@@ -1619,34 +1619,46 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+        sparse_tensor, _, _ = self._gen_sparse(len([2, 3, 4]), 9, [2, 3, 4] + [3, 4, 5, 6])
+        for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
+            with self.assertRaisesRegex(RuntimeError, "This memory format option is not supported by sparse tensors"):
+                result = torch.zeros_like(sparse_tensor, memory_format=mem_format)
+
     def test_empty_like(self):
         # tests https://github.com/pytorch/pytorch/issues/43699
 
         def _test_empty_like(sparse_tensor):
-            result = torch.empty_like(input_coalesced, memory_format=torch.preserve_format)
-            self.assertTrue(result.is_sparse)
-            self.assertEqual(result.shape, input_coalesced.shape)
-            self.assertEqual(result.dtype, input_coalesced.dtype)
-            self.assertEqual(result.device, input_coalesced.device)
-            self.assertEqual(result.sparse_dim(), input_coalesced.sparse_dim())
-            self.assertEqual(result.dense_dim(), input_coalesced.dense_dim())
 
-        input_coalesced = torch.sparse_coo_tensor(
-            indices=torch.tensor([[0, 1, 2]]),
-            values=torch.tensor([3.0, -4.0, 5.0]),
-            size=[3, ],
-            device=self.device
-        )
-        _test_empty_like(input_coalesced)
+            for mem_format in [None, torch.preserve_format]:
+                result = torch.empty_like(sparse_tensor, memory_format=mem_format)
+                self.assertTrue(result.is_sparse)
+                self.assertEqual(result.shape, sparse_tensor.shape)
+                self.assertEqual(result.dtype, sparse_tensor.dtype)
+                self.assertEqual(result.device, sparse_tensor.device)
+                self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
+                self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
 
-        # hybrid sparse input
-        input_coalesced = torch.sparse_coo_tensor(
-            indices=torch.tensor([[1, 3], [2, 4]]),
-            values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
-            size=[4, 5, 2],
-            device=self.device
-        )
-        _test_empty_like(input_coalesced)
+            for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
+                with self.assertRaisesRegex(RuntimeError, "This memory format option is not supported by sparse tensors"):
+                    result = torch.empty_like(sparse_tensor, memory_format=mem_format)
+
+        if not self.is_uncoalesced:
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0, 1, 2]]),
+                values=torch.tensor([3.0, -4.0, 5.0]),
+                size=[3, ],
+                device=self.device
+            )
+            _test_empty_like(input_coalesced)
+
+            # hybrid sparse input
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[1, 3], [2, 4]]),
+                values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                size=[4, 5, 2],
+                device=self.device
+            )
+            _test_empty_like(input_coalesced)
 
         if self.is_uncoalesced:
             # test uncoalesced input
