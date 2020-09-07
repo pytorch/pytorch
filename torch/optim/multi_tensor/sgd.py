@@ -126,14 +126,14 @@ class SGD(Optimizer):
                     bufs.append(buf)
 
                 if nesterov:
-                    torch._foreach_add_(grads, bufs, alpha = momentum)
+                    torch._foreach_add_(grads, bufs, alpha=momentum)
                 else:
                     grads = bufs
 
             if not has_sparse_grad:
-                torch._foreach_add_(params_with_grad, grads, alpha = -group['lr'])
+                torch._foreach_add_(params_with_grad, grads, alpha =-group['lr'])
             else: 
                 for i in range(len(params_with_grad)): 
-                    params_with_grad[i].add_(grads[i], alpha = -group['lr'])
+                    params_with_grad[i].add_(grads[i], alpha =-group['lr'])
 
         return loss

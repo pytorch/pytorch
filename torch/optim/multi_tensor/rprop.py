@@ -51,7 +51,7 @@ class Rprop(Optimizer):
                 if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('RMSprop does not support sparse gradients')
-                    
+
                     grads.append(p.grad)
                     params_with_grad.append(p)
 
