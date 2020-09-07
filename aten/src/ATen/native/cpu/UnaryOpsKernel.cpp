@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
