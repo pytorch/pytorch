@@ -275,13 +275,13 @@ class TestOptim(TestCase):
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)]
             )
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3),
                 [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
-                lambda opt: ExponentialLR(opt, gamma=0.99),
-                lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ExponentialLR(opt, gamma=0.99),
+                 lambda opt: ReduceLROnPlateau(opt)]
             )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
