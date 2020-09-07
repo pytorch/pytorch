@@ -3955,7 +3955,7 @@ Example::
 """.format(**common_args))
 
 # TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
-add_docstr(torch.logspace, r"""
+add_docstr(torch.logspace, """
 logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
