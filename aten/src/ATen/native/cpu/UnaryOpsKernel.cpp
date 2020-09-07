@@ -395,6 +395,15 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   });
 }
 
+static void kaiser_window_kernel(TensorIterator& iter, int64_t window_length, double beta){
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
+    auto alpha = (window_length - 1) / 2.0;
+    cpu_kernel(iter, [=](scalar_t a){
+        return static_cast<scalar_t>(calc_i0(beta * std::sqrt(1 - std::pow((a - alpha) / alpha, 2.0))) / calc_i0(beta));
+    });
+  });
+}
+
 static void cauchy_kernel(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
@@ -629,6 +638,7 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
 
 
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)

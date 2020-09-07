@@ -1004,9 +1004,8 @@ Tensor kaiser_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, options);
-  auto alpha = (window_length - 1) / 2.0;
-  auto denom = native::full(window_length, beta, options);
-  window.sub_(alpha).div_(alpha).pow_(2.0).mul_(-1.0).add_(1.0).sqrt_().mul_(beta).i0_().div_(denom.i0_());
+  auto iter = TensorIterator::unary_op(window, window);
+  kaiser_window_stub(iter.device_type(), iter, window_length, beta);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 

@@ -183,6 +183,15 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   });
 }
 
+void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
+    auto alpha = (window_length - 1) / 2.0;
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return static_cast<scalar_t>(calc_i0(beta * std::sqrt(1 - std::pow((a - alpha) / alpha, 2.0))) / calc_i0(beta));
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
@@ -197,6 +206,7 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 
 } // namespace native
 } // namespace at
