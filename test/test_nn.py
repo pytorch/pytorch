@@ -9845,34 +9845,6 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
-    @onlyOnCPUAndCUDA   # TODO: fix on XLA
-    def test_adaptive_avg_pool2d_output_size_one(self, device):
-        def helper(size, memory_format):
-            x = torch.randint(1, 10, size, dtype=torch.float, device=device, requires_grad=True)
-            if memory_format == 'non_contiguous':
-                x = x[::2, ::2, ::2, ::2]
-            else:
-                x = x.to(memory_format=memory_format)
-
-            net = torch.nn.AdaptiveAvgPool2d((1, 1))
-            out = net(x)
-            ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
-
-            out.sum().backward()    # make sure it doesn't crash
-
-            self.assertEqual(out, ref_out)
-            if memory_format == torch.channels_last:
-                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-                c = out.size(1)
-                self.assertEqual(out.stride(), [c, 1, c, c])
-            else:
-                self.assertTrue(out.is_contiguous())
-                c = out.size(1)
-                self.assertEqual(out.stride(), [c, 1, 1, 1])
-
-        for mf in (torch.contiguous_format, torch.channels_last, 'non_contiguous'):
-            helper((2, 3, 6, 6), mf)
-
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
