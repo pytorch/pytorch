@@ -176,7 +176,9 @@ at::DimVector inversePermutation(
 
 } // namespace
 
-size_t InputsIdLookup::getCode(const at::ArrayRef<IValue>& inputs) {
+InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
+    const at::ArrayRef<IValue>& inputs) {
+  IdLookupReturn ret;
   std::stringstream encoded_inputs;
   for (const auto& input : inputs) {
     if (input.isTensor()) {
@@ -199,11 +201,33 @@ size_t InputsIdLookup::getCode(const at::ArrayRef<IValue>& inputs) {
       encoded_inputs << ";s";
     }
   }
-  auto& iter = encoding_lookup_[encoded_inputs.str()];
-  if (iter == 0) {
-    iter = current_id_++;
+  auto& id_iter_pair = encoding_lookup_[encoded_inputs.str()];
+
+  // short-cut to leave LRU entry as is;
+  if (id_iter_pair.lru_iter == used_entry_.begin()) {
+    ret.id = id_iter_pair.id;
+    return ret;
   }
-  return iter;
+
+  if (id_iter_pair.id == 0) {
+    // no entry existed for given input set, set id for given entry
+    id_iter_pair.id = current_id_++;
+    if (used_entry_.size() == max_cache_size_) {
+      // pop least recently used cache;
+      const auto& remove_iter = encoding_lookup_.find(used_entry_.back());
+      used_entry_.pop_back();
+      ret.evict_id = remove_iter->second.id;
+      ret.eviction = true;
+      encoding_lookup_.erase(remove_iter);
+    }
+  } else {
+    used_entry_.erase(id_iter_pair.lru_iter);
+  }
+
+  ret.id = id_iter_pair.id;
+  id_iter_pair.lru_iter =
+      used_entry_.insert(used_entry_.begin(), encoded_inputs.str());
+  return ret;
 }
 
 FusionExecutorCache::FusionExecutorCache(
@@ -556,7 +580,19 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   // get unique id `unique_id` for given input set `inputs`;
-  const size_t unique_id = inputs_id_lookup_.getCode(inputs);
+  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
+  const size_t unique_id = id_lookup_ret.id;
+
+  // if we went over the cache size for short-cut, we evict entries using LRU;
+  if (id_lookup_ret.eviction) {
+    auto index_lookup_iter = code_to_index_lookup_.find(id_lookup_ret.evict_id);
+    TORCH_INTERNAL_ASSERT(
+        index_lookup_iter != code_to_index_lookup_.end(),
+        "evicting cache entry not found in lookup table");
+    // evict nested cache in FusionExecutorCache
+    fe_cache_[index_lookup_iter->second]->evictCache(index_lookup_iter->first);
+    code_to_index_lookup_.erase(index_lookup_iter);
+  }
 
   FusionExecutorCache* fusion_executor_cache = nullptr;
 
