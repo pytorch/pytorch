@@ -1154,18 +1154,28 @@ dist(other, p=2) -> Tensor
 See :func:`torch.dist`
 """)
 
-add_docstr_all('div',
-               r"""
+add_docstr_all('div', r"""
 div(value) -> Tensor
 
 See :func:`torch.div`
 """)
 
-add_docstr_all('div_',
-               r"""
+add_docstr_all('div_', r"""
 div_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
+""")
+
+add_docstr_all('divide', r"""
+divide(value) -> Tensor
+
+See :func:`torch.divide`
+""")
+
+add_docstr_all('divide_', r"""
+divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.divide`
 """)
 
 add_docstr_all('dot',

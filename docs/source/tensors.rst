@@ -284,6 +284,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: dist
    .. automethod:: div
    .. automethod:: div_
+   .. automethod:: divide
+   .. automethod:: divide_
    .. automethod:: dot
    .. automethod:: double
    .. automethod:: eig

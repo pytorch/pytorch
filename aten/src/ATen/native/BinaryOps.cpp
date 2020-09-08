@@ -153,6 +153,41 @@ Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
 }
 
+// WARNING: There doesn't appear to be any testing for this function
+// with sparse self input.
+Tensor div(const Tensor& self, Scalar other) {
+  return self.div(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+// WARNING: This function, with a sparse self, is currently only
+// exercised by DistributedDataParallelTest.test_sparse_gradients
+// (you need to exercise it from C++, because this overload is never
+// used for Python)
+Tensor& div_(Tensor& self, Scalar other) {
+  return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+// divide, alias for div
+Tensor& divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::div_out(result, self, other);
+}
+
+Tensor divide(const Tensor& self, const Tensor& other) {
+  return self.div(other);
+}
+
+Tensor& divide_(Tensor& self, const Tensor& other) {
+  return self.div_(other);
+}
+
+Tensor divide(const Tensor& self, Scalar other) {
+  return self.div(other);
+}
+
+Tensor& divide_(Tensor& self, Scalar other) {
+  return self.div_(other);
+}
+
 Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   remainder_stub(iter.device_type(), iter);
@@ -399,20 +434,6 @@ Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
   return native::add_(self, wrapped_scalar_tensor(other), alpha);
-}
-
-// WARNING: There doesn't appear to be any testing for this function
-// with sparse self input.
-Tensor div(const Tensor& self, Scalar other) {
-  return self.div(wrapped_scalar_tensor(other)); // redispatch!
-}
-
-// WARNING: This function, with a sparse self, is currently only
-// exercised by DistributedDataParallelTest.test_sparse_gradients
-// (you need to exercise it from C++, because this overload is never
-// used for Python)
-Tensor& div_(Tensor& self, Scalar other) {
-  return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {

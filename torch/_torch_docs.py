@@ -2449,6 +2449,12 @@ Example::
             [-0.2278, -0.1068, -1.4678,  6.3936]])
 """.format(**common_args))
 
+add_docstr(torch.divide, r"""
+divide(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.div`.
+""")
+
 add_docstr(torch.dot,
            r"""
 dot(input, tensor) -> Tensor

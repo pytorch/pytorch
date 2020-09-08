@@ -280,6 +280,7 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
