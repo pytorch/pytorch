@@ -191,12 +191,14 @@ class ModuleHierarchyCtxMgr:
     def __init__(self, target : str):
         self.target = target
 
+    @torch.jit.unused
     def __enter__(self):
         global curr_module_qualname
         self.orig = curr_module_qualname
         curr_module_qualname = self.target
         return self
 
+    @torch.jit.unused
     def __exit__(self, type, value, tb):
         global curr_module_qualname
         curr_module_qualname = self.orig

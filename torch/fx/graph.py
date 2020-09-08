@@ -136,9 +136,22 @@ class Graph:
         free_vars: List[str] = []
         body: List[str] = []
 
-        def insert_hierarchy_guard(node : Node):
+        # Variable to deduplicate `with ModuleHierarchyCtxMgr` statements.
+        # If subsequent statements reside within the same module, no need
+        # to emit `with` statements redundantly.
+        within_module_block : Optional[str] = None
+
+        def insert_hierarchy_guard(node : Node, within_module_block : Optional[str]):
             if node.module_qualname:
-                body.append(f'with torch.fx.ModuleHierarchyCtxMgr(\'{node.module_qualname}\'):\n    ')
+                if node.module_qualname != within_module_block:
+                    body.append(f'with torch.fx.ModuleHierarchyCtxMgr(\'{node.module_qualname}\'):\n    ')
+                else:
+                    body.append('    ')
+                return node.module_qualname
+            else:
+                return None
+
+
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
@@ -146,14 +159,14 @@ class Graph:
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
-                insert_hierarchy_guard(node)
+                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 assert callable(node.target)
-                insert_hierarchy_guard(node)
+                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
@@ -171,12 +184,12 @@ class Graph:
                 continue
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                insert_hierarchy_guard(node)
+                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
                 continue
             elif node.op == 'get_param':
                 assert isinstance(node.target, str)
-                insert_hierarchy_guard(node)
+                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -196,7 +209,7 @@ class Graph:
                 maybe_comma = ',' if len(arg) == 1 else ''
                 return f'({items}{maybe_comma})'
             elif isinstance(arg, dict):
-                items_str = ','.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
+                items_str = ', '.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
                 return f'{{{items_str}}}'
 
             if isinstance(arg, Node):
@@ -210,7 +223,7 @@ class Graph:
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_param':
-                return f'%{n.name} : [uses={n.uses}]= {n.target}'
+                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}, module_qualname={n.module_qualname}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'

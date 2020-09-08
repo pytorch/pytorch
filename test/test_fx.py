@@ -111,11 +111,12 @@ class TestFX(JitTestCase):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallDelegate(DefaultDelegate):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            module_qualname : Optional[str] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
                     raise RuntimeError('In-place operations are not supported')
-                return super().create_node(kind, target, args, kwargs, name)
+                return super().create_node(kind, target, args, kwargs, name, module_qualname)
 
         # Test method
         class MyInplaceMod(torch.nn.Module):
@@ -377,8 +378,9 @@ class TestFX(JitTestCase):
     def test_node_tagging(self):
         class TaggingDelegate(DefaultDelegate):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
-                n = super().create_node(kind, target, args, kwargs, name)
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            module_qualname : Optional[str] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name, module_qualname)
                 n.tag = 'foo'
                 return n
 

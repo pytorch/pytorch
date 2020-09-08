@@ -1781,6 +1781,13 @@ struct to_ir {
       Expr e = target.target();
 
       auto* rhs = emitExpr(e);
+      if (auto namedType = rhs->type()->cast<c10::NamedType>()) {
+        if (auto qualname = namedType->name()) {
+          if (*qualname == "__torch__.torch.fx.symbolic_trace.ModuleHierarchyCtxMgr") {
+            continue;
+          }
+        }
+      }
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
       auto rhsClass = rhs->type()->expect<ClassType>();
