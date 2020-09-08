@@ -92,10 +92,10 @@ InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
 InlinedCallStack::InlinedCallStack(
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info)
+    c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec)
     : fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)){}
+      module_instance_info_vec_(std::move(module_instance_info_vec)){}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -109,11 +109,11 @@ InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info)
+    c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec)
     : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)){}
+      module_instance_info_vec_(std::move(module_instance_info_vec)){}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
@@ -137,7 +137,7 @@ std::vector<InlinedCallStackWithModuleInfo>
     r.emplace_back(
         std::make_tuple((*current)->fn_,
           (*current)->source_range_,
-          (*current)->module_instance_info_));
+          (*current)->module_instance_info_vec_));
     current = (*current)->callee_;
   }
   return r;

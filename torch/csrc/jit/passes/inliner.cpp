@@ -18,7 +18,7 @@ void pushScopeInfo(Node* node) {
   for (const auto& tup : vec) {
     const auto opt_module_instance_info = std::get<2>(tup);
     if (opt_module_instance_info) {
-      const auto& module_instance_info = opt_module_instance_info.value();
+      const auto& module_instance_info = opt_module_instance_info.value().back();
       if(module_instance_info.class_type()) {
         const auto& class_type = module_instance_info.class_type();
         const auto& instance_name = module_instance_info.instance_name();

@@ -1848,6 +1848,20 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+c10::optional<std::vector<ModuleInstanceInfo>> getModuleInfo(Node* node, Graph* graph) {
+  std::vector<ModuleInstanceInfo> module_instance_info_vec;
+  module_instance_info_vec.clear();
+  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+    TORCH_INTERNAL_ASSERT(
+        node->kind() == prim::GetAttr, "Expected prim::GetAttr nodes");
+    auto type = node->output(0)->type()->cast<c10::ClassType>();
+    ModuleInstanceInfo module_instance_info(type, node->s(attr::name));
+    module_instance_info_vec.insert(module_instance_info_vec.begin(), module_instance_info);
+    node = node->inputs()[0]->node();
+  }
+  return c10::make_optional(module_instance_info_vec);
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -1875,19 +1889,17 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
-  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec = c10::nullopt;
   if (to_replace->kind() == prim::CallMethod) {
-    auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
-      module_instance_info =
-        c10::make_optional(
-            ModuleInstanceInfo(
-              class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+      module_instance_info_vec =
+          getModuleInfo(to_replace->input(0)->node(), to_replace->owningGraph());
     } else {
       std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
-      module_instance_info =
-        c10::make_optional(
-            ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+      auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
+      ModuleInstanceInfo module_instance_info(class_type_ptr, instance_name_unknown);
+      std::vector<ModuleInstanceInfo> vec({module_instance_info});
+      module_instance_info_vec = c10::make_optional(vec);
     }
   }
 
@@ -1909,11 +1921,11 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange(), module_instance_info);
+                *new_node_cs, callee, to_replace->sourceRange(), module_instance_info_vec);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange(), module_instance_info);
+                callee, to_replace->sourceRange(), module_instance_info_vec);
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));

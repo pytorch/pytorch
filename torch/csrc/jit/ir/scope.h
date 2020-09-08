@@ -104,7 +104,7 @@ struct ModuleInstanceInfo {
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
 using InlinedCallStackWithModuleInfo =
-  std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
+  std::tuple<Function*, SourceRange, c10::optional<std::vector<ModuleInstanceInfo>>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
@@ -112,7 +112,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   Function* fn_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
-  c10::optional<ModuleInstanceInfo> module_instance_info_;
+  c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec_;
 
  public:
   // Constructor for a leaf callstack node.
@@ -122,7 +122,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   InlinedCallStack(
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info);
+      c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec);
 
   // Constructor for an inner callstack node.
   InlinedCallStack(
@@ -134,7 +134,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       InlinedCallStackPtr callee,
       Function* fn,
       SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info);
+      c10::optional<std::vector<ModuleInstanceInfo>> module_instance_info_vec);
 
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
