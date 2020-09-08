@@ -410,6 +410,7 @@ void ProcessGroupNCCL::parseNcclAsyncErrorHandling() {
     auto val = std::stoi(errorHandle);
     if (val == 1) {
       asyncErrorHandling_ = true;
+      LOG(INFO) << "NCCL Async Error Handling is enabled.";
     } else if (val != 0) {
       throw std::runtime_error(
           "Invalid value for environment variable: " +
