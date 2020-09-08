@@ -40,29 +40,6 @@ DEFINE_DISPATCH(cumsum_stub);
 DEFINE_DISPATCH(cumprod_stub);
 DEFINE_DISPATCH(logcumsumexp_stub);
 
-namespace {
-
-bool is_unique(IntArrayRef dim) {
-  bool unique_dim = true;
-  for (int i = 0; i < dim.size(); ++i) {
-    auto curr_value = dim[i];
-    for (int j = 0; j < i; ++j) {
-      if (curr_value == dim[j]) {
-        unique_dim = false;
-        break;
-      }
-    }
-
-    if (!unique_dim) {
-      break;
-    }
-  }
-
-  return unique_dim;
-};
-
-} // anonymous namespace
-
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
   return _logcumsumexp_out_cpu(result, self, dim);
@@ -381,8 +358,6 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(is_unique(dim), "mean: repeated dimension in `dim` (", dim, ")");
-
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(scalarType) || at::isComplexType(scalarType),
