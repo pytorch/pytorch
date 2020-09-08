@@ -2950,7 +2950,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         max_segments = 5
         max_segment_length = 20
         num_lengths = np.random.randint(1, max_segments + 1)
-        lengths = np.random.randint(0, max_segment_length + 1,
+        lengths = np.random.randint(1, max_segment_length + 1,
                                     size=num_lengths).astype(np.int32)
         num_indices = np.sum(lengths)
         indices = torch.from_numpy(np.random.randint(
