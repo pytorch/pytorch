@@ -49,7 +49,7 @@ namespace api {
 // as well.  This behavior is by design.
 //
 
-struct C10_EXPORT Descriptor final {
+struct Descriptor final {
   //
   // Pool
   //
@@ -83,6 +83,7 @@ struct C10_EXPORT Descriptor final {
       };
 
       Handle operator()(const Descriptor& descriptor) const;
+      void purge(VkDescriptorPool descriptor_pool);
 
      private:
       VkDevice device_;
@@ -98,29 +99,26 @@ struct C10_EXPORT Descriptor final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
-
-    static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
   } pool;
 
   /*
-    Factory
+    Set
   */
 
-  class Factory final {
+  class Set final {
    public:
-    Factory(VkDevice device, VkDescriptorPool descriptor_pool);
+    Set(VkDevice device, VkDescriptorPool descriptor_pool);
 
     VkDescriptorSet allocate(VkDescriptorSetLayout descriptor_set_layout);
-    void purge();
 
    private:
     VkDevice device_;
     VkDescriptorPool descriptor_pool_;
-  } factory;
+  } set;
 
   explicit Descriptor(const VkDevice device)
     : pool(device),
-      factory(device, pool.cache.retrieve(Pool::kDefault)) {
+      set(device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
 

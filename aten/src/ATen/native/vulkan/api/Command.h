@@ -9,7 +9,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct C10_EXPORT Command final {
+struct Command final {
   //
   // Pool
   //
@@ -40,6 +40,7 @@ struct C10_EXPORT Command final {
       };
 
       Handle operator()(const Descriptor& descriptor) const;
+      void purge(VkCommandPool command_pool);
 
      private:
       VkDevice device_;
@@ -55,8 +56,6 @@ struct C10_EXPORT Command final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
-
-    static void purge(VkDevice device, VkCommandPool command_pool);
   } pool;
 
   //

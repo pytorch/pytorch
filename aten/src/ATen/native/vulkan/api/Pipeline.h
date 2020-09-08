@@ -29,7 +29,7 @@ namespace api {
 // these Vulkan objects.
 //
 
-struct C10_EXPORT Pipeline final {
+struct Pipeline final {
   //
   // Layout
   //

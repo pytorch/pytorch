@@ -24,10 +24,10 @@
     at::native::vulkan::api::destroy_##Handle
 
 #define VK_DELETER_DISPATCHABLE_DECLARE(Handle) \
-    C10_EXPORT void destroy_##Handle(const Vk##Handle handle)
+    void destroy_##Handle(const Vk##Handle handle)
 
 #define VK_DELETER_NON_DISPATCHABLE_DECLARE(Handle)   \
-  class C10_EXPORT destroy_##Handle final {           \
+  class destroy_##Handle final {                      \
    public:                                            \
     explicit destroy_##Handle(const VkDevice device); \
     void operator()(const Vk##Handle handle) const;   \
@@ -39,6 +39,14 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+struct Command;
+class Context;
+struct Descriptor;
+struct Pipeline;
+struct Resource;
+class Runtime;
+struct Shader;
 
 VK_DELETER_DISPATCHABLE_DECLARE(Instance);
 VK_DELETER_DISPATCHABLE_DECLARE(Device);

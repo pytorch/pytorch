@@ -19,7 +19,7 @@ namespace api {
 // user.
 //
 
-class C10_EXPORT Context final {
+class Context final {
  public:
   explicit Context(bool enable_validation_layers);
   ~Context() = default;
@@ -90,8 +90,8 @@ class C10_EXPORT Context final {
   Resource resource_;
 };
 
-C10_EXPORT bool available();
-C10_EXPORT Context& context();
+bool available();
+Context* context();
 
 } // namespace api
 } // namespace vulkan

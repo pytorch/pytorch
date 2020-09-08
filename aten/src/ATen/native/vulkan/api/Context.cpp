@@ -309,11 +309,11 @@ bool available() {
   return initialize();
 }
 
-Context& context() {
+Context* context() {
   Context* const context = initialize();
   TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
 
-  return *context;
+  return context;
 }
 
 } // namespace api
