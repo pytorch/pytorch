@@ -1,6 +1,6 @@
 
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 namespace torch {
 namespace jit {

@@ -1144,8 +1144,8 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
 }
 )";
 
-  const std::string actual_kernel = "\n" +
-      codegen::generateCudaKernel(GpuLower(fusion.get()).kernel());
+  const std::string actual_kernel =
+      "\n" + codegen::generateCudaKernel(GpuLower(fusion.get()).kernel());
   if (expected_kernel.size() != actual_kernel.size() ||
       expected_kernel.compare(actual_kernel) != 0) {
     std::cerr
