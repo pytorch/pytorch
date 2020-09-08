@@ -15,18 +15,62 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// encoding an input set to unique id, which is used to short-cut cache entry
+// selection in our nested cache implementation to cut off overhead.
+//
+// We have implemented naive LRU cache eviction policy here, since each entry in
+// `InputsIdLookup` is attached to a static input shape/stride, and could grow
+// gigantic when we have input shapes that does not stabalize to a finite set.
+//
 // Note, the uniqueness of the ide generated for a given input set is only local
 // to the instance of `InputsIdLookup`.
-class InputsIdLookup {
+TORCH_CUDA_API class InputsIdLookup {
  public:
-  // encode each unique input sets to an unique id;
-  size_t getCode(const at::ArrayRef<IValue>& inputs);
+  // constructor where maximum cache size is fixed during init
+  explicit InputsIdLookup(size_t max_cache_size = 10)
+      : max_cache_size_(max_cache_size){};
+
+  // struct to hold return value for lookupId.
+  struct IdLookupReturn {
+    size_t id = 0;
+    size_t evict_id = 0;
+    bool eviction = false;
+  };
+
+  // encode each input sets to with an unique id;
+  // Returned data structure also indicates whether eviction has happened within
+  // the lookup cache. This is needed because lookup shortcut is also cached in
+  // nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
+  // see [ Note -- 2 level cache implementation ]
+  TORCH_CUDA_API IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+
+  // debugging API
+  size_t size() const {
+    return encoding_lookup_.size();
+  }
 
  private:
+  // entry stored in `encoding_lookup_` to implement LRU
+  struct EncodingEntry {
+    size_t id;
+    std::list<std::string>::iterator lru_iter;
+  };
+
+  // maximum cache size for LRU
+  const size_t max_cache_size_;
+
+  // next available unique id, we monotonically increase `current_id_` avoid
+  // conflicts
   size_t current_id_ = 1;
 
-  // TODO: change this to a trie for efficiency;
-  std::unordered_map<std::string, size_t> encoding_lookup_;
+  // entry in the cache, This is used to implement LRU cache, where entries in
+  // the list is ordered by their recent usage (freshly used entry is placed at
+  // the beginning)
+  std::list<std::string> used_entry_;
+
+  // map from `std::string` to a unique id `size_t` (packaged in `EncodingEntry`
+  // ). We store an iterator to `used_entry_` to implement LRU
+  std::unordered_map<std::string, EncodingEntry> encoding_lookup_;
 };
 
 // [ Note -- 2 level cache implementation ]
@@ -82,6 +126,17 @@ class FusionExecutorCache {
   std::vector<at::Tensor> runFusionWithInputs(
       const at::ArrayRef<IValue>& inputs,
       size_t unique_id);
+
+  // evict cached short cut entry in `code_to_fe_lookup_`;
+  inline void evictCache(size_t cache_id) {
+    auto iter = code_to_fe_lookup_.find(cache_id);
+    TORCH_INTERNAL_ASSERT(
+        iter != code_to_fe_lookup_.end(),
+        "evict cache failed to find an entry");
+    // evict nested lookup entry in nested FusionExecutor
+    (iter->second)->evictCache(cache_id);
+    code_to_fe_lookup_.erase(iter);
+  };
 
  private:
   // device_ where compiled binaries are loaded on & inputs are expected to

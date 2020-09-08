@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
@@ -6704,6 +6705,44 @@ void testGPU_FusionComputeAtMultiBCast() {
 
   // This is not supported and should throw an exception.
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
+}
+
+void testGPU_FusionInputsIdLookup() {
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({16, 8, 8}, options);
+  at::Tensor t1 = at::randn({8, 8}, options);
+  at::Tensor t2 = at::randn({6, 4}, options);
+
+  // create a cache with max size 2;
+  auto inputs_id_lookup = torch::jit::fuser::cuda::InputsIdLookup(2);
+
+  // testing basic function, same encoding for identical inputs
+  auto id_0 = inputs_id_lookup.lookupId({t0, t1, 5.0});
+  auto id_0_lookup = inputs_id_lookup.lookupId({t0, t1, 2.5});
+  TORCH_CHECK(id_0.id == id_0_lookup.id);
+  TORCH_CHECK(inputs_id_lookup.size() == 1);
+  TORCH_CHECK(id_0.eviction == false);
+
+  // new input (even tho same shape, but we have different signature because of
+  // missing scalar input
+  auto id_1 = inputs_id_lookup.lookupId({t0, t1});
+  auto id_1_lookup = inputs_id_lookup.lookupId({t0, t1});
+  TORCH_CHECK(id_1.id == id_1_lookup.id);
+  TORCH_CHECK(inputs_id_lookup.size() == 2);
+  TORCH_CHECK(id_1.eviction == false);
+
+  // eviction should happen at this point
+  auto id_2 = inputs_id_lookup.lookupId({t2, t1});
+  TORCH_CHECK(id_2.id != id_0.id);
+  TORCH_CHECK(id_2.id != id_1.id);
+  TORCH_CHECK(inputs_id_lookup.size() == 2);
+  TORCH_CHECK(id_2.eviction == true);
+  TORCH_CHECK(id_2.evict_id == id_0.id);
+
+  // look at input 1 again
+  auto id_1_relook = inputs_id_lookup.lookupId({t0, t1});
+  TORCH_CHECK(id_1_relook.id == id_1.id);
+  TORCH_CHECK(id_1_relook.eviction == false);
 }
 
 } // namespace jit
