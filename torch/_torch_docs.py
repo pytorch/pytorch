@@ -2381,9 +2381,9 @@ returns a new resulting tensor.
 .. warning::
     Integer division using div is no longer supported, and in a future release
     div will perform true division as in Python 3. Use :func:`torch.true_divide`
-    or :func:`torch.floor_divide` (// in Python), instead. For the historic
+    or :func:`torch.floor_divide` (// in Python), instead. To mimic the historic
     integer division behavior, use
-    `torch.trunc(torch.true_divide(input, other)).to(input.dtype)`.
+    `torch.trunc(torch.true_divide(input, other)).to(torch.result_type(input, other))`.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
