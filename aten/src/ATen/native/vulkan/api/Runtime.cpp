@@ -255,6 +255,7 @@ Adapter Runtime::select(const Selector& selector) {
       this,
       physical_device,
       query_physical_device_properties(physical_device),
+      query_physical_device_memory_properties(physical_device),
       query_compute_queue_family_index(physical_device),
     };
 

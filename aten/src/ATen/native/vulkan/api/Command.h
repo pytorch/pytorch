@@ -40,6 +40,7 @@ struct Command final {
       };
 
       Handle operator()(const Descriptor& descriptor) const;
+      void purge(VkCommandPool command_pool);
 
      private:
       VkDevice device_;
@@ -55,8 +56,6 @@ struct Command final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
-
-    static void purge(VkDevice device, VkCommandPool command_pool);
   } pool;
 
   //
