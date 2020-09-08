@@ -797,7 +797,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucket_views(replica, replica.contents, true);
+        initialize_bucket_views(replica, replica.contents);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -825,8 +825,7 @@ void Reducer::initialize_buckets(
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
-    at::Tensor& contents,
-    bool populate_bucket_views_in) {
+    at::Tensor& contents) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -835,30 +834,41 @@ void Reducer::initialize_bucket_views(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
-      } else {
-        replica.bucket_views_out.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
-      }
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
             contents.narrow(0, offset, length).view(v.sizes()));
-      } else {
-        replica.bucket_views_out.push_back(
-            contents.narrow(0, offset, length).view(v.sizes()));
-      }
     }
-    // If `initialize_bucket_views` was called from `initialize_buckets`,
-    // by default `bucket_views_out` and `bucket_views_in` are
+    // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
-    if (populate_bucket_views_in) {
-      replica.bucket_views_out = replica.bucket_views_in;
+    replica.bucket_views_out = replica.bucket_views_in;
+  }
+}
+
+// (see Note:  "Gradient Layout Contract" in initialize_buckets).
+void Reducer::populate_bucket_views_out(
+    Reducer::BucketReplica& replica,
+    at::Tensor& tensor) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
+    const auto& v = replica.variables[i];
+    const auto offset = replica.offsets[i];
+    const auto length = replica.lengths[i];
+    if (v.is_non_overlapping_and_dense()) {
+      // If the param's memory is dense, match its layout, anticipating
+      // the autograd engine (AccumulateGrad) will also create gradients
+      // matching its layout.
+        replica.bucket_views_out.push_back(
+            tensor.as_strided(v.sizes(), v.strides(), offset));
+    } else {
+      // Fall back to a C-style contiguous view, again anticipating
+      // AccumulateGrad will do the same when stashing grads for non-dense
+      // params.
+        replica.bucket_views_out.push_back(
+            tensor.narrow(0, offset, length).view(v.sizes()));
     }
   }
 }
@@ -1071,7 +1081,7 @@ void Reducer::finalize_backward() {
           // Reinitialize only `bucket_views_out` with the future_result by
           // following the same logic in `initialize_buckets`.
           replica.bucket_views_out.clear();
-          initialize_bucket_views(replica, future_result[i], false);
+          populate_bucket_views_out(replica, future_result[i]);
         }
       }
     }
