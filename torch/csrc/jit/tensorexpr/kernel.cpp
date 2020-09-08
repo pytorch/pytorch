@@ -238,9 +238,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
-    case aten::atan2:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward: {
+    case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
       for (size_t idx = 0; idx < 2; idx++) {
         torch::jit::Value* inp = v->node()->input(idx);
@@ -1205,24 +1203,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     }
 
-    case aten::_sigmoid_backward: {
-      return computeTwoOperand(
-          "aten_sigmoid_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs * (ExprHandle(1.0f) - rhs);
-          });
-    }
-
-    case aten::_tanh_backward: {
-      return computeTwoOperand(
-          "aten_tanh_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * (ExprHandle(1.0f) - rhs * rhs);
-          });
-    }
-
     case aten::sum: {
       return computeSum(v);
     }
@@ -1292,7 +1272,12 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     if (!l.hasLoopBodyFor(p.second) || hasReduction) {
       continue;
     }
-    l.computeInline(p.second->buf());
+    Stmt* loop = l.getLoopBodyFor(p.second);
+    if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
+      l.computeInlineWithRandom(loop);
+    } else {
+      l.computeInline(loop);
+    }
   }
   if (backendType == kCudaCodeGen) {
     for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
@@ -1300,7 +1285,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       // For every output tensor we've created a flattened 1D tensor - let's
       // mark the original output tensor with computeInline
-      l.computeInline(tensorOutputs_[i]->buf());
+      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
