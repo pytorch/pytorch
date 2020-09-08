@@ -112,7 +112,13 @@ def div(g, self, other):
 
 
 def floor_divide(g, self, other):
-    out = floor(g, true_divide(g, self, other))
+    out = div(g, self, other)
+    # the correct operation is truncate, which is not supported in ONNX,
+    # we cannot call floor since it will behave differently for negative numbers
+    # (eg. -0.1 should become -0 )
+    # - if scalar_type information are not available, assume that
+    # we need to call floor (treat as float)
+    out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Long'])
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
@@ -148,13 +154,13 @@ def true_divide(g, self, other):
     # Case 2: self is floating, other is not
     # Casts other to self's dtype
     if sym_help._is_fp(self):
-        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
         return div(g, self, other)
 
     # Case 3: other is floating, self is not
     # Casts self to other's dtype
     if sym_help._is_fp(other):
-        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
+        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
         return div(g, self, other)
 
     # Case 4: neither is floating
@@ -165,8 +171,8 @@ def true_divide(g, self, other):
     if torch.get_default_dtype() is torch.double:
         onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Double']
 
-    self = g.op("Cast", self, to_i=onnx_scalar_type)
-    other = g.op("Cast", other, to_i=onnx_scalar_type)
+    g.op("Cast", self, to_i=onnx_scalar_type)
+    g.op("Cast", other, to_i=onnx_scalar_type)
     return div(g, self, other)
 
 
@@ -1534,12 +1540,12 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         if dtype is None:
             dtype = sym_help._unpack_list(data)[0].type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        input_list = list()
+        input_list = list()   
         for t in sym_help._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = g.op("Reshape", t, shape_reference)
             t = g.op("Cast", t, to_i=sym_help.scalar_type_to_onnx[dtype])
-            input_list.append(t)
+            input_list.append(t)    
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
