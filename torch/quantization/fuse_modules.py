@@ -6,6 +6,10 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 
 from .fuser_method_mappings import get_fuser_method
+from .fuser_method_mappings import (
+    fuse_conv_bn,
+    fuse_conv_bn_relu
+)
 
 from typing import Type, List, Optional
 
