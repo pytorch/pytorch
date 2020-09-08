@@ -12,7 +12,7 @@ namespace {
 Context* initialize() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
-      const Adapter adapter = runtime().select([](const Adapter& adapter) {
+      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
         // Select the first adapter.
         return true;
       });
@@ -80,14 +80,14 @@ Context::Context(const Adapter& adapter)
       shader_(device()),
       pipeline_(device()),
       descriptor_(device()),
-      resource_(adapter.instance, adapter.physical_device, device()) {
+      resource_(adapter.runtime->instance(), adapter.physical_device, device()) {
 }
 
-Context& context() {
+Context* context() {
   Context* const context = initialize();
   TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
 
-  return *context;
+  return context;
 }
 
 } // namespace api

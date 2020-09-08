@@ -20,7 +20,7 @@ namespace api {
 // user.
 //
 
-class C10_EXPORT Context final {
+class Context final {
  public:
   explicit Context(const Adapter& adapter);
   Context(const Context&) = delete;
@@ -75,7 +75,7 @@ class C10_EXPORT Context final {
   Resource resource_;
 };
 
-C10_EXPORT Context& context();
+Context* context();
 
 } // namespace api
 } // namespace vulkan
