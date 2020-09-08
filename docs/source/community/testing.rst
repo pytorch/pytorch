@@ -1,10 +1,8 @@
 Building PyTorch locally
 ------------------------
-Before you can test, you must build PyTorch locally.
+TBD: setting up your environment
+Before you can test, you must build PyTorch locally::
 
-TDB: setting up your environment
-
-.. script:: bash
     git checkout -b my-issue-fix
     git submodule update --init -f --recursive
     git clean -xffd; git submodule foreach --recursive git clean -xffd
@@ -41,7 +39,7 @@ consuming. You can run a single file using the `-i` flag to ``run_tests.py``::
 Onnx tests
 ~~~~~~~~~~
 
-Models can be saved via the `onnx` serialization protocol. This is extensively
+Models can be saved via the onnx_ serialization protocol. This is extensively
 tested via::
 
     export PYTHONPATH=.
@@ -56,6 +54,8 @@ tests. You can regenerate the correct output via::
     scripts/onnx/test.sh
     unset PYTHONPATH
     unset EXPECTTEST_ACCEPT
+
+.. _onnx: https://onnx.ai/
 
 CPP tests
 ~~~~~~~~~
