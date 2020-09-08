@@ -106,9 +106,9 @@ Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
 // arccos, alias for acos
-Tensor& arccos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
-Tensor arccos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
-Tensor& arccos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+Tensor& arccos_out(Tensor& result, const Tensor& self) { return at::acos_out(result, self); }
+Tensor arccos(const Tensor& self) { return self.acos(); }
+Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -138,18 +138,18 @@ Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 // arcsin, alias of asin
-Tensor& arcsin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
-Tensor arcsin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
-Tensor& arcsin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+Tensor& arcsin_out(Tensor& result, const Tensor& self) { return at::asin_out(result, self); }
+Tensor arcsin(const Tensor& self) { return self.asin(); }
+Tensor& arcsin_(Tensor& self) { return self.asin_(); }
 
 Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
 Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
 Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 
 // arctan, alias of atan
-Tensor& arctan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
-Tensor arctan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
-Tensor& arctan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
+Tensor& arctan_out(Tensor& result, const Tensor& self) { return at::atan_out(result, self); }
+Tensor arctan(const Tensor& self) { return self.atan(); }
+Tensor& arctan_(Tensor& self) { return self.atan_(); }
 
 // Note [Complex abs and angle]
 // Complex inputs to abs and angle return float results by default.
@@ -200,8 +200,18 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
-Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor& conj_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_out(result, self, conj_stub);
+}
+
+Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
+Tensor conj(const Tensor& self) {
+  if (!self.is_complex()) {
+    return self;
+  }
+  return at::_conj(self);
+}
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
@@ -246,6 +256,10 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
+Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
@@ -312,9 +326,19 @@ Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
 Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
 
+// arcsinh, alias for asinh
+Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return at::asinh_out(result, self); }
+Tensor arcsinh(const Tensor& self) { return self.asinh(); }
+Tensor& arcsinh_(Tensor& self) { return self.asinh_(); }
+
 Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atanh_stub); }
 Tensor atanh(const Tensor& self) { return unary_op_impl(self, at::atanh_out); }
 Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
+
+// arctanh, alias for atanh
+Tensor& arctanh_out(Tensor& result, const Tensor& self) { return at::atanh_out(result, self); }
+Tensor arctanh(const Tensor& self) { return self.atanh(); }
+Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
@@ -393,7 +417,6 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)
     .build();
@@ -411,7 +434,6 @@ Tensor& signbit_out(Tensor& result, const Tensor& self) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -597,6 +619,7 @@ DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);

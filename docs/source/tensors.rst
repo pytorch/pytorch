@@ -194,6 +194,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: amax
+   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -324,17 +326,24 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gcd_
    .. automethod:: ge
    .. automethod:: ge_
+   .. automethod:: greater_equal
+   .. automethod:: greater_equal_
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
+   .. automethod:: greater
+   .. automethod:: greater_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
+   .. automethod:: i0
+   .. automethod:: i0_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -374,6 +383,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lcm_
    .. automethod:: le
    .. automethod:: le_
+   .. automethod:: less_equal
+   .. automethod:: less_equal_
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: lgamma
@@ -405,6 +416,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
+   .. automethod:: less
+   .. automethod:: less_
    .. automethod:: lu
    .. automethod:: lu_solve
    .. automethod:: as_subclass
@@ -438,6 +451,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ndimension
    .. automethod:: ne
    .. automethod:: ne_
+   .. automethod:: not_equal
+   .. automethod:: not_equal_
    .. automethod:: neg
    .. automethod:: neg_
    .. automethod:: negative
@@ -518,6 +533,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: arcsinh
+   .. automethod:: arcsinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
@@ -539,6 +556,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
@@ -554,6 +573,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: atanh
    .. automethod:: atanh_
+   .. automethod:: arctanh
+   .. automethod:: arctanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse
@@ -580,6 +601,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze_
    .. automethod:: values
    .. automethod:: var
+   .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where
