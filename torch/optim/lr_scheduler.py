@@ -1074,6 +1074,10 @@ class OneCycleLR(_LRScheduler):
     You must either provide a value for total_steps or provide a value for both
     epochs and steps_per_epoch.
 
+    The default behaviour of this scheduler follows the fastai implementation of 1cycle, which
+    claims that "unpublished work has shown even better results by using only two phases". To
+    mimic the behaviour of the original paper instead, set ``three_phase=True``.
+
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         max_lr (float or list): Upper learning rate boundaries in the cycle
