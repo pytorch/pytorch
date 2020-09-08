@@ -64,7 +64,7 @@ class TestGradients(TestCase):
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
-            self.skipTest("Skipped! ", op.name, ' does not support dtype ', str(dtype))
+            self.skipTest(f"Skipped! {op.name} does not support dtype {str(dtype)}")
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
