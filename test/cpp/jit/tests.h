@@ -135,7 +135,7 @@ namespace jit {
   _(GPU_FusionSimpleArith)                          \
   _(GPU_FusionExprEvalConstants)                    \
   _(GPU_FusionExprEvalBindings)                     \
-  _(GPU_FusionExprEvalBasic)                        \
+  _(GPU_FusionExprEvalBasic)                      /*\
   _(GPU_FusionExprEvalComplex)                      \
   _(GPU_FusionExprEvalPostLower)                    \
   _(GPU_FusionSimpleTypePromote)                    \
@@ -149,7 +149,7 @@ namespace jit {
   _(GPU_FusionTVReorder)                            \
   _(GPU_FusionEquality)                             \
   _(GPU_FusionParser)                               \
-  _(GPU_FusionDependency)                         /*\
+  _(GPU_FusionDependency)                       *//*\
   _(GPU_FusionCodeGen)                              \
   _(GPU_FusionCodeGen2)                             \
   _(GPU_FusionSimplePWise)                          \
