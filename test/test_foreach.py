@@ -17,19 +17,18 @@ class TestForeach(TestCase):
 
     def _get_test_data(self, device, dtype, N):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
-            tensors1 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
-            tensors2 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
-        elif dtype in torch.testing.get_all_int_dtypes():
-            tensors1 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
-            tensors2 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
-        else:
-            tensors1 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
-            tensors2 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+            tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
 
-        return tensors1, tensors2
+        elif dtype in torch.testing.get_all_int_dtypes():
+            tensors = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+        else:
+            tensors = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+
+        return tensors
 
     def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
-        tensors1, tensors2 = self._get_test_data(device, dtype, N)
+        tensors1 = self._get_test_data(device, dtype, N)
+        tensors2 = self._get_test_data(device, dtype, N)
 
         expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
         res = foreach_op(tensors1, tensors2)
@@ -37,6 +36,71 @@ class TestForeach(TestCase):
         self.assertEqual(res, tensors1)
         self.assertEqual(tensors1, expected)
 
+    def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
+        tensors1 = self._get_test_data(device, dtype, N)
+        expected = [torch_op(tensors1[i]) for i in range(N)]
+        res = foreach_op(tensors1)
+        foreach_op_(tensors1)
+        self.assertEqual(res, tensors1)
+        self.assertEqual(tensors1, expected)
+
+    def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
+        tensors = self._get_test_data(device, dtype, N)
+        tensors1 = self._get_test_data(device, dtype, N)
+        tensors2 = self._get_test_data(device, dtype, N)
+        value = 2
+
+        expected = [torch_op(tensors[i], tensors1[i], tensors2[i], value=value) for i in range(N)]
+
+        res = foreach_op(tensors, tensors1, tensors2, value)
+        foreach_op_(tensors, tensors1, tensors2, value)
+        self.assertEqual(res, tensors)
+        self.assertEqual(tensors, expected)
+
+    #
+    # Unary ops
+    #
+    @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
+    def test_sqrt(self, device, dtype):
+        self._test_unary_op(device, dtype, torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt)
+
+    @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
+    def test_exp(self, device, dtype):
+        self._test_unary_op(device, dtype, torch._foreach_exp, torch._foreach_exp_, torch.exp)
+
+    #
+    # Pointwise ops
+    #
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    def test_addcmul(self, device, dtype):
+        if device == 'cpu':
+            if dtype == torch.half:
+                with self.assertRaisesRegex(RuntimeError, r"\"addcmul_cpu_out\" not implemented for \'Half\'"):
+                    self._test_pointwise_op(device, dtype, torch._foreach_addcmul, 
+                                            torch._foreach_addcmul_, torch.addcmul)
+                return
+
+        self._test_pointwise_op(device, dtype, torch._foreach_addcmul, torch._foreach_addcmul_, torch.addcmul)
+
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    def test_addcdiv(self, device, dtype):
+        if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Integer division with addcdiv is no longer supported, and in a future"):
+                self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
+            return
+
+        if device == 'cpu':
+            if dtype == torch.half:
+                with self.assertRaisesRegex(RuntimeError, r"\"addcdiv_cpu_out\" not implemented for \'Half\'"):
+                    self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, 
+                                            torch._foreach_addcdiv_, torch.addcdiv)
+                return
+        self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
+
+    #
+    # Ops with scalar
+    #
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalar(self, device, dtype):
         tensors = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
@@ -154,6 +218,9 @@ class TestForeach(TestCase):
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
+    #
+    # Ops with list
+    #
     def test_add_list_error_cases(self, device):
         tensors1 = []
         tensors2 = []
