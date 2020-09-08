@@ -1,5 +1,10 @@
+#include <torch/nn/init.h>
 #include <torch/nn/modules/transformerlayer.h>
 #include <torch/nn/modules/transformercoder.h>
+#include <torch/nn/modules/transformer.h>
+
+#include <limits>
+
 
 namespace F = torch::nn::functional;
 
@@ -80,78 +85,58 @@ TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
 }
 
 void TransformerDecoderLayerImpl::reset() {
-  ///initialize self attention
-  self_attn = register_module(
-    "self_attn",
-    MultiheadAttention(
-      MultiheadAttentionOptions(options.d_model(), options.nhead())
-      .dropout(options.dropout())));
+  // NOTE: reset() is for initializing the model only, call reset() after the model is created
+  // will cause throwing exceptions. Call reset_parameter() if the created model need a reset.
 
-  ///initialize Dropout, post self attention
-  dropout1 = register_module("dropout1",
-    Dropout(DropoutOptions().p(options.dropout())));
+  // initialize self attention
+  self_attn = this->register_module("self_attn",
+    MultiheadAttention(MultiheadAttentionOptions(
+      options.d_model(), options.nhead()).dropout(options.dropout())));
 
-  ///initialize Normalization, post self attention
-  norm1 = register_module(
-    "norm1",
-    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+  // initialize multihed attention
+  multihead_attn = this->register_module("multihead_attn",
+    MultiheadAttention(MultiheadAttentionOptions(
+      options.d_model(), options.nhead()).dropout(options.dropout())));
 
-  ///initialize multihed attention
-  multihead_attn = register_module(
-    "multihead_attn",
-    MultiheadAttention(
-      MultiheadAttentionOptions(options.d_model(), options.nhead())
-      .dropout(options.dropout())));
+  // Initialize Feed forward first linear layer
+  linear1 = this->register_module("linear1", Linear(options.d_model(), options.dim_feedforward()));
+  // initialize Feed forward dropout layer
+  dropout = this->register_module("dropout", Dropout(options.dropout()));
+  // initialize Feed forward second linear layer
+  linear2 = this->register_module("linear2", Linear(options.dim_feedforward(), options.d_model()));
 
-  ///initialize post multi-headed attention dropout layer
-  dropout2 = register_module(
-    "dropout2", Dropout(DropoutOptions().p(options.dropout())));
 
-  ///initialize post multi-headed attention Normalization
-  norm2 = register_module(
-    "norm2", LayerNorm(
-      LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+  // initialize Normalization, post self attention
+  norm1 = this->register_module("norm1", LayerNorm(LayerNormOptions({options.d_model()})));
+  // initialize post multi-headed attention Normalization
+  norm2 = this->register_module("norm2", LayerNorm(LayerNormOptions({options.d_model()})));
+  // initialize normalization, post feed forward
+  norm3 = this->register_module("norm3", LayerNorm(LayerNormOptions({options.d_model()})));
 
-  ///Initialize Feed forward first linear layer
-  linear1 = register_module(
-    "linear1",
-    Linear(LinearOptions(options.d_model(), options.dim_feedforward())));
-
-  ///initialize Feed forward dropout layer
-  dropout = register_module(
-    "dropout",
-    Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize Feed forward second linear layer
-  linear2 = register_module(
-    "linear2",
-    Linear(LinearOptions(options.dim_feedforward(), options.d_model())));
-
-  ///initialize dropout, post feed forward
-  dropout3 = register_module(
-    "dropout3",
-    Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize normalization, post feed forward
-  norm3 = register_module(
-    "norm3",
-    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+  // initialize Dropout, post self attention
+  dropout1 = this->register_module("dropout1", Dropout(options.dropout()));
+  // initialize post multi-headed attention dropout layer
+  dropout2 = this->register_module("dropout2", Dropout(options.dropout()));
+  // initialize dropout, post feed forward
+  dropout3 = this->register_module("dropout3", Dropout(options.dropout()));
 }
 
 void TransformerDecoderLayerImpl::reset_parameters() {
 
   // TODO xinyu: standardrize reset_parameters virtual funcs
   self_attn->_reset_parameters();
-  // dropout1->reset_parameters();
-  norm1->reset_parameters();
   multihead_attn->_reset_parameters();
-  // dropout2->reset_parameters();
-  norm2->reset_parameters();
+
   linear1->reset_parameters();
   // dropout->reset_paramteres();
   linear2->reset_parameters();
-  // dropout3->reset_paramteres();
+
+  norm1->reset_parameters();
+  norm2->reset_parameters();
   norm3->reset_parameters();
+  // dropout1->reset_parameters();
+  // dropout2->reset_parameters();
+  // dropout3->reset_paramteres();
 }
 
 ///Pass the inputs (and mask) through the decoder layer.
@@ -214,11 +199,11 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
   for (int64_t i = 0; i < options.num_layers(); ++i) {
-    layers->push_back(options.encoder_layer()->clone());
+    layers->push_back(std::move(options.encoder_layer()->clone()));
   }
 
   if (!options.norm().is_empty()) {
-    norm = options.norm().clone();
+    norm = std::move(options.norm().clone());
     this->register_module("norm", norm.ptr());
   }
 }
@@ -236,10 +221,10 @@ void TransformerEncoderImpl::reset_parameters() {
   // b. Allow user to add/delete normalization module when reset parameters
   if (!norm.is_empty()) {
     this->unregister_module("norm");
-    norm = AnyModule();
+    norm = std::move(AnyModule());
   }
   if (!options.norm().is_empty()) {
-    norm = options.norm().clone();
+    norm = std::move(options.norm().clone());
     this->register_module("norm", norm.ptr());
   }
 }
@@ -274,11 +259,11 @@ void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
   for (int64_t i = 0; i < options.num_layers(); ++i) {
-    layers->push_back(options.decoder_layer()->clone());
+    layers->push_back(std::move(options.decoder_layer()->clone()));
   }
 
   if (!options.norm().is_empty()) {
-    norm = options.norm().clone();
+    norm = std::move(options.norm().clone());
     this->register_module("norm", norm.ptr());
   }
 }
@@ -297,13 +282,12 @@ void TransformerDecoderImpl::reset_parameters() {
   // b. Allow user to add/delete normalization module when reset parameters
   if (!norm.is_empty()) {
     this->unregister_module("norm");
-    norm = AnyModule();
+    norm = std::move(AnyModule());
   }
   if (!options.norm().is_empty()) {
-    norm = options.norm().clone();
+    norm = std::move(options.norm().clone());
     this->register_module("norm", norm.ptr());
   }
-
 }
 
 Tensor TransformerDecoderImpl::forward(
@@ -340,6 +324,111 @@ Tensor TransformerDecoderImpl::forward(
   }
 
   return output;
+}
+
+
+// =======================================TransformerImpl================================
+TransformerImpl::TransformerImpl(TransformerOptions options_ ) : options(std::move(options_)){
+  reset();
+}
+
+void TransformerImpl::reset() {
+  // set up encoder
+  if (options.custom_encoder().is_empty()) {
+    LayerNorm norm(LayerNormOptions({options.d_model()}));
+    TransformerEncoder trans_encoder(TransformerEncoderOptions(
+      TransformerEncoderLayerOptions(options.d_model(), options.nhead())
+      .dim_feedforward(options.dim_feedforward())
+      .dropout(options.dropout())
+      .activation(options.activation()), options.num_encoder_layers())
+        .norm(std::move(AnyModule(norm))));
+
+    this->encoder = std::move(AnyModule(trans_encoder));
+  }
+  else {
+    this->encoder = std::move(options.custom_encoder().clone());
+  }
+  this->register_module("encoder", this->encoder.ptr());
+
+  // set up decoder
+  if (options.custom_decoder().is_empty()) {
+
+    LayerNorm norm(LayerNormOptions({options.d_model()}));
+    TransformerDecoder trans_decoder(TransformerDecoderOptions(
+      TransformerDecoderLayerOptions(options.d_model(), options.nhead())
+      .dim_feedforward(options.dim_feedforward())
+      .dropout(options.dropout())
+      .activation(options.activation()), options.num_decoder_layers())
+        .norm(std::move(AnyModule(norm))));
+
+    this->decoder = std::move(AnyModule(trans_decoder));
+  }
+  else {
+    this->decoder = std::move(options.custom_decoder().clone());
+  }
+  this->register_module("decoder", this->decoder.ptr());
+
+  reset_parameters();
+}
+
+
+void TransformerImpl::reset_parameters() {
+  auto parameters = this->parameters();
+  for (auto& param : parameters) {
+    if (param.dim() > 1) {
+      torch::nn::init::xavier_uniform_(param);
+    }
+  }
+}
+
+
+Tensor TransformerImpl::forward(
+  const Tensor& src,
+  const Tensor& tgt,
+  const Tensor& src_mask,
+  const Tensor& tgt_mask,
+  const Tensor& memory_mask,
+  const Tensor& src_key_padding_mask,
+  const Tensor& tgt_key_padding_mask,
+  const Tensor& memory_key_padding_mask) {
+
+  TORCH_CHECK(src.dim() == 3 && tgt.dim() == 3,
+    "src and tgt should have 3 dimensions, but got ", src.dim(), " and ", tgt.dim());
+
+  TORCH_CHECK(src.size(1) == tgt.size(1),
+    "src and tgt should have same size at dimension 1, but got ", src.size(1), " and ", tgt.size(1));
+
+  TORCH_CHECK(src.size(2) == options.d_model() && tgt.size(2) == options.d_model(),
+    "src and tgt should have a same size as d_model at dimension 2, but got ",
+    src.size(2), " and ", tgt.size(2), " while d_model is ", options.d_model());
+
+  Tensor memory = this->encoder.forward<Tensor>(src, src_mask, src_key_padding_mask);
+  Tensor output = this->decoder.forward<Tensor>(
+    tgt, memory, tgt_mask, memory_mask, tgt_key_padding_mask, memory_key_padding_mask);
+
+  return output;
+}
+
+Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
+  // Treat 0 dim valid here
+  TORCH_CHECK(sz >= 0,
+    "Input size must be non-negative to genearte a valid square subsequent mask, but got ", sz);
+
+  Tensor mask = (torch::triu(torch::ones({sz, sz})) == 1).transpose(0, 1).to(torch::kFloat32);
+
+  // check IEEE754 support here since -inf is not guaranteed to be valid on non IEEE754 platform
+  if (std::numeric_limits<float>::is_iec559) {
+    mask = mask.masked_fill(mask == 0, -std::numeric_limits<float>::infinity()).masked_fill(mask == 1, 0.f);
+  }
+  // if IEEE754 is not supported, we use the smallest float number in current platform
+  else {
+    TORCH_WARN_ONCE(
+      "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
+      "the mas with smallest float number on this platform instead of -inf");
+    mask = mask.masked_fill(mask == 0, std::numeric_limits<float>::min()).masked_fill(mask == 1, 0.f);
+  }
+
+  return mask;
 }
 
 } // namespace nn
