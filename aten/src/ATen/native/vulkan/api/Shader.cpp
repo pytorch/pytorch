@@ -11,6 +11,7 @@ namespace api {
 
 Shader::Layout::Factory::Factory(const VkDevice device)
   : device_(device) {
+    TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
 }
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(

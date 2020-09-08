@@ -36,6 +36,9 @@ class Cache final {
   typedef typename Factory::Handle Handle;
   typedef typename Factory::Hasher Hasher;
 
+  const Factory& factory() const;
+  Factory& factory();
+
   // Create or retrieve a resource.
   //
   // This operation is a simple cache lookup and returns the Handle corresponding
@@ -64,6 +67,16 @@ template<typename Factory>
 inline Cache<Factory>::Cache(Factory factory)
   : factory_(std::move(factory)) {
     cache_.reserve(Configuration::kReserve);
+}
+
+template<typename Factory>
+inline const Factory& Cache<Factory>::factory() const {
+  return factory_;
+}
+
+template<typename Factory>
+inline Factory& Cache<Factory>::factory() {
+  return factory_;
 }
 
 template<typename Factory>
