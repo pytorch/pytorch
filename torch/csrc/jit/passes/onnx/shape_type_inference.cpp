@@ -130,8 +130,9 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   //       The conversion here is incomplete for these ops.
   //       e.g: ListConstruct, ListUnpack, etc.
   std::string model_str;
+  onnx::ModelProto model_p;
   RawDataExportMap export_map;
-  std::tie(model_str, export_map) = export_onnx(
+  std::tie(model_p, export_map) = export_onnx_opt(
       n_graph,
       {},
       opset_version,
@@ -145,7 +146,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
       false,
       std::string());
   onnx::ModelProto model_proto;
-  model_proto.ParseFromString(model_str);
+  model_proto = model_p;
 
   // infer shape
   onnx::shape_inference::InferShapes(model_proto);

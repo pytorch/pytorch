@@ -870,6 +870,44 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
+std::tuple<::ONNX_NAMESPACE::ModelProto, RawDataExportMap> export_onnx_opt(
+    const std::shared_ptr<Graph>& graph,
+    const std::map<std::string, at::Tensor>& initializers,
+    int64_t onnx_opset_version,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<std::int64_t, std::string>>& dynamic_axes,
+    bool defer_weight_export,
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    bool strip_doc_string,
+    bool keep_initializers_as_inputs,
+    const std::map<std::string, int>& custom_opsets,
+    bool add_node_names,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
+  auto graph_encoder = GraphEncoder(
+      graph,
+      onnx_opset_version,
+      operator_export_type,
+      initializers,
+      dynamic_axes,
+      defer_weight_export,
+      strip_doc_string,
+      keep_initializers_as_inputs,
+      custom_opsets,
+      add_node_names,
+      use_external_data_format,
+      onnx_file_path);
+  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export with use_external_data_format=True.");
+  return std::make_tuple(
+      graph_encoder.get_model_proto(),
+      graph_encoder.get_raw_data_export_map());
+}
+
 void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
