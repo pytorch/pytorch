@@ -190,6 +190,9 @@ public:
   Vec256<float> hypot(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_hypotf8_u05(values, b));
   }
+  Vec256<float> i0() const {
+    return map(calc_i0);
+  }
   Vec256<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }
