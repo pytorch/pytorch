@@ -1,5 +1,6 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
+import time
 import timeit
 from typing import List, Optional
 
@@ -75,7 +76,27 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def blocked_autorange(self, callback=None, min_run_time=0.2):
+    def adaptive_autorange(self, threshold=0.1, max_run_time=10.0, callback=None,
+            min_run_time=0.1):
+        start_time = time.time()
+        number = self._estimate_block_size(min_run_time=0.05)
+        measure = None
+        times = []
+        rounds = 0
+        with common.set_torch_threads(self._num_threads):
+            while time.time() - start_time < max_run_time:
+                rounds += 1
+                time_taken = self._timer.timeit(number)
+                if callback:
+                    callback(number, time_taken)
+                times.append(time_taken)
+                measure = self._construct_measurement(number, times)
+                if rounds > 3 and time.time() - start_time > min_run_time:
+                    if measure.meets_confidence():
+                        return measure
+        return measure
+
+    def _estimate_block_size(self, min_run_time):
         with common.set_torch_threads(self._num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
@@ -89,15 +110,19 @@ class Timer(object):
                 if time_taken > min_run_time:
                     break
                 number *= 10
+        return number
 
-            total_time = 0.0
-            times = []
+    def blocked_autorange(self, callback=None, min_run_time=0.2):
+        number = self._estimate_block_size(min_run_time)
+        times = []
+        total_time = 0.0
 
+        with common.set_torch_threads(self._num_threads):
             while total_time < min_run_time:
                 time_taken = self._timer.timeit(number)
                 total_time += time_taken
                 if callback:
                     callback(number, time_taken)
                 times.append(time_taken)
+        return self._construct_measurement(number_per_run=number, times=times)
 
-            return self._construct_measurement(number_per_run=number, times=times)
