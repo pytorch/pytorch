@@ -723,7 +723,7 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmin_out(result, self, dim, keepdims);
 }
 
-static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -863,7 +863,19 @@ Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
+  if (trivial_return.has_value()) {
+    return trivial_return.value();
+  }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_var(self, unbiased);
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, false);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -871,7 +883,7 @@ Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
@@ -883,7 +895,19 @@ Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
+  if (trivial_return.has_value()) {
+    return trivial_return.value();
+  }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_std(self, unbiased);
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, true);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -891,7 +915,7 @@ Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 
