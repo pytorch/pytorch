@@ -1,5 +1,5 @@
 import inspect
-from types import CodeType, FunctionType, MethodType
+from types import CodeType, FunctionType
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 import torch
 
@@ -85,7 +85,7 @@ class DelegateBase:
         their constituent ops are recorded, unless specified otherwise
         via this parameter.
         """
-        return m.__module__.startswith('torch.nn') or m.__module__.startswith('torch.quantization') and not isinstance(m, torch.nn.Sequential)
+        return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
     def create_arg(self, a: Any) -> Argument:
         """
