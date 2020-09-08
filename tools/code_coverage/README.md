@@ -38,11 +38,11 @@ cmake .. -DCODE_COVERAGE=ON -DBUILD_TEST=ON -DCMAKE_BUILD_CONFIG=Debug
 
 
 ## Examples
-The default setting is for `gcc`. If you are using `clang`, the first step is to set some environment value if needed:
+The tool will auto-detect compiler type in your operating system, but if you are using another one, you need to specify it. Besides, if you are using `clang`, `llvm` tools are required. So the first step is to set some environment value if needed:
 ```bash
-# set compiler type, the default is "GCC"
+# set compiler type, the default is auto detected, you can check it at the start of log.txt
 export COMPILER_TYPE="CLANG"
-# set llvm path, by default is /usr/local/opt/llvm/bin
+# set llvm path for clang, by default is /usr/local/opt/llvm/bin
 export LLVM_TOOL_PATH=...
 ```
 

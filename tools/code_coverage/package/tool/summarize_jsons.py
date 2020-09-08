@@ -3,10 +3,16 @@ import os
 import time
 from typing import Any, Dict, List, Set, Tuple
 
-from ..util.setting import JSON_FOLDER_BASE_DIR, TestList, TestPlatform, TestStatusType
+from ..util.setting import (
+    JSON_FOLDER_BASE_DIR,
+    CompilerType,
+    TestList,
+    TestPlatform,
+    TestStatusType,
+)
 from ..util.utils import (
     check_compiler_type,
-    get_cov_type,
+    detect_compiler_type,
     print_error,
     print_time,
     related_to_test_list,
@@ -93,7 +99,7 @@ def get_json_obj(json_file: str) -> Tuple[Any, int]:
     return None, 2
 
 
-def parse_json(json_file: str) -> List[CoverageRecord]:
+def parse_json(json_file: str, platform: TestPlatform) -> List[CoverageRecord]:
     print("start parse:", json_file)
     json_obj, read_status = get_json_obj(json_file)
     if read_status == 0:
@@ -105,13 +111,14 @@ def parse_json(json_file: str) -> List[CoverageRecord]:
         raise RuntimeError(
             "Fail to do code coverage! Fail to load json file: ", json_file
         )
-    cov_type = get_cov_type()
-    check_compiler_type(cov_type)
+
+    cov_type = detect_compiler_type(platform)
+
     coverage_records: List[CoverageRecord] = []
-    if cov_type == "CLANG":
+    if cov_type == CompilerType.CLANG:
         coverage_records = LlvmCoverageParser(json_obj).parse("fbcode")
         # print(coverage_records)
-    elif cov_type == "GCC":
+    elif cov_type == CompilerType.GCC:
         coverage_records = GcovCoverageParser(json_obj).parse()
 
     return coverage_records
@@ -126,13 +133,14 @@ def parse_jsons(
         for file_name in file_list:
             if file_name.endswith(".json"):
                 # if compiler is clang, we only analyze related json / when compiler is gcc, we analyze all jsons
-                if get_cov_type() == "CLANG" and not related_to_test_list(
+                cov_type = detect_compiler_type(platform)
+                if cov_type == CompilerType.CLANG and not related_to_test_list(
                     file_name, test_list
                 ):
                     continue
                 json_file = os.path.join(path, file_name)
                 try:
-                    coverage_records = parse_json(json_file)
+                    coverage_records = parse_json(json_file, platform)
                 except RuntimeError:
                     print_error("Fail to load json file: ", json_file)
                     continue

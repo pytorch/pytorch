@@ -159,6 +159,7 @@ PyObject* c10d_init(PyObject* _unused) {
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
+              bool,
               bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
