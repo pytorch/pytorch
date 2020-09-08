@@ -306,57 +306,6 @@ class ParameterDict:
 class BufferDict:
     def __init__(self, mod: ScriptModule) -> None: ...
 
-# Defined in torch/csrc/jit/python/python_ir.cpp
-# TorchType is equivalent to torch.Type/Torch._C.Type
-# We do not use `Type` here because this would clash with
-# typing.Type.
-class TorchType:  
-    ...
-
-R = TypeVar('R', bound=TorchType)
-
-# common base for all types that have a single sub element
-# e.g. Future[R], Option[R], List[R]
-class SingleElementType(TorchType):
-    ...
-
-class NamedType(TorchType):
-    ...
-
-class NumberType(TorchType):
-    @classmethod
-    def get(cls) -> NumberType: ...
-
-class TensorType(TorchType):
-    @classmethod
-    def get(cls) -> TensorType: ...
-
-class IntType(NumberType):
-    @classmethod
-    def get(cls) -> IntType: ...
-
-class BoolType(NumberType):
-    @classmethod
-    def get(cls) -> IntType: ...
-
-class ListType(SingleElementType, Generic[R]):
-    def __init__(self, type: TorchType): ...
-    @classmethod
-    def ofInts(cls) -> ListType[IntType]: ...
-    @classmethod
-    def ofTensors(cls) -> ListType[TensorType]: ...
-    @classmethod
-    def ofFloats(cls) -> ListType[BoolType]: ...
-    def getElementType(self: ListType[R]) -> R: ...
-
-class TupleType(NamedType, Tuple[TupleType, ...]):
-    def __init__(self, type: List[TorchType]): ...
-    def elements(self) -> List[TorchType]: ...
-
-class OptionalType(SingleElementType, Generic[R]):
-    def __init__(self, type: TorchType): ...
-
-
 # Defined in torch/csrc/Module.cpp
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
 def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
@@ -600,6 +549,8 @@ Stack = List[IValue]
 class JitType:
     ...
 
+R = TypeVar('R', bound=JitType)
+
 class AnyType(JitType):
     @staticmethod
     def get() -> AnyType: ...
@@ -657,7 +608,7 @@ class InterfaceType(JitType):
     def getMethod(self, name: str) -> Optional[FunctionSchema]: ...
     def getMethodNames(self) -> List[str]: ...
 
-class OptionalType(JitType):
+class OptionalType(JitType, Generic[R]):
     def __init__(self, a: JitType) -> None: ...
     def getElementType(self) -> JitType: ...
 
@@ -679,6 +630,10 @@ class EnumType(JitType):
         enum_names_values: List[Any]
     ) -> None:
         ...
+
+class TensorType(JitType):
+    @classmethod
+    def get(cls) -> TensorType: ...
 
 # Defined in torch/csrc/jit/python/python_tree_views.cpp
 class SourceRange:
