@@ -32,7 +32,7 @@ namespace api {
 // and destruct the aforementioned Vulkan objects.
 //
 
-struct C10_EXPORT Shader final {
+struct Shader final {
   //
   // Layout
   //
@@ -187,11 +187,11 @@ inline size_t Shader::Layout::Factory::Hasher::operator()(
 }
 
 inline bool operator==(
-    const Shader::WorkGroup& work_group_1,
-    const Shader::WorkGroup& work_group_2) {
-  return (work_group_1.x == work_group_2.x) &&
-         (work_group_1.y == work_group_2.y) &&
-         (work_group_1.z == work_group_2.z);
+    const Shader::WorkGroup& _1,
+    const Shader::WorkGroup& _2) {
+  return (_1.x == _2.x) &&
+         (_1.y == _2.y) &&
+         (_1.z == _2.z);
 }
 
 inline bool operator==(

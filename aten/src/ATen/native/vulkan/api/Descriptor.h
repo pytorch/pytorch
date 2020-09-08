@@ -49,7 +49,7 @@ namespace api {
 // as well.  This behavior is by design.
 //
 
-struct C10_EXPORT Descriptor final {
+struct Descriptor final {
   //
   // Pool
   //

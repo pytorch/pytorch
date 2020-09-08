@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Runtime.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 #include <sstream>
 
@@ -251,7 +252,7 @@ Adapter Runtime::select(const Selector& selector) {
 
   for (const VkPhysicalDevice physical_device : physical_devices) {
     const Adapter adapter{
-      instance(),
+      this,
       physical_device,
       query_physical_device_properties(physical_device),
       query_compute_queue_family_index(physical_device),
@@ -293,11 +294,11 @@ bool available() {
   return initialize();
 }
 
-Runtime& runtime() {
+Runtime* runtime() {
   Runtime* const runtime = initialize();
   TORCH_CHECK(runtime, "Vulkan: Backend not available on this platform!");
 
-  return *runtime;
+  return runtime;
 }
 
 } // namespace api
