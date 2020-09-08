@@ -76,7 +76,7 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(device()),
+      command_(device(), {adapter.compute_queue_family_index}),
       shader_(device()),
       pipeline_(device()),
       descriptor_(device()),

@@ -113,7 +113,12 @@ Resource::Pool::Pool(
     const VkPhysicalDevice physical_device,
     const VkDevice device)
   : device_(device),
-    allocator_(create_allocator(instance, physical_device, device), vmaDestroyAllocator) {
+    allocator_(
+        create_allocator(
+          instance,
+          physical_device,
+          device),
+        vmaDestroyAllocator) {
     buffers_.reserve(Configuration::kReserve);
     images_.reserve(Configuration::kReserve);
 }
