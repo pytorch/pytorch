@@ -7,10 +7,15 @@ namespace api {
 
 Pipeline::Layout::Factory::Factory(const VkDevice device)
  : device_(device) {
+  TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
 }
 
 typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
+  TORCH_INTERNAL_ASSERT(
+      descriptor.descriptor_set_layout,
+      "Invalid Vulkan descriptor set layout!");
+
   const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
     nullptr,
@@ -34,6 +39,8 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
 namespace {
 
 VkPipelineCache create_pipeline_cache(const VkDevice device) {
+  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
+
   const VkPipelineCacheCreateInfo pipeline_cache_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
     nullptr,
@@ -53,11 +60,21 @@ VkPipelineCache create_pipeline_cache(const VkDevice device) {
 
 Pipeline::Factory::Factory(const VkDevice device)
  : device_(device),
-   pipeline_cache_(create_pipeline_cache(device), VK_DELETER(PipelineCache)(device)) {
+   pipeline_cache_(
+      create_pipeline_cache(device),
+      VK_DELETER(PipelineCache)(device)) {
 }
 
 typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     const Descriptor& descriptor) const {
+  TORCH_INTERNAL_ASSERT(
+      descriptor.pipeline_layout,
+      "Invalid Vulkan pipeline layout!");
+
+  TORCH_INTERNAL_ASSERT(
+      descriptor.shader_module,
+      "Invalid Vulkan shader module!");
+
   constexpr uint32_t x_offset = 0u;
   constexpr uint32_t x_size = sizeof(Shader::WorkGroup::x);
   constexpr uint32_t y_offset = x_offset + x_size;
@@ -113,7 +130,12 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
 
   VkPipeline pipeline{};
   VK_CHECK(vkCreateComputePipelines(
-      device_, pipeline_cache_.get(), 1u, &compute_pipeline_create_info, nullptr, &pipeline));
+      device_,
+      pipeline_cache_.get(),
+      1u,
+      &compute_pipeline_create_info,
+      nullptr,
+      &pipeline));
 
   return Handle{
     pipeline,
