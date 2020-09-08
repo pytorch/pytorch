@@ -7,6 +7,7 @@ namespace api {
 
 Command::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
+    TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
 }
 
 typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
@@ -28,13 +29,11 @@ typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
   };
 }
 
-void Command::Pool::purge(
-    const VkDevice device,
+void Command::Pool::Factory::purge(
     const VkCommandPool command_pool) {
-  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
   TORCH_INTERNAL_ASSERT(command_pool, "Invalid Vulkan command pool!");
 
-  VK_CHECK(vkResetCommandPool(device, command_pool, 0u));
+  VK_CHECK(vkResetCommandPool(device_, command_pool, 0u));
 }
 
 namespace {
@@ -42,6 +41,9 @@ namespace {
 VkCommandBuffer allocate_command_buffer(
     const VkDevice device,
     const VkCommandPool command_pool) {
+  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT(command_pool, "Invalid Vulkan command pool!");
+
   const VkCommandBufferAllocateInfo command_buffer_allocate_info{
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
     nullptr,
