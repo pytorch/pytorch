@@ -8,6 +8,8 @@
 
 #include <nccl.h>
 
+#define ENABLE_NCCL_A2A 1
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
