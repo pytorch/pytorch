@@ -93,9 +93,9 @@ struct C10_API Device final {
   DeviceType type_;
   DeviceIndex index_ = -1;
   void validate() {
-    TORCH_CHECK(index_ == -1 || index_ >= 0,
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
-    TORCH_CHECK(!is_cpu() || index_ <= 0,
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_cpu() || index_ <= 0,
         "CPU device index must be -1 or zero, got ", index_);
   }
 };
