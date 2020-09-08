@@ -970,6 +970,8 @@ class ReductionOps : OptOutDispatch {
 
 void IRPrinter::printReductionOps(Fusion* fusion) {
   FusionGuard fg(fusion);
+
+  // TODO(kir): we shouldn't be creating new nodes during printing
   auto a = new NamedScalar("a", DataType::Null);
   auto b = new NamedScalar("b", DataType::Null);
   for (auto rop_pair : ReductionOps::get(fusion)) {

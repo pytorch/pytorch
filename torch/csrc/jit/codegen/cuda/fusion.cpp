@@ -1,5 +1,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
@@ -345,8 +346,7 @@ void Fusion::print() {
 }
 
 void Fusion::printKernel() {
-  GpuLower lower(this);
-  lower.printKernel(std::cout);
+  std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
 }
 
 void Fusion::printMath() {

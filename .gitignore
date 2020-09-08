@@ -187,6 +187,7 @@ build_android
 build_ios
 /build_*
 .build_debug/*
+.build_profile/*
 .build_release/*
 distribute/*
 *.testbin

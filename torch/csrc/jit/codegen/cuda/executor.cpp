@@ -1,4 +1,5 @@
 
+#include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -91,13 +92,14 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   has_grid_reductions = fusion_.hasGridReduction();
   has_block_broadcasts = fusion_.hasBlockBroadcast();
   lowered_ = GpuLower(&fusion_);
-  const auto kernel = lowered_.getKernel(kernelName());
-  const auto structured_code = getStructuredCode(kernel);
+  const auto kernel = lowered_.kernel();
+  const auto kernel_code = codegen::generateCudaKernel(kernel, kernelName());
+  const auto structured_code = getStructuredCode(kernel_code);
 
-  if (lowered_.static_allocations().size() > 0) {
+  if (kernel->staticAllocations().size() > 0) {
     StatefulExpressionEvaluator static_evaluator(&fusion_);
     unsigned static_smem_size =
-        computeSharedMemory(static_evaluator, lowered_.static_allocations());
+        computeSharedMemory(static_evaluator, kernel->staticAllocations());
     TORCH_INTERNAL_ASSERT(
         static_smem_size < max_device_smem,
         "The static shared memory allocation is larger than available memory.");
@@ -254,11 +256,13 @@ LaunchParams FusionExecutor::computeLaunchParams(
         launch_params.bdimy() * launch_params.bdimz();
   }
 
-  uint64_t dynamic_smem_size = computeSharedMemory(
-      see, lowered_.dynamic_allocations(), true, reduction_broadcast_workspace);
+  const auto kernel = lowered_.kernel();
 
-  uint64_t static_smem_size =
-      computeSharedMemory(see, lowered_.static_allocations());
+  const uint64_t dynamic_smem_size = computeSharedMemory(
+      see, kernel->dynamicAllocations(), true, reduction_broadcast_workspace);
+
+  const uint64_t static_smem_size =
+      computeSharedMemory(see, kernel->staticAllocations());
 
   TORCH_INTERNAL_ASSERT(
       (dynamic_smem_size + static_smem_size) < max_device_smem,
@@ -271,7 +275,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     StatefulExpressionEvaluator& see) {
   GlobalBuffers global_buffers;
-  for (auto alloc : lowered_.global_allocations()) {
+  for (auto alloc : lowered_.kernel()->globalAllocations()) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
