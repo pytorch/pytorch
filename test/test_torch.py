@@ -18859,10 +18859,15 @@ else:
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
-    def test_mean_repeated_dim(self, device):
+    def test_repeated_dim(self, device):
+        ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp]
         x = torch.randn(3, 3, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, r'mean: repeated dimension in `dim` \(\[0, 0\]\)'):
-            torch.mean(x, dim=(0, 0))
+
+        error_msg = r'appears multiple times in the list of dims'
+        for op in ops:
+            for dim in [(0, 0), (0, -4)]:
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    op(x, dim=dim)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
