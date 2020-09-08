@@ -186,6 +186,10 @@ namespace c10 {
   _(aten, __isnot__)                 \
   _(aten, copy)                      \
   _(aten, copy_)                     \
+  _(aten, div)                       \
+  _(aten, div_)                      \
+  _(aten, true_divide)               \
+  _(aten, true_divide_)              \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
   _(aten, addcdiv_)                  \
@@ -196,7 +200,7 @@ namespace c10 {
   _(aten, ge)                        \
   _(aten, ge_)                       \
   _(aten, greater_equal)             \
-  _(aten, greater_equal_)             \
+  _(aten, greater_equal_)            \
   _(aten, gt)                        \
   _(aten, gt_)                       \
   _(aten, greater)                   \
