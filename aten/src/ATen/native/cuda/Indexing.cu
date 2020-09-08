@@ -905,7 +905,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
 #endif
     if (num_nonzeros_h > 0 && self.dim() > 1){
         int64_t div = 1;
-#ifndef __HIP_PLATFORM_HCC
+#ifndef __HIP_PLATFORM_HCC__
         auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
 #endif
         for (int dim = self.dim()-1; dim >= 0; dim--){

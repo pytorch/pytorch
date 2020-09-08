@@ -5299,7 +5299,7 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
 
     See below for more details on the two behaviors.
 
-    When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero> causes
+    When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
     host-device synchronization.
 
 **When** :attr:`as_tuple` **is ``False`` (default)**:
