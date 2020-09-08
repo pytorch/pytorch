@@ -1,7 +1,7 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
 from collections import OrderedDict
 
@@ -1514,3 +1514,14 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
+
+    def test_no_type_annotation(self):
+        def fn(self, input: Dict) -> Any:
+            return input
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            m = torch.jit.script(fn)

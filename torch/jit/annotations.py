@@ -291,7 +291,8 @@ def try_ann_to_type(ann, loc):
     if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
-        return DictType(key, value)
+        if key and value:
+            return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
             contained = ann.__args__[0]
