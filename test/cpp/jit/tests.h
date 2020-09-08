@@ -149,7 +149,7 @@ namespace jit {
   _(GPU_FusionTVReorder)                            \
   _(GPU_FusionEquality)                             \
   _(GPU_FusionParser)                               \
-  _(GPU_FusionDependency)                           \
+  _(GPU_FusionDependency)                         /*\
   _(GPU_FusionCodeGen)                              \
   _(GPU_FusionCodeGen2)                             \
   _(GPU_FusionSimplePWise)                          \
@@ -224,7 +224,7 @@ namespace jit {
   _(GPU_FusionTraversalOrder6)                      \
   _(GPU_FusionTraversalOrder7)                      \
   _(GPU_FusionBranches)                             \
-  _(GPU_FusionThreadPredicate)
+  _(GPU_FusionThreadPredicate)*/
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
