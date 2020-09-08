@@ -96,8 +96,7 @@ class PytorchBenchmarkUploader(ScribeUploader):
             test = b['name'].split('[')[0]
             net_name = b['params']['net_name']
             benchmark_name = '{}[{}]'.format(test, net_name)
-            executor = b['params']['executor']
-            fuser = b['params']['fuser']
+            executor, fuser = b['params']['executor_and_fuser'].split('-')
             m = self.format_message({
                 "time": upload_time,
                 "benchmark_group": b['group'],
