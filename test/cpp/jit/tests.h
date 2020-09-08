@@ -119,7 +119,7 @@ namespace jit {
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
-#define TH_FORALL_TESTS_CUDA(_)                     \
+#define TH_FORALL_TESTS_CUDA(_)                   /*\
   _(ArgumentSpec)                                   \
   _(CompleteArgumentSpec)                           \
   _(Fusion)                                         \
@@ -135,7 +135,7 @@ namespace jit {
   _(GPU_FusionSimpleArith)                          \
   _(GPU_FusionExprEvalConstants)                    \
   _(GPU_FusionExprEvalBindings)                     \
-  _(GPU_FusionExprEvalBasic)                      /*\
+  _(GPU_FusionExprEvalBasic)                    *//*\
   _(GPU_FusionExprEvalComplex)                      \
   _(GPU_FusionExprEvalPostLower)                    \
   _(GPU_FusionSimpleTypePromote)                    \
