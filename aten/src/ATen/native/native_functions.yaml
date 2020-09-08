@@ -193,28 +193,28 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
   use_c10_dispatcher: full
 
-- func: dropout(Tensor input, float p, bool train) -> Tensor
+- func: dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   use_c10_dispatcher: full
 
-- func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   use_c10_dispatcher: full
 
-- func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: alpha_dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: alpha_dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   use_c10_dispatcher: full
 
-- func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_alpha_dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   use_c10_dispatcher: full
 
 - func: abs(Tensor self) -> Tensor

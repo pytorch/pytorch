@@ -40,7 +40,7 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 }
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
+Ctype<inplace> _dropout_impl(T& input, double p, bool train, c10::optional<Generator> gen) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   if (p == 0 || !train || input.numel() == 0) {
     return input;
@@ -52,7 +52,7 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
 
   at::Tensor b; // used for alpha_dropout only
   auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  noise.bernoulli_(1 - p);
+  noise.bernoulli_(1 - p, gen);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
     double a = 1. / std::sqrt((alpha * alpha * p + 1) * (1 - p));
@@ -82,44 +82,44 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 } // anomymous namepsace
 
-Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, bool train, c10::optional<Generator> gen) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
-      return std::get<0>(at::_fused_dropout(input, 1 - p));
+      return std::get<0>(at::_fused_dropout(input, 1 - p, gen));
     }
-    return _dropout<false>(input, p, train);
+    return _dropout<false>(input, p, train, gen);
   }();
   namedinference::propagate_names(result, input);
   return result;
 }
 
-Tensor& dropout_(Tensor& input, double p, bool train) {
-  return _dropout<true>(input, p, train);
+Tensor& dropout_(Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _dropout<true>(input, p, train, gen);
 }
 
-Tensor feature_dropout(const Tensor& input, double p, bool train) {
-  return _feature_dropout<false>(input, p, train);
+Tensor feature_dropout(const Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _feature_dropout<false>(input, p, train, gen);
 }
 
-Tensor& feature_dropout_(Tensor& input, double p, bool train) {
-  return _feature_dropout<true>(input, p, train);
+Tensor& feature_dropout_(Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _feature_dropout<true>(input, p, train, gen);
 }
 
-Tensor alpha_dropout(const Tensor& input, double p, bool train) {
-  return _alpha_dropout<false>(input, p, train);
+Tensor alpha_dropout(const Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _alpha_dropout<false>(input, p, train, gen);
 }
 
-Tensor& alpha_dropout_(Tensor& input, double p, bool train) {
-  return _alpha_dropout<true>(input, p, train);
+Tensor& alpha_dropout_(Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _alpha_dropout<true>(input, p, train, gen);
 }
 
-Tensor feature_alpha_dropout(const Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<false>(input, p, train);
+Tensor feature_alpha_dropout(const Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _feature_alpha_dropout<false>(input, p, train, gen);
 }
 
-Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<true>(input, p, train);
+Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train, c10::optional<Generator> gen) {
+  return _feature_alpha_dropout<true>(input, p, train, gen);
 }
 
 }} // namespace at::native
