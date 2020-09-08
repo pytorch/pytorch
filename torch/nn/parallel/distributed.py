@@ -3,6 +3,7 @@ import copy
 import itertools
 import os
 import inspect
+import logging
 
 import torch
 
@@ -586,6 +587,15 @@ class DistributedDataParallel(Module):
 
         if self.require_forward_param_sync:
             self._sync_params()
+
+        # Calling _rebuild_buckets before forward compuation,
+        # It may allocate new buckets before deallocating old buckets
+        # inside _rebuild_buckets. To save peak memory usage,
+        # call _rebuild_buckets before the peak memory usage increases
+        # during forward computation.
+        # This should be called only once during whole training period.
+        if self.reducer._rebuild_buckets():
+            logging.info("Reducer buckets have been rebuilt in this iteration.")
 
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
