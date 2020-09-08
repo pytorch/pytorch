@@ -17,10 +17,10 @@ from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
-from torch.quantization.default_mappings import (
-    DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST,
-    DEFAULT_QAT_MODULE_MAPPING,
+from torch.quantization.quantization_mappings import (
+    get_dynamic_quant_module_mapping,
+    get_qconfig_propagation_list,
+    get_qat_module_mapping,
 )
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -192,7 +192,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
+    convert(module, get_dynamic_quant_module_mapping(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -348,7 +348,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
+            propagate_qconfig_list = get_qconfig_propagation_list()
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
            and type(module) in propagate_qconfig_list:
@@ -356,7 +356,7 @@ class QuantizationTestCase(TestCase):
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+        if type(module) not in get_qat_module_mapping().values():
             for child in module.children():
                 self.checkObservers(child)
 
