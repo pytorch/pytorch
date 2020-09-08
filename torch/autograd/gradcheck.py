@@ -21,8 +21,7 @@ def make_jacobian(input, num_out):
             return None
         if not input.requires_grad:
             return None
-        shape = (input.nelement(), num_out)
-        return torch.zeros(shape, dtype=input.dtype)
+        return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
     elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
@@ -81,7 +80,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
             return r.detach().reshape(-1)
 
         ds_dx = compute_gradient(eps)
-        # print(ds_dx.is_complex())
         if x.is_complex():
             ds_dy = compute_gradient(eps * 1j)
             # conjugate wirtinger derivative
