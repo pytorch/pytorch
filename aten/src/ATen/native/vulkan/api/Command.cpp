@@ -5,6 +5,11 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+Command::Pool::Pool(const VkDevice device, const Descriptor& primary)
+  : cache(Factory(device)),
+    primary(cache.retrieve(primary)) {
+}
+
 Command::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
     TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
