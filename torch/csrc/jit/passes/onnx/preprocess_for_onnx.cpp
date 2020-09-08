@@ -105,7 +105,7 @@ static void FuseWithListUnpack(Block* b) {
 }
 
 // Replace aten::add with onnx::Concat
-// when inputs to an add node are 2 int lists
+// when inputs to the add node are two int lists
 //
 // before the pass:
 // graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
