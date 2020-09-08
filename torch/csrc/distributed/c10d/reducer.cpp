@@ -68,8 +68,8 @@ Reducer::Reducer(
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
   {
-   std::lock_guard<std::mutex> lock(mutex_);
-   initialize_buckets(std::move(bucket_indices));
+    std::lock_guard<std::mutex> lock(mutex_);
+    initialize_buckets(std::move(bucket_indices));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -364,8 +364,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       // See Note [DDP Communication Hook]
       if (comm_hook_ == nullptr) {
         // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-        auto wrapped =
-            c10::scalar_to_tensor(double(1.) / divFactor_);
+        auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
         wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
         // Divides while copying into the bucket view.
         at::native::mul_out(bucket_view, grad, wrapped);
@@ -834,14 +833,14 @@ void Reducer::initialize_bucket_views(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-        replica.bucket_views_in.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
+      replica.bucket_views_in.push_back(
+          contents.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-        replica.bucket_views_in.push_back(
-            contents.narrow(0, offset, length).view(v.sizes()));
+      replica.bucket_views_in.push_back(
+          contents.narrow(0, offset, length).view(v.sizes()));
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
@@ -861,14 +860,14 @@ void Reducer::populate_bucket_views_out(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-        replica.bucket_views_out.push_back(
-            tensor.as_strided(v.sizes(), v.strides(), offset));
+      replica.bucket_views_out.push_back(
+          tensor.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-        replica.bucket_views_out.push_back(
-            tensor.narrow(0, offset, length).view(v.sizes()));
+      replica.bucket_views_out.push_back(
+          tensor.narrow(0, offset, length).view(v.sizes()));
     }
   }
 }
