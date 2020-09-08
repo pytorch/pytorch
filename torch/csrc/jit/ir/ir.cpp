@@ -1848,6 +1848,30 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+c10::optional<std::string> getModuleInfo(Node* node, Graph* graph) {
+  std::vector<std::string> names;
+  names.clear();
+  auto graph_type = graph->inputs()[0]->type()->cast<c10::ClassType>();
+  auto graph_type_name = graph_type->name()->qualifiedName();
+  std::cout << "Graph type: " << std::endl;
+  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+    TORCH_INTERNAL_ASSERT(
+        node->kind() == prim::GetAttr, "Expected prim::GetAttr nodes");
+    auto type = node->output(0)->type()->cast<c10::ClassType>();
+    auto type_name = type->name()->qualifiedName();
+    type_name = type_name.substr(type_name.find_last_of(".")+1);
+    std::string node_name = node->s(attr::name) + "(" + type_name + ")";
+    names.insert(names.begin(), node_name);
+    node = node->inputs()[0]->node();
+  }
+  std::string result = "";
+  for (const auto& p : names) {
+    result += "." + p;
+  }
+  std::cout << result << std::endl;
+  return c10::make_optional(result);
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -1889,15 +1913,23 @@ std::vector<Value*> inlineCallTo(
     InlinedCallStack* raw_callstack_ptr =
         new_node_cs ? new_node_cs->get() : nullptr;
 
+    c10::optional<std::string> module_info = c10::nullopt;
+    if (to_replace->kind() == prim::CallMethod) {
+      if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
+        module_info =
+            getModuleInfo(to_replace->input(0)->node(), to_replace->owningGraph());
+      }
+    }
+
     if (!new_callstack_entries.count(raw_callstack_ptr)) {
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange());
+                *new_node_cs, callee, to_replace->sourceRange(), module_info);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange());
+                callee, to_replace->sourceRange(), module_info);
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));

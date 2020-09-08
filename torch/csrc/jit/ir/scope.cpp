@@ -90,12 +90,30 @@ InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
     : fn_(fn), source_range_(std::move(source_range)) {}
 
 InlinedCallStack::InlinedCallStack(
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<std::string> module_info)
+    : fn_(fn),
+      source_range_(std::move(source_range)),
+      module_info_(std::move(module_info)) {}
+
+InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range)
     : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)) {}
+
+InlinedCallStack::InlinedCallStack(
+    InlinedCallStackPtr callee,
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<std::string> module_info)
+    : callee_(std::move(callee)),
+      fn_(fn),
+      source_range_(std::move(source_range)),
+      module_info_(std::move(module_info)) {}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
@@ -110,5 +128,19 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   }
   return r;
 }
+
+std::vector<InlinedCallStackElem> InlinedCallStack::elems() {
+  std::vector<InlinedCallStackElem> r;
+  c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
+  while (current) {
+    r.emplace_back(
+        std::make_tuple((*current)->fn_,
+          (*current)->source_range_,
+          (*current)->module_info_));
+    current = (*current)->callee_;
+  }
+  return r;
+}
+
 } // namespace jit
 } // namespace torch

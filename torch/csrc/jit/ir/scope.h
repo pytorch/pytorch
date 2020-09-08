@@ -81,17 +81,24 @@ struct InlinedCallStack;
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
+using InlinedCallStackElem = std::tuple<Function*, SourceRange, c10::optional<std::string>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
   c10::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
   SourceRange source_range_;
+  c10::optional<std::string> module_info_;
   InlinedCallStackPtr intrusive_from_this();
 
  public:
   // Constructor for a leaf callstack node.
   InlinedCallStack(Function* fn, SourceRange source_range);
+
+  InlinedCallStack(
+      Function* fn,
+      SourceRange source_range,
+      c10::optional<std::string> module_info);
 
   // Constructor for an inner callstack node.
   InlinedCallStack(
@@ -99,11 +106,20 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       Function* fn,
       SourceRange source_range);
 
+  InlinedCallStack(
+      InlinedCallStackPtr callee,
+      Function* fn,
+      SourceRange source_range,
+      c10::optional<std::string> module_info);
+
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
+
+  // Return callstack as a vector of [Function, SourceRange, ModuleInfo] tuples.
+  std::vector<InlinedCallStackElem> elems();
 };
 
 } // namespace jit
