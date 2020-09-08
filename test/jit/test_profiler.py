@@ -93,7 +93,7 @@ class TestProfiler(JitTestCase):
         y = torch.ones([1], requires_grad=True)
         broadcast_f(x, y)
         b = broadcast_f(x, y)
-        b.backward(torch.ones([2, 2], dtype=torch.float))
+        b.backward(torch.ones([2, 2], dtype=torch.float), retain_graph=True)
         b.backward(torch.ones([2, 2], dtype=torch.float))
         # warmup_backward(b, torch.ones([2, 2], dtype=torch.float))
         g = torch.jit.last_executed_optimized_graph()
