@@ -528,12 +528,18 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    def test_allow_tf32_get_set(self):
+    def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cudnn_allow_tf32_get_set(self):
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            self.assertFalse(torch.backends.cudnn.allow_tf32)
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            self.assertTrue(torch.backends.cudnn.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
