@@ -28,7 +28,7 @@ class Fusions(serial.SerializedTestCase):
         rand_seed=st.integers(0, 65534),
     )
     @settings(deadline=None, max_examples=100)
-    def test_tanhquantize(self, scale, zp, size, rand_seed):
+    def Skip_test_tanhquantize(self, scale, zp, size, rand_seed):
         np.random.seed(rand_seed)
 
         workspace.ResetWorkspace()
