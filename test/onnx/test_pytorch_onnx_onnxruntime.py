@@ -2904,7 +2904,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
-    @enableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
         class Slice(torch.nn.Module):
