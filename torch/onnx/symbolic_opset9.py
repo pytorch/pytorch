@@ -112,7 +112,7 @@ def div(g, self, other):
 
 
 def floor_divide(g, self, other):
-    out = floor(true_divide(g, self, other))
+    out = floor(g, true_divide(g, self, other))
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
