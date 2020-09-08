@@ -20,6 +20,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
+#include <stack>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,71 @@ static IValue Table(
     ivalue_entries.push_back(Tup({e.first, e.second}));
   }
   return Tup(std::move(ivalue_entries));
+}
+
+std::string getModuleTypeName(
+    const Module& module,
+    const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
+}
+
+std::string getScopeString(
+    const InlinedCallStackWithModuleInfo& frame,
+    const std::string& root_scope_string) {
+  Function* f = std::get<0>(frame);
+  std::string module_info = root_scope_string;
+  const auto& opt_module_instance_info_vec = std::get<2>(frame);
+  if (opt_module_instance_info_vec.has_value()) {
+    for (const auto& module_instance_info: opt_module_instance_info_vec.value()) {
+      if (module_instance_info.class_type()) {
+        const auto& class_type = module_instance_info.class_type();
+        const auto& instance_name = module_instance_info.instance_name();
+        auto type_name = class_type->name()->qualifiedName();
+        type_name = type_name.substr(type_name.find_last_of(".") + 1);
+        module_info += "." + instance_name + "(" + type_name + ")";
+      } else {
+        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+      }
+    }
+  }
+  return module_info + "." + f->name();
+}
+
+void pushScopeInfo(
+    Node* node,
+    const std::string& root_scope_string) {
+  ScopePtr sc = c10::make_intrusive<Scope>();
+  if (!node->callstack()) {
+    sc = sc->push(Symbol::scope(root_scope_string + ".forward"));
+  } else {
+    for (const auto& frame : (*node->callstack())->vec_with_module_info()) {
+      auto name = getScopeString(frame, root_scope_string);
+      sc = sc->push(Symbol::scope(name));
+    }
+  }
+  node->setScope(sc);
+}
+
+void reconstructScopes(
+    std::shared_ptr<Graph> graph,
+    const std::string& root_scope_string) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* node : block->nodes()) {
+      pushScopeInfo(node, root_scope_string);
+      for (Block* subblock : node->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
 }
 
 std::string getModulePath(Node* node) {
