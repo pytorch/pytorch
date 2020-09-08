@@ -933,7 +933,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
 Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
   file a support request");
-  TORCH_CHECK(out.dtype()== at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
+  TORCH_CHECK(out.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
   TORCH_CHECK(self.device() == out.device(), "expected self and out to be on the same device, but got out on ",
   out.device(), " and self on ", self.device());
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,

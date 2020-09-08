@@ -13064,7 +13064,7 @@ class TestTorchDeviceType(TestCase):
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
-        tensor_nc = torch.empty(4, 8, device=device)[:, ::2].copy_(tensor)
+        tensor_nc = torch.empty(shape[0], shape[1]*2, device=device)[:, ::2].copy_(tensor)
         dst1 = tensor.nonzero(as_tuple=False)
         dst2 = tensor_nc.nonzero(as_tuple=False)
         self.assertEqual(dst1, dst2, atol=0, rtol=0)
