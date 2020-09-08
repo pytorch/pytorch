@@ -1,8 +1,11 @@
 #pragma once
 
+#include <vector>
 #include <iostream>
 #include <string>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -107,6 +110,10 @@ enum class DispatchKey : uint8_t {
   PrivateUse2,
   PrivateUse3,
 
+  // Define an alias key to represent end of backend dispatch keys.
+  // If you add new backend keys after PrivateUse3, please also update it here.
+  EndOfBackendKeys = PrivateUse3,
+
   // The meta function characterizes how an operation affects the metadata of a
   // tensor (shape, dtype) without doing any of the actual computation.  A
   // meta tensor can be used to dry run operators without actually doing
@@ -180,39 +187,46 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
-  // layer which happens on top of all backends.  It inspects the autograd
+  // layer which happens on top of all backends. It inspects the autograd
   // metadata of all inputs, determines what autograd metadata should be
   // constructed by the output, and otherwise defers to the backend to
   // actually do the numeric computation.  Autograd contains
   // the bulk of this logic.
-  Autograd,
 
-  Tracer,
-
-  // Pre-autograd dispatch keys allow backends to override the autograd behavior
-  // (aka Autograd) for operators which have a Variable kernel
-  // already registered.  For example, XLA wants to define autograd for
-  // einsum directly.  Registering a custom autograd implementation at the
-  // XLA key won't work because we process Autograd
-  // before XLA.  This key has higher priority and gets processed
-  // first.  You generally should NOT redispatch after handling autograd
-  // here (since that would result in execution of the Autograd
-  // operator, which you're trying to skip).  In PreAutograd implementations,
+  // Autograd is now an alias dispatch key which by default maps to all
+  // backend-specific autograd keys.
+  // Backend-specific allow backends to override the default kernel registered
+  // to Autograd key as needed.
+  // For example, XLA wants to define autograd for einsum directly.
+  // Registering a custom autograd implementation at the XLA key won't work
+  // because we process Autograd before XLA.  This key has higher priority and
+  // gets processed first.  You generally should NOT redispatch after handling
+  // autograd here (since that would result in execution of the Autograd
+  // operator, which you're trying to skip).  In AutogradXLA implementations,
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
+
+  // Currently we only have backend-specific autograd keys for CPU/CUDA/XLA and
+  // reserved user-defined backends. All other in-tree backends share the
+  // AutogradOther key. We can add specific autograd key for those backends
+  // upon request.
+  AutogradOther,
+  AutogradCPU,
+  AutogradCUDA,
   AutogradXLA,
+  // Here are some reserved pre-autograd keys for user-defined backends, see
+  // Note [Private use DispatchKey]
+  AutogradPrivateUse1,
+  AutogradPrivateUse2,
+  AutogradPrivateUse3,
+
+  Tracer,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   Autocast,
-
-  // Here are some reserved pre-autograd keys for user-defined backends, see
-  // Note [Private use DispatchKey]
-  PrivateUse1_PreAutograd,
-  PrivateUse2_PreAutograd,
-  PrivateUse3_PreAutograd,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -244,13 +258,34 @@ enum class DispatchKey : uint8_t {
   TESTING_ONLY_GenericMode,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-  NumDispatchKeys, // Sentinel
+  NumDispatchKeys, // Sentinel, end of runtime keys.
+
+  // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // Alias dispatch keys are synthetic dispatch keys which map to multiple
+  // runtime dispatch keys. Alisa keys have precedence, but they are always
+  // lower precedence than runtime keys. You can register a kernel to an
+  // alias key, the kernel might be populated to the mapped runtime keys
+  // during dispatch table computation.
+  // If a runtime dispatch key has multiple kernels from alias keys, which
+  // kernel wins is done based on the precedence of alias keys (but runtime
+  // keys always have precedence over alias keys).
+  // Alias keys won't be directly called during runtime.
+
+  // See Note [Alias Dispatch Key : Autograd]
+  Autograd,
+
+  // Define an alias key to represent end of alias dispatch keys.
+  // If you add new alias keys after Autograd, please also update it here.
+  EndOfAliasKeys = Autograd, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
+  PrivateUse1_PreAutograd = AutogradPrivateUse1,
+  PrivateUse2_PreAutograd = AutogradPrivateUse2,
+  PrivateUse3_PreAutograd = AutogradPrivateUse3,
 };
 
 // Note [Private use DispatchKey]
@@ -269,13 +304,13 @@ enum class DispatchKey : uint8_t {
 // the PyTorch developers to get a type ID registered in this case.
 //
 // We provide two classes of private user tensor id: regular DispatchKeys
-// and PreAutograd DispatchKeys.  DispatchKeys serve the role of ordinary "backend"
+// and Autograd DispatchKeys.  DispatchKeys serve the role of ordinary "backend"
 // DispatchKeys; if you were adding support for a new type of accelerator, you
-// would use a DispatchKey, and reuse autograd definitions already defined in
-// PyTorch for operators you define.  PreAutograd DispatchKeys serve as "wrapper"
-// DispatchKeys: they are most appropriate for tensors that compose multiple
-// internal tensors, and for cases when the built-in autograd formulas for
-// operators are not appropriate.
+// would use a backend DispatchKey, and ideally automatically reuse AutogradOther
+// definitions already defined in PyTorch.  AutogradPrivateUse DispatchKeys serve
+// as "wrapper" DispatchKeys: they are only necessary for tensors that compose
+// multiple internal tensors, and for cases when the built-in autograd formulas
+// for operators are not appropriate.
 
 static_assert(
   static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
@@ -284,6 +319,8 @@ static_assert(
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
+C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
 // dispatch keys directly correspond to DeviceType; and most APIs that
@@ -291,6 +328,10 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 // torch::dispatch(torch::kCPU, ...) is also valid.
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
+// Check if a DispatchKey is an alias mapping to other runtime keys.
+inline bool isAliasDispatchKey(DispatchKey k) {
+  return k == DispatchKey::Autograd;
+}
 } // namespace c10
 
 namespace torch {
