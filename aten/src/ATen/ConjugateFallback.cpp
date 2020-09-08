@@ -7,9 +7,11 @@ namespace at {
         m.fallback(torch::CppFunction::makeFromBoxedFunction<&conjugateFallback>());
     }
 
+   // This function assumes that the tensor input has it's conjugate bit set
    Tensor conj_materialize(const Tensor& self) {
-        // this function assumes that the tensor input has it's conjugate bit set
-        self.set_conjugate(false);
+        // NOTE: this design is still up in the air- temporarily excluding the conjugate key
+        // from the set has drawbacks (it can be hard to reason about)
+        c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::Conjugate);
         Tensor self_conjugated = self.conj();
         return self_conjugated;
     }
@@ -17,24 +19,21 @@ namespace at {
     void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         // Unwrap all arguments
         const auto num_arguments = op.schema().arguments().size();
-        auto arguments = torch::jit::pop(*stack, num_arguments);
 
-        // conjugate each tensor argument on the stack with it's conjugate DispatchKey + bit set
+        // conjugate each tensor argument on the stack with it's conjugate DispatchKey set
         // leave all other arguments unchanged
-        for (int64_t idx = 0; idx < arguments.size(); ++idx) {
-            const auto& ivalue = arguments[idx];
+        for (int64_t idx = stack->size() - num_arguments; idx < stack->size(); ++idx) {
+            const auto& ivalue = (*stack)[idx];
             if (!ivalue.isTensor()) {
-                torch::jit::push(stack, ivalue);
                 continue;
             }
             auto* impl = ivalue.unsafeToTensorImpl();
-            if (impl->is_conjugate()) {
-                const auto& tensor = ivalue.toTensor();
-                auto conjugated_tensor = conj_materialize(tensor);
-                torch::jit::push(stack, conjugated_tensor);
-            } else {
-                torch::jit::push(stack, ivalue);
+            if (!impl->is_conjugate()) {
+                continue;
             }
+            const auto& tensor = ivalue.toTensor();
+            auto conjugated_tensor = conj_materialize(tensor);
+            (*stack)[idx] = conjugated_tensor;
         }
 
         op.callBoxed(stack);

@@ -582,7 +582,6 @@ void testRegisterizerAllocs() {
   Buffer b(BufHandle("B", {1}, kInt));
   Buffer c(BufHandle("C", {1}, kInt));
   VarHandle x("x", kInt);
-  VarHandle y("y", kInt);
 
   VarHandle b_(b.data()->base_handle());
 
@@ -614,9 +613,9 @@ void testRegisterizerAllocs() {
 
   /*
    * int C_ = C[0];
+   * Allocate(B, int, {C_});
    * int A_ = C_;
    * int B_ = 0;
-   * Allocate(B, int, {C_});
    * for (int x = 0; x < 10; x++) {
    *   B_ = B_ + x;
    *   A_ = C_;
@@ -632,9 +631,9 @@ void testRegisterizerAllocs() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: int C_ = C[0];
+# CHECK: Allocate(B
 # CHECK: int A_ = C_;
 # CHECK: int B_ = 0;
-# CHECK: Allocate(B
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK:   B_ =
 # CHECK:   A_ = C_

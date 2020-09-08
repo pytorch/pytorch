@@ -84,8 +84,8 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 TEST(BackendFallbackTest, ConjugateTest) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, Conjugate);
 
-  Tensor a = ones({5, 5}, dtype=torch.cfloat);
-  Tensor b = ones({5, 5}, dtype=torch.cfloat);
+  Tensor a = ones({5, 5}, kDouble);
+  Tensor b = ones({5, 5}, kDouble);
   Tensor c = a.conj() + b;
   Tensor d = a.conj_view() + b;
   ASSERT_TRUE(c.equal(d));
