@@ -57,6 +57,20 @@ class TestForeach(TestCase):
         self.assertEqual(res, tensors)
         self.assertEqual(tensors, expected)
 
+    def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
+        tensors1 = self._get_test_data(device, dtype, N)
+        tensors2 = self._get_test_data(device, dtype, N)
+        alpha = 2
+
+        expected = [torch_op(tensors1[i], torch.mul(tensors2[i], alpha)) for i in range(N)]
+        res = foreach_op(tensors1, tensors2, alpha)
+        foreach_op_(tensors1, tensors2, alpha)
+        self.assertEqual(res, tensors1)
+
+        if dtype == torch.bool:
+            expected = [e.to(torch.bool) for e in expected]
+        self.assertEqual(tensors1, expected)
+
     #
     # Unary ops
     #
@@ -276,14 +290,19 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_list(self, device, dtype):
         self._test_bin_op_list(device, dtype, torch._foreach_add, torch._foreach_add_, torch.add)
+        self._test_bin_op_list_alpha(device, dtype, torch._foreach_add, torch._foreach_add_, torch.add)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_sub_list(self, device, dtype):
         if dtype == torch.bool:
-            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool tensors is not supported."):
+            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
                 self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
+
+            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
+                self._test_bin_op_list_alpha(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
         else:
             self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
+            self._test_bin_op_list_alpha(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_mul_list(self, device, dtype):
