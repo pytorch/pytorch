@@ -183,7 +183,7 @@ mobile::Module _load_data(
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
+      copied_metadata.insert({"model_name", result.name()});
     }
     if (observer) {
       observer->onExitLoadModel(copied_metadata);
