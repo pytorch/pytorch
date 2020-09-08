@@ -7,15 +7,6 @@
 
 namespace {
 
-TEST(VulkanAPITest, Runtime) {
-  const auto kMode = at::native::vulkan::api::Runtime::Type::Debug;
-  ASSERT_NO_THROW(at::native::vulkan::api::Runtime{kMode});
-}
-
-TEST(VulkanAPITest, Context) {
-  ASSERT_NO_THROW(at::native::vulkan::api::context());
-}
-
 TEST(VulkanAPITest, empty) {
   if (!at::native::vulkan::api::available()) {
     return;

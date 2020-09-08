@@ -5,8 +5,8 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename T>
-struct AddScalarFunctor_ {
+template<typename T, template<class> class Op>
+struct BinaryOpScalarFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
@@ -29,7 +29,7 @@ struct AddScalarFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar;
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -47,7 +47,7 @@ struct AddScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar;
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -60,8 +60,8 @@ struct AddScalarFunctor_ {
         }
 };
 
-template<typename T>
-struct AddScalarFunctor {
+template<typename T, template<class> class Op>
+struct BinaryOpScalarFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
@@ -88,7 +88,7 @@ struct AddScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar;
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
                     // store
                     load_store(out, r_out, i_start, 0);
@@ -106,7 +106,7 @@ struct AddScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar;
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -119,8 +119,8 @@ struct AddScalarFunctor {
         }
 };
 
-template<typename T>
-struct AddListFunctor_ {
+template<typename T, template<class> class Op>
+struct BinaryOpListFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl) {
@@ -147,7 +147,7 @@ struct AddListFunctor_ {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(r_x[ii]) + static_cast<T>(r_y[ii]);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
                     }
                     // store
                     load_store(x, r_x, i_start , 0);
@@ -167,7 +167,7 @@ struct AddListFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(r_x[ii]) + static_cast<T>(r_y[ii]);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -180,8 +180,8 @@ struct AddListFunctor_ {
         }
 };
 
-template<typename T>
-struct AddListFunctor {
+template<typename T, template<class> class Op>
+struct BinaryOpListFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl) {
@@ -212,7 +212,7 @@ struct AddListFunctor {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + static_cast<T>(r_y[ii]);
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
                     }
                     // store
                     load_store(out, r_out, i_start , 0);
@@ -232,7 +232,7 @@ struct AddListFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + static_cast<T>(r_y[ii]);
+                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {

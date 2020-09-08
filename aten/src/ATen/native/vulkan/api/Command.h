@@ -9,7 +9,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct C10_EXPORT Command final {
+struct Command final {
   //
   // Pool
   //
