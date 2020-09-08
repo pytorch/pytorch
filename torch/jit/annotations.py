@@ -5,9 +5,10 @@ import warnings
 import os
 import re
 import torch
-from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
+from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, FutureType, EnumType
@@ -16,7 +17,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
-
+from typing import Type
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
@@ -32,7 +33,7 @@ class Module(object):
         try:
             return self.members[name]
         except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+            raise RuntimeError(f"Module {self.name} has no member called {name}") from None
 
 
 class EvalEnv(object):
@@ -130,7 +131,7 @@ def check_fn(fn, loc):
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
         raise torch.jit.frontend.FrontendError(
-            loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
+            loc, f"Cannot instantiate class '{py_ast.body[0].name}' in a script function")
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
 
@@ -145,17 +146,17 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
+        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
+        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
     arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann, loc)
@@ -228,7 +229,7 @@ def split_type_line(type_line):
     try:
         arrow_pos = type_line.index('->')
     except ValueError:
-        raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
+        raise RuntimeError("Syntax error in type annotation (cound't find `->`)") from None
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
 
@@ -255,12 +256,12 @@ def try_real_annotations(fn, loc):
 
 # Finds common type for enum values belonging to an Enum class. If not all
 # values have the same type, AnyType is returned.
-def get_enum_value_type(e: enum.Enum, loc):
-    enum_values = list(e)
+def get_enum_value_type(e: Type[enum.Enum], loc):
+    enum_values: List[enum.Enum] = list(e)
     if not enum_values:
-        raise ValueError("No enum values defined for: '{}'".format(e.__class__))
+        raise ValueError(f"No enum values defined for: '{e.__class__}'")
 
-    types = set([type(v.value) for v in enum_values])
+    types = {type(v.value) for v in enum_values}
     ir_types = [try_ann_to_type(t, loc) for t in types]
 
     # If Enum values are of different types, an exception will be raised here.
@@ -293,10 +294,12 @@ def try_ann_to_type(ann, loc):
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
-            valid_type = try_ann_to_type(ann.__args__[0], loc)
+            contained = ann.__args__[0]
         else:
-            valid_type = try_ann_to_type(ann.__args__[1], loc)
-        assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(ann))
+            contained = ann.__args__[1]
+        valid_type = try_ann_to_type(contained, loc)
+        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+        assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
@@ -322,8 +325,8 @@ def try_ann_to_type(ann, loc):
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if not is_enum_support_enabled():
-            warnings.warn("Enum support is work in progress, enum class {}"
-                          " is not compiled".format(ann))
+            warnings.warn(f"Enum support is work in progress, enum class {ann}"
+                          " is not compiled")
             return None
         if not hasattr(ann, "__torch_script_class__"):
             torch.jit._script._recursive_compile_class(ann, loc)
@@ -346,7 +349,7 @@ def ann_to_type(ann, loc):
     the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
-    raise ValueError("Unknown type annotation: '{}'".format(ann))
+    raise ValueError(f"Unknown type annotation: '{ann}'")
 
 
 __all__ = [
