@@ -27,7 +27,10 @@ from .pattern_utils import (
 
 from .quantization_patterns import *
 
-from .utils import _parent_name
+from .utils import (
+    _parent_name,
+    quantize_node,
+)
 
 import copy
 
@@ -377,7 +380,7 @@ class Quantizer:
 
         def load_x(n):
             assert n.name in env or n.name in quant_env, \
-                'node ' + n.name + ' does not exist in either of the environment'
+                'node ' + n.name + ' does not exist in either environment'
             if n.name in quant_env:
                 return quant_env[n.name]
             else:
@@ -467,48 +470,10 @@ class Quantizer:
                         quant_env[node.name] = quant_env[prev_node.name]
                         continue
                     # replace activation post process with quantization ops
-                    parent_name = ''
-
-                    scale, zero_point = observer_module.calculate_qparams()
-                    dtype = observer_module.dtype
-
-                    def is_per_channel(qscheme):
-                        return qscheme == torch.per_channel_affine or \
-                            qscheme == torch.per_channel_symmetric
-
-                    if is_per_channel(observer_module.qscheme):
-                        ch_axis = int(observer_module.ch_axis)
-                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis': ch_axis, '_dtype_': dtype}
-                        quantize_op = torch.quantize_per_channel
-                    else:
-                        scale = float(scale)
-                        zero_point = int(zero_point)
-                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-                        quantize_op = torch.quantize_per_tensor
-                    i = 0
-
-                    def noattr(module, qparams, i):
-                        for name in qparams.keys():
-                            if hasattr(module, name + str(i)):
-                                return False
-                        return True
-
-                    def get_next_i(module, qparams):
-                        i = 0
-                        while not noattr(module, qparams, i):
-                            i += 1
-                        return i
-
-                    parent_module = self.modules[parent_name]
-                    i = get_next_i(parent_module, qparams)
-                    inputs = [load_non_quantized(node.args[0])]
-                    for key, value in qparams.items():
-                        setattr(parent_module, key + str(i), value)
-                        qparam_full_path = key + str(i)
-                        if parent_name:
-                            qparam_full_path = parent_name + '.' + qparam_full_path
-                        inputs.append(self.quantized_graph.create_node('get_param', qparam_full_path))
-                    quant_env[node.name] = self.quantized_graph.create_node('call_function', quantize_op, tuple(inputs), {})
+                    root_module = self.modules['']
+                    quant_env[node.name] = quantize_node(
+                        root_module, self.quantized_graph,
+                        load_non_quantized(node.args[0]), observer_module)
                     continue
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
