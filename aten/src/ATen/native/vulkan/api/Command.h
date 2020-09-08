@@ -53,9 +53,14 @@ struct Command final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
-    }
+    // This field simply stores a reference to the primary command pool in
+    // the cache for ease of access, and carries no significance otherwise.
+    // This object's lifetime is managed by the cache as usual.  Purge the
+    // contents of the pool regularly through the factory it was created.
+
+    VkCommandPool primary;
+
+    Pool(VkDevice device, const Descriptor& primary);
   } pool;
 
   //
@@ -77,8 +82,8 @@ struct Command final {
     VkCommandBuffer command_buffer_;
   };
 
-  explicit Command(const VkDevice device)
-    : pool(device) {
+  explicit Command(const VkDevice device, const Pool::Descriptor& primary)
+    : pool(device, primary) {
   }
 };
 

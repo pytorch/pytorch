@@ -4,8 +4,9 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+namespace {
 
-const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
+const Descriptor::Pool::Descriptor kPrimary{
   1024u,
   {
     // Note: It is OK for the sum of descriptors per type, below, to exceed
@@ -44,13 +45,20 @@ const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
   },
 };
 
+} // namespace
+
+Descriptor::Pool::Pool(const VkDevice device)
+  : cache(Factory(device)),
+    primary(cache.retrieve(kPrimary)) {
+}
+
 Descriptor::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
     TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
 }
 
 typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
-  const Descriptor& descriptor) const {
+    const Descriptor& descriptor) const {
   const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     nullptr,
