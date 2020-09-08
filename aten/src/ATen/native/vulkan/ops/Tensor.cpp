@@ -13,7 +13,7 @@ bool can_be_image(const IntArrayRef sizes) {
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
-      // Question for Ivan: VK_FORMAT_R32G32B32A32_SFLOAT ?
+      // VK_FORMAT_R32G32B32A32_SFLOAT?
       return VK_FORMAT_R16G16B16A16_SFLOAT;
 
     default:
@@ -51,7 +51,7 @@ api::Resource::Buffer maybe_allocate_staging(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (context->adapter().is_unified_memory_architecture()) {
+  if (context->adapter().has_unified_memory()) {
     return api::Resource::Buffer{};
   }
 
@@ -71,7 +71,7 @@ api::Resource::Buffer allocate_buffer(
     usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
   }
 
-  if (!context->adapter().is_unified_memory_architecture()) {
+  if (!context->adapter().has_unified_memory()) {
     usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
 
@@ -195,35 +195,49 @@ vTensor::vTensor(
 }
 
 VkBuffer vTensor::buffer() const {
-  if (!dirty_.staging && !dirty_.image) {
-    return buffer_.handle;
+  if (dirty_.image) {
+    //
+
+    dirty_.image = 0u;
+  }
+
+  if (dirty_.staging) {
+    //
+
+    dirty_.staging = 0u;
   }
 
   return buffer_.handle;
 }
 
 VkBuffer vTensor::buffer(const Access::Flags access) {
+  const VkBuffer buffer = const_cast<const vTensor&>(*this).buffer();
+
   if (access & Access::Write) {
     dirty_.buffer = 1;
   }
 
-  return buffer();
+  return buffer;
 }
 
 VkImage vTensor::image() const {
-  if (dirty_.staging || dirty_.buffer) {
-    // context_->command().buffer();
+  if (dirty_.buffer) {
+    //
+
+    dirty_.buffer = 0u;
   }
 
   return image_.handle;
 }
 
 VkImage vTensor::image(const Access::Flags access) {
+  const VkImage image = const_cast<const vTensor&>(*this).image();
+
   if (access & Access::Write) {
     dirty_.image = 1;
   }
 
-  return image();
+  return image;
 }
 
 void verify(const TensorOptions& options) {

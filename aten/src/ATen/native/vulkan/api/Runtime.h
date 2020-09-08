@@ -1,14 +1,13 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-class C10_EXPORT Runtime final {
+class Runtime final {
  public:
   enum class Type {
     Debug,
@@ -46,8 +45,8 @@ class C10_EXPORT Runtime final {
   Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
 };
 
-C10_EXPORT bool available();
-C10_EXPORT Runtime& runtime();
+bool available();
+Runtime* runtime();
 
 } // namespace api
 } // namespace vulkan
