@@ -1,7 +1,7 @@
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 
 class TestForeach(TestCase):
     bin_ops = [
@@ -71,6 +71,7 @@ class TestForeach(TestCase):
     #
     # Pointwise ops
     #
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_addcmul(self, device, dtype):
         if device == 'cpu':
