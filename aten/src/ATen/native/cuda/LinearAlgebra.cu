@@ -74,7 +74,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   if (&result != &self) {
     at::native::resize_as_(result, self_);
-    if (beta.to<double>() != 0.0) {
+    if (beta.toComplexDouble() != 0.0) {
       at::native::copy_(result, self_);
     }
   }

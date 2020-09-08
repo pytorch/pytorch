@@ -25,6 +25,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -42,15 +43,22 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
-    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
+};
+
+std::vector<std::string> _static_weight_only_quant_aten_funcs = {
+    "embedding_bag",
+};
+std::vector<std::string> _static_weight_only_quant_call_funcs = {
+    "embedding_bag",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -259,10 +267,16 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs(
-          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
+      // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
+      // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"embedding_bag", 0}}),
       // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
-      // %offsets.1, %7, %8, %9, %10, %9, %per_sample_weights.1, %13)
+      // %offsets.1, %max_norm, %norm_type, %scale_grad_by_freq, %mode, %sparse,
+      // %per_sample_weights.1, %include_last_offset)
       CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
@@ -273,6 +287,14 @@ bool isBiasOfConvOrLinear(Value* v) {
       AtenFuncArgs(
           {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  return result;
+}
+
+bool isEmbeddingBagNonInput(Value* v) {
+  bool result = matchArgPattern(
+      v,
+      AtenFuncArgs({{"embedding_bag", 2}, {"embedding_bag", 6}}),
+      CallFuncArgs({}));
   return result;
 }
 
@@ -452,6 +474,13 @@ bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
+}
+
+bool isWeightOnlyStaticQuantOp(Node* n) {
+  return isFunctionNode(
+      n,
+      _static_weight_only_quant_call_funcs,
+      _static_weight_only_quant_aten_funcs);
 }
 
 bool nodeQuantizable(Node* n, QuantType quant_type) {
