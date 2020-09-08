@@ -178,6 +178,9 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        torch._c_style_div,
+        Tensor._c_style_div,
+        Tensor._c_style_div_,
     }
 
 
