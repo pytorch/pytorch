@@ -25,7 +25,7 @@ class GradBucket {
   // each device. There will be multiple replicas only in the case of single
   // process multiple device mode. In the single process single device mode,
   // this list would consist of only a single tensor.
-  const std::vector<at::Tensor>& getTensors();
+  const std::vector<at::Tensor>& getTensors() const;
 
  private:
   std::vector<at::Tensor> tensors_;
