@@ -602,6 +602,7 @@ def iter_indices(tensor):
 def is_iterable(obj):
     try:
         iter(obj)
+        print("Is iterable")
         return True
     except TypeError:
         return False
@@ -1147,6 +1148,8 @@ class TestCase(expecttest.TestCase):
             # See TestTorch.test_assert_equal_generic_meta
             super().assertEqual(x, y, msg=msg)
         elif is_iterable(x) and is_iterable(y):
+            print(x)
+            print(y)
             super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,

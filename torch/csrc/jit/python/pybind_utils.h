@@ -631,10 +631,18 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      if (auto mod = as_module(py::cast<py::object>(obj))) {
+      auto object = py::cast<py::object>(obj);
+      if (auto mod = as_module(object)) {
         // if obj is already a ScriptModule, just return its ivalue
         return mod.value()._ivalue();
       }
+
+      if (py::isinstance(
+              obj, py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
+        auto inst = py::cast<Object>(obj.attr("_c"));
+        return inst._ivalue();
+      }
+
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
@@ -910,23 +918,23 @@ inline py::object toPyObject(IValue ivalue) {
       return py::cast(Module(obj));
     }
 
-    auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
-      return py::cast(Object(obj));
-    }
-    const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    AT_ASSERT(classType);
-    auto pyClass = getScriptedClassOrError(obj->name());
-    auto pyObj = pyClass.attr("__new__")(pyClass);
+    return py::cast(Object(obj));
+    // auto pyCu = get_python_cu();
+    // if (obj->name().find("__torch__.torch.classes") == 0) {
+    // }
+    // const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
+    // AT_ASSERT(classType);
+    // auto pyClass = getScriptedClassOrError(obj->name());
+    // auto pyObj = pyClass.attr("__new__")(pyClass);
 
-    const auto numAttrs = classType->numAttributes();
+    // const auto numAttrs = classType->numAttributes();
 
-    for (size_t slot = 0; slot < numAttrs; slot++) {
-      const auto& attrName = classType->getAttributeName(slot);
-      IValue v = obj->getSlot(slot);
-      py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
-    }
-    return pyObj;
+    // for (size_t slot = 0; slot < numAttrs; slot++) {
+    //   const auto& attrName = classType->getAttributeName(slot);
+    //   IValue v = obj->getSlot(slot);
+    //   py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
+    // }
+    // return pyObj;
   } else if (ivalue.isPyObject()) {
     // return borrowed reference to ensure it correctly incref the underlying
     // PyObject

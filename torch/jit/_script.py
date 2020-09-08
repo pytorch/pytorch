@@ -255,6 +255,30 @@ class ConstMap:
 
 
 if _enabled:
+
+    class ScriptClass(object):
+        def __init__(self):
+            super().__init__()
+
+    class RecursiveScriptClass(object):
+        def __init__(self, cpp_class):
+            super(RecursiveScriptClass, self).__init__()
+            self.__dict__["_initializing"] = True
+            self._c = cpp_class
+            self._initializing = False
+
+        def __getattr__(self, attr):
+            if self._initializing:
+                return super(RecursiveScriptClass, self).__getattr__(attr)
+
+            return getattr(self._c, attr)
+
+        def __setattr__(self, attr, value):
+            if self._initializing:
+                return super(RecursiveScriptClass, self).__setattr__(attr, value)
+
+            setattr(self._c, attr, value)
+
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
     # it in the objects dict. Due to the standard rules for attribute lookup
@@ -724,7 +748,16 @@ if _enabled:
 
 
 else:
+
+    class ScriptClass(object):
+        def __init__(self):
+            super().__init__()
+
     # TODO MAKE SURE THAT DISABLING WORKS
+    class RecursiveScriptClass(object):
+        def __init__(self):
+            super().__init__()
+
     class ScriptModule(torch.nn.Module):  # type: ignore
         def __init__(self, arg=None):
             super().__init__()
@@ -882,6 +915,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
     if isinstance(obj, ScriptModule):
         return obj
 
@@ -890,8 +924,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             obj, torch.jit._recursive.infer_methods_to_compile
         )
 
-    qualified_name = _qualified_name(obj)
+
     if inspect.isclass(obj):
+        qualified_name = _qualified_name(obj)
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
         if issubclass(obj, torch.nn.Module):
@@ -915,7 +950,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
-    else:
+    elif inspect.isfunction(obj):
+        qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
@@ -935,6 +971,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
         return fn
+    else:
+        return torch.jit._recursive.create_script_class(obj)
 
 
 # overloads are registered in _jit_internal and compiled here so that _overload

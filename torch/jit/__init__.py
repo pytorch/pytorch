@@ -18,6 +18,7 @@ from torch.jit._script import (
     Attribute,
     ScriptModule,
     script_method,
+    RecursiveScriptClass,
     RecursiveScriptModule,
     ScriptWarning,
     interface,
