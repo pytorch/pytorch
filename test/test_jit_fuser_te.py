@@ -1215,7 +1215,7 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(" ".join([
                     "Failed:", str(dtype), op.__name__, device
-                    ]))
+                ]))
 
 if __name__ == '__main__':
     run_tests()
