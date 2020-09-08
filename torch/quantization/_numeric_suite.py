@@ -10,7 +10,7 @@ from .quantization_mappings import (
     get_compare_output_module_list,
 )
 
-NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
+NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
     nnqd.Linear,
     nnq.Linear,
     nnqd.LSTM,
@@ -394,29 +394,29 @@ def prepare_model_outputs(
     float_module,
     q_module,
     Logger=OutputLogger,
-    white_list=None):
+    allow_list=None
+):
     r"""Prepare the model by attaching the logger to both float module
-    and quantized module if they are in the white_list.
+    and quantized module if they are in the allow_list.
 
     Args:
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
         Logger: type of logger to be attached to float_module and q_module
-        white_list: list of module types to attach logger
+        allow_list: list of module types to attach logger
     """
-    compare_output_module_list = white_list
-    if compare_output_module_list:
-        compare_output_module_list = get_compare_output_module_list()
+    if allow_list is None:
+        allow_list = get_compare_output_module_list()
 
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
-    prepare(float_module, inplace=True, white_list=white_list)
+    prepare(float_module, inplace=True, allow_list=allow_list)
     q_module.qconfig = qconfig_debug
     prepare(
         q_module,
         inplace=True,
-        white_list=compare_output_module_list,
-        observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+        allow_list=allow_list,
+        observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST,
     )
 
 
@@ -425,7 +425,7 @@ def compare_model_outputs(
     q_model,
     *data,
     Logger=OutputLogger,
-    white_list=None
+    allow_list=None
 ):
     r"""Compare output activations between float and quantized models at
     corresponding locations for the same input. Return a dict with key corresponding
@@ -444,18 +444,16 @@ def compare_model_outputs(
         q_model: model quantized from float_model
         data: input data used to run the prepared float_model and q_model
         Logger: type of logger to be attached to float_module and q_module
-        white_list: list of module types to attach logger
+        allow_list: list of module types to attach logger
 
     Return:
         act_compare_dict: dict with key corresponding to quantized module names
         and each entry being a dictionary with two keys 'float' and 'quantized',
         containing the matching float and quantized activations
     """
-    compare_output_module_list = white_list
-    if compare_output_module_list:
-        compare_output_module_list = get_compare_output_module_list()
-
-    prepare_model_outputs(float_model, q_model, Logger, compare_output_module_list)
+    if allow_list is None:
+        allow_list = get_compare_output_module_list()
+    prepare_model_outputs(float_model, q_model, Logger, allow_list)
     float_model(*data)
     q_model(*data)
     act_compare_dict = get_matching_activations(float_model, q_model)

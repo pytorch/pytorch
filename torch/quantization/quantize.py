@@ -18,7 +18,7 @@ from .quantization_mappings import (get_dynamic_quant_module_mapping,
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
 
-def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
+def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig_`
 
@@ -26,7 +26,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
         module: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
-        white_list: list of quantizable modules
+        allow_list: list of quantizable modules
         qconfig_parent: quantization config of parent module, we will fallback to
                        this config when there is no specified config for current
                        module
@@ -37,8 +37,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
         None, module is modified inplace with qconfig attached
     """
     # TODO: Add test
-    if white_list is None:
-        white_list = get_qconfig_propagation_list()
+    if allow_list is None:
+        allow_list = get_qconfig_propagation_list()
 
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
@@ -47,11 +47,11 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
     module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        _propagate_qconfig_helper(child, qconfig_dict, white_list,
+        _propagate_qconfig_helper(child, qconfig_dict, allow_list,
                                   module_qconfig, module_prefix)
 
-# TODO(jerryzh): expose white_list
-def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
+# TODO(jerryzh): expose allow_list
+def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -67,7 +67,7 @@ def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict, white_list)
+    _propagate_qconfig_helper(module, qconfig_dict, allow_list)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
@@ -102,6 +102,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
     """
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
+
     # respect device affinity when adding observers
     if device is None:
         devices = get_unique_devices_(module)
@@ -176,7 +177,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=None,
+def prepare(model, inplace=False, allow_list=None,
             observer_non_leaf_module_list=None, prehook=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
@@ -189,14 +190,14 @@ def prepare(model, inplace=False, white_list=None,
     Args:
         model: input model to be modified in-place
         inplace: carry out model transformations in-place, the original module is mutated
-        white_list: list of quantizable modules
+        allow_list: list of quantizable modules
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
         prehook: observer we want to add to forward_pre_hook
     """
     if not inplace:
         model = copy.deepcopy(model)
-    qconfig_propagation_list = white_list
-    if qconfig_propagation_list is None:
+    propagate_qconfig_list = allow_list
+    if propagate_qconfig_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
     propagate_qconfig_(model, qconfig_dict=None)
 
