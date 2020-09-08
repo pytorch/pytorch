@@ -1126,20 +1126,14 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
-    def rand(self, dtype, device="cuda"):
-        shape = (4, 4)
+    def data_for(self, dtype, device="cuda"):
+        v = torch.arange(1, 3, dtype=torch.float, device=device)
         if dtype == torch.bool:
-            return torch.rand(shape, dtype=torch.float32, device=device) > 0.5
+            return v > 2
         elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
-            return torch.quantize_per_tensor(torch.rand(shape, dtype=torch.float32, device=device), .01, 1, dtype=dtype)
-        elif dtype.is_complex:
-            return torch.rand(shape, dtype=dtype, device=device)
-        elif dtype.is_floating_point:
-            return torch.rand(shape, dtype=dtype, device=device)
+            return torch.quantize_per_tensor(v, 0.1, 1, dtype=dtype)
         else:
-            # dtype is an integer.
-            return torch.randint(1, 4, shape, dtype=dtype, device=device)
-        raise RuntimeError("Unhandled dtype")
+            return v.to(dtype)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unary_ops(self):
@@ -1188,12 +1182,10 @@ class TestTEFuser(JitTestCase):
             torch.frac,
             torch.lgamma,
         ]
-        devices = [
-            "cuda",
-        ]
+        devices = ["cuda"]
         for dtype, op, device in product(dtypes, unary_ops, devices):
             try:
-                x = self.rand(dtype, device)
+                x = self.data_for(dtype, device)
                 fn = apply(op)
                 ref = fn(x)
             except Exception:
@@ -1206,9 +1198,9 @@ class TestTEFuser(JitTestCase):
                 torch.testing.assert_allclose(ref, t(x))
                 self.assertAllFused(t.graph_for(x))
             except Exception as e:
-                raise RuntimeError(" ".join([
-                    "Failed:", str(dtype), op.__name__, device
-                    ]))
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unsupported_dtypes(self):
@@ -1226,7 +1218,7 @@ class TestTEFuser(JitTestCase):
         ]
         for dtype in unsupported_dtypes:
             try:
-                x = self.rand(dtype)
+                x = self.data_for(dtype, "cuda")
                 ref = fn(x)
             except Exception:
                 # If eager mode doesn't support a dtype/op/device combo,

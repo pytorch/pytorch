@@ -110,7 +110,7 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
     case ScalarType::Short:
       return "short";
     case ScalarType::Long:
-      return "long";
+      return "long long";
     default:
       return dtype.ToCppString();
   }
