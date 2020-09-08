@@ -451,10 +451,15 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (selfType->hasAttribute(field) &&
       selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
-    const auto submoduleConcreteType =
-        concreteType_->findSubmoduleConcreteType(field);
+    if (const auto submoduleConcreteType =
+            concreteType_->findSubmoduleConcreteType(field)) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    }
+
     return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+        m.graph()->insertGetAttr(self_, field),
+        ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
   } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
@@ -499,21 +504,26 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   // 5. Check if it's an attribute of the original Python class that this
   // ScriptModule was derived from. The only class attributes we handle are
   // methods.
+  const auto maybePyClass = concreteType_->getPyClass();
+  if (!maybePyClass) {
+    // ConcreteType doesn't always have an originating Python class, e.g. if it
+    // was derived from a serialized ScriptModule. In this case, we've exhausted
+    // our options for attr lookup.
+    return nullptr;
+  }
   py::object unboundMethod = py::getattr(
-      concreteType_->getPyClass(),
-      field.c_str(),
-      pybind11::cast<pybind11::none>(Py_None));
+      *maybePyClass, field.c_str(), pybind11::cast<pybind11::none>(Py_None));
 
   if (py::isinstance<py::function>(unboundMethod)) {
-    bool isStaticFn = py::cast<bool>(
-        py::module::import("torch._jit_internal")
-            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    bool isStaticFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_static_fn")(*maybePyClass, field.c_str()));
     if (isStaticFn) {
       // Functions within the module annotated with @staticmethod do not need
       // binding.
-      py::object staticFn = py::module::import("torch._jit_internal")
-                                .attr("get_static_fn")(
-                                    concreteType_->getPyClass(), field.c_str());
+      py::object staticFn =
+          py::module::import("torch._jit_internal")
+              .attr("get_static_fn")(*maybePyClass, field.c_str());
       return toSugaredValue(staticFn, m, loc);
     }
     // For Python methods that we're trying to call directly, we need to bind
