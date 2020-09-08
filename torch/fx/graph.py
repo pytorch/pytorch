@@ -151,22 +151,20 @@ class Graph:
             else:
                 return None
 
-
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
                 continue
-            elif node.op == 'call_method':
+            within_module_block = insert_hierarchy_guard(node, within_module_block)
+            if node.op == 'call_method':
                 assert isinstance(node.target, str)
-                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 assert callable(node.target)
-                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
@@ -184,12 +182,10 @@ class Graph:
                 continue
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
                 continue
             elif node.op == 'get_param':
                 assert isinstance(node.target, str)
-                within_module_block = insert_hierarchy_guard(node, within_module_block)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')

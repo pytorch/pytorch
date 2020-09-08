@@ -9,8 +9,9 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     to the original, but with the nodes originating from `target_qualname`
     out-lined (opposite of inlined).
     """
+    target_qualname_atoms : List[str] = target_qualname.split('.')
     target_module : torch.nn.Module = mod
-    for atom in target_qualname.split('.'):
+    for atom in target_qualname_atoms:
         target_module = getattr(target_module, atom)
 
 
@@ -29,7 +30,15 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
 
     for node in mod.graph.nodes:
         def in_block(node):
-            return node.module_qualname and node.module_qualname.startswith(target_qualname)
+            if not node.module_qualname:
+                return False
+            module_qualname_atoms = node.module_qualname.split('.')
+            if len(module_qualname_atoms) < len(target_qualname_atoms):
+                return False
+            for l, r in zip(module_qualname_atoms, target_qualname_atoms):
+                if l != r:
+                    return False
+            return True
 
         def_set = block_defs if in_block(node) else rest_defs
         use_set = block_uses if in_block(node) else rest_uses
@@ -106,16 +115,15 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     # Register output
     base_graph.output(base_remap_table[mod.graph.result])
 
-    # NOT GREAT: deepcopy root so we can mutate it and insert our new
-    # submodule
+    rv = torch.fx.GraphModule(mod, base_graph)
 
-    new_root = copy.deepcopy(mod)
+    new_root = rv
     new_root_target = new_root
     for atom in target_qualname.split('.')[:-1]:
         new_root_target = getattr(new_root_target, atom)
     setattr(new_root_target, target_qualname.split('.')[-1], submod_module)
 
-    return torch.fx.GraphModule(new_root, base_graph)
+    return rv
 
 
 def fully_outline_module(mod : torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -134,9 +142,6 @@ def fully_outline_module(mod : torch.fx.GraphModule) -> torch.fx.GraphModule:
     qualnames_by_atoms = sorted(qualnames_by_atoms, reverse=True)
 
     # Finally, uninline all submodules
-    # TODO: this is likely slow since it's going to deepcopy a bunch of stuff
-    # every iteration. If we fix that in extract_module this will automatically
-    # get better
     uninlined = mod
     for qualname_atoms in qualnames_by_atoms:
         uninlined = extract_module(uninlined, '.'.join(qualname_atoms))
