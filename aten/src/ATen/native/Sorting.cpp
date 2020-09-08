@@ -99,7 +99,8 @@ void quantile_impl(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
+    bool keepdim,
+    bool ignore_nan) {
   int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
 
   TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
@@ -182,13 +183,23 @@ void quantile_impl(
   TORCH_CHECK(
       sorted.size(-1) <= std::pow(2, 24),
       "quantile() input tensor is too large");
-  
-  Tensor ranks = q * (sorted.size(-1) - 1);
+
+  Tensor ranks;
+  if (ignore_nan) {
+    ranks = q * (sorted.isnan().logical_not().sum(-1, true) - 1);
+    ranks.masked_fill_(ranks == -1, 0);
+  } else {
+    ranks = q * (sorted.size(-1) - 1);
+  }
+
   Tensor ranks_below = ranks.toType(kLong);
   Tensor weights = ranks - ranks_below;
   Tensor ranks_above = ranks.ceil_().toType(kLong);
-  Tensor values_below = sorted.index_select(-1, ranks_below);
-  Tensor values_above = sorted.index_select(-1, ranks_above);
+
+  Tensor values_below = ignore_nan ? sorted.gather(-1, ranks_below)
+                                   : sorted.index_select(-1, ranks_below);
+  Tensor values_above = ignore_nan ? sorted.gather(-1, ranks_above)
+                                   : sorted.index_select(-1, ranks_above);
 
   // Make out match expected shape for lerp
   Tensor result = q.dim() == 0
@@ -197,8 +208,9 @@ void quantile_impl(
 
   at::lerp_out(result, values_below, values_above, weights);
 
-  Tensor nan_mask = sorted.isnan().any(-1, false);
-  out.masked_fill_(nan_mask, NAN);
+  if (!ignore_nan) {
+    out.masked_fill_(sorted.isnan().any(-1, false), NAN);
+  }
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
@@ -293,13 +305,60 @@ std::tuple<Tensor, Tensor> kthvalue(
   return std::make_tuple(values, indices);
 }
 
+Tensor& nanquantile_out(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  quantile_impl(out, self, q, std::move(_dim), keepdim, true);
+  return out;
+}
+
+Tensor& nanquantile_out(
+    Tensor& out,
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::nanquantile_out(
+      out,
+      self,
+      at::scalar_tensor(q, self.options()),
+      std::move(_dim),
+      keepdim);
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  Tensor out = at::empty({0}, self.options());
+  quantile_impl(out, self, q, std::move(_dim), keepdim, true);
+  return out;
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::nanquantile(
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+}
+
 Tensor& quantile_out(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, false);
   return out;
 }
 
@@ -325,7 +384,7 @@ Tensor quantile(
     optional<int64_t> _dim,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, false);
   return out;
 }
 

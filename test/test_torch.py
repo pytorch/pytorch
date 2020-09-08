@@ -10420,15 +10420,17 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_quantile(self, device, dtype):
         # Generate some random test cases
+        ops = ['quantile', 'nanquantile']
         a_sizes = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
         q_values = [tuple(np.random.rand(i)) for i in range(0, 4)]
+        keepdims = [True, False]
 
         # Add corner cases
         a_sizes.extend([0.75, (1,), (1, 1), (1, 2, 1)])
         q_values.extend([0.5, (0., 1.), np.random.rand(10)])
 
         # Enumerate all input combinations
-        for size, quantiles, keepdim in product(a_sizes, q_values, [True, False]):
+        for op, size, quantiles, keepdim in product(ops, a_sizes, q_values, keepdims):
             if type(size) is tuple:
                 a = torch.randn(size, dtype=dtype, device=device)
             else:
@@ -10436,17 +10438,20 @@ class TestTorchDeviceType(TestCase):
             q = torch.tensor(quantiles, dtype=dtype, device=device)
 
             # Make some random elements NaN
-            a.masked_fill_(torch.randint_like(a, 10) == 0, float('nan'))
+            a.masked_fill_(torch.randint_like(a, 25) == 0, float('nan'))
+
+            torch_op = getattr(torch, op)
+            numpy_op = getattr(np, op)
 
             # Compute quantile along every dimension and flattened tensor
             for dim in [None] + list(range(a.ndim)):
-                result = torch.quantile(a, q, dim, keepdim)
-                expected = np.quantile(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
+                result = torch_op(a, q, dim, keepdim)
+                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
                 self.assertTrue(np.allclose(result.cpu().numpy(), expected, atol=1e-06, equal_nan=True))
 
                 # Test out variation
                 out = torch.empty_like(result)
-                torch.quantile(a, q, dim, keepdim, out=out)
+                torch_op(a, q, dim, keepdim, out=out)
                 self.assertTrue(np.allclose(result.cpu().numpy(), expected, atol=1e-06, equal_nan=True))
 
     def test_quantile_error(self, device):
