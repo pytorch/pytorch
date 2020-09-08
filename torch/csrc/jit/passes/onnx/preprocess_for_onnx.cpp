@@ -133,7 +133,7 @@ static void FuseWithListUnpack(Block* b) {
 static void ReplaceAddWithConcat(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      FuseWithListUnpack(child_block);
+      ReplaceAddWithConcat(child_block);
     }
     if (it->kind() == aten::add) {
       if (!it->input(0)->type()->cast<ListType>() ||
