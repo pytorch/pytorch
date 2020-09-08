@@ -4,56 +4,81 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
+import benchmark_fuzz_utils as fuzz_utils
 import operator_benchmark as op_bench
 import torch
 
 
 """Microbenchmarks for point-wise unary operator."""
 
-
-# Configs for pointwise unary ops
 unary_ops_configs_short = op_bench.config_list(
-    attr_names=['M', 'N'],
-    attrs=[
-        [512, 512],
-    ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
+    attr_names=['X_SIZE'],
+    attrs=[[(512, 512)]],
+    cross_product_configs={'device': ['cpu', 'cuda']},
     tags=['short']
 )
 
-unary_ops_configs_long = op_bench.cross_product_configs(
-    M=[256, 1024],
-    N=[256, 1024],
-    device=['cpu', 'cuda'],
+unary_ops_configs_long = op_bench.config_list(
+    attr_names=['X_SIZE'],
+    attrs=[
+        [(256, 256)], [(256, 1024)], [(1024, 256)], [(1024, 1024)]
+    ],
+    cross_product_configs={'device': ['cpu', 'cuda']},
     tags=['long']
 )
 
-class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, device, op_func):
-        self.input_one = torch.rand(M, N, device=device)
-        self.op_func = op_func
+unary_ops_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.UNARY,
+    fuzz_utils.Scale.SMALL,
+    n=10,
+    seed="UnaryOps",
+    cross_product_configs={"device": ["cpu", "cuda"]},
+    tags=["short"],
+    checksum=1109,
+)
 
-    def forward(self):
-        return self.op_func(self.input_one)
+unary_ops_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.UNARY,
+    fuzz_utils.Scale.MEDIUM,
+    n=10,
+    seed="UnaryOps",
+    cross_product_configs={"device": ["cpu", "cuda"]},
+    tags=["long"],
+    checksum=7803,
+)
 
+no_grad_ops = ('argsort', 'clone', 'unique', 'uniform_')
 
-unary_ops_list = op_bench.op_list(
+scrutinized_unary_ops_list = op_bench.op_list(
+    attr_names=['op_name', 'op_func'],
+    attrs=[
+        ['argsort', torch.argsort],
+        ['clone', torch.clone],
+        ['exp', torch.exp],
+        ['log', torch.log],
+        ['logit', torch.logit],
+        ['reciprocal', torch.reciprocal],
+        ['relu', torch.relu],
+        ['sqrt', torch.sqrt],
+        ['square', torch.square],
+        ['unique', torch.unique],
+        ['uniform_', lambda t: t.uniform_()],
+    ],
+)
+
+other_unary_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
     attrs=[
         ['abs', torch.abs],
         ['abs_', torch.abs_],
         ['acos', torch.acos],
         ['acos_', torch.acos_],
-        ['argsort', torch.argsort],
         ['asin', torch.asin],
         ['asin_', torch.asin_],
         ['atan', torch.atan],
         ['atan_', torch.atan_],
         ['ceil', torch.ceil],
         ['ceil_', torch.ceil_],
-        ['clone', torch.clone],
         ['cos', torch.cos],
         ['cos_', torch.cos_],
         ['cosh', torch.cosh],
@@ -63,7 +88,6 @@ unary_ops_list = op_bench.op_list(
         ['erfc', torch.erfc],
         ['erfc_', torch.erfc_],
         ['erfinv', torch.erfinv],
-        ['exp', torch.exp],
         ['exp_', torch.exp_],
         ['expm1', torch.expm1],
         ['expm1_', torch.expm1_],
@@ -73,7 +97,6 @@ unary_ops_list = op_bench.op_list(
         ['frac_', torch.frac_],
         ['hardshrink', torch.hardshrink],
         ['lgamma', torch.lgamma],
-        ['log', torch.log],
         ['log10', torch.log10],
         ['log10_', torch.log10_],
         ['log1p', torch.log1p],
@@ -81,13 +104,10 @@ unary_ops_list = op_bench.op_list(
         ['log2', torch.log2],
         ['log2_', torch.log2_],
         ['log_', torch.log_],
-        ['logit', torch.logit],
         ['logit_', torch.logit_],
         ['neg', torch.neg],
         ['neg_', torch.neg_],
-        ['reciprocal', torch.reciprocal],
         ['reciprocal_', torch.reciprocal_],
-        ['relu', torch.relu],
         ['relu_', torch.relu_],
         ['round', torch.round],
         ['round_', torch.round_],
@@ -99,9 +119,7 @@ unary_ops_list = op_bench.op_list(
         ['sin', torch.sin],
         ['sin_', torch.sin_],
         ['sinh', torch.sinh],
-        ['sqrt', torch.sqrt],
         ['sqrt_', torch.sqrt_],
-        ['square', torch.square],
         ['square_', torch.square_],
         ['tan', torch.tan],
         ['tan_', torch.tan_],
@@ -109,7 +127,6 @@ unary_ops_list = op_bench.op_list(
         ['tanh_', torch.tanh_],
         ['trunc', torch.trunc],
         ['trunc_', torch.trunc_],
-        ['unique', torch.unique],
         ['zero_', torch.zero_],
         ['bernoulli_', lambda t: t.bernoulli_()],
         ['cauchy_', lambda t: t.cauchy_()],
@@ -118,16 +135,31 @@ unary_ops_list = op_bench.op_list(
         ['normal_', lambda t: t.normal_()],
         ['random_', lambda t: t.random_()],
         ['sign_', lambda t: t.sign_()],
-        ['uniform_', lambda t: t.uniform_()],
         ['half', lambda t: t.half()],
         ['long', lambda t: t.long()],
     ],
 )
 
+class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, X_SIZE, device, op_func):
+        self.input_one = torch.rand(X_SIZE, device=device, requires_grad=self.auto_set())
+        self.op_func = op_func
 
-op_bench.generate_pt_tests_from_op_list(unary_ops_list,
-                                        unary_ops_configs_short + unary_ops_configs_long,
-                                        UnaryOpBenchmark)
+    def forward(self):
+        return self.op_func(self.input_one)
+
+unary_configs = unary_ops_configs_short + unary_ops_configs_long
+scrutinized_unary_configs = (
+    unary_configs + unary_ops_fuzzed_configs_short +
+    unary_ops_fuzzed_configs_long)
+
+op_bench.generate_pt_tests_from_op_list(
+    scrutinized_unary_ops_list, scrutinized_unary_configs, UnaryOpBenchmark)
+op_bench.generate_pt_gradient_tests_from_op_list(
+    [i for i in scrutinized_unary_ops_list if i['op_name'] not in no_grad_ops],
+    scrutinized_unary_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(
+    other_unary_ops_list, unary_configs, UnaryOpBenchmark)
 
 
 if __name__ == "__main__":
