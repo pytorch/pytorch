@@ -1515,8 +1515,12 @@ class TestDict(JitTestCase):
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
 
-    def test_no_type_annotation(self):
-        def fn(self, input: Dict) -> Any:
+    def test_type_annotation_missing_contained_type(self):
+        """
+        Test that the use of a Dict type annotation without contained
+        key and value types produces an error.
+        """
+        def fn(input: Dict) -> Any:
             return input
 
         with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
