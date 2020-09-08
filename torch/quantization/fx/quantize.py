@@ -106,6 +106,20 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     return graph_module
 
 
+def assert_and_get_unique_device(module):
+    """
+    Returns the unique device for a module, or None if no device is found.
+    Throws an error if multiple devices are detected.
+    """
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    assert len(devices) <= 1, (
+        "prepare only works with cpu or single-device CUDA modules, "
+        "but got devices {}".format(devices)
+    )
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return device
+
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -172,7 +186,7 @@ class Quantizer:
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         if not inplace:
             model = copy.deepcopy(model)
-
+        input_root = model
         self.is_dynamic_quant = is_dynamic_quant
         # TODO: allow user specified patterns
         if self.is_dynamic_quant:
@@ -201,13 +215,13 @@ class Quantizer:
 
         env = {}
         observed_graph = Graph()
-        observed = set()
+        observed_node_names_set = set()
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
         for node in model.graph.nodes:
-            if node.name in observed:
+            if node.name in observed_node_names_set:
                 continue
 
             get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
@@ -217,12 +231,14 @@ class Quantizer:
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
-                def insert_observer(node, observer):
-                    observer_name = get_new_observer_name(model.root)
-                    setattr(model.root, observer_name, observer)
+                def insert_observer(node, observer, device):
+                    observer_name = get_new_observer_name(input_root)
+                    setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
+                    observed_node_names_set.add(node.name)
+                    if device:
+                        getattr(input_root, observer_name).to(device)
 
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
@@ -237,32 +253,41 @@ class Quantizer:
 
                     def is_observed(input_arg):
                         if isinstance(input_arg, Node):
-                            return input_arg.name in observed
+                            return input_arg.name in observed_node_names_set
                         elif isinstance(input_arg, list):
                             return all(map(is_observed, input_arg))
                     # propagate observed property from input
                     if is_observed(node.args[0]):
-                        observed.add(node.name)
+                        observed_node_names_set.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
-                    if node.args[0].name in observed:
-                        observed.add(node.name)
+                    if node.args[0].name in observed_node_names_set:
+                        observed_node_names_set.add(node.name)
                 elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
-                    insert_observer(node, qconfig.activation())
+                    new_observer = qconfig.activation()
+                    # respect device affinity when adding observers
+                    device = assert_and_get_unique_device(input_root)
+                    insert_observer(node, new_observer, device)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
-            if node.name not in observed and node.name in quants:
-                observer_name = get_new_observer_name(model.root)
+            if node.name not in observed_node_names_set and node.name in quants:
+                observer_name = get_new_observer_name(input_root)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
-                    self.activation_post_process_map[node.name] = qconfig.weight() if is_weight else qconfig.activation()
-                    setattr(model.root, observer_name, self.activation_post_process_map[node.name])
+                    new_observer = \
+                        qconfig.weight() if is_weight else qconfig.activation()
+                    # respect device affinity when adding observers
+                    device = assert_and_get_unique_device(input_root)
+                    if device:
+                        new_observer.to(device)
+                    self.activation_post_process_map[node.name] = new_observer
+                    setattr(input_root, observer_name, self.activation_post_process_map[node.name])
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
-        observed_graph.output(load_arg(model.graph.result))
+                    observed_node_names_set.add(node.name)
+        observed_graph.output(load_arg(input_graph.result))
 
-        model.__init__(model.root, observed_graph)
+        model.__init__(input_root, observed_graph)
         self.save_state(model)
         return model
 
@@ -303,7 +328,7 @@ class Quantizer:
                         weight_observer_nodes = collect_producer_nodes(node_arg)
                         if weight_observer_nodes is not None:
                             weight_observer_module = graph_module_from_producer_nodes(
-                                observed.root, weight_observer_nodes)
+                                observed, weight_observer_nodes)
                             # run the weight observer
                             weight_observer_module()
         return
@@ -476,7 +501,7 @@ class Quantizer:
                         folded_nodes[node_to_fold.name] = node
 
                     prepacking_module = graph_module_from_producer_nodes(
-                        quantized.root, nodes_to_fold)
+                        quantized, nodes_to_fold)
                     packed_weight = prepacking_module()
                     packed_weights[node.name] = packed_weight
 
@@ -487,7 +512,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
-        quantized_root = quantized.root
+        quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)

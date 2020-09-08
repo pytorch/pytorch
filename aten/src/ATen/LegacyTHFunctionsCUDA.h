@@ -37,8 +37,6 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending);
 std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted);
 std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted);
-Tensor _th_var(const Tensor & self, bool unbiased);
-Tensor _th_std(const Tensor & self, bool unbiased);
 Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);

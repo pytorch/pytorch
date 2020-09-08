@@ -15,7 +15,7 @@ class Fuser:
     def fuse(self, model, inplace=False):
         if not inplace:
             model = copy.deepcopy(model)
-        input_root = model.root
+        input_root = model
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
