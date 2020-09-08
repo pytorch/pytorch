@@ -111,27 +111,25 @@ static void FuseWithListUnpack(Block* b) {
 // graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
 //  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
 //  %2 : None = prim::Constant()
-//  %3 : int[] = aten::size(%x.1) # <string>:7:9
-//  %l1.1 : int[] = aten::list(%3) #
-//  test/onnx/test_pytorch_onnx_onnxruntime.py:2847:21 %5 : int[] =
-//  aten::size(%y.1) # <string>:7:9 %l2.1 : int[] = aten::list(%5) #
-//  test/onnx/test_pytorch_onnx_onnxruntime.py:2848:21 %7 : int[] =
-//  aten::add(%l1.1, %l2.1) # test/onnx/test_pytorch_onnx_onnxruntime.py:2849:35
-//  %8 : Tensor = aten::new_zeros(%x.1, %7, %2, %2, %2, %2) #
-//  test/onnx/test_pytorch_onnx_onnxruntime.py:2849:23 return (%8)
+//  %3 : int[] = aten::size(%x.1)
+//  %l1.1 : int[] = aten::list(%3
+//  %5 : int[] = aten::size(%y.1)
+//  %l2.1 : int[] = aten::list(%5)
+//  %7 : int[] = aten::add(%l1.1, %l2.1)
+//  %8 : Tensor = aten::new_zeros(%x.1, %7, %2, %2, %2, %2)
+//  return (%8)
 //
 // after the pass:
 // graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
 //  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
 //  %2 : None = prim::Constant()
-//  %3 : int[] = aten::size(%x.1) # <string>:7:9
-//  %l1.1 : int[] = aten::list(%3) #
-//  test/onnx/test_pytorch_onnx_onnxruntime.py:2847:21 %5 : int[] =
-//  aten::size(%y.1) # <string>:7:9 %l2.1 : int[] = aten::list(%5) #
-//  test/onnx/test_pytorch_onnx_onnxruntime.py:2848:21 %9 : Tensor =
-//  onnx::Concat[axis=0](%l1.1, %l2.1) %8 : Tensor = aten::new_zeros(%x.1, %9,
-//  %2, %2, %2, %2) # test/onnx/test_pytorch_onnx_onnxruntime.py:2849:23 return
-//  (%8)
+//  %3 : int[] = aten::size(%x.1)
+//  %l1.1 : int[] = aten::list(%3)
+//  %5 : int[] = aten::size(%y.1)
+//  %l2.1 : int[] = aten::list(%5)
+//  %9 : Tensor = onnx::Concat[axis=0](%l1.1, %l2.1)
+//  %8 : Tensor = aten::new_zeros(%x.1, %9, %2, %2, %2, %2)
+//  return (%8)
 static void ReplaceAddWithConcat(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
