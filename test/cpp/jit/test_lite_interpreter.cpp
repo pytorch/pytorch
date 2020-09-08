@@ -556,7 +556,7 @@ void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
   // which have the same class type. Hence, it only records module
   // information for A1.
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A1(A).forward"});
+      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 

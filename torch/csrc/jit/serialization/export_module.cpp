@@ -20,6 +20,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
+#include <stack>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,62 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
+std::string getModuleTypeName(
+    const Module& module,
+    const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
+}
+
+std::string getScopeString(
+    const InlinedCallStackElem& frame,
+    const std::string& root_scope_string) {
+  Function* f = std::get<0>(frame);
+  std::string module_info = root_scope_string;
+  auto opt_module_info = std::get<2>(frame);
+  if (opt_module_info.has_value()) {
+    module_info += opt_module_info.value();
+  }
+  return module_info + "." + f->name();
+}
+
+void pushScopeInfo(
+    Node* node,
+    const std::string& root_scope_string) {
+  ScopePtr sc = c10::make_intrusive<Scope>();
+  if (!node->callstack()) {
+    sc = sc->push(Symbol::scope(root_scope_string + ".forward"));
+  } else {
+    for (const auto& frame : (*node->callstack())->elems()) {
+      auto name = getScopeString(frame, root_scope_string);
+      sc = sc->push(Symbol::scope(name));
+    }
+  }
+  node->setScope(sc);
+}
+
+void reconstructScopes(
+    std::shared_ptr<Graph> graph,
+    const std::string& root_scope_string) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* node : block->nodes()) {
+      pushScopeInfo(node, root_scope_string);
+      std::cout << "Scope: " << node->scopeName() << std::endl;
+      for (Block* subblock : node->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+}
+
 std::string getModulePath(Node* node) {
   std::string modulePath = node->scopeName();
   size_t end = modulePath.size();
@@ -78,7 +135,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
   if (save_mobile_debug_info) {
-    ReconstructScopes(module, *graph, "top");
+    std::string root_scope_string = getModuleTypeName(module, "top");
+    reconstructScopes(graph, root_scope_string);
   }
 
   torch::jit::Code code(graph, func.name());
