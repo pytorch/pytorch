@@ -5,9 +5,12 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/onnx/onnx.h>
-#include <onnx/onnx_pb.h>
 
 #include <ostream>
+
+namespace ONNX_NAMESPACE{
+    class ModelProto;
+}
 
 namespace torch {
 namespace jit {
