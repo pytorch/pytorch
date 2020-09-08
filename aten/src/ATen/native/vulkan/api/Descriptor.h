@@ -64,8 +64,6 @@ struct Descriptor final {
       c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
     };
 
-    static const Descriptor kDefault;
-
     /*
       Factory
     */
@@ -96,9 +94,14 @@ struct Descriptor final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
-    }
+    // This field simply stores a reference to the primary descriptor pool in
+    // the cache for ease of access, and carries no significance otherwise.
+    // This object's lifetime is managed by the cache as usual.  Purge the
+    // contents of the pool regularly through the factory it was created.
+
+    VkDescriptorPool primary;
+
+    explicit Pool(VkDevice device);
   } pool;
 
   /*
@@ -118,7 +121,7 @@ struct Descriptor final {
 
   explicit Descriptor(const VkDevice device)
     : pool(device),
-      set(device, pool.cache.retrieve(Pool::kDefault)) {
+      set(device, pool.primary) {
   }
 };
 
