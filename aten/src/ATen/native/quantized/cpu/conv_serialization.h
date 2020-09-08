@@ -30,9 +30,9 @@
  *      - stride x kSpatialDim
  *      - padding x kSpatialDim
  *      - dilation x kSpatialDim
- *      - output_padding x kSpatialDim (unused)
+ *      - output_padding x kSpatialDim
  *      - groups
- *      - transpose (0 or 1, unused)
+ *      - transpose (0 or 1)
  *    1: weight
  *  2. list of optional tensors
  *    0: bias
@@ -164,13 +164,14 @@ ConvParamsSerializationType serialize_conv(
   params_vec.insert(params_vec.end(), padding.begin(), padding.end());
   auto dilation = params->dilation().vec();
   params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
-  // output_padding is not implemented yet, so we fill in a default value
+  auto output_padding = params->output_padding().vec();
+  params_vec.insert(params_vec.end(), output_padding.begin(),
+                    output_padding.end());
   for (int i = 0; i < kSpatialDim; i++) {
     params_vec.push_back(0);
   }
   params_vec.push_back(params->groups());
-  // transpose is not implemented yet, so we fill in a default value
-  params_vec.push_back(0);
+  params_vec.push_back(params->transpose());
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
@@ -234,7 +235,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   at::Tensor weight = non_optional[1];
   c10::optional<at::Tensor> bias = optional[0];
 
-  torch::List<int64_t> stride, padding, dilation;
+  torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
   int idx = 1;
   for (int i = 0; i < kSpatialDim; ++i) {
@@ -249,14 +250,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     dilation.emplace_back(conv_params_packed[idx].item<int64_t>());
     idx++;
   }
-  // output_padding is not implemented yet, so we skip the entries
   for (int i = 0; i < kSpatialDim; ++i) {
-    // do nothing
+    output_padding.emplace_back(conv_params_packed[idx].item<int64_t>());
     idx++;
   }
   int64_t groups = conv_params_packed[idx].item<int64_t>();
   idx++;
-  // transpose is not implemented yet, so we skip the entry
+  bool transpose = conv_params_packed[idx].item<bool>();
   idx++;
   TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
       "Unexpected length of conv_params_packed, expected ",
@@ -273,8 +273,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       bias,
       stride,
       padding,
+      output_padding,
       dilation,
-      groups
+      groups,
+      transpose
     );
   }
 #endif // USE_FBGEMM
@@ -289,8 +291,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       bias,
       stride,
       padding,
+      output_padding,
       dilation,
-      groups
+      groups,
+      transpose
     );
   }
 #endif // USE_PYTORCH_QNNPACK
