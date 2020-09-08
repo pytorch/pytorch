@@ -32,7 +32,8 @@ Reducer::Reducer(
     std::shared_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
-    bool find_unused_parameters)
+    bool find_unused_parameters,
+    bool grad_is_view)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -41,6 +42,7 @@ Reducer::Reducer(
       next_bucket_(0),
       has_marked_unused_parameters_(false),
       find_unused_parameters_(find_unused_parameters),
+      grad_is_view_(grad_is_view),
       local_used_maps_reduced_(false),
       backward_stats_base_(0),
       has_rebuilt_bucket_(false),
@@ -68,8 +70,8 @@ Reducer::Reducer(
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
   {
-   std::lock_guard<std::mutex> lock(mutex_);
-   initialize_buckets(std::move(bucket_indices));
+    std::lock_guard<std::mutex> lock(mutex_);
+    initialize_buckets(std::move(bucket_indices));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -310,6 +312,56 @@ void Reducer::verify_replica0_across_processes() {
   }
 }
 
+void Reducer::check_grad_layout(
+    const at::Tensor& grad,
+    const at::Tensor& bucket_view) {
+  // Ensure that the gradient type matches the bucket type.
+  TORCH_CHECK(
+      grad.options().type_equal(bucket_view.options()),
+      "Expected ",
+      bucket_view.toString(),
+      ", got ",
+      grad.toString());
+  TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
+  TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
+  // AccumulateGrad doesn't HAVE to obey the grad layout contract.
+  // The penalty for disobedience is reduced performance, not numerical
+  // death. Warnings here help diagnose poor DDP performance.
+  if (grad.strides() != bucket_view.strides()) {
+    TORCH_WARN_ONCE(
+        "Grad strides do not match bucket view strides. "
+        "This may indicate grad was not created according to the "
+        "gradient layout contract, or that the param's strides "
+        "changed since DDP was constructed.  This is not an error, "
+        "but may impair performance.\n"
+        "grad.sizes() = ",
+        grad.sizes(),
+        ", strides() = ",
+        grad.strides(),
+        "\n",
+        "bucket_view.sizes() = ",
+        bucket_view.sizes(),
+        ", strides() = ",
+        bucket_view.strides());
+  }
+  if (!grad_is_view_) {
+    TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
+  }
+}
+
+void Reducer::copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view) {
+  // See Note [DDP Communication Hook]
+  if (comm_hook_ == nullptr) {
+    // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+    auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
+    wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+    // Divides while copying into the bucket view.
+    at::native::mul_out(bucket_view, grad, wrapped);
+  } else {
+    bucket_view.copy_(grad);
+  }
+}
+
 void Reducer::mark_variable_ready_dense(VariableIndex index) {
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
@@ -327,50 +379,27 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   // of the bucket it would otherwise hold.
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
-      // Ensure that the gradient type matches the bucket type.
-      TORCH_CHECK(
-          grad.options().type_equal(bucket_view.options()),
-          "Expected ",
-          bucket_view.toString(),
-          ", got ",
-          grad.toString());
-      // Assert that the grad tensor and the bucket don't share storage.
-      // If they did, we could avoid the copy altogether.
-      // The reason for not doing this is that existing code calls
-      // `detach_` from `zero_grad`, which is incompatible with views.
-      TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
-      TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
-      TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
-      // AccumulateGrad doesn't HAVE to obey the grad layout contract.
-      // The penalty for disobedience is reduced performance, not numerical
-      // death. Warnings here help diagnose poor DDP performance.
-      if (grad.strides() != bucket_view.strides()) {
-        TORCH_WARN_ONCE(
-            "Grad strides do not match bucket view strides. "
-            "This may indicate grad was not created according to the "
-            "gradient layout contract, or that the param's strides "
-            "changed since DDP was constructed.  This is not an error, "
-            "but may impair performance.\n"
-            "grad.sizes() = ",
-            grad.sizes(),
-            ", strides() = ",
-            grad.strides(),
-            "\n",
-            "bucket_view.sizes() = ",
-            bucket_view.sizes(),
-            ", strides() = ",
-            bucket_view.strides());
-      }
-      // See Note [DDP Communication Hook]
-      if (comm_hook_ == nullptr) {
-        // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-        auto wrapped =
-            c10::scalar_to_tensor(double(1.) / divFactor_);
-        wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
-        // Divides while copying into the bucket view.
-        at::native::mul_out(bucket_view, grad, wrapped);
+      check_grad_layout(grad, bucket_view);
+      // When grad_is_view_ is false, or even when grad_is_view_ is true,
+      // in rare cases users may set grad to be None after every iteration.
+      // In these cases, grad and bucket_view are pointing
+      // to different storages and thus need to copy grads to bucket_view.
+      // If grad_is_view_ is set as true, let grad point to bucket_view.
+      // If grad has already been set as views of buckets in previous
+      // iterations, no copy is needed.
+      if (!grad.is_alias_of(bucket_view)) {
+        copy_grad_to_bucket(grad, bucket_view);
+        if (grad_is_view_) {
+          // Let grad point to bucket_view buffer.
+          grad = bucket_view;
+          // The grad is modified and need to be written back.
+          return true;
+        }
       } else {
-        bucket_view.copy_(grad);
+        // If grad and bucket view point to the same storage, no need to copy
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(process_group_->getSize());
+        }
       }
     } else {
       bucket_view.zero_();
@@ -676,6 +705,17 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices) {
+  // If initialize_buckets is called inside DDP constructor, then
+  // it does not matter rpc context ptr is nullptr or not, as grad
+  // will not be mutated.
+  // If initialize_buckets is called during training loop, e.g, inside
+  // rebuild_buckets(), since grad could be mutated and be pointed to
+  // bucket_view, then it needs to check rpc context ptr is nullptr or not,
+  // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
+  // mutate grad in rpc context.
+  using torch::distributed::autograd::ThreadLocalDistAutogradContext;
+  this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
+
   // This shouldn't be called if we're expecting autograd hooks to fire.
   TORCH_CHECK(
       !expect_autograd_hooks_,
@@ -827,25 +867,48 @@ void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
-    const auto& v = replica.variables[i];
+    auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
     if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-        replica.bucket_views_in.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
+      replica.bucket_views_in.push_back(
+          contents.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-        replica.bucket_views_in.push_back(
-            contents.narrow(0, offset, length).view(v.sizes()));
+      replica.bucket_views_in.push_back(
+          contents.narrow(0, offset, length).view(v.sizes()));
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
     replica.bucket_views_out = replica.bucket_views_in;
+
+    // If grad_is_view_ is set as true, then there are two cases to handle:
+    // initialize_bucket_views could be called inside initialize_buckets when
+    // rebuild_buckets, if grad has already been defined/calculated in previous
+    // iteration, old grad needs to be copied into new bucket_view
+    // and let grad point to the new bucket_view,
+    // initialize_bucket_views could also be called inside initialize_buckets
+    // during construction. Grads are not defined during construction time,
+    // in this case, do not let grad point to bucket_view, because grads should
+    // be kept as being undefined for globally unused parameters.
+    if (grad_is_view_) {
+      auto& bucket_view = replica.bucket_views_in.back();
+      runGradCallbackForVariable(v, [&](auto& grad) {
+        if (grad.defined() && !grad.is_alias_of(bucket_view)) {
+          bucket_view.copy_(grad);
+          grad = bucket_view;
+          // The grad is modefied and needs to be written back.
+          return true;
+        }
+        // The grad is not modified and does not need to be written back.
+        return false;
+      });
+    }
   }
 }
 
@@ -861,14 +924,14 @@ void Reducer::populate_bucket_views_out(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-        replica.bucket_views_out.push_back(
-            tensor.as_strided(v.sizes(), v.strides(), offset));
+      replica.bucket_views_out.push_back(
+          tensor.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-        replica.bucket_views_out.push_back(
-            tensor.narrow(0, offset, length).view(v.sizes()));
+      replica.bucket_views_out.push_back(
+          tensor.narrow(0, offset, length).view(v.sizes()));
     }
   }
 }
@@ -966,6 +1029,31 @@ void Reducer::prepare_for_backward(
   }
 }
 
+void Reducer::copy_bucket_to_grad(
+    torch::autograd::Variable& variable,
+    Reducer::BucketReplica& replica,
+    size_t intra_bucket_index,
+    bool global_unused) {
+  const auto& bucket_view = replica.bucket_views_out[intra_bucket_index];
+  runGradCallbackForVariable(variable, [&](auto& grad) {
+    // If a parameter is globally unused, we keep its grad untouched.
+    if (!global_unused) {
+      if (!grad.defined()) {
+        // Creates grad according to the "Gradient Layout Contract"
+        // (see torch/csrc/grad/AccumulateGrad.h)
+        grad =
+            torch::autograd::utils::clone_obey_contract(bucket_view, variable);
+      } else {
+        grad.copy_(bucket_view);
+      }
+      // The grad is modified and needs to be written back.
+      return true;
+    }
+    // The grad is not modified.
+    return false;
+  });
+}
+
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
   for (size_t replica_index = 0; replica_index < bucket.replicas.size();
@@ -1016,24 +1104,39 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         }
       }
 
-      const auto& bucket_view = replica.bucket_views_out[intra_bucket_index];
-      runGradCallbackForVariable(variable, [&](auto& grad) {
-        // If a parameter is globally unused, we keep its grad untouched.
-        if (!global_unused) {
-          if (!grad.defined()) {
-            // Creates grad according to the "Gradient Layout Contract"
-            // (see torch/csrc/grad/AccumulateGrad.h)
-            grad = torch::autograd::utils::clone_obey_contract(
-                bucket_view, variable);
-          } else {
-            grad.copy_(bucket_view);
-          }
-          // The grad is modified and needs to be written back.
-          return true;
+      if (!grad_is_view_) {
+        copy_bucket_to_grad(
+            variable, replica, intra_bucket_index, global_unused);
+      } else {
+        const auto& bucket_view_out =
+            replica.bucket_views_out[intra_bucket_index];
+        auto& bucket_view_in = replica.bucket_views_in[intra_bucket_index];
+        // If communication_hook is registered, bucket_view_out stores
+        // all reduced results in a newly allocated tensor, copy bucket_view_out
+        // back to bucket_view_in that referring to replica.content tensor and
+        // grad.
+        if (!bucket_view_in.is_alias_of(bucket_view_out)) {
+          bucket_view_in.copy_(bucket_view_out);
         }
-        // The grad is not modified.
-        return false;
-      });
+        runGradCallbackForVariable(variable, [&](auto& grad) {
+          // If a parameter is globally unused, we keep its grad untouched.
+          if (!global_unused) {
+            // If grad is globally used but locally unused, let grad point to
+            // bucket_view_in
+            if (!grad.defined()) {
+              grad = bucket_view_in;
+            } else {
+              TORCH_INTERNAL_ASSERT(
+                  grad.is_alias_of(bucket_view_in),
+                  "Grad should have been pointed to bucket_view_in if grad is defined");
+            }
+            // The grad is modified and needs to be written back.
+            return true;
+          }
+          // The grad is not modified.
+          return false;
+        });
+      }
     }
   }
 }

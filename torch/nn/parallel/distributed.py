@@ -316,6 +316,15 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
+        grad_is_view: when setting to ``True``, grads will be views of all reduce
+                      buckets in reducer, this can reduce peak memory usage, the
+                      saved memory size will be equal to the total grads size.
+                      Also it can avoid coping between grads and the all reduce
+                      buckets in reducer and thus improve training performance.
+                      When grads are views, detach_() can not be called in your
+                      zero_grad() function, please fix it by referring to
+                      the Optimizer.zero_grad() function in torch/optim/optimizer.py
+                      as the solution.
 
     Attributes:
         module (Module): the module to be parallelized
@@ -330,7 +339,8 @@ class DistributedDataParallel(Module):
                  process_group=None,
                  bucket_cap_mb=25,
                  find_unused_parameters=False,
-                 check_reduction=False):
+                 check_reduction=False,
+                 grad_is_view=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -381,6 +391,7 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
+        self.grad_is_view = grad_is_view
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -517,7 +528,8 @@ class DistributedDataParallel(Module):
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
-            self.find_unused_parameters)
+            self.find_unused_parameters,
+            self.grad_is_view)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)

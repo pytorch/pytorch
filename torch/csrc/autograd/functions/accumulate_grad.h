@@ -161,6 +161,11 @@ struct TORCH_API AccumulateGrad : public Node {
         // valid operation which adds `new_grad` to `variable_grad` in
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
+        // Also DistributedDataParallel(DDP) package relies on grad being
+        // mutated in place for saving peak memory usage. DDP will still
+        // work correctly if it is mutated out of place here, but DDP will
+        // maintain one extra copy of grad tensors in buffer and thus
+        // increase peak memory usage.
         variable_grad += new_grad;
         CHECK_RESULT(variable_grad, variable);
         // ^ We could enforce the contract more aggressively here by writing:
