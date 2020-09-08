@@ -238,7 +238,7 @@ class TestQuantizeFx(QuantizationTestCase):
         non_inplace_model = quantize_static_fx(
             model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=False)
         inplace_model = model
-        quantize_static_fx(
+        inplace_model = quantize_static_fx(
             inplace_model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=True)
         non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
         inplace_res = inplace_model(self.img_data_2d[0][0])

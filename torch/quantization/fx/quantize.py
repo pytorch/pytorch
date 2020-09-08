@@ -186,7 +186,6 @@ class Quantizer:
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         if not inplace:
             model = copy.deepcopy(model)
-        input_root = model
         self.is_dynamic_quant = is_dynamic_quant
         # TODO: allow user specified patterns
         if self.is_dynamic_quant:
@@ -194,14 +193,14 @@ class Quantizer:
         else:
             self.patterns = get_quant_patterns()
 
-        propagate_qconfig_(model.root, qconfig_dict)
-        if model.root.training:
-            self._qat_swap_modules(model.root)
+        propagate_qconfig_(model, qconfig_dict)
+        if model.training:
+            self._qat_swap_modules(model)
 
-        self.modules = dict(model.root.named_modules())
+        self.modules = dict(model.named_modules())
 
         # map from node name to qconfig, used in _find_matches
-        self._generate_qconfig_map(model.root, model.graph)
+        self._generate_qconfig_map(model, model.graph)
 
         # match the patterns that will get quantized
         matches = self._find_matches(model.graph, self.modules, self.patterns)
@@ -232,13 +231,13 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
                 def insert_observer(node, observer, device):
-                    observer_name = get_new_observer_name(input_root)
-                    setattr(input_root, observer_name, observer)
+                    observer_name = get_new_observer_name(model)
+                    setattr(model, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed_node_names_set.add(node.name)
                     if device:
-                        getattr(input_root, observer_name).to(device)
+                        getattr(model, observer_name).to(device)
 
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
@@ -266,28 +265,28 @@ class Quantizer:
                     # observer for outputs
                     new_observer = qconfig.activation()
                     # respect device affinity when adding observers
-                    device = assert_and_get_unique_device(input_root)
+                    device = assert_and_get_unique_device(model)
                     insert_observer(node, new_observer, device)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
             if node.name not in observed_node_names_set and node.name in quants:
-                observer_name = get_new_observer_name(input_root)
+                observer_name = get_new_observer_name(model)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
                     new_observer = \
                         qconfig.weight() if is_weight else qconfig.activation()
                     # respect device affinity when adding observers
-                    device = assert_and_get_unique_device(input_root)
+                    device = assert_and_get_unique_device(model)
                     if device:
                         new_observer.to(device)
                     self.activation_post_process_map[node.name] = new_observer
-                    setattr(input_root, observer_name, self.activation_post_process_map[node.name])
+                    setattr(model, observer_name, self.activation_post_process_map[node.name])
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed_node_names_set.add(node.name)
-        observed_graph.output(load_arg(input_graph.result))
+        observed_graph.output(load_arg(model.graph.result))
 
-        model.__init__(input_root, observed_graph)
+        model = GraphModule(model, observed_graph)
         self.save_state(model)
         return model
 
@@ -336,9 +335,7 @@ class Quantizer:
     def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False):
         self.restore_state(model)
         if not inplace:
-            print('before copy model.graph:', model.code)
             model = copy.deepcopy(model)
-            print('after copy model.graph:', model.code)
         self.is_dynamic_quant = is_dynamic_quant
         # run weight observers before inserting quant dequant nodes
         # for dynamic quantization
@@ -347,9 +344,8 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
-        self.modules = dict(model.root.named_modules())
+        self.modules = dict(model.named_modules())
 
-        print('model.graph:', model.graph.nodes)
         matches = self._find_matches(model.graph, self.modules, self.patterns)
         quants = self._find_quants(model.graph, matches)
         self.quantized_graph = Graph()
@@ -477,12 +473,12 @@ class Quantizer:
         self.quantized_graph.output(load_non_quantized(model.graph.result))
 
         to_be_removed = []
-        for name, _ in model.root.named_modules():
+        for name, _ in model.named_modules():
             if name.split('.')[-1].startswith('activation_post_process_'):
                 to_be_removed.append(name)
         for n in to_be_removed:
-            delattr(model.root, n)
-        model.__init__(model.root, self.quantized_graph)
+            delattr(model, n)
+        model = GraphModule(model, self.quantized_graph)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the graph module
@@ -531,7 +527,7 @@ class Quantizer:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
         folded_graph.output(load_arg(quantized_graph.result))
-        quantized.__init__(quantized_root, folded_graph)
+        quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
     def convert(self, model, inplace=False, debug=False, is_dynamic=False):
@@ -555,7 +551,6 @@ class Quantizer:
                 matched.append(node)
 
         for node in reversed(graph.nodes):
-            print('node:', node, node.op, node.target)
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):

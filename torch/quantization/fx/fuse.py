@@ -1,3 +1,7 @@
+from torch.fx import (
+    GraphModule
+)
+
 from torch.fx.graph import (
     Graph,
     map_arg,
@@ -37,8 +41,7 @@ class Fuser:
             # node matched in patterns and is not root is removed here
 
         self.fused_graph.output(load_arg(input_graph.result))
-        # inplace modification
-        model.__init__(input_root, self.fused_graph)
+        model = GraphModule(input_root, self.fused_graph)
         return model
 
     def _find_matches(self, root, graph, patterns):
