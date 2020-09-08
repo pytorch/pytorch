@@ -8,7 +8,9 @@ import torch.cuda
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, find_free_port, run_tests
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.distributed.distributed_test import DistributedTest
+from torch.testing._internal.distributed.distributed_test import (
+    DistributedTest, TestDistBackend
+)
 
 CPP_EXTENSIONS_WARNING = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
@@ -42,7 +44,7 @@ def skip_if_no_ninja(func):
 
 if BACKEND == "gloo" or BACKEND == "nccl":
 
-    class TestDistBackendWithFork(DistributedTest._DistTestBase):
+    class TestDistBackendWithFork(TestDistBackend, DistributedTest._DistTestBase):
 
         def setUp(self):
             super().setUp()
