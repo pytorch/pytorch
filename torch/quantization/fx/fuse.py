@@ -17,7 +17,7 @@ from .fusion_patterns import *  # noqa: F401
 import copy
 class Fuser:
     def fuse(self, model, inplace=False):
-        input_root = model.root
+        input_root = model
         if not inplace:
             input_root = copy.deepcopy(input_root)
         input_graph = model.graph
