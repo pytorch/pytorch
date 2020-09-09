@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -6,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
+#include <memory>
 #include <ostream>
 
 namespace torch {
@@ -22,24 +24,7 @@ class TORCH_CUDA_API GpuLower {
     lower();
   }
 
-  // print generated code to ostream
-  std::ostream& printKernel(
-      std::ostream& _os,
-      const std::string& kernel_name = "CUDAGeneratedKernel");
-
-  std::string getKernel(const std::string& kernel_name = "CUDAGeneratedKernel");
-
-  std::vector<kir::Allocate*> global_allocations() {
-    return global_allocations_;
-  }
-
-  std::vector<kir::Allocate*> dynamic_allocations() {
-    return dynamic_smem_allocations_;
-  }
-
-  std::vector<kir::Allocate*> static_allocations() {
-    return static_smem_allocations_;
-  }
+  Kernel* kernel() const;
 
   // Converts a Fusion IR value into the Kernel IR equivalent
   //
@@ -58,21 +43,11 @@ class TORCH_CUDA_API GpuLower {
   // not have this information. Since we need to have the correct information in
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
-  void buildSizesMap();
+  void replaceSymbolicSizes();
 
  private:
-  // List of global buffers
-  // Allocate nodes track if it needs to be initialized to 0
-  std::vector<kir::Allocate*> global_allocations_;
-
-  // List of dynamic shared memory buffers
-  std::vector<kir::Allocate*> dynamic_smem_allocations_;
-
-  // List of static shared memory buffers
-  std::vector<kir::Allocate*> static_smem_allocations_;
-
-  // Lowered IR
-  std::vector<Expr*> lowered_exprs_;
+  // Lowered Kernel IR
+  std::unique_ptr<Kernel> kernel_;
 
   // Fusion IR node to Kernel IR node mapping
   std::unordered_map<const Val*, Val*> kir_map_;

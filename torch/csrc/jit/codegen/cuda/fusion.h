@@ -90,10 +90,10 @@ class TORCH_CUDA_API Fusion final {
   void removeVal(Val* val);
 
   // Register input as an input of the fusion
-  void addInput(Val* const input);
+  void addInput(Val* input);
 
   // Register output as an output of the fusion
-  void addOutput(Val* const output);
+  void addOutput(Val* output);
 
   // Check if stmt is properly registered with this fusion
   bool inFusion(const Statement* stmt) const;

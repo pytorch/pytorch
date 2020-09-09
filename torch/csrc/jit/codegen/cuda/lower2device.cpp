@@ -1,8 +1,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
@@ -14,96 +12,10 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-namespace {
-
 // TODO(kir): revisit this
 thread_local GpuLower* active_gpu_lower = nullptr;
 
-class BuffersExtractor : OptOutDispatch {
- public:
-  BuffersExtractor(
-      const std::vector<Expr*>& exprs,
-      ThreadPredicateMap& _thread_predicates)
-      : thread_predicates_(_thread_predicates), has_block_broadcast_(false) {
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-  }
-
-  std::vector<kir::Allocate*> getGlobalAllocs() {
-    return global_allocations_;
-  }
-
-  std::vector<kir::Allocate*> getDynamicAllocs() {
-    return dynamic_allocations_;
-  }
-
-  std::vector<kir::Allocate*> getStaticAllocs() {
-    return static_allocations_;
-  }
-
-  bool hasBlockBroadcast() {
-    return has_block_broadcast_;
-  }
-
- private:
-  ThreadPredicateMap& thread_predicates_;
-  bool has_block_broadcast_;
-  std::vector<kir::Allocate*> global_allocations_;
-  std::vector<kir::Allocate*> dynamic_allocations_;
-  std::vector<kir::Allocate*> static_allocations_;
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(kir::ForLoop* fl) final {
-    for (auto expr : fl->body().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->body().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-
-    for (auto expr : ite->elseBody().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-  }
-
-  void handle(kir::BroadcastOp* bop) final {
-    const ir_utils::ParallelTypeBitmap domains =
-        ir_utils::getParallelBroadcastDomains(bop->out(), thread_predicates_);
-    const bool thread_x = domains.get(ParallelType::TIDx);
-    const bool thread_y = domains.get(ParallelType::TIDy);
-    const bool thread_z = domains.get(ParallelType::TIDz);
-    const bool block_broadcast_needed = thread_x || thread_y || thread_z;
-    has_block_broadcast_ |= block_broadcast_needed;
-  }
-
-  void handle(kir::Allocate* a) final {
-    switch (a->getMemoryType()) {
-      case MemoryType::Global:
-        global_allocations_.push_back(a);
-        break;
-      case MemoryType::Shared:
-        if (a->size()->isConstScalar()) {
-          static_allocations_.push_back(a);
-        } else {
-          dynamic_allocations_.push_back(a);
-        }
-        break;
-      case MemoryType::Local:
-        break;
-    }
-  }
-};
-
-} // namespace
-
-void GpuLower::buildSizesMap() {
+void GpuLower::replaceSymbolicSizes() {
   // Grab inputs and outputs
   // TODO: Only run through inputs for the size map, outputs don't actually set
   // any sizes of the problem.
@@ -177,7 +89,7 @@ void GpuLower::lower() {
 
   // prepare for lowering
   validateIr(fusion_);
-  buildSizesMap();
+  replaceSymbolicSizes();
 
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
@@ -193,48 +105,19 @@ void GpuLower::lower() {
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 
-  // Store the final lowered IR
-  lowered_exprs_ = indexed_loops;
-
-  // Get allocations
-  BuffersExtractor be(lowered_exprs_, preds);
-  global_allocations_ = be.getGlobalAllocs();
-  dynamic_smem_allocations_ = be.getDynamicAllocs();
-  static_smem_allocations_ = be.getStaticAllocs();
+  // We now have the lowered expressions, store the final lowered Kernel IR
+  kernel_ = std::make_unique<Kernel>(indexed_loops);
 }
 
-// Traverse through the fusion and print CUDA code associated with it
-std::ostream& GpuLower::printKernel(
-    std::ostream& os,
-    const std::string& kernel_name) {
-  FusionGuard fg(fusion_);
-
-  std::vector<kir::Allocate*> allocs;
-  allocs.insert(
-      allocs.end(), global_allocations_.begin(), global_allocations_.end());
-
-  std::vector<Val*> global_tensors(allocs.size(), nullptr);
-  std::transform(
-      allocs.begin(),
-      allocs.end(),
-      global_tensors.begin(),
-      [](kir::Allocate* alloc) { return alloc->buffer(); });
-
-  bool hasDynamicSmem = dynamic_smem_allocations_.size() > 0;
-
-  IRPrinter irp(os);
-  irp.printKernel(lowered_exprs_, kernel_name, global_tensors, hasDynamicSmem);
-  return os;
-}
-
-std::string GpuLower::getKernel(const std::string& kernel_name) {
-  std::stringstream ss;
-  printKernel(ss, kernel_name);
-  return ss.str();
+Kernel* GpuLower::kernel() const {
+  TORCH_CHECK(kernel_);
+  return kernel_.get();
 }
 
 // Maps Fusion IR nodes to the Kernel IR counterparts
-// (this is a interim solution for easing the Kernel IR splitting)
+//
+// TODO(kir): this is a interim solution for easing the Kernel IR splitting
+//
 class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
   explicit KernelIrMapper(GpuLower* gpu_lower) : gpu_lower_(gpu_lower) {}
