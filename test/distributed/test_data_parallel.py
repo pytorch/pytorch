@@ -785,8 +785,9 @@ class TestDataParallel(TestCase):
             def forward(self, inp):
                 return inp
 
-
-        module = MyMod(torch.nn.ParameterList([torch.rand(10), torch.rand(10)])).cuda()
+        p1 = torch.nn.Parameter(torch.rand(10))
+        p2 = torch.nn.Parameter(torch.rand(10))
+        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
@@ -795,7 +796,7 @@ class TestDataParallel(TestCase):
                 r"nn\.ParameterList is being used with DataParallel but this"):
             model(input)
 
-        module = MyMod(torch.nn.ParameterDict({0: torch.rand(10), 1: torch.rand(10)})).cuda()
+        module = MyMod(torch.nn.ParameterDict({0: p1, 1: p2})).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
