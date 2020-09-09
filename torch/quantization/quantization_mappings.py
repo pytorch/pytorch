@@ -106,6 +106,7 @@ def get_static_quant_module_class(float_module_class):
     assert quantized_module_class is not None, \
         'Floating point module class {}'.format(float_module_class) + \
         ' does not have a corresponding quantized module class'
+    return quantized_module_class
 
 def register_qat_module_class(float_module_class, qat_module_class):
     ''' Register a mapping from float module class to qat module class,
