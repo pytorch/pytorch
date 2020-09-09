@@ -3,7 +3,7 @@ import subprocess
 from typing import List, Optional
 
 from ..util.setting import TOOLS_FOLDER, CompilerType, TestType
-from ..util.utils import check_compiler_type, print_error, remove_file
+from ..util.utils import print_error, remove_file
 
 
 def get_oss_binary_folder(test_type: TestType) -> str:

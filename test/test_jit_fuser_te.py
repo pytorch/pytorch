@@ -1161,19 +1161,20 @@ class TestTEFuser(JitTestCase):
             torch.int32,
             torch.int64,
             torch.float16,
-            torch.bfloat16,
             torch.float32,
             torch.float64,
+            torch.bfloat16,
             torch.bool,
             torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.qint8,
-            torch.quint8,
-            torch.qint32,
+            # torch.complex64,
+            # torch.complex128,
+            # torch.qint8,
+            # torch.quint8,
+            # torch.qint32,
         ]
         unary_ops = [
             torch.sigmoid,
+            torch.reciprocal,
         ]
         devices = [
             "cuda",
