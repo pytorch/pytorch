@@ -46,7 +46,6 @@ TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
 
 TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
   m.fallback(torch::CppFunction::makeAutogradNotImplemented());
-  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 }
