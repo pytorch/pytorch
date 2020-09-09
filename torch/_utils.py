@@ -421,6 +421,10 @@ class ExceptionWrapper(object):
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
+        elif getattr(self.exc_type, "message", None):
+            # Some exceptions have first argument as non-str but explicitly
+            # have message field
+            raise self.exc_type(message=msg)
         raise self.exc_type(msg)
 
 

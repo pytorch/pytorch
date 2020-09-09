@@ -261,7 +261,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     If `qconfig` is provided, the `dtype` argument is ignored.
 
     Args:
-        module: input model
+        model: input model
         qconfig_spec: Either:
 
             - A dictionary that maps from name or type of submodule to quantization
@@ -309,6 +309,8 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             default_qconfig = default_dynamic_qconfig
         elif dtype is torch.float16:
             default_qconfig = float16_dynamic_qconfig
+        elif dtype is torch.quint8:
+            default_qconfig = float_qparams_dynamic_qconfig
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
