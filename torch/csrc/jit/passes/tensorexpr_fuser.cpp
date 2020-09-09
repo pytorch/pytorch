@@ -586,6 +586,17 @@ class TensorExprFuser {
       if (input->node()->kind() == prim::Constant) {
         REQ(!input->type()->cast<TensorType>())
       }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
+      }
     }
     if (node->kind() == aten::cat) {
       REQ(node->input(0)->node()->kind() == prim::ListConstruct);
