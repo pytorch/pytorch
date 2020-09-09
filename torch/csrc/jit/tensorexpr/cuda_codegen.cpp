@@ -186,6 +186,18 @@ void CudaPrinter::visit(const For* v) {
 }
 
 void CudaPrinter::visit(const Cast* v) {
+  if (v->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__float2half(";
+    v->src_value()->accept(this);
+    os() << ")";
+    return;
+  } else if (v->src_value()->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__half2float(";
+    v->src_value()->accept(this);
+    os() << ")";
+    return;
+  }
+
   os() << cudaDtypeCppString(v->dtype());
   os() << "(";
   v->src_value()->accept(this);
@@ -222,15 +234,6 @@ void CudaPrinter::visit(const Intrinsics* v) {
 
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    if (v->indices().empty()) {
-      os() << "__half2float(" << *v->base_handle() << ")";
-    } else {
-      os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-           << "])";
-    }
-    return;
-  }
   // Detects whether the load target is also a store target.
   // TODO: this is currently too wide. It detects whether a store-target
   // exists within the program. In fact, this check is only necessary within a
@@ -239,8 +242,9 @@ void CudaPrinter::visit(const Load* v) {
     os() << *v->base_handle();
     return;
   }
-  if (v->dtype().scalar_type() == ScalarType::Bool) {
-    // There's no __ldg overload for bool.
+  if (v->dtype().scalar_type() == ScalarType::Bool ||
+      v->dtype().scalar_type() == ScalarType::Half) {
+    // There's no __ldg overload for bool or half.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
   }
@@ -366,12 +370,7 @@ void CudaPrinter::visit(const Store* v) {
   } else {
     os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   }
-  if (v->value()->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__float2half(" << *v->value() << ");";
-  } else {
-    os() << *v->value() << ";";
-  }
-  os() << std::endl;
+  os() << *v->value() << ";";
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
@@ -428,12 +427,7 @@ void CudaPrinter::visit(const Block* v) {
 
 void CudaPrinter::visit(const Let* v) {
   emitIndent();
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    // we do math in floats so use that.
-    os() << "float";
-  } else {
-    os() << cudaDtypeCppString(v->dtype());
-  }
+  os() << cudaDtypeCppString(v->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -476,6 +470,27 @@ class PrioritizeLoad : public IRMutator {
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
+  }
+
+  const Expr* mutate(const Cast* v) override {
+    const Load* src_load = dynamic_cast<const Load*>(v->src_value());
+    const Expr* new_src = v->src_value()->accept_mutator(this);
+    const Var* new_var = dynamic_cast<const Var*>(new_src);
+    if (!src_load || !new_var) {
+      return new Cast(v->dtype(), new_src);
+    }
+
+    // We just did the prioritize load, let's fold in the Cast.
+    MemLoadList& load_list = load_stack_.back();
+    assert(!load_list.empty());
+    auto pair = load_list.back();
+    assert(pair.first == new_var);
+    load_list.pop_back();
+
+    new_var = new Var("v", v->dtype());
+    const Expr* new_value = new Cast(v->dtype(), pair.second);
+    load_list.push_back(std::make_pair(new_var, new_value));
+    return new_var;
   }
 
   Stmt* mutate(const Store* v) override {
@@ -843,8 +858,9 @@ void CudaCodeGen::Initialize() {
 
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
+  Stmt* stmt_v = stmt();
   CudaHalfChecker halfChecker;
-  stmt()->accept(&halfChecker);
+  stmt_v = stmt_v->accept_mutator(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
@@ -886,7 +902,6 @@ void CudaCodeGen::Initialize() {
     os() << std::endl;
   }
 
-  Stmt* stmt_v = stmt();
   NoThreadIdxRewriter no_thread_idx;
   stmt_v = stmt_v->accept_mutator(&no_thread_idx);
 
