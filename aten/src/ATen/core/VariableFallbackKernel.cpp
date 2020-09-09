@@ -33,19 +33,19 @@ namespace {
 // to override it themselves!
 
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeAutogradNotImplemented());
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeAutogradNotImplemented());
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeAutogradNotImplemented());
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeAutogradNotImplemented());
 }
 
 }

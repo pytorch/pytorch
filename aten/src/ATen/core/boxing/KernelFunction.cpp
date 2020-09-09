@@ -29,6 +29,17 @@ void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Stack
     );
 }
 
+void autograd_not_implemented_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
+  TORCH_CHECK(0,
+    op.operator_name(), " does not have a kernel registered for Autograd. You're seeing this message likely "
+    "because you're writing a new backend for PyTorch (if not please report a bug). Note registering to "
+    "backend key like PrivateUse1 only support inference. To support training, you should provide either "
+    "a composite kernel or a torch::autograd::Function that handles both forward and backward "
+    "to the corresponding Autograd dispatch key. Currently this throws in forward, we plan to support "
+    "automatically redispatch to backend key and only throws when users call backward in the future(#43908)."
+    );
+}
+
 // single line summary of state
 std::string KernelFunction::dumpState() const {
   std::ostringstream oss;
