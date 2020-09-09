@@ -318,8 +318,9 @@ std::string OperatorEntry::dumpComputedTable() const {
 }
 
 // Inspect the "canonical" information in OperatorEntry.  This only prints out
-// *non-derived* information; i.e., what the source of truth says about the
-// operator.  This dumping function is appropriate for expect tests.
+// *non-derived* information including kernels registered to alias dispatch keys;
+// i.e., what the source of truth says about the operator.  This dumping function
+// is appropriate for expect tests.
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
@@ -333,10 +334,11 @@ std::string OperatorEntry::dumpState() const {
     oss << "schema: (none)\n";
   }
 
-  auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts) {
+  auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts, bool is_alias_key=false) {
     int64_t i = 0;
     for (const auto& jt : jts) {
       oss << k_desc
+          << (is_alias_key ? "[alias]" :  "")
           << (i > 0 ? " (inactive)" : "")
           << ": "
           << jt.debug << " :: "
@@ -347,11 +349,11 @@ std::string OperatorEntry::dumpState() const {
   };
 
   // Iterate over DispatchKey, not the flat hash map, so we have a stable order
-  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+  for (uint8_t i = 0; i <= static_cast<uint8_t>(DispatchKey::EndOfAliasKeys); i++) {
     auto k = static_cast<DispatchKey>(i);
     auto it = kernels_.find(k);
     if (it != kernels_.end()) {
-      print_kernel(toString(k), it->second);
+      print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
   print_kernel("catchall", catchAllKernel_);
