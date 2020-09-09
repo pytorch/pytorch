@@ -1487,11 +1487,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_cdist',
 }
 
-EXCLUDE_METHOD_FOR_ATTRIBUTES = {
-    'real',
-    'imag',
-}
-
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
     exclude_all_tensor_method_by_test_name = {

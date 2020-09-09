@@ -45,6 +45,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
     """
     input: input to `fn`
     target: the Tensors wrt whom Jacobians are calculated (default=`input`)
+    v: grad output value used to calculate gradients in case of complex functions.
 
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
@@ -230,10 +231,10 @@ def gradcheck(
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
-    For functions with complex output, the numerical and analytical gradients are computed
-    using :attr:`grad_output` both values 1 and 1j and compared against other in each case.
-    For more details on how the gradient for complex functions is calculated, check out
-    the note :ref:`complex_autograd-doc`
+    For complex functions, no notion of Jacobian exists, and the gradients computation is done under
+    the assumption that the overall function has a real valued output. For more details, check out
+    :ref:`complex_autograd-doc`. For functions with complex output, gradcheck compares the numerical and
+    analytical gradients for two values of :attr:`grad_output`: 1 and 1j.
 
     .. note::
         The default values are designed for :attr:`input` of double precision.
