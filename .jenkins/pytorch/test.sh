@@ -375,12 +375,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
-  test_python_all_except_nn_and_cpp_extensions
-  test_aten
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
-  test_torch_function_benchmark
+#   test_python_all_except_nn_and_cpp_extensions
+#   test_aten
+#   test_libtorch
+#   test_custom_script_ops
+#   test_custom_backend
+#   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -391,17 +391,17 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   test_cpp_extensions
 else
   install_torchvision
-  test_python_nn
-  test_python_all_except_nn_and_cpp_extensions
-  test_cpp_extensions
-  test_aten
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
-  test_torch_function_benchmark
-  test_distributed
+#   test_python_nn
+#   test_python_all_except_nn_and_cpp_extensions
+#   test_cpp_extensions
+#   test_aten
+#   test_libtorch
+#   test_custom_script_ops
+#   test_custom_backend
+#   test_torch_function_benchmark
+#   test_distributed
   test_benchmarks
-  test_rpc
+#   test_rpc
   if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
     pushd test
     echo "Generating XML coverage report"
