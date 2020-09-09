@@ -103,7 +103,7 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, X_SIZE, C_OUT, KERNEL_SIZE, STRIDE, device):
         self.input = torch.rand(X_SIZE, device=device, requires_grad=self.auto_set())
-        self.convtranspose3d = nn.ConvTranspose1d(
+        self.convtranspose3d = nn.ConvTranspose3d(
             X_SIZE[1], C_OUT, KERNEL_SIZE, stride=STRIDE).to(device=device)
         self.set_module_name('ConvTranspose3d')
 
