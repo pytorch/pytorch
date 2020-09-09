@@ -1,7 +1,7 @@
 CUSTOM_MODULES = set()
 
-def register_custom_module_class(custom_module_class):
-    ''' Register a module as custom module, when the module
+def register_traceable_custom_module_class(custom_module_class):
+    ''' Register a symbolically traceable module as custom module, when the module
     appear in the code, we will observe and quantize it as one
     unit
     '''

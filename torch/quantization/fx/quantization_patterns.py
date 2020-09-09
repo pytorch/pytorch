@@ -3,6 +3,7 @@ from torch.fx.graph import (
     Node,
 )
 from ..quantization_mappings import (
+    get_static_quant_module_mapping,
     get_static_quant_module_class,
     get_quantized_operator,
 )
@@ -10,28 +11,14 @@ from .pattern_utils import (
     register_quant_pattern,
     register_dynamic_quant_pattern,
 )
-from .utils import _parent_name
+from .utils import (
+    _parent_name,
+    quantize_node,
+    get_per_tensor_qparams,
+)
 
 from abc import ABC, abstractmethod
 import operator
-
-# ------------------------
-# Helper Functions
-# ------------------------
-
-def get_qparams(activation_post_process):
-    scale, zero_point = activation_post_process.calculate_qparams()
-    scale = float(scale)
-    zero_point = int(zero_point)
-    dtype = activation_post_process.dtype
-    return scale, zero_point, dtype
-
-def quantize_node(node, activation_post_process):
-    scale, zero_point, dtype = get_qparams(activation_post_process)
-    return torch.quantize_per_tensor(node, scale, zero_point, dtype)
-
-def quantize(quantizer, node):
-    quantize_node(node, quantizer.activation_post_process_map[node.name])
 
 # -------------------------
 # Pattern Registrations
@@ -213,8 +200,9 @@ class ConvRelu(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 conv_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.conv2d, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
-                    conv_out, quantizer.activation_post_process_map[self.conv_node.name])
+                    root_module, quantizer.quantized_graph, conv_out, quantizer.activation_post_process_map[self.conv_node.name])
             else:
                 assert len(self.conv_node.args) == 7, \
                     'only conv2d calls with all arguments specified is support right now in debug=False option'
@@ -228,7 +216,7 @@ class ConvRelu(QuantizeHandler):
                 # construct conv input
                 conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                 activation_post_process = quantizer.activation_post_process_map[self.conv_node.name]
-                scale, zero_point, _ = get_qparams(activation_post_process)
+                scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                 qconv_args = (conv_input, packed_weight, scale, zero_point)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 return quantizer.quantized_graph.create_node(
@@ -288,7 +276,10 @@ class LinearReLU(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
                 linear_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.linear, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
+                    root_module,
+                    quantizer.quantized_graph,
                     linear_out,
                     quantizer.activation_post_process_map[self.linear_node.name])
             else:
@@ -317,7 +308,7 @@ class LinearReLU(QuantizeHandler):
                 linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                 activation_post_process = \
                     quantizer.activation_post_process_map[self.linear_node.name]
-                scale, zero_point, _ = get_qparams(activation_post_process)
+                scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                 qlinear_args = (linear_input, packed_weight, scale, zero_point)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
@@ -511,20 +502,26 @@ class CopyNode(QuantizeHandler):
 class DefaultQuant(QuantizeHandler):
     def convert(self, quantizer, node):
         assert self.all_nodes
-        return quantize(quantizer, node)
+        root_module = quantizer.modules['']
+        return quantize_node(
+            root_module,
+            quantizer.quantized_graph,
+            node, quantizer.activation_post_process_map[node.name])
 
 class CustomModule(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
-        activation_post_process = quantizer.activation_post_process_map[node.name]
         if quantizer.is_dynamic_quant:
-            convert = torch.qauntization.convert_dynamic_fx
+            convert = torch.qauntization.convert_dynamic_child_module_fx
         else:
-            convert = torch.quantization.convert
+            convert = torch.quantization.convert_child_module_fx
         observed_custom_module = quantizer.modules[node.target]
+        print('observed custom module:', type(observed_custom_module))
         quantized_custom_module = convert(observed_custom_module, debug=debug)
+        print('quantized custom module:', quantized_custom_module)
         parent_name, name = _parent_name(node.target)
         setattr(quantizer.modules[parent_name], name, quantized_custom_module)
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 
 # 2. Post Training Dynamic Quantizatoin Patterns
