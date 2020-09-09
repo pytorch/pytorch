@@ -154,6 +154,13 @@ def doAutodiffCheck(testname):
         return False
     return True
 
+if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+    EXCLUDE_SCRIPT_MODULES.update({
+        'test_nn_LocalResponseNorm_1d',
+        'test_nn_LPPool2d',
+        'test_nn_LPPool2d_norm',
+    })
+
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
@@ -5390,6 +5397,7 @@ a")
 
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Peeling is now disabled")
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5676,8 +5684,9 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
-                   .check("~~~~~~~~~...  <--- HERE") \
+                   .check("~~~~~~~~~") \
                    .check('raise Exception("hello")') \
+                   .check('~~~~~~~~~~~~~~~~~ <--- HERE') \
                    .run(str(ast.range()))
 
     def test_python_frontend_py3(self):
@@ -15167,6 +15176,71 @@ a")
 
         input = torch.ones(2, 2)
         self.assertEqual(input, parameter_script(input))
+
+    def test_save_load_attr_error(self):
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        class Wrapper(nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                # this attribute doesn't exist on `Inner`
+                return self.inner.b(x)
+
+        inner_module = torch.jit.script(Inner())
+        inner_module = self.getExportImportCopy(inner_module)
+        wrapped = Wrapper(inner_module)
+        # This should properly complain that `self.inner` doesn't have the attribute `b`
+        with self.assertRaisesRegex(RuntimeError, 'has no attribute'):
+            torch.jit.script(wrapped)
+
+    def test_rescripting_loaded_modules(self):
+        class InnerSubmod(nn.Module):
+            __constants__ = ['my_constant']
+
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.ones(1))
+                self.register_parameter("bar", torch.nn.Parameter(torch.ones(1)))
+                self.baz = torch.ones(1)
+                self.my_constant = 1
+
+            def forward(self, x):
+                return x + x
+
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = InnerSubmod()
+
+            def forward(self, x):
+                return self.submod(x)
+
+        class Wrapper(nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                # access inner elements
+                ret = self.inner.submod(x) + self.inner.submod.foo + self.inner.submod.bar + self.inner.submod.baz
+                ret = ret + self.inner.submod.my_constant
+                return ret
+
+        inner_module = torch.jit.script(Inner())
+        wrapped = Wrapper(inner_module)
+        self.checkModule(wrapped, torch.ones(1))
+
+        inner_module_loaded = self.getExportImportCopy(inner_module)
+        wrapped_loaded = Wrapper(inner_module_loaded)
+        self.assertEqual(wrapped(torch.ones(1)), wrapped_loaded(torch.ones(1)))
 
 
 # known to be failing in tracer
