@@ -1664,6 +1664,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
     def test_all_to_all_cuda(self):
         group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
         self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU)
 
     @unittest.skipIf(
@@ -1738,6 +1739,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
     def test_all_to_all_single_equal_split_full_group_cuda(self):
         group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank, True, rank_to_GPU)
 
     @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
@@ -1769,6 +1771,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
     def test_all_to_all_single_unequal_split_full_group_cuda(self):
         group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank, True, rank_to_GPU)
 
     @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
