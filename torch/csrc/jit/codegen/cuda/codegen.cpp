@@ -23,7 +23,7 @@ std::string generateCudaKernel(
 
   std::stringstream ss;
 
-  IRPrinter ir_printer(ss);
+  IrPrinter ir_printer(ss);
   ir_printer.printKernel(
       kernel->exprs(),
       kernel_name,

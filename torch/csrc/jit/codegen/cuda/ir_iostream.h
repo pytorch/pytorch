@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -11,84 +12,28 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-class Fusion;
-
-// Hierarchal dispatch functions for handle
-class Statement;
-class Expr;
-class Val;
-
-// Vals
-class IterDomain;
-class TensorDomain;
-class TensorView;
-class Bool;
-class Float;
-class Half;
-class Int;
-class NamedScalar;
-
-// Exprs
-class Split;
-class Merge;
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class ReductionOp;
-class BroadcastOp;
-
-// Kernel IR
-namespace kir {
-
-class Bool;
-class Float;
-class Half;
-class Int;
-class NamedScalar;
-
-class IterDomain;
-class TensorDomain;
-class TensorView;
-
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class ReductionOp;
-class BroadcastOp;
-
-class TensorIndex;
-class Allocate;
-class ForLoop;
-class IfThenElse;
-class GridReduction;
-class Sync;
-
-} // namespace kir
-
-/*
- * Define pretty printing functions for all nodes. handle is used so we can take
- * advantage of OptInConstDispatch. Where we will throw an error if a print
- * function is not defined for a node. Stream operator << is also provided for
- * Fusion&, Fusion* and Statement* which allow us to print any node through
- * stream operator <<.
- */
-
-class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+//! Define pretty printing functions for IR nodes
+//!
+//! This class is intended for debug printing, so it attempts
+//! to handle invalid states as well.
+//!
+class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
  public:
-  std::ostream& os;
-  bool print_inline_ = false;
-
-  // Track the indentation size for pretty printing
-  int indent_size = 0;
+  explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   // Indent the generated code
   void indent() {
-    for (int i = 0; i < indent_size; i++)
-      os << "  ";
+    for (int i = 0; i < indent_size_; i++) {
+      os_ << "  ";
+    }
   }
 
   void resetIndent() {
-    indent_size = 0;
+    indent_size_ = 0;
+  }
+
+  bool printInline() const {
+    return print_inline_;
   }
 
   void printHeader(
@@ -96,8 +41,6 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
       const std::string& kernel_name_,
       const std::vector<Val*>& global_buffers,
       bool hasDynamicSmem);
-
-  IRPrinter(std::ostream& _os) : os(_os) {}
 
   virtual void handle(Fusion* f);
 
@@ -174,9 +117,16 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
       bool hasDynamicSmem);
 
  private:
-  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
-
   const ThreadPredicateMap& getThreadPredicateMap();
+
+ private:
+  std::ostream& os_;
+  bool print_inline_ = false;
+
+  // Track the indentation size for pretty printing
+  int indent_size_ = 0;
+
+  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
 };
 
 TORCH_CUDA_API std::ostream& operator<<(

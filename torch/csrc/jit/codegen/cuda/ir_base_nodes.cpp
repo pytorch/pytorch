@@ -36,7 +36,7 @@ Expr* Statement::asExpr() {
 }
 
 void Statement::print() const {
-  IRPrinter ir_printer(std::cout);
+  IrPrinter ir_printer(std::cout);
   ir_printer.handle(this);
   std::cout << std::endl;
 }

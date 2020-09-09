@@ -338,9 +338,9 @@ void Fusion::validateInputs() {
 void Fusion::print() {
   FusionGuard fg(this);
   std::cout << "%kernel {\n";
-  IRMathPrinter op_exprs(std::cout);
+  IrMathPrinter op_exprs(std::cout);
   op_exprs.handle(this);
-  IRTransformPrinter t_exprs(std::cout);
+  IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
   std::cout << "}\n";
 }
@@ -357,7 +357,7 @@ void Fusion::printMath() {
 
 void Fusion::printTransforms() {
   FusionGuard fg(this);
-  IRTransformPrinter t_exprs(std::cout);
+  IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
 }
 
