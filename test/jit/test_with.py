@@ -23,7 +23,6 @@ class TestWith(JitTestCase):
     """
     A suite of tests for with statements.
     """
-
     def test_with_as(self):
         """
         Check that with statements that use the 'as' keyword to bind expressions
@@ -610,3 +609,28 @@ class TestWith(JitTestCase):
         w = s(x, y)
 
         self.assertFalse(w.requires_grad)
+
+    def test_with_record_function(self):
+        """
+        Check that torch.autograd.profiler.record_function context manager is
+        torchscriptable.
+        """
+        def with_rf(x, y):
+            # type: (Tensor, Tensor) -> Tensor
+            with torch.autograd.profiler.record_function("foo"):
+                a = x + y
+            return a
+        scripted = torch.jit.script(with_rf)
+        x, y = torch.ones(2), torch.ones(2)
+        with torch.autograd.profiler.profile() as p:
+            scripted(x, y)
+
+        # Need to call below to populate CPU children.
+        p.key_averages()
+        function_events = p.function_events
+        # Event with name "foo" and child "aten::add" should be reocorded.
+        rf_events = [evt for evt in function_events if evt.name == "foo"]
+        self.assertTrue(len(rf_events), 1)
+        rf_event = rf_events[0]
+        child_events = rf_event.cpu_children
+        self.assertTrue("aten::add" in (child.name for child in child_events))

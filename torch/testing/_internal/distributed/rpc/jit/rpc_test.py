@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
+from torch.autograd.profiler import record_function
 from torch.distributed.rpc import RRef
 from torch.distributed.rpc.internal import RPCExecMode, _build_rpc_profiling_key
 from torch.futures import Future
@@ -138,6 +139,11 @@ def one_arg(value):
 def script_add_ones(x):
     return torch.add(x, torch.ones(1))
 
+@torch.jit.script
+def script_add_ones_with_record_function(x, block: str):
+    with record_function(block):
+        return torch.add(x, torch.ones(1))
+
 
 @torch.jit.script
 def script_fork_wait_udf(tensor):
@@ -179,6 +185,11 @@ def call_rpc_with_profiling(handle: Tensor, dst_worker_name: str) -> Tensor:
     torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
     ret = fut.wait()
     return ret
+
+@torch.jit.script
+def call_rpc_torchscript_with_record_function(dst_worker_name: str, block: str) -> Tensor:
+    fut = rpc.rpc_async(dst_worker_name, script_add_ones_with_record_function, (torch.tensor(1), block))
+    return fut.wait()
 
 
 @torch.jit.script
@@ -1115,6 +1126,40 @@ class JitRpcTest(
             ][0]
             remote_add_profiled_name = f"{profiled_name}#remote_op: aten::add"
             self.assertEqual(remote_add.name, remote_add_profiled_name)
+
+    @dist_init
+    def test_rpc_torchscript_record_function(self):
+        # tests that torchscript functions can be profiled using with
+        # record_function(...) over RPC.
+        REMOTE_OP_STR = "#remote_op: "
+        if self.rank == 0:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker_name = worker_name(dst_rank)
+            block_scope = "foo"
+            with torch.autograd.profiler.profile() as prof:
+                call_rpc_torchscript_with_record_function(dst_worker_name, block_scope)
+
+            # Need to call below to populate CPU children.
+            prof.key_averages()
+            function_events = prof.function_events
+            expected_key = (
+                _build_rpc_profiling_key(
+                    RPCExecMode.ASYNC_JIT,
+                    torch._jit_internal._qualified_name(
+                        script_add_ones_with_record_function
+                    ),
+                    worker_name(self.rank),
+                    dst_worker_name,
+                )
+                + REMOTE_OP_STR
+                + block_scope
+            )
+            remote_record_function_event = [
+                evt for evt in function_events if evt.name == expected_key
+            ][0]
+            self.assertTrue(block_scope in remote_record_function_event.name)
+            remote_children = remote_record_function_event.cpu_children
+            self.assertTrue("aten::add" in child.name for child in remote_children)
 
     def test_record_function_jit_end_callbacks_with_fork(self):
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit

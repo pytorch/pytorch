@@ -1,5 +1,7 @@
 import itertools
+from typing import Any
 import torch
+from torch.futures import Future
 
 from collections import defaultdict, namedtuple
 from operator import attrgetter
@@ -424,21 +426,23 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, name: str):
+        self.name: str = name
         # Whether or not we should run record function's end callbacks when exiting.
-        self.run_callbacks_on_exit = True
+        self.run_callbacks_on_exit: bool = True
+        # Stores underlying RecordFunction as a tensor. TODO: move to custom
+        # class (https://github.com/pytorch/pytorch/issues/35026).
+        self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
             torch.ops.profiler._record_function_exit(self.handle)
-        return False
 
-    def _call_end_callbacks_on_future(self, fut):
+    def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
         _call_end_callbacks_on_future is meant to be used for profiling async
         calls that return a future. Calling this function will extend recording
