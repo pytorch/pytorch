@@ -631,7 +631,7 @@ class TestWith(JitTestCase):
         # Need to call below to populate CPU children.
         p.key_averages()
         function_events = p.function_events
-        # Event with name "foo" and child "aten::add" should be reocorded.
+        # Event with name "foo" should be recorded.
         rf_events = [evt for evt in function_events if evt.name == "foo"]
         self.assertTrue(len(rf_events), 1)
         rf_event = rf_events[0]
@@ -641,5 +641,6 @@ class TestWith(JitTestCase):
         nested_function_event = [
             evt for evt in function_events if evt.name == "nested"
         ][0]
+        # Nested record function should have child "aten::add"
         nested_child_events = nested_function_event.cpu_children
         self.assertTrue("aten::add" in (child.name for child in nested_child_events))
