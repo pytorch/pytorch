@@ -68,6 +68,15 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
+    AsyncWork() {
+      resultFuture = c10::make_intrusive<c10::ivalue::Future>(
+          c10::ListType::create(c10::TensorType::get()));
+    }
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+      return resultFuture;
+    }
+
     static void execute(std::shared_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
       try {
@@ -75,6 +84,7 @@ class ProcessGroupGloo : public ProcessGroup {
       } catch (...) {
         eptr = std::current_exception();
       }
+      work->resultFuture->markCompleted();
       work->finish(eptr);
     }
 
@@ -82,6 +92,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
    protected:
     friend class ProcessGroupGloo;
+    c10::intrusive_ptr<c10::ivalue::Future> resultFuture;
   };
 
   // For send and recv operations there is no need to pass them to the

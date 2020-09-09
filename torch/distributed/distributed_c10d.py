@@ -1,3 +1,5 @@
+import contextlib
+import functools
 import pickle
 import torch
 import warnings
@@ -753,10 +755,31 @@ def recv(tensor,
         return src
 
 
+def async_collective(func):
+    @functools.wraps(func)
+    def wrapped(*args, async_op=False, **kwargs):
+        work = func(*args, **kwargs)
+        if work is None:
+            return
+
+        should_profile = torch.autograd._profiler_enabled()
+        if should_profile:
+            with torch.autograd.profiler.record_function(func.__name__) as rf:
+                fut = rf._call_end_callbacks_on_future(work.get_future())
+                work._set_profiling_future(fut)
+
+        if async_op:
+            return work
+        else:
+            work.wait()
+
+    return wrapped
+
+
+@async_collective
 def broadcast_multigpu(tensor_list,
                        src,
                        group=group.WORLD,
-                       async_op=False,
                        src_tensor=0):
     """
     Broadcasts the tensor to the whole group with multiple GPU tensors
@@ -802,16 +825,13 @@ def broadcast_multigpu(tensor_list,
         group_src_rank = _get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.broadcast(tensor_list, opts)
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def broadcast(tensor,
               src,
-              group=group.WORLD,
-              async_op=False):
+              group=group.WORLD):
     """
     Broadcasts the tensor to the whole group.
 
@@ -845,16 +865,13 @@ def broadcast(tensor,
         group_src_rank = _get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.broadcast([tensor], opts)
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def all_reduce_multigpu(tensor_list,
                         op=ReduceOp.SUM,
-                        group=group.WORLD,
-                        async_op=False):
+                        group=group.WORLD):
     r"""
     Reduces the tensor data across all machines in such a way that all get
     the final result. This function reduces a number of tensors on every node,
@@ -896,16 +913,13 @@ def all_reduce_multigpu(tensor_list,
     else:
         work = group.allreduce(tensor_list, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def all_reduce(tensor,
                op=ReduceOp.SUM,
-               group=group.WORLD,
-               async_op=False):
+               group=group.WORLD):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -938,16 +952,13 @@ def all_reduce(tensor,
     else:
         work = group.allreduce([tensor], opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def all_reduce_coalesced(tensors,
                          op=ReduceOp.SUM,
-                         group=group.WORLD,
-                         async_op=False):
+                         group=group.WORLD):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
     For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
@@ -989,17 +1000,13 @@ def all_reduce_coalesced(tensors,
     else:
         work = group.allreduce_coalesced(tensors, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
-
+@async_collective
 def reduce_multigpu(tensor_list,
                     dst,
                     op=ReduceOp.SUM,
                     group=group.WORLD,
-                    async_op=False,
                     dst_tensor=0):
     """
     Reduces the tensor data on multiple GPUs across all machines. Each tensor
@@ -1046,17 +1053,14 @@ def reduce_multigpu(tensor_list,
         opts.rootRank = group_dst_rank
         work = group.reduce(tensor_list, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def reduce(tensor,
            dst,
            op=ReduceOp.SUM,
-           group=group.WORLD,
-           async_op=False):
+           group=group.WORLD):
     """
     Reduces the tensor data across all machines.
 
@@ -1085,6 +1089,7 @@ def reduce(tensor,
     opts.reduceOp = op
     opts.rootRank = dst
 
+
     if group == GroupMember.WORLD:
         _check_default_pg()
         work = _default_pg.reduce([tensor], opts)
@@ -1093,16 +1098,13 @@ def reduce(tensor,
         opts.rootRank = group_dst_rank
         work = group.reduce([tensor], opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def all_gather_multigpu(output_tensor_lists,
                         input_tensor_list,
-                        group=group.WORLD,
-                        async_op=False):
+                        group=group.WORLD):
     """
     Gathers tensors from the whole group in a list.
     Each tensor in ``tensor_list`` should reside on a separate GPU
@@ -1151,10 +1153,7 @@ def all_gather_multigpu(output_tensor_lists,
     else:
         work = group.allgather(output_tensor_lists, input_tensor_list)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
 def _object_to_tensor(obj):
@@ -1386,10 +1385,10 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
 
+@async_collective
 def all_gather(tensor_list,
                tensor,
-               group=group.WORLD,
-               async_op=False):
+               group=group.WORLD):
     """
     Gathers tensors from the whole group in a list.
 
@@ -1416,15 +1415,12 @@ def all_gather(tensor_list,
     else:
         work = group.allgather([tensor_list], [tensor])
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
+@async_collective
 def all_gather_coalesced(output_tensor_lists,
                          input_tensor_list,
-                         group=group.WORLD,
-                         async_op=False):
+                         group=group.WORLD):
     """
     Gathers input tensors from the whole group in a list in a coalesced manner.
 
@@ -1483,10 +1479,7 @@ def all_gather_coalesced(output_tensor_lists,
     else:
         work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
     if dst == my_rank:
@@ -1501,11 +1494,11 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
         )
 
 
+@async_collective
 def gather(tensor,
            gather_list=None,
            dst=0,
-           group=group.WORLD,
-           async_op=False):
+           group=group.WORLD):
     """
     Gathers a list of tensors in a single process.
 
@@ -1550,17 +1543,14 @@ def gather(tensor,
         opts.rootRank = group_dst_rank
         work = group.gather(output_tensors, input_tensors, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def scatter(tensor,
             scatter_list=None,
             src=0,
-            group=group.WORLD,
-            async_op=False):
+            group=group.WORLD):
     """
     Scatters a list of tensors to all processes in a group.
 
@@ -1616,17 +1606,14 @@ def scatter(tensor,
         opts.rootRank = group_src_rank
         work = group.scatter(output_tensors, input_tensors, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def reduce_scatter_multigpu(output_tensor_list,
                             input_tensor_lists,
                             op=ReduceOp.SUM,
-                            group=group.WORLD,
-                            async_op=False):
+                            group=group.WORLD):
     """
     Reduce and scatter a list of tensors to the whole group.  Only nccl backend
     is currently supported.
@@ -1687,17 +1674,14 @@ def reduce_scatter_multigpu(output_tensor_list,
             opts
         )
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def reduce_scatter(output,
                    input_list,
                    op=ReduceOp.SUM,
-                   group=group.WORLD,
-                   async_op=False):
+                   group=group.WORLD):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
 
@@ -1726,18 +1710,15 @@ def reduce_scatter(output,
     else:
         work = group.reduce_scatter([output], [input_list], opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
+@async_collective
 def all_to_all_single(output,
                       input,
                       output_split_sizes=None,
                       input_split_sizes=None,
-                      group=group.WORLD,
-                      async_op=False):
+                      group=group.WORLD):
     """
     Each process splits input tensor and then scatters the split list
     to all processes in a group. Then concatenate the received tensors from all
@@ -1822,15 +1803,12 @@ def all_to_all_single(output,
     else:
         work = group.alltoall_base(output, input, output_split_sizes, input_split_sizes, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
+@async_collective
 def all_to_all(output_tensor_list,
                input_tensor_list,
-               group=group.WORLD,
-               async_op=False):
+               group=group.WORLD):
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
@@ -1913,14 +1891,11 @@ def all_to_all(output_tensor_list,
     else:
         work = group.alltoall(output_tensor_list, input_tensor_list, opts)
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
-def barrier(group=group.WORLD,
-            async_op=False):
+@async_collective
+def barrier(group=group.WORLD):
     """
     Synchronizes all processes.
 
@@ -1944,10 +1919,7 @@ def barrier(group=group.WORLD,
     else:
         work = group.barrier()
 
-    if async_op:
-        return work
-    else:
-        work.wait()
+    return work
 
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None):

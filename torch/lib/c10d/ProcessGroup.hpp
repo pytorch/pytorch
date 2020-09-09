@@ -93,6 +93,14 @@ class ProcessGroup {
     // work. Only NCCL backend is currently supported.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
+    // Keeps track of the future responsible for profiling owner creation
+    // // acknowledgement
+    c10::intrusive_ptr<c10::ivalue::Future> getProfilingFuture() const;
+    // Sets the future responsible for profiling owner creation acknowledgement.
+    // This future is set from python to be a future that returns when profiling
+    // callbacks have been run.
+    void setProfilingFuture(c10::intrusive_ptr<c10::ivalue::Future> profilingFuture);
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -106,6 +114,8 @@ class ProcessGroup {
     std::condition_variable cv_;
     bool completed_ = false;
     std::exception_ptr exception_;
+
+    c10::optional<c10::intrusive_ptr<c10::ivalue::Future>> profilingFuture_;
   };
 
   explicit ProcessGroup(int rank, int size);

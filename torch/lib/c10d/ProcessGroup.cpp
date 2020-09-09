@@ -63,6 +63,16 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
   TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getProfilingFuture() const {
+  TORCH_INTERNAL_ASSERT(profilingFuture_, "Profiling future has not been set!");
+  return *profilingFuture_;
+}
+
+void ProcessGroup::Work::setProfilingFuture(c10::intrusive_ptr<c10::ivalue::Future> profilingFuture) {
+  profilingFuture_ = std::move(profilingFuture);
+}
+
+
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;

@@ -729,6 +729,23 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_profiling_future",
+          [](::c10d::ProcessGroup::Work& work,
+            const std::shared_ptr<jit::PythonFutureWrapper>& wrappedFuture) {
+              work.setProfilingFuture(wrappedFuture->fut);
+          })
+      .def(
+          "_get_profiling_future",
+          [](const ::c10d::ProcessGroup::Work& work) {
+            return std::make_shared<jit::PythonFutureWrapper>(
+                work.getProfilingFuture());
+          },
+          py::call_guard<py::gil_scoped_acquire>(),
+          R"(
+            Returns future that completes when the profiling event corresponding
+            to the creation of this RRef on the remote node has been recorded.
+          )")
+      .def(
           "get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
