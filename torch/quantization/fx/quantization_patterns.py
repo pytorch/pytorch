@@ -517,6 +517,14 @@ class CustomModule(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         activation_post_process = quantizer.activation_post_process_map[node.name]
+        if quantizer.is_dynamic_quant:
+            convert = torch.qauntization.convert_dynamic_fx
+        else:
+            convert = torch.quantization.convert
+        observed_custom_module = quantizer.modules[node.target]
+        quantized_custom_module = convert(observed_custom_module, debug=debug)
+        parent_name, name = _parent_name(node.target)
+        setattr(quantizer.modules[parent_name], name, quantized_custom_module)
 
 
 # 2. Post Training Dynamic Quantizatoin Patterns

@@ -20,13 +20,18 @@ def fuse_fx(graph_module, inplace=False):
     fuser = Fuser()
     return fuser.fuse(graph_module, inplace)
 
-def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant):
+def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant, is_child_module=False):
     _check_is_graph_module(graph_module)
 
     quantizer = Quantizer()
     prepare = quantizer.prepare_dynamic if is_dynamic_quant else quantizer.prepare
-    prepared = prepare(graph_module, qconfig_dict, inplace)
-    return prepared
+    return prepare(graph_module, qconfig_dict, inplace, is_child_module)
+
+def prepare_child_module_fx(graph_module, qconfig_dict, inplace=False):
+    return _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False, is_child_module=True)
+
+def prepare_dynamic_child_module_fx(graph_module, qconfig_dict, inplace=False):
+    return _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=True, is_child_module=True)
 
 def prepare_fx(graph_module, qconfig_dict, inplace=False):
     r""" Prepare a model for post training static quantization or
@@ -41,7 +46,8 @@ def prepare_fx(graph_module, qconfig_dict, inplace=False):
       A GraphModule with observer or fake quant modules, ready for
       calibration or quantization aware training
     """
-    return _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False)
+    prepared, _ = _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False)
+    return prepared
 
 def prepare_static_fx(graph_module, qconfig_dict, inplace=False):
     assert not graph_module.training, 'prepare_static_fx only works for models in ' + \
@@ -66,7 +72,8 @@ def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
 def prepare_dynamic_fx(graph_module, qconfig_dict, inplace=False):
     r""" Prepare a model for post training dynamic quantization
     """
-    return _prepare_fx(graph_module, qconfig_dict, inplace, True)
+    prepared, _ = _prepare_fx(graph_module, qconfig_dict, inplace, True)
+    return prepared
 
 def _convert_fx(graph_module, inplace=False, debug=False, is_dynamic_quant=False):
     _check_is_graph_module(graph_module)
