@@ -10417,62 +10417,75 @@ class TestTorchDeviceType(TestCase):
             run_test(tensor_dims, some)
 
     @dtypes(torch.float, torch.double)
-    @precisionOverride({torch.float: 1e-3, torch.double: 1e-6})
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_quantile(self, device, dtype):
-
         # Generate some random test cases
-        a_sizes = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        q_values = [tuple(np.random.rand(i)) for i in range(0, 4)]
+        ops = ['quantile', 'nanquantile']
+        inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
+        keepdims = [True, False]
 
         # Add corner cases
-        a_sizes.extend([0.75, (1,), (1, 1), (1, 2, 1)])
-        q_values.extend([0.5, (0., 1.), np.random.rand(10)])
+        inputs.extend([0.75, (1,), (1, 1), (1, 2, 1)])
+        inputs.extend([[float('nan')], [[float('nan'), float('nan')], [1, 2]]])
+        inputs.extend([[[float('nan'), float('nan')], [float('nan'), 2]]])
+        quantiles.extend([0.5, (0., 1.), np.random.rand(10)])
 
         # Enumerate all input combinations
-        for size, quantiles, keepdim in product(a_sizes, q_values, [True, False]):
-            if type(size) is tuple:
-                a = torch.randn(size, dtype=dtype, device=device)
+        for op, x, quantiles, keepdim in product(ops, inputs, quantiles, keepdims):
+            if type(x) is tuple:
+                a = torch.randn(x, dtype=dtype, device=device)
+                # Make some random elements NaN
+                a.masked_fill_(torch.randint_like(a, 25) == 0, float('nan'))
             else:
-                a = torch.tensor(size, dtype=dtype, device=device)
+                a = torch.tensor(x, dtype=dtype, device=device)
+
             q = torch.tensor(quantiles, dtype=dtype, device=device)
+
+            torch_op = getattr(torch, op)
+            numpy_op = getattr(np, op)
+
             # Compute quantile along every dimension and flattened tensor
             for dim in [None] + list(range(a.ndim)):
-                result = torch.quantile(a, q, dim=dim, keepdim=keepdim).cpu()
-                expected = np.quantile(a.cpu().numpy(), q.cpu().numpy(), axis=dim, keepdims=keepdim)
-                expected = torch.from_numpy(np.array(expected)).type(result.type())
-                self.assertEqual(result, expected)
+                result = torch_op(a, q, dim, keepdim)
+                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
+                self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
+
                 # Test out variation
-                out = torch.empty(result.shape, dtype=dtype, device=device)
-                torch.quantile(a, q, dim=dim, keepdim=keepdim, out=out)
-                self.assertEqual(result, out.cpu())
+                out = torch.empty_like(result)
+                torch_op(a, q, dim, keepdim, out=out)
+                self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_error(self, device):
-        with self.assertRaisesRegex(RuntimeError, "Input tensor must be non-empty"):
-            torch.empty(0, device=device).quantile(0.5)
-        with self.assertRaisesRegex(RuntimeError, "q must be a scalar or 1D tensor"):
-            torch.randn(1, device=device).quantile(torch.rand(2, 3, device=device))
-        with self.assertRaisesRegex(RuntimeError, "Input tensor must be either float or double dtype"):
-            torch.randn(1, dtype=torch.float16, device=device).quantile(0.5)
-        with self.assertRaisesRegex(RuntimeError, "q must be same dtype as the input tensor"):
-            torch.randn(1, device=device).quantile(torch.tensor(0.5, dtype=torch.float64, device=device))
-        with self.assertRaisesRegex(RuntimeError, "out tensor must be same dtype as the input tensor"):
-            torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(0, dtype=torch.float64, device=device))
-        if self.device_type == "cuda":
-            with self.assertRaisesRegex(RuntimeError, "q must be on the same device as the input tensor"):
-                torch.randn(1, device=device).quantile(torch.tensor(0.5))
-            with self.assertRaisesRegex(RuntimeError, "out tensor must be on the same device as the input tensor"):
-                torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
-        with self.assertRaisesRegex(RuntimeError, "expected out shape to be 1 but got 1 1"):
-            torch.quantile(torch.randn(1, device=device), torch.tensor([0.5], device=device), out=torch.empty(1, 1, device=device))
-        with self.assertRaisesRegex(RuntimeError, r'q must be in the range \[0, 1\]'):
-            torch.randn(1, device=device).quantile(-1)
-        with self.assertRaisesRegex(RuntimeError, r'q must be in the range \[0, 1\]'):
-            torch.randn(1, device=device).quantile(1.1)
+        def check(a, q, args, kwargs, message):
+            with self.assertRaisesRegex(RuntimeError, r'quantile\(\) ' + message):
+                at = torch.tensor(a, device=device)
+                qt = torch.tensor(q, device=device) if isinstance(q, list) else q
+                torch.quantile(at, qt, *args, **kwargs)
+
+        check([], 0.5, [], {}, r'input tensor must be non-empty')
+        check([1.], [[1.]], [], {}, r'q must be a scalar or 1D tensor')
+        check([1], 0.5, [], {}, r'input tensor must be either float or double dtype')
+        check([1.], [1], [], {}, r'q must be same dtype as the input tensor')
+        check([1.], -1., [], {}, r'q must be in the range \[0, 1\] but got -1')
+        check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
+
+        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
+              r'out tensor must be same dtype as the input tensor')
+        check([1.], [0.5], [], {'out': torch.empty(1, 1, dtype=torch.float64, device=device)},
+              r'expected output shape to be 1 but got 1 1')
+
         if self.device_type == "cpu":
-            # This can only be checked on cpu to avoid implicit device synchronization
-            with self.assertRaisesRegex(RuntimeError, r'q values must be in the range \[0, 1\]'):
-                torch.randn(1).quantile(torch.tensor([0.5, 1.1, -1]))
+            check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')
+
+        if self.device_type == "cuda":
+            with self.assertRaisesRegex(
+                    RuntimeError, r'quantile\(\) q must be on the same device as the input tensor'):
+                torch.randn(1, device=device).quantile(torch.tensor(0.5))
+            with self.assertRaisesRegex(
+                    RuntimeError, r'quantile\(\) out tensor must be on the same device as the input tensor'):
+                torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
+
 
     def test_random_neg_values(self, device):
         signed_dtypes = [torch.double, torch.float, torch.long, torch.int, torch.short]

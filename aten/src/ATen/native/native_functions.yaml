@@ -5741,6 +5741,18 @@
   use_c10_dispatcher: full
   variants: method, function
 
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: legacy::cpu::_th_sort_out

@@ -648,6 +648,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
+        torch.nanquantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,

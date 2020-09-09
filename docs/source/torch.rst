@@ -355,6 +355,7 @@ Reduction Ops
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
