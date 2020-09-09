@@ -7729,6 +7729,9 @@ class TestTorchDeviceType(TestCase):
             L = torch.cholesky(A, upper)
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
+            # issue gh-42695
+            x = torch.cholesky_solve(b, L, upper=upper, out=x)
+            self.assertEqual(x, x_exp)
 
         # test against numpy.linalg.solve
         for upper in [True, False]:
