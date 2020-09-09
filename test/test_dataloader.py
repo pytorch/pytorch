@@ -3,7 +3,6 @@
 import math
 import sys
 import errno
-import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -2640,22 +2639,28 @@ class SetAffinityDataset(IterableDataset):
         after = os.sched_getaffinity(0)
         return iter(after)
 
-
-def worker_set_affinity(_):
-    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
-
-
 @unittest.skipIf(
     not hasattr(os, 'sched_setaffinity'),
     "os.sched_setaffinity is not available")
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
+        # Query the current affinity mask to avoid setting a disallowed one
+        old_affinity = os.sched_getaffinity(0)
+        if not old_affinity:
+            self.skipTest("No affinity information")
+        # Choose any
+        expected_affinity = list(old_affinity)[-1]
+
+        def worker_set_affinity(_):
+            os.sched_setaffinity(0, [expected_affinity])
+
+
         dataset = SetAffinityDataset()
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
+            self.assertEqual(sample, [expected_affinity])
 
 class ConvDataset(Dataset):
     def __init__(self):
