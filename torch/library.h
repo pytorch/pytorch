@@ -154,6 +154,18 @@ public:
     );
   }
 
+  /// \private
+  ///
+  /// Creates a function that raises an error saying that named tensors
+  /// are not supported when called.
+  static CppFunction makeAutogradNotImplemented() {
+    return CppFunction(
+      c10::KernelFunction::makeAutogradNotImplemented(),
+      /* cpp_signature */ c10::nullopt, // not known for fallthroughs
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from a boxed kernel function with signature
   /// `void(const OperatorHandle&, Stack*)`; i.e., they receive a
   /// stack of arguments in a boxed calling convention, rather than

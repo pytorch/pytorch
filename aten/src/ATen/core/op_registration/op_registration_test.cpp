@@ -1777,11 +1777,12 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
   }
 
   {
-    // AutogradCPU is fallthrough, use CPU kernel
+    // Throw since no autograd kernel registered for this op
     cpu_called = false;
     auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
-    callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(cpu_called);
+    expectThrows<c10::Error>([&] {
+      callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
+    }, "test::fn does not have a kernel registered for Autograd.");
   }
 
   bool autograd_called = false;
@@ -1807,6 +1808,8 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
 TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   bool privateuse1_called = false;
   bool catchall_called = false;
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1);
+  m1.fallback(CppFunction::makeAutogradNotImplemented());
 
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn", torch::dispatch(c10::DispatchKey::PrivateUse1, [&](const Tensor& x, const Tensor& y) { privateuse1_called = true; return x; }));
@@ -1838,18 +1841,17 @@ TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   }
 
   {
-    // TODO(#43908): currently this will fallthrough AutogradPrivateUse1 then call catchall kernel
-    // at AutogradCPU, while backend extenders are indeed expecting to call PrivateUse1 kernel.
-    // This confusing behavior is caused by we registering fallthrough as backend fallback for
-    // Autograd keys. Note users could always work around this by registering the same kernel to
-    // AutogradPrivateUse1 as shown below until we support it.
+    // TODO(#43908): currently this will hit fallback kernel registered to AutogradPrivateUse1
+    // which throws, while backend extenders are indeed expecting to call PrivateUse1 kernel.
+    // Note users could always work around this by registering the same kernel to
+    // AutogradPrivateUse1 as shown below until we support redispatch.
     auto op = Dispatcher::singleton().findOp({"test::fn", ""});
     ASSERT_TRUE(op.has_value());
-    catchall_called = false;
-    callOp(*op,
-           dummyTensor(c10::DispatchKey::PrivateUse1, /*requires_grad=*/true),
-           dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(catchall_called);
+    expectThrows<c10::Error>([&] {
+      callOp(*op,
+             dummyTensor(c10::DispatchKey::PrivateUse1, /*requires_grad=*/true),
+             dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
+    }, "test::fn does not have a kernel registered for Autograd.");
   }
 
   m.impl("fn", c10::DispatchKey::AutogradPrivateUse1, [&](const Tensor& x, const Tensor& y) { privateuse1_called = true; return x; });

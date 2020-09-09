@@ -91,6 +91,14 @@ inline KernelFunction KernelFunction::makeNamedNotSupported() {
     );
 }
 
+inline KernelFunction KernelFunction::makeAutogradNotImplemented() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &autograd_not_implemented_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
 template<bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
