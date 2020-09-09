@@ -26,10 +26,10 @@ def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
     #
     # We'll use this later to figure out what needs to be inputs/outputs
     # to/from the extracted block
-    block_defs : Set[Node]  = set()
+    block_defs :Set[Node]  = set()
     block_uses : Set[Node] = set()
     rest_defs : Set[Node] = set()
-    rest_uses : Set[Node ]= set()
+    rest_uses : Set[Node] = set()
 
     for node in mod.graph.nodes:
         def in_block(node):

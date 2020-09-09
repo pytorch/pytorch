@@ -191,15 +191,23 @@ class ModuleHierarchyCtxMgr:
     def __init__(self, target : str):
         self.target = target
 
-    @torch.jit.unused
     def __enter__(self):
-        global curr_module_qualname
-        self.orig = curr_module_qualname
-        curr_module_qualname = self.target
+        if not torch.jit.is_scripting():
+            self.real_enter()
         return self
 
     @torch.jit.unused
-    def __exit__(self, type, value, tb):
+    def real_enter(self):
+        global curr_module_qualname
+        self.orig = curr_module_qualname
+        curr_module_qualname = self.target
+
+    def __exit__(self, type : Any, value : Any, tb : Any):
+        if not torch.jit.is_scripting():
+            self.real_exit()
+
+    @torch.jit.unused
+    def real_exit(self):
         global curr_module_qualname
         curr_module_qualname = self.orig
 
