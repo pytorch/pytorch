@@ -403,12 +403,12 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                 )
             )
 
-        # simulate_uneven_inputs = False
         training_examples = get_training_examples()
         for _ in range(3):
             futures = []
             num_trainers = len(trainer_rrefs)
             for idx, trainer_rref in enumerate(trainer_rrefs):
+                # Half the trainers will deplete inputs earlier than the rest.
                 trainer_has_less_inputs = (
                     simulate_uneven_inputs and idx < num_trainers // 2
                 )
