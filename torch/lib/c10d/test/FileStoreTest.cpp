@@ -30,7 +30,7 @@ std::string tmppath() {
   return std::string(tmp.data(), tmp.size());
 }
 
-void testGetSet(std::string path, const std::string prefix = "") {
+void testGetSet(std::string path, std::string prefix = "") {
   // Basic Set/Get on File Store
   {
     auto fileStore = std::make_shared<c10d::FileStore>(path, 2);
@@ -51,7 +51,7 @@ void testGetSet(std::string path, const std::string prefix = "") {
   }
 }
 
-void stressTestStore(std::string path, const std::string prefix = "") {
+void stressTestStore(std::string path, std::string prefix = "") {
   // Hammer on FileStore::add
   const auto numThreads = 4;
   const auto numIterations = 100;
