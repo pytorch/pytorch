@@ -184,7 +184,7 @@ class Graph:
                 maybe_comma = ',' if len(arg) == 1 else ''
                 return f'({items}{maybe_comma})'
             elif isinstance(arg, dict):
-                items_str = ','.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
+                items_str = ', '.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
                 return f'{{{items_str}}}'
 
             if isinstance(arg, Node):
@@ -198,7 +198,7 @@ class Graph:
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_param':
-                return f'%{n.name} : [uses={n.uses}]= {n.target}'
+                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
