@@ -52,6 +52,82 @@ alias_infos = (
               lambda d: torch.randn(20, device=d) + 2),
     AliasInfo('arccosh_', torch.Tensor.arccosh_, 'acosh_', torch.Tensor.acosh_,
               lambda d: torch.randn(20, device=d) + 2),
+    AliasInfo('arccos', torch.arccos, 'acos', torch.acos,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arccos_', torch.Tensor.arccos_, 'acos_', torch.Tensor.acos_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arcsin', torch.arcsin, 'asin', torch.asin,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arcsin_', torch.Tensor.arcsin_, 'asin_', torch.Tensor.asin_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arctan', torch.arctan, 'atan', torch.atan,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arctan_', torch.Tensor.arctan_, 'atan_', torch.Tensor.atan_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('fix', torch.fix, 'trunc', torch.trunc,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('fix_', torch.Tensor.fix_, 'trunc_', torch.Tensor.trunc_,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('negative', torch.negative, 'neg', torch.neg,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('negative_', torch.Tensor.negative_, 'neg_', torch.Tensor.neg_,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('arcsinh', torch.arcsinh, 'asinh', torch.asinh,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arcsinh_', torch.Tensor.arcsinh_, 'asinh_', torch.Tensor.asinh_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arctanh', torch.arctanh, 'atanh', torch.atanh,
+              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
+    AliasInfo('arctanh_', torch.Tensor.arctanh_, 'atanh_', torch.Tensor.atanh_,
+              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
+    AliasInfo('subtract', torch.subtract, 'sub', torch.sub,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('subtract_', torch.Tensor.subtract_, 'sub_', torch.Tensor.sub_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('greater_equal', torch.greater_equal, 'ge', torch.ge,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('greater_equal_', torch.Tensor.greater_equal_, 'ge_', torch.Tensor.ge_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('greater', torch.greater, 'gt', torch.gt,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('greater_', torch.Tensor.greater_, 'gt_', torch.Tensor.gt_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('less_equal', torch.less_equal, 'le', torch.le,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('less_equal_', torch.Tensor.less_equal_, 'le_', torch.Tensor.less_equal_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('less', torch.less, 'lt', torch.lt,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('less_', torch.Tensor.less_, 'lt_', torch.Tensor.lt_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('not_equal', torch.not_equal, 'ne', torch.ne,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('not_equal_', torch.Tensor.not_equal_, 'ne_', torch.Tensor.ne_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
 )
 
 # Placeholder test class for validating that aliases are correctly
@@ -124,9 +200,14 @@ def create_alias_tests(cls):
 
             inp = info.get_input(device)
             args = info.get_args(device)
-            alias_result = alias_op(inp.clone(), *args)
-            original_result = alias_op(inp.clone(), *args)
 
+            alias_input = inp.clone()
+            alias_result = alias_op(alias_input, *args)
+
+            original_input = inp.clone()
+            original_result = alias_op(original_input, *args)
+
+            self.assertEqual(alias_input, original_input, atol=0, rtol=0)
             self.assertEqual(alias_result, original_result, atol=0, rtol=0)
 
         # Applies decorators

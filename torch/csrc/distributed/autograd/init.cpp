@@ -146,9 +146,9 @@ Arguments:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      pred = model.forward()
-    >>>      loss = loss_func(pred, loss)
-    >>>      dist_autograd.backward(context_id, loss)
+    >>>     pred = model.forward()
+    >>>     loss = loss_func(pred, loss)
+    >>>     dist_autograd.backward(context_id, loss)
 )",
       py::arg("contextId"),
       py::arg("roots"),
@@ -180,13 +180,13 @@ Returns:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      t1 = torch.rand((3, 3), requires_grad=True)
-    >>>      t2 = torch.rand((3, 3), requires_grad=True)
-    >>>      loss = t1 + t2
-    >>>      dist_autograd.backward(context_id, [loss.sum()])
-    >>>      grads = dist_autograd.get_gradients(context_id)
-    >>>      print(grads[t1])
-    >>>      print(grads[t2])
+    >>>     t1 = torch.rand((3, 3), requires_grad=True)
+    >>>     t2 = torch.rand((3, 3), requires_grad=True)
+    >>>     loss = t1 + t2
+    >>>     dist_autograd.backward(context_id, [loss.sum()])
+    >>>     grads = dist_autograd.get_gradients(context_id)
+    >>>     print(grads[t1])
+    >>>     print(grads[t2])
 )",
       py::arg("context_id"));
 
