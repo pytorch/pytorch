@@ -26,13 +26,6 @@ CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack
 // boxing is universally supported this can be removed.
 [[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
-// Note [autograd_not_implemented_kernel]
-// This kernel implements reporting an error message about missing Autograd kernel.
-// For backend extenders who want to support training while pytorch doesn't have an in-tree
-// Autograd kernel, it's required to explicitly register to Autograd backend key with
-// either a composite kernel or torch::autograd::Function.
-[[noreturn]] CAFFE2_API void autograd_not_implemented_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
-
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
@@ -189,7 +182,6 @@ public:
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeNamedNotSupported();
-  static KernelFunction makeAutogradNotImplemented();
 
   /**
    * Create a KernelFunction from an unboxed lambda.
