@@ -4905,6 +4905,11 @@
     CPU: legacy::cpu::_th_trace
     CUDA: trace_cuda
 
+- func: trace_backward(Tensor grad, int[] sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: ne_out
@@ -5206,6 +5211,11 @@
     CPU: legacy::cpu::_th_take
     CUDA: legacy::cuda::_th_take
 
+- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: index_select_out_cpu_
@@ -5241,6 +5251,11 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+
+- func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
