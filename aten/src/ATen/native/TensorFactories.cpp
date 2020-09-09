@@ -275,23 +275,23 @@ Tensor empty_like(
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
 
+  TensorOptions options = self.options().merge_in(options_);
+
   // Avoid adding optional_memory_format to options_ because it can be invalid for non-strided tensors.
-  if (options_.layout() == kSparse && self.is_sparse()) {
+  if (options.layout() == kSparse && self.is_sparse()) {
     if (optional_memory_format.has_value()) {
       TORCH_CHECK(
         optional_memory_format == MemoryFormat::Preserve,
-        "This memory format option is not supported by sparse tensors");
+        "Memory format for sparse tensors must be Preserve, got ",
+        *optional_memory_format);
     }
-    auto result = at::empty({0}, options_); // to be resized
+    auto result = at::empty({0}, options); // to be resized
     result.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
     return result;
   }
 
-  TensorOptions options =
-      self.options()
-          .merge_in(options_)
-          .merge_in(TensorOptions().memory_format(optional_memory_format));
+  options = options.merge_in(TensorOptions().memory_format(optional_memory_format));
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&
@@ -867,7 +867,8 @@ Tensor zeros_like(
     if (optional_memory_format.has_value()) {
       TORCH_CHECK(
         optional_memory_format == MemoryFormat::Preserve,
-        "This memory format option is not supported by sparse tensors");
+        "Memory format for sparse tensors must be Preserve, got ",
+        *optional_memory_format);
     }
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(

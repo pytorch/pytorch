@@ -1621,17 +1621,26 @@ class TestSparse(TestCase):
 
         sparse_tensor, _, _ = self._gen_sparse(len([2, 3, 4]), 9, [2, 3, 4] + [3, 4, 5, 6])
         for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
-            with self.assertRaisesRegex(RuntimeError, "This memory format option is not supported by sparse tensors"):
+            with self.assertRaisesRegex(RuntimeError, "Memory format for sparse tensors must be Preserve"):
                 result = torch.zeros_like(sparse_tensor, memory_format=mem_format)
 
     def test_empty_like(self):
         # tests https://github.com/pytorch/pytorch/issues/43699
+        def assert_sparse_invars(t):
+            # SparseTensor has the following invariants:
+            # - sparse_dim + dense_dim = len(SparseTensor.shape)
+            # - SparseTensor._indices().shape = (sparse_dim, nnz)
+            # - SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+            self.assertEqual(t.sparse_dim() + t.dense_dim(), len(t.shape))
+            self.assertEqual(tuple(t._indices().shape), (t.sparse_dim(), t._nnz()))
+            self.assertEqual(tuple(t._values().shape), (t._nnz(), ) + t.shape[t.sparse_dim():])
 
         def _test_empty_like(sparse_tensor):
 
             for mem_format in [None, torch.preserve_format]:
                 result = torch.empty_like(sparse_tensor, memory_format=mem_format)
                 self.assertTrue(result.is_sparse)
+                assert_sparse_invars(result)
                 self.assertEqual(result.shape, sparse_tensor.shape)
                 self.assertEqual(result.dtype, sparse_tensor.dtype)
                 self.assertEqual(result.device, sparse_tensor.device)
@@ -1639,7 +1648,7 @@ class TestSparse(TestCase):
                 self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
 
             for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
-                with self.assertRaisesRegex(RuntimeError, "This memory format option is not supported by sparse tensors"):
+                with self.assertRaisesRegex(RuntimeError, "Memory format for sparse tensors must be Preserve"):
                     result = torch.empty_like(sparse_tensor, memory_format=mem_format)
 
         if not self.is_uncoalesced:
