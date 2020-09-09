@@ -37,7 +37,8 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
-  debug_info->setModelName(name());
+  auto metadata = metadata();
+  debug_info->setModelName(metadata.find("model_name") == metadata.end() ? name() : metadata.at("model_name"));
   debug_info->setMethodName(method_name);
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
