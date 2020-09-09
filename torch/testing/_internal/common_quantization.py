@@ -19,7 +19,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
 from torch.quantization.default_mappings import (
     DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST,
     DEFAULT_QAT_MODULE_MAPPING,
 )
 # symbolic trace
@@ -28,7 +28,6 @@ from torch.fx import symbolic_trace
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
-    fuse_fx,
     prepare_fx,
     prepare_dynamic_fx,
     convert_fx,
@@ -348,7 +347,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
            and type(module) in propagate_qconfig_list:
@@ -527,7 +526,7 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.root.named_modules())
+        modules = dict(graph_module.named_modules())
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
@@ -579,7 +578,7 @@ class QuantizationTestCase(TestCase):
                 str(expected_node_list))
 
     def printGraphModule(self, graph_module, print_str=True):
-        modules = dict(graph_module.root.named_modules())
+        modules = dict(graph_module.named_modules())
         node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
@@ -624,7 +623,6 @@ class QuantizationTestCase(TestCase):
         else:
             model.eval()
         original = symbolic_trace(model)
-        fused = fuse_fx(original)
 
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
@@ -634,7 +632,7 @@ class QuantizationTestCase(TestCase):
             prepare = prepare_fx
             convert = convert_fx
 
-        prepared = prepare(fused, qconfig_dict)
+        prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
         qgraph = convert(prepared)
         qgraph_debug = convert(prepared, debug=True)
