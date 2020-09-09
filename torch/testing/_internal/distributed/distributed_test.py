@@ -66,6 +66,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
+SKIP_NCCL_A2A = (BACKEND == 'nccl' and not bool(int(os.getenv("PYTORCH_TEST_NCCL_A2A", 0))))
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
@@ -1614,7 +1615,14 @@ class DistributedTest:
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
-        def _test_all_to_all_helper(self, group, group_id, rank):
+        def _test_all_to_all_helper(
+            self,
+            group,
+            group_id,
+            rank,
+            cuda=False,
+            rank_to_GPU=None,
+        ):
             if group_id is not None:
                 size = len(group)
                 in_splits = [i + 1 for i in group]
@@ -1623,6 +1631,10 @@ class DistributedTest:
                 ]
                 out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
                 expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+                if cuda:
+                    in_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in in_tensors]
+                    expected_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors]
+                    out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
                 dist.all_to_all(out_tensors, in_tensors, group=group_id)
                 for t1, t2 in zip(out_tensors, expected_tensors):
                     self.assertEqual(t1, t2)
@@ -1635,7 +1647,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1659,7 +1671,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1681,6 +1693,13 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_helper(group, group_id, rank)
 
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        def test_all_to_all_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU)
+
         @unittest.skipIf(
             BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
         )
@@ -1689,7 +1708,7 @@ class DistributedTest:
             group, group_id, rank = self._init_group_test()
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1715,7 +1734,7 @@ class DistributedTest:
             group, group_id, rank = self._init_group_test()
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1746,7 +1765,14 @@ class DistributedTest:
             group, group_id, rank = self._init_full_group_test()
             self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        def test_all_to_all_single_equal_split_full_group_cuda(self):
+            group, group_id, rank = self._init_full_group_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_equal_split_helper(group, group_id, rank, True, rank_to_GPU)
+
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1770,7 +1796,7 @@ class DistributedTest:
             group, group_id, rank = self._init_full_group_test()
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-        @unittest.skip("NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
@@ -1791,6 +1817,13 @@ class DistributedTest:
         def test_all_to_all_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_to_all_helper(group, group_id, rank)
+
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        def test_all_to_all_single_unequal_split_full_group_cuda(self):
+            group, group_id, rank = self._init_full_group_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_unequal_split_helper(group, group_id, rank, True, rank_to_GPU)
 
         # BARRIER
         def _test_barrier_helper(
