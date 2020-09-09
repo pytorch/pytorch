@@ -54,7 +54,7 @@ def fuzzer_factory(fuzzer: Fuzzers, scale: Scale, seed: Union[int, str], fuzzer_
             attr_names += (convolution.GROUPS,)
         return convolution.ConvFuzzer(dim=dim, **kwargs), attr_names
 
-    raise NotImplementedError(f"Unknown fuzzer.")
+    raise NotImplementedError("Unknown fuzzer.")
 
 
 def make_fuzzed_config(
@@ -62,8 +62,8 @@ def make_fuzzed_config(
     scale=Scale.SMALL,
     n: int = 10,
     seed: Union[int, str] = 0,
-    fuzzer_kwargs: Optional[dict]=None,
-    cross_product_configs=None,
+    fuzzer_kwargs: Optional[dict] = None,
+    cross_product_configs = None,
     tags=None,
     checksum: Optional[int] = None
 ):

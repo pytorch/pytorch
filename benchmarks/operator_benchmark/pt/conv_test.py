@@ -9,27 +9,9 @@ import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
 
+from . import configs
+
 """Microbenchmarks for Conv1d and ConvTranspose1d operators."""
-conv1d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.CONV1D,
-    fuzz_utils.Scale.SMALL,
-    n=10,
-    seed="Conv1D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
-    tags=["short"],
-    checksum=570,
-)
-
-conv1d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.CONV1D,
-    fuzz_utils.Scale.MEDIUM,
-    n=10,
-    seed="Conv1D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
-    tags=["long"],
-    checksum=2341,
-)
-
 class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, X_SIZE, C_OUT, KERNEL_SIZE, STRIDE, device):
         self.input = torch.rand(X_SIZE, device=device, requires_grad=self.auto_set())
@@ -51,7 +33,7 @@ class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self):
         return self.convtranspose1d(self.input)
 
-conv1d_configs = conv1d_fuzzed_configs_short + conv1d_fuzzed_configs_long
+conv1d_configs = configs.conv1d_fuzzed_configs_short + configs.conv1d_fuzzed_configs_long
 op_bench.generate_pt_test(conv1d_configs, Conv1dBenchmark)
 op_bench.generate_pt_test(conv1d_configs, ConvTranspose1dBenchmark)
 op_bench.generate_pt_gradient_test(conv1d_configs, Conv1dBenchmark)
@@ -59,28 +41,6 @@ op_bench.generate_pt_gradient_test(conv1d_configs, ConvTranspose1dBenchmark)
 
 
 """Microbenchmarks for Conv2d and ConvTranspose2d operators."""
-conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.CONV2D,
-    fuzz_utils.Scale.SMALL,
-    n=10,
-    fuzzer_kwargs={"groups": {1: 0.5, 2: 0.5}},
-    seed="Conv2D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
-    tags=["short"],
-    checksum=612,
-)
-
-conv2d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.CONV2D,
-    fuzz_utils.Scale.MEDIUM,
-    n=10,
-    fuzzer_kwargs={"groups": {1: 0.5, 2: 0.5}},
-    seed="Conv2D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
-    tags=["long"],
-    checksum=2289,
-)
-
 class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, X_SIZE, C_OUT, KERNEL_SIZE, STRIDE, GROUPS, device):
         self.input = torch.rand(X_SIZE, device=device, requires_grad=self.auto_set())
@@ -101,7 +61,7 @@ class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self):
         return self.convtranspose2d(self.input)
 
-conv2d_configs = conv2d_fuzzed_configs_short + conv2d_fuzzed_configs_long
+conv2d_configs = configs.conv2d_fuzzed_configs_short + configs.conv2d_fuzzed_configs_long
 op_bench.generate_pt_test(conv2d_configs, Conv2dBenchmark)
 op_bench.generate_pt_test(conv2d_configs, ConvTranspose2dBenchmark)
 op_bench.generate_pt_gradient_test(conv2d_configs, Conv2dBenchmark)
