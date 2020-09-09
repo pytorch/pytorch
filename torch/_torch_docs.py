@@ -4609,16 +4609,14 @@ Example::
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
 :attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
-data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
+data points. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
 being flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
-and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
-If :attr:`q` is a scalar or scalar tensor, the output shape is what remains from the reduction.
-
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
-the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
+If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
+except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
+have size 1. Otherwise, the dimensions being reduced are squeezed (see :func:`torch.squeeze`).
+If :attr:`q` is a 1D tensor, an extra dimension is prepended to the output tensor with the same
+size as :attr:`q` which represents the quantiles.
 
 Args:
     {input}
@@ -4653,27 +4651,27 @@ add_docstr(torch.nanquantile,
            r"""
 nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
-This is a variant of :func:`torch.quantile` that ignores `NaN` values when
-computing the quantiles. If during the reduction all values are `NaN`, only
-then will the result be `NaN`.
+This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
+computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
+not exist. If all values in a reduced row are ``NaN`` then the quantiles for
+that reduction will be ``NaN``. See the documentation for :func:`torch.quantile.
 
 Example::
 
-    >>> torch.tensor([float('nan'), 1, 2]).quantile(0.5)
+    >>> t = torch.tensor([float('nan'), 1, 2])
+    >>> t.quantile(0.5)
     tensor(nan)
-    >>> torch.tensor([float('nan'), 1, 2]).nanquantile(0.5)
+    >>> t.nanquantile(0.5)
     tensor(1.5000)
 
-    >>> a = torch.tensor([[float('nan'), float('nan')], [1, 2]])
-    >>> a
+    >>> t = torch.tensor([[float('nan'), float('nan')], [1, 2]])
+    >>> t
     tensor([[nan, nan],
             [1., 2.]])
-    >>> a.nanquantile(0.5, 0)
+    >>> t.nanquantile(0.5, dim=0)
     tensor([1., 2.])
-    >>> a.nanquantile(0.5, 1)
+    >>> t.nanquantile(0.5, dim=1)
     tensor([   nan, 1.5000])
-
-See :func:`torch.quantile`
 """.format(**single_dim_common))
 
 add_docstr(torch.min,
