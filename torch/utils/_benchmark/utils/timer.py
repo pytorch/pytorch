@@ -1,6 +1,7 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
 import timeit
+import time
 from typing import List, Optional
 
 import numpy as np
@@ -42,12 +43,15 @@ class Timer(object):
         globals.setdefault("torch", torch)
 
         self._stmt = stmt
+        self._timer = timer
+        self._setup = setup
         self._label = label
+        self._globals = globals
         self._sub_label = sub_label
         self._description = description
         self._env = env
         self._num_threads = num_threads
-        self._timer = timeit.Timer(stmt=stmt, setup=setup, timer=timer, globals=globals)
+        self._timer = self._custom_globals_timer(globals)
 
     def _construct_measurement(self, number_per_run: int, times: List[float]):
         return common.Measurement(
@@ -68,6 +72,56 @@ class Timer(object):
             return self._construct_measurement(
                 number_per_run=number, times=[self._timer.timeit(number=number)]
             )
+
+    def _custom_globals_timer(self, custom_globals):
+        return timeit.Timer(stmt=self._stmt, setup=self._setup, timer=self._timer, globals=custom_globals)
+
+    def cache_speedup(self):
+        uncached = self.uncached_autorange()
+        cached = self._time_single_runs()
+        ratio = uncached.median / cached.median
+        return ratio
+
+    def is_cache_sensitive(self):
+        return self.cache_speedup() > 1.2
+
+    def _time_single_runs(self, min_run_time=2, max_run_time=60):
+        cache_clear = common.CPUCacheClear()
+        times = []
+        start = time.time()
+        while True:
+            times.append(self._timer.timeit(1))
+            if time.time() - start > min_run_time:
+                break
+        return self._construct_measurement(number_per_run=1, times=times)
+
+    def uncached_autorange(self, min_run_time=5, max_run_time=60, run_to_confidence=False,
+                cache_size_mb=2):
+        # Notice: this has rougnly 1us overhead in measurement. NOT SUITABLE for measuring performance
+        # of operations on the order of 1us or smaller.
+        if self._num_threads != 1:
+            raise Exception('Cache aware benchmarking only supports 1 thread.')
+        cache_clear = common.CPUCacheClear(cache_size_mb=cache_size_mb)
+
+        times = []
+        start = time.time()
+        populate_timer = timeit.Timer('sum(range(2)); torch.tanh(torch.tensor([1.1]))',
+            globals={'torch': torch})
+        while True:
+            cache_clear.clear_cpu_cache()
+            # Flushing teh cache flushes a lot more than just the data we are interested in.
+            # After flushing, all operations will be much (~1us) slower. We will do a no-op operation
+            # to bring python back in the cache.
+            populate_timer.timeit(1)
+            times.append(self._timer.timeit(1))
+            if not run_to_confidence and time.time() - start > min_run_time:
+                break
+
+        measure = self._construct_measurement(number_per_run=1, times=times)
+        if measure.median <= 0.000004:
+            measure.add_warning('Uncached code <4us can give unreliable measurements.',
+                'There is >=200ns overhead from clearing python/torch from cache.')
+        return measure
 
     def repeat(self, repeat=-1, number=-1):
         raise NotImplementedError("See `Timer.blocked_autorange.`")

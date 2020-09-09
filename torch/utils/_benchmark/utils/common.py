@@ -76,6 +76,16 @@ class Measurement:
     def __setstate__(self, state: Dict[str, Any]):
         self.__init__(**state)  # type: ignore
 
+    def add_warning(self, message, body):
+        message = message.strip('\n')
+        if body:
+            body = body.strip('\n')
+        if body:
+            self._warnings.append(('  WARNING: {}\n'
+                                   '           {}\n').format(message, body))
+        else:
+            self._warnings.append('  WARNING: {}\n'.format(message))
+
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
 
@@ -86,9 +96,9 @@ class Measurement:
             )
 
         if self._iqr / self._median > _IQR_GROSS_WARN_THRESHOLD:
-            add_warning("This suggests significant environmental influence.")
+            add_warning("This suggests significant environmental influence.\n")
         elif self._iqr / self._median > _IQR_WARN_THRESHOLD:
-            add_warning("This could indicate system fluctuation.")
+            add_warning("This could indicate system fluctuation.\n")
         return warnings
 
     @property
@@ -217,6 +227,16 @@ def trim_sigfig(x: float, n: int) -> float:
 
 def ordered_unique(elements):
     return list(collections.OrderedDict({i: None for i in elements}).keys())
+
+
+class CPUCacheClear:
+    def __init__(self, cache_size_mb=2):
+        self.cache_size_mb = cache_size_mb
+        self.num_64bit_words = int((cache_size_mb * 1000 * 1000 * 1000) / 8)  # 8 bytes per 64 bits
+        self.array = np.ones(self.num_64bit_words, dtype=np.int64)
+
+    def clear_cpu_cache(self):
+        np.sum(self.array)
 
 
 def merge_measurements(measurements: List[Measurement]):
