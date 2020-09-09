@@ -30,17 +30,17 @@ void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm) {
+void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm, beta beta) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&]() {
       auto norm_val = norm.to<scalar_t>();
       gpu_kernel(iter, [norm_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
         const auto x = input - target;
-        if (x < scalar_t(-1))
+        if (x < -beta)
           return -norm_val * grad_output;
-        else if (x > scalar_t(1))
+        else if (x > beta)
           return norm_val * grad_output;
         else
-          return norm_val * x * grad_output;
+          return norm_val * x * grad_output / beta;
     });
   });
 }

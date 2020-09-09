@@ -6320,23 +6320,23 @@
     CPU: nll_loss2d_backward_cpu
     CUDA: legacy::cuda::_thnn_nll_loss2d_backward
 
-- func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+- func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, float beta=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_out
     CUDA: smooth_l1_loss_out
 
-- func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
-- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_backward_out
     CUDA: smooth_l1_loss_backward_out
 
-- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
+- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
