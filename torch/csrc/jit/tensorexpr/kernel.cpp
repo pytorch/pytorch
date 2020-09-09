@@ -48,6 +48,14 @@ bool fallbackEnforced() {
   return false;
 }
 
+int maxNumKernelsToRun() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_MAX_KERNELS_NUM");
+  if (!enable_c_str) {
+    return -1;
+  }
+  return std::stoi(std::string(enable_c_str));
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -1814,7 +1822,20 @@ Stmt* TensorExprKernel::getCodeGenStmt() {
   return codegen_->stmt();
 }
 
+int kernelsExecuted = 0;
+
 void TensorExprKernel::runKernel(Stack& stack) {
+  int maxnum = maxNumKernelsToRun();
+  if (maxnum >= 0) {
+    if (kernelsExecuted == maxnum - 1) {
+      GRAPH_DEBUG("Last executed stmt:\n", getCodeGenStmt());
+      GRAPH_DEBUG("Last executed graph:\n", *graph_);
+    }
+    if (kernelsExecuted >= maxnum) {
+      return fallback(stack);
+    }
+    kernelsExecuted++;
+  }
   KernelScope kernelScope(&kernelArena_);
 
   // Set up arguments (inputs, then outputs) for kernel call.
