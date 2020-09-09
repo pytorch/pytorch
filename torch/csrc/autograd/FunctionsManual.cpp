@@ -211,11 +211,12 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
-Tensor mul_scalar_backward(Tensor grad, Tensor self, Scalar other) {
+Tensor mul_scalar_backward(Tensor grad, Scalar other, ScalarType self_st) {
   auto scalar_as_tensor = at::scalar_to_tensor(other);
   auto result = grad * scalar_as_tensor.conj();
+  bool is_self_complex = at::isComplexType(self_st);
   // only real valued gradient should be propagated for real tensors
-  if (!self.is_complex() && result.is_complex()) {
+  if (!is_self_complex && result.is_complex()) {
     // R -> C
     result = at::real(result);
   }
@@ -223,9 +224,10 @@ Tensor mul_scalar_backward(Tensor grad, Tensor self, Scalar other) {
   return result;
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor self, Tensor other) {
+Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto result = grad * other.conj();
-  if (!self.is_complex() && result.is_complex()) {
+  bool is_self_complex = at::isComplexType(self_st);
+  if (!is_self_complex && result.is_complex()) {
     // R -> C
     result = at::real(result);
   }

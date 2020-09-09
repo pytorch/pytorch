@@ -736,11 +736,11 @@
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: mul_tensor_backward(grad, self, other)
-  other: mul_tensor_backward(grad, other, self)
+  self: mul_tensor_backward(grad, other, self.scalar_type())
+  other: mul_tensor_backward(grad, self, other.scalar_type())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: mul_scalar_backward(grad, self, other)
+  self: mul_scalar_backward(grad, other, self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
