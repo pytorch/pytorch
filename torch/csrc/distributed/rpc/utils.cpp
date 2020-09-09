@@ -1,8 +1,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <fmt/format.h>
-#include <ATen/DeviceGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
@@ -533,7 +531,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   // kTpMessagePickleIdx = 3
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
-  for (int i = 0; i < pickler.tensorData().size(); ++i) {
+  for (size_t i = 0; i < pickler.tensorData().size(); ++i) {
     //const auto& tensorData = jit::getWriteableTensorData(tensor);
     const auto& tensorData =
         jit::getWriteableTensorData(pickler.tensorData()[i]);
@@ -640,7 +638,7 @@ Message tensorpipeDeserialize(
   // NB: This is a temporary solution. When TensorPipe Tensor.data can point to
   // a CUDA memory address, we should directly use CUDACachingAllocator to
   // create CUDA buffers in tensorpipeAllocate.
-  for (int i = 0; i < message.tensors.size(); ++i) {
+  for (size_t i = 0; i < message.tensors.size(); ++i) {
     auto& tensor = message.tensors[i];
     if (!tensor.metadata.empty()) {
       TORCH_INTERNAL_ASSERT(
