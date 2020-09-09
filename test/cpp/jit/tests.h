@@ -69,7 +69,7 @@ namespace jit {
   _(ModuleDefine)                                 \
   _(QualifiedName)                                \
   _(ClassImport)                                  \
-  _(ScriptObject)                                 \
+  _(ScriptObject)                               /*\
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
@@ -116,7 +116,7 @@ namespace jit {
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
   _(LiteSequentialSampler)                        \
-  _(FusionAliasing)
+  _(FusionAliasing)*/
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
