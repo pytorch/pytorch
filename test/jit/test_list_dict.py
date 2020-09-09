@@ -1520,12 +1520,25 @@ class TestDict(JitTestCase):
         Test that the use of a Dict type annotation without contained
         key and value types produces an error.
         """
-        def fn(input: Dict) -> Any:
+        # This function uses a type comment.
+        def fn_with_comment(input):
+            # type: (Dict) -> Any
+            return input
+
+        # This function uses Python3 style type annotations.
+        def annotated_fn(input: Dict) -> Any:
             return input
 
         with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
             cu = torch.jit.CompilationUnit()
-            cu.define(dedent(inspect.getsource(fn)))
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
 
         with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            m = torch.jit.script(fn)
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            m = torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            m = torch.jit.script(annotated_fn)
