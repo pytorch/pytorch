@@ -12,7 +12,7 @@ namespace jit {
 namespace fuser {
 
 //! Prints computation Fusion IR nodes
-//! 
+//!
 //! IrMathPrinter and IrTransformPrinter allow the splitting up of fusion print
 //! functions. IrMathPrinter as its name implies focuses solely on what tensor
 //! computations are taking place. Resulting TensorView math will reflect the
@@ -40,7 +40,7 @@ class TORCH_CUDA_API IrMathPrinter : public IrPrinter {
 //! Prints transformation (schedule) Fusion IR nodes
 //!
 //! \sa IrMathPrinter
-//! 
+//!
 class TORCH_CUDA_API IrTransformPrinter : public IrPrinter {
  public:
   IrTransformPrinter(std::ostream& os) : IrPrinter(os) {}

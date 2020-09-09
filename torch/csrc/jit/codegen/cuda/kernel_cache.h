@@ -18,12 +18,13 @@ namespace cuda {
 //! Encoding an input set to unique id, which is used to short-cut cache entry
 //! selection in our nested cache implementation to cut off overhead.
 //!
-//! We have implemented naive LRU cache eviction policy here, since each entry in
-//! `InputsIdLookup` is attached to a static input shape/stride, and could grow
-//! gigantic when we have input shapes that does not stabalize to a finite set.
+//! We have implemented naive LRU cache eviction policy here, since each entry
+//! in `InputsIdLookup` is attached to a static input shape/stride, and could
+//! grow gigantic when we have input shapes that does not stabalize to a finite
+//! set.
 //!
-//! \note the uniqueness of the ide generated for a given input set is only local
-//!  to the instance of `InputsIdLookup`.
+//! \note the uniqueness of the ide generated for a given input set is only
+//!   local to the instance of `InputsIdLookup`.
 //!
 class TORCH_CUDA_API InputsIdLookup {
  public:

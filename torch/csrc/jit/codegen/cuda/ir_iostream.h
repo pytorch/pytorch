@@ -32,6 +32,10 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
     indent_size_ = 0;
   }
 
+  bool printInline() const {
+    return print_inline_;
+  }
+
   bool printInline() const { return print_inline_; }
 
   void printHeader(
