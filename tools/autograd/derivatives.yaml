@@ -1208,6 +1208,7 @@
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
+  target: mse_loss_backward(grad, target, self, reduction)
 
 - name: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: multi_margin_loss_backward(grad, self, target, p, margin, weight, reduction)
@@ -1554,6 +1555,7 @@
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)
+  target: -mse_loss_double_backward(grad * grad_output, target, reduction)
 
 - name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   grad_output: nll_loss(grad, target, weight, reduction, ignore_index)
