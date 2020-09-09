@@ -85,6 +85,14 @@ Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
 
+Workspace* GetWorkspaceByName(const std::string &name) {
+  if (gWorkspaces.count(name)) {
+    return gWorkspaces[name].get();
+  }
+  return nullptr;
+}
+
+
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {

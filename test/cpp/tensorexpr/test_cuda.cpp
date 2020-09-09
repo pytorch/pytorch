@@ -9,8 +9,11 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
@@ -215,6 +218,45 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
 void testCudaTestVectorAdd02() {
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
+}
+
+void testCudaHalfCast() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, a(i));
+  });
+
+  LoopNest l({b});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> bData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  float* bDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(bData, 2.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
 }
 
 void testCudaDynamicShape2D() {
@@ -862,6 +904,64 @@ void testCudaLocalMemReduce_1() {
 
   cudaFree(a_dev);
   cudaFree(b_dev);
+}
+
+void testCudaHalfSupport() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, ExprHandle(2.0f) * a(i));
+  });
+
+  Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+  });
+
+  Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, c->call(i));
+  });
+
+  LoopNest l({b, c, d});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b, c, d});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> cData(4, 0.0f);
+  std::vector<at::Half> dData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* bDev = nullptr;
+  at::Half* cDev = nullptr;
+  at::Half* dDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = aData.size() * sizeof(aData[0]);
+  auto cSize = cData.size() * sizeof(float);
+  auto dSize = dData.size() * sizeof(dData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMalloc(&cDev, cSize);
+  cudaMalloc(&dDev, dSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(cDev, cData.data(), cSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(dDev, dData.data(), dSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev, cDev, dDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(cData.data(), cDev, cSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(dData.data(), dDev, dSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(cData, 46.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+  cudaFree(cDev);
+  cudaFree(dDev);
 }
 
 } // namespace jit
