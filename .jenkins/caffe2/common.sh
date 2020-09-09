@@ -12,6 +12,18 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    if which sccache > /dev/null; then
+        # Save sccache logs to file
+        sccache --stop-server || true
+        rm ~/sccache_error.log || true
+        SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+
+        # Report sccache stats for easier debugging
+        sccache --zero-stats
+    fi
+fi
+
 # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
 # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
 # that the test code in .jenkins/test.sh is the same

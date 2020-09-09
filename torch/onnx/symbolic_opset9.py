@@ -1109,9 +1109,9 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
-@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i', 'i')
 def _convolution(g, input, weight, bias, stride, padding, dilation,
-                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
+                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32):
     weight_size = weight.type().sizes()
 
     args = [input, weight]
@@ -1145,32 +1145,32 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose1d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
@@ -1752,15 +1752,9 @@ def to(g, self, *args):
 
 
 def repeat(g, self, repeats):
-    if not sym_help._is_value(repeats):
-        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-    const_repeats = sym_help._maybe_get_const(repeats, 'is')
-
-    if self.isCompleteTensor() and not sym_help._is_value(const_repeats):
-        sizes = self.type().sizes()
-        diff_dims = len(const_repeats) - len(sizes)
-        if diff_dims > 0:
-            self = view(g, self, [1] * diff_dims + sizes)
+    dtype = 4  # int64
+    shape_ = ones_like(g, repeats, dtype)
+    self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
 
 
@@ -2529,6 +2523,42 @@ def take(g, self, index):
     out = index_select(g, self_flattened, 0, index)
     out = reshape_as(g, out, index)
     return out
+
+
+def _kl_div_log_target_impl(g, input, target):
+    diff_ = sub(g, target, input)
+    exp_ = exp(g, target)
+    output = mul(g, exp_, diff_)
+    return output
+
+
+def _kl_div_non_log_target_impl(g, input, target):
+    log_ = log(g, target)
+    diff_ = sub(g, log_, input)
+    output_pos = mul(g, target, diff_)
+    zeros_ = zeros_like(g, output_pos)
+    mask_ = gt(g, target, g.op("Constant", value_t=torch.tensor(0)))
+    output = where(g, mask_, output_pos, zeros_)
+    return output
+
+
+@parse_args('v', 'v', 'i', 'b')
+def kl_div(g, input, target, reduction, log_target):
+    if log_target:
+        output = _kl_div_log_target_impl(g, input, target)
+    else:
+        output = _kl_div_non_log_target_impl(g, input, target)
+
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output, keepdims_i=0)
+    elif reduction == 2:
+        return g.op("ReduceSum", output, keepdims_i=0)
+    else:
+        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
+                                          "request ONNX export support for the missing reduction type.")
+
 
 @parse_args('v', 'v', 'is', 'i')
 def as_strided(g, self, sizes, strides, offset=None):
