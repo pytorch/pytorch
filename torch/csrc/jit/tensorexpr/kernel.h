@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -30,12 +31,17 @@ class TORCH_API TensorExprKernel {
 
   Stmt* getCodeGenStmt();
 
+  std::string getCodeText() {
+    return codegen_->getCodeText();
+  }
+
  private:
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
     kLLVMCodeGen,
     kCudaCodeGen,
+    kBlockCodeGen,
   };
 
   void compile();
@@ -127,7 +133,6 @@ class TORCH_API TensorExprKernel {
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
-  at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
 
@@ -142,6 +147,9 @@ class TORCH_API TensorExprKernel {
 
   // Get the reduction info for the given node, based on properties and inputs.
   ReductionInfo getReductionInfo(const torch::jit::Node* node);
+
+  // Get the reduction axes for the given node, based on properties and inputs.
+  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
   struct ShapeArg {
@@ -200,8 +208,12 @@ class TORCH_API TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool& getTEGenerateBlockCode();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
+
+TORCH_API c10::optional<at::Device> pickDeviceType(
+    const at::ArrayRef<torch::jit::Value*>& inputs);
 
 } // namespace tensorexpr
 } // namespace jit

@@ -409,6 +409,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         std::string(NCCL_BLOCKING_WAIT));
   }
 
+  // If single-process single-device mode, WorkNCCL::getFuture is supported,
+  // so get a dedicated stream for each device to run FutureNCCL then callbacks.
+  // Depending on the device index of collective outputs, WorkNCCL passes
+  // the corresponding device's then callback stream to FutureNCCL.
+  futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
+  for (int device_index = 0; device_index < c10::cuda::device_count();
+       device_index++) {
+    futureNCCLCallbackStreams_.push_back(std::make_shared<at::cuda::CUDAStream>(
+        at::cuda::getStreamFromPool(device_index)));
+  }
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
@@ -776,10 +787,14 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   TORCH_INTERNAL_ASSERT(
       outputs_->size() == 1,
       "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
+  auto deviceIndex = (*outputs_)[0].device().index();
   // Create a new FutureNCCL object after checking for single-process
   // single-device mode.
   return c10::make_intrusive<FutureNCCL>(
-      at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
+      at::IValue(*outputs_),
+      deviceIndex,
+      cudaEvents_,
+      futureNCCLCallbackStreams_[deviceIndex]);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -799,8 +814,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
 
-  // Store a reference to outputs to be used by WorkNCCL::getFuture.
+  // Store references to outputs and futureNCCLCallbackStream to be used by
+  // WorkNCCL::getFuture.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 

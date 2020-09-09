@@ -19,6 +19,13 @@ namespace {
 } // namspace
 
 Tensor& fill_out(Tensor& self, Scalar value) {
+  if (self.is_quantized()) {
+    at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
+    out = out.to(self.device());
+    // Trust the `copy_` to handle the quantization and the boundary chacks.
+    self.copy_(out);
+    return self;
+  }
   // When filling a number to 1-element CPU tensor, we want to skip
   // everything but manipulate data ptr directly.
   // Ideally this fast pass should be implemented in TensorIterator,
@@ -29,7 +36,12 @@ Tensor& fill_out(Tensor& self, Scalar value) {
         fill_fast<scalar_t>(self, value);});
      return self;
   }
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
+    .check_all_same_dtype(false)
+    .add_output(self)
+    .resize_outputs(false)
+    .build();
   fill_stub(iter.device_type(), iter, value);
   return self;
 }

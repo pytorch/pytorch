@@ -31,6 +31,7 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"cuda", c10::DispatchKey::CUDA},
     {"xla", c10::DispatchKey::XLA},
     {"autograd", c10::DispatchKey::Autograd},
+    {"autogradcpu", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);

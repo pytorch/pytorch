@@ -145,7 +145,7 @@ def skip_if_rocm(func):
     return wrapper
 
 TIMEOUT_DEFAULT = 100
-TIMEOUT_OVERRIDE = {}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
 def get_timeout(test_id):
@@ -194,6 +194,26 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         ]
     ]
 
+tmp_dir = None
+def initialize_temp_directories(init_method=None):
+    global tmp_dir
+    tmp_dir = tempfile.TemporaryDirectory()
+    os.environ["TEMP_DIR"] = tmp_dir.name
+    os.mkdir(os.path.join(tmp_dir.name, "barrier"))
+    os.mkdir(os.path.join(tmp_dir.name, "test_dir"))
+    init_dir_path = os.path.join(tmp_dir.name, "init_dir")
+    os.mkdir(init_dir_path)
+    # Set init method if specified.
+    if init_method is not None:
+        os.environ["INIT_METHOD"] = init_method
+    else:
+        os.environ["INIT_METHOD"] = "file://" + os.path.join(
+            init_dir_path, "shared_init_file"
+        )
+
+def cleanup_temp_dir():
+    if tmp_dir is not None:
+        tmp_dir.cleanup()
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
@@ -243,6 +263,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.skip_return_code_checks = []
+        self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 

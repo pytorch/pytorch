@@ -138,7 +138,8 @@ DONT_REQUIRE_DERIVATIVE = {
     # Quantize functions should not record gradients
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
-    'argmax', 'argmin', 'argsort', 'searchsorted'
+    'argmax', 'argmin', 'argsort', 'searchsorted',
+    'bucketize'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -216,7 +217,15 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-# See NOTE[UnboxedOnly] in function_wrapper.py
+# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
+# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
+# ops that are `use_c10_dispatcher: full` need different c++ code than ops
+# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
+# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
+# can be deleted once all ops are `use_c10_dispatcher: full`.
+# If you update one of the templates, you likely also have to update the other.
+
+# See NOTE[UnboxedOnly]
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
 """)
@@ -366,7 +375,7 @@ ${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_stri
 
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
-# See NOTE[UnboxedOnly] in function_wrapper.py
+# See NOTE[UnboxedOnly]
 UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")

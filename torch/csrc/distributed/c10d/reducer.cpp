@@ -5,6 +5,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -12,7 +13,6 @@
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -21,6 +21,8 @@ namespace {
 inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
+
+constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
@@ -43,6 +45,7 @@ Reducer::Reducer(
       backward_stats_base_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
+      divFactor_(kUnsetDivFactor),
       comm_hook_(nullptr) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
@@ -64,7 +67,10 @@ Reducer::Reducer(
 
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
-  initialize_buckets(std::move(bucket_indices));
+  {
+   std::lock_guard<std::mutex> lock(mutex_);
+   initialize_buckets(std::move(bucket_indices));
+  }
 
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
@@ -359,7 +365,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       if (comm_hook_ == nullptr) {
         // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
         auto wrapped =
-            c10::scalar_to_tensor(double(1.) / process_group_->getSize());
+            c10::scalar_to_tensor(double(1.) / divFactor_);
         wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
         // Divides while copying into the bucket view.
         at::native::mul_out(bucket_view, grad, wrapped);
@@ -396,11 +402,69 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
     replica.contents = grad;
     // See Note [DDP Communication Hook]
     if (comm_hook_ == nullptr) {
-      replica.contents.div_(process_group_->getSize());
+      replica.contents.div_(divFactor_);
     }
     // The grad is modified in place and needs to be written back.
     return true;
   });
+}
+
+std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<std::vector<at::Tensor>> bucketTensors;
+  bucketTensors.reserve(buckets_.size());
+  for (const auto& bucket : buckets_) {
+    std::vector<at::Tensor> tensors;
+    tensors.reserve(bucket.replicas.size());
+    for (const auto& rep : bucket.replicas) {
+      tensors.push_back(rep.contents);
+    }
+    bucketTensors.push_back(std::move(tensors));
+  }
+  return bucketTensors;
+}
+
+void Reducer::set_forward_pass_work_handle(
+    std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+    at::Tensor& tensor,
+    bool useStaticWorldSize) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
+  forwardPassWorkHandle_.resultTensor = tensor;
+  forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
+}
+
+std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return local_used_maps_dev_;
+}
+
+void Reducer::push_rebuilt_params_for_all_indices() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!should_rebuild_buckets()) {
+    return;
+  }
+  const auto replica_count = replicas_.size();
+  for (size_t replica_index = 0; replica_index < replica_count;
+       ++replica_index) {
+    const auto variable_count = replicas_[replica_index].size();
+    for (size_t variable_index = 0; variable_index < variable_count;
+         ++variable_index) {
+      const auto index = VariableIndex{
+          .replica_index = replica_index,
+          .variable_index = variable_index,
+      };
+      push_rebuilt_params(index);
+    }
+  }
+}
+
+void Reducer::push_rebuilt_params(const VariableIndex& index) {
+  if (should_rebuild_buckets() && index.replica_index == 0) {
+    rebuilt_params_.push_back(
+        replicas_[index.replica_index][index.variable_index]);
+    rebuilt_param_indices_.push_back(index.variable_index);
+  }
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -434,12 +498,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
   // and intialized. Also we only need to dump tensors and parameter indcies of
   // one replica.
-  if (!has_rebuilt_bucket_ && !find_unused_parameters_ &&
-      index.replica_index == 0) {
-    rebuilt_params_.push_back(
-        replicas_[index.replica_index][index.variable_index]);
-    rebuilt_param_indices_.push_back(index.variable_index);
-  }
+  push_rebuilt_params(index);
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the
@@ -510,6 +569,20 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
 
+  // If it was scheduled, wait on allreduce in forward pass that tells us
+  // division factor based on no. of currently participating processes.
+  if (divFactor_ == kUnsetDivFactor) {
+    divFactor_ = process_group_->getSize();
+    auto& workHandle = forwardPassWorkHandle_.workHandle;
+    if (workHandle) {
+      if (!forwardPassWorkHandle_.useStaticWorldSize) {
+        workHandle->wait();
+        at::Tensor& res = forwardPassWorkHandle_.resultTensor;
+        divFactor_ = res.item().to<int>();
+      }
+    }
+  }
+
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(index);
   } else {
@@ -558,11 +631,9 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       this->finalize_backward();
       // Rebuild bucket if this is the first time to rebuild
       if (!rebuilt_params_.empty()) {
-        auto rebuilt_bucket_indices = rebuildBuckets();
-        // Unlock before initialize_buckets() as initialize_buckets() requires a
-        // lock, it could result in self deadlock without unlocking here.
+        // Unlock since rebuild_buckets() acquires the lock.
         lock.unlock();
-        initialize_buckets(std::move(rebuilt_bucket_indices));
+        rebuild_buckets();
       } else {
         lock.unlock();
       }
@@ -613,8 +684,6 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // This shouldn't be called if we're expecting autograd hooks to fire.
   TORCH_CHECK(
       !expect_autograd_hooks_,
@@ -774,24 +843,30 @@ void Reducer::initialize_bucket_views(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views_out.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
+            contents.as_strided(v.sizes(), v.strides(), offset));
+      } else {
+        replica.bucket_views_out.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
       }
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views_out.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
+            contents.narrow(0, offset, length).view(v.sizes()));
+      } else {
+        replica.bucket_views_out.push_back(
+            contents.narrow(0, offset, length).view(v.sizes()));
       }
+    }
+    // If `initialize_bucket_views` was called from `initialize_buckets`,
+    // by default `bucket_views_out` and `bucket_views_in` are
+    // essentially the same thing.
+    if (populate_bucket_views_in) {
+      replica.bucket_views_out = replica.bucket_views_in;
     }
   }
 }
@@ -970,6 +1045,10 @@ void Reducer::finalize_backward() {
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
 
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  divFactor_ = kUnsetDivFactor;
+
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
@@ -1128,13 +1207,26 @@ void Reducer::sync_bucket_indices(
   }
 }
 
-std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
+bool Reducer::rebuild_buckets() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
+    return false;
+  }
+
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
-      "rebuilt parameter tensors size is not same as rebuilt parameter indices size.");
+      c10::str(
+          "rebuilt parameter tensors size is not same as rebuilt parameter indices size: ",
+          rebuilt_params_.size(),
+          " versus ",
+          rebuilt_param_indices_.size()));
   TORCH_INTERNAL_ASSERT(
       replicas_[0].size() == rebuilt_param_indices_.size(),
-      "rebuilt parameter indices size is not same as original model parameters size.");
+      c10::str(
+          "rebuilt parameter indices size is not same as original model parameters size.",
+          replicas_[0].size(),
+          " versus ",
+          rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(kDefaultFirstBucketBytes);
@@ -1154,7 +1246,8 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  return rebuilt_bucket_indices;
+  initialize_buckets(std::move(rebuilt_bucket_indices));
+  return true;
 }
 
 // See Note [DDP Communication Hook]
@@ -1184,7 +1277,7 @@ struct BucketKey {
 
   // See torch/csrc/utils/hash.h for dispatch code.
   static size_t hash(const BucketKey& key) {
-    return torch::get_hash(key.type, key.device);
+    return c10::get_hash(key.type, key.device);
   }
 };
 
@@ -1220,7 +1313,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   std::unordered_map<
       BucketKey,
       std::vector<size_t>::const_iterator,
-      torch::hash<BucketKey>>
+      c10::hash<BucketKey>>
       bucket_size_limit_iterators;
 
   // Local accumulator type for a single bucket.
@@ -1230,7 +1323,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   };
 
   // Keep vector of indices and size accumulator by tensor type and device.
-  std::unordered_map<BucketKey, BucketAccumulator, torch::hash<BucketKey>>
+  std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
 
   for (size_t i = 0; i < tensors.size(); i++) {
