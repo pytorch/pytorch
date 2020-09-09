@@ -175,14 +175,18 @@ mobile::Module _load_data(
     observer->onEnterLoadModel();
   }
   try {
-    //
     auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
     BytecodeDeserializer deserializer(std::move(reader));
     auto mcu = std::make_shared<mobile::CompilationUnit>();
     mobile::Module result = mobile::Module(
         deserializer.deserialize(std::move(device)).toObject(), mcu);
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata.insert({"model_name", result.name()});
+    }
     if (observer) {
-      observer->onExitLoadModel(result.metadata());
+      observer->onExitLoadModel(copied_metadata);
     }
     return result;
   } catch (c10::Error& error) {
