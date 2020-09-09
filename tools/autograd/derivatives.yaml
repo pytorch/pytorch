@@ -366,10 +366,10 @@
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
-  self: cummax_backward(indices, grad, self, dim)
+  self: cummaxmin_backward(grad, self, indices, dim)
 
 - name: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
-  self: cummin_backward(indices, grad, self, dim)
+  self: cummaxmin_backward(grad, self, indices, dim)
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   self, weight, bias: "grad.defined() ? conv_tbc_backward(grad, self, weight, bias, pad) : std::tuple<Tensor, Tensor, Tensor>()"
