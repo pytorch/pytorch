@@ -2175,9 +2175,11 @@ struct to_ir {
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
+    //adding implicit conversion for NumberType also; else it float values
+    //get converted to integers
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::FloatType || kind == c10::TypeKind::NumberType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
