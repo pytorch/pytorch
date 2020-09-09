@@ -1008,13 +1008,13 @@ class TestTEFuser(JitTestCase):
         assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @unittest.skip("Reenable when TE will add support for 0-dim tensors")
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
 
-        x = torch.tensor([0.1, 0.1], dtype=torch.float, device='cpu')
-        y = torch.tensor([1, 1], dtype=torch.float, device='cpu')
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(1, dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
