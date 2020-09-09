@@ -921,11 +921,14 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
-    def test_no_unnecessary_save(self):
-        # If we kept x in the derivative Function of x * 2 we would
+    def test_intermediate_variable_save(self):
+        # We keep x in the derivative Function of x * 2 we would
         # get an error in the backward that would complain that we've
         # modified x, which was needed for gradient computation.
-        # Since we should elide unnecessary saves, this test should pass.
+        # Prior to 1.7, this would not raise an error since x was not used in
+        # mul_scalar_backward, however we need to store information about x to ensure
+        # we propagate correct gradients for the case when x is real and the scalar multiplied
+        # is complex.
         mu = torch.ones(1, requires_grad=True)
         x = torch.empty(1)
         loss = 0
@@ -936,7 +939,7 @@ class TestAutograd(TestCase):
             multiplied = x * ft
             s = multiplied.sum()
             loss += s
-        loss.backward()
+        self.assertRaises(RuntimeError, lambda: loss.backward())
 
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
@@ -6341,10 +6344,10 @@ class TestAutogradDeviceType(TestCase):
         z = ((x + 2) * m).sum()
         end_mem = torch.cuda.memory_allocated()
 
-        # In the end the memory usage should remain equal, because neither of
-        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
-        # previous allocation of z had the same size as the current one.
-        self.assertEqual(base_mem, end_mem)
+        # In the end the memory usage should not remain equal, because
+        # (x + 2) and ((x + 2) * m) are kept alive for backward.
+
+        self.assertNotEqual(base_mem, end_mem)
 
     @onlyCUDA
     def test_pin_memory(self, device):
