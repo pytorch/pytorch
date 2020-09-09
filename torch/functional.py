@@ -894,7 +894,7 @@ def tensordot(a, b, dims=2):
         if isinstance(dims, torch.Tensor):
             dims = dims.item()
         if dims < 0:
-            raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
+            raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
     return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
@@ -1020,7 +1020,7 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     elif compute_mode == 'donot_use_mm_for_euclid_dist':
         return _VF.cdist(x1, x2, p, 2)  # type: ignore
     else:
-        raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
+        raise ValueError(f"{compute_mode} is not a valid value for compute_mode")
 
 def atleast_1d(*tensors):
     r"""
@@ -1283,7 +1283,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore
                 else:
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
-        raise RuntimeError("only valid string values are 'fro' and 'nuc', found {}".format(p))
+        raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
@@ -1417,11 +1417,9 @@ else:
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
-        raise TypeError("expected tuple of {} elements but got {}"
-                        .format(2 + int(get_infos), out_len))
+        raise TypeError(f"expected tuple of {2 + int(get_infos)} elements but got {out_len}")
     if not isinstance(out, (tuple, list)):
-        raise TypeError("argument 'out' must be tuple of Tensors, not {}"
-                        .format(type(out).__name__))
+        raise TypeError(f"argument 'out' must be tuple of Tensors, not {type(out).__name__}")
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]

@@ -194,6 +194,12 @@ message TensorBoundShapes {
   optional int64 max_feature_len = 3;
 }
 
+message AOTConfig{
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {
