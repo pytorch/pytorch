@@ -642,18 +642,6 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.pow(torch.add(x, y), 2.0)
             return c
 
-        def test_sigmoid_backward(x, y):
-            x_2 = torch.mul(x, x)
-            c = torch.sigmoid(x_2)
-            torch.autograd.backward(c, y)
-            return c.detach()
-
-        def test_tanh_backward(x, y):
-            x_2 = torch.mul(x, x)
-            c = torch.tanh(x_2)
-            torch.autograd.backward(c, y)
-            return c.detach()
-
         def test_type_as(x, y):
             return x.type_as(torch.add(x, y))
 
@@ -672,9 +660,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_sub,
             test_remainder,
             test_pow,
-            # to fix the backward path, need script instead of trace
-            # test_sigmoid_backward,
-            # test_tanh_backward,
             test_type_as,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
@@ -1001,7 +986,6 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_cuda(self):
         self._test_cat('cuda')
 
-    @unittest.skip("temporarily disable")
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
@@ -1025,23 +1009,22 @@ class TestTensorExprFuser(BaseTestClass):
             # FIXME: interp.elapsed_value() also increments due to simplifier
             assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-# FIXME: Blocked on profiling executor changes
-# def test_loop():
-#    @torch.jit.script
-#    def test(x, y, z):
-#    # type: (Tensor, Tensor, int) -> Tensor
-#        b = y
-#        for i in range(0, z):
-#            a = x + y
-#            b = b + y
-#        return b
-#
-#    llvm = LLVMCodeGenExecuted()
-#    interp = SimpleIREvalExecuted()
-#    x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
-#    test(x, y, z)
-#    r = test(x, y, z)
-#    assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
+    def test_loop(self):
+        @torch.jit.script
+        def test(x, y, z):
+            # type: (Tensor, Tensor, int) -> Tensor
+            b = y
+            for i in range(0, z):
+                a = x + y
+                b = b + y
+            return b
+
+        llvm = LLVMCodeGenExecuted()
+        interp = SimpleIREvalExecuted()
+        x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
+        test(x, y, z)
+        r = test(x, y, z)
+        assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
     @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
@@ -1209,19 +1192,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b)
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @unittest.skip("temporarily disable")
-    def test_unused(self):
-        def test(x, y):
-            return x * x + torch.rand_like(y)
-        a = torch.rand(1, device="cuda")
-        b = torch.rand(1, device="cuda")
-        scripted = torch.jit.script(test)
-        scripted(a, b)
-        cx = CudaCodeGenExecuted()
-        scripted(a, b)
-        assert cx.elapsed_value() == 0
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_multi_rand(self):

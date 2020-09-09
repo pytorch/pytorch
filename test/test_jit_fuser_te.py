@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
+import contextlib
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,6 +44,14 @@ def warmup_forward(f, *args):
         results = f(*args)
 
     return results
+
+@contextlib.contextmanager
+def texpr_reductions_enabled():
+    old = torch._C._jit_set_texpr_reductions_enabled(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_reductions_enabled(old)
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
@@ -108,39 +117,42 @@ class TestTEFuser(JitTestCase):
             x2 = x * x
             return x2.sum()
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_keepdim_cast(self):
         def func(x):
             return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
