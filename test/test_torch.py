@@ -12012,6 +12012,75 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(std1, std2)
                         self.assertEqual(mean1, mean2)
 
+    def _compare_std_var_with_numpy(self, op, device, dtype, input, dim,
+                                    keepdim, unbiased, use_out):
+        assert TEST_NUMPY
+
+        a = input.cpu().numpy() if input.dtype is not torch.bfloat16 else input.float().cpu().numpy()
+        numpy_kwargs = {
+            'axis' : dim,
+            'keepdims' : keepdim,
+            'ddof' : 1 if unbiased else 0,
+        }
+
+        if dim is None:
+            del numpy_kwargs['axis']
+            del numpy_kwargs['keepdims']
+
+        if op == 'var':
+            torch_op = torch.var
+            numpy_op = np.var
+        elif op == 'std':
+            torch_op = torch.std
+            numpy_op = np.std
+        else:
+            self.fail("Unknown op!")
+
+        numpy_result = numpy_op(a, **numpy_kwargs)
+
+        if dim is None and use_out is False:
+            torch_result = torch_op(input, unbiased)
+        elif dim is not None and use_out is False:
+            torch_result = torch_op(input, dim, unbiased, keepdim)
+        elif dim is not None and use_out is True:
+            out = torch.empty(0, device=device, dtype=dtype)
+            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
+        else:
+            out = torch.empty(0, device=device, dtype=dtype)
+            try:
+                torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
+            except RuntimeError:
+                return
+            self.fail("Failed to hit RuntimeError!")
+
+        self.assertEqual(torch_result, numpy_result, exact_dtype=False)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float, torch.double)
+    def test_var_vs_numpy(self, device, dtype):
+        _size = (20, 20)
+
+        for test_case in product((torch.randn(_size, device=device, dtype=dtype),),
+                                 (None, 0, 1),
+                                 (False, True),
+                                 (False, True),
+                                 (False, True),):
+            self._compare_std_var_with_numpy('var', device, dtype, *test_case)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float, torch.double)
+    def test_std_vs_numpy(self, device, dtype):
+        _size = (20, 20)
+
+        for test_case in product((torch.randn(_size, device=device, dtype=dtype),),
+                                 (None, 0, 1),
+                                 (False, True),
+                                 (False, True),
+                                 (False, True),):
+            self._compare_std_var_with_numpy('std', device, dtype, *test_case)
+
     def test_amin_amax_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -12936,20 +13005,9 @@ class TestTorchDeviceType(TestCase):
         c = torch.randn((0, 1, 2), device=device)
         self.assertEqual(c, c.index_select(0, ind_empty))
 
-    def test_nonzero(self, device):
-        num_srcs = [
-            12, 12, 12, 12, 12, 125,
-        ]
-
-        dtypes = [
-            torch.uint8,
-            torch.int8,
-            torch.short,
-            torch.int,
-            torch.float,
-            torch.double,
-            torch.long,
-        ]
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nonzero(self, device, dtype):
 
         shapes = [
             torch.Size((12,)),
@@ -12960,69 +13018,70 @@ class TestTorchDeviceType(TestCase):
             torch.Size((5, 5, 5)),
         ]
 
-        def is_lexicographically_sorted(inds):
-            """Check sorted ascending with
-            i -> j -> k changing slowest to fastest"""
-            assert inds.size(1) == 3
-            if inds.size(0) > 1:
-                i0, j0, k0 = inds[:-1].t()
-                i1, j1, k1 = inds[+1:].t()
-                i_ok = (i1 >= i0)
-                j_ok = (j1 >= j0) | (i1 > i0)
-                k_ok = (k1 >= k0) | (j1 > j0) | (i1 > i0)
-                lex = torch.stack((i_ok, j_ok, k_ok), dim=1)
-                return lex
-            return torch.full_like(inds, 1)
+        def gen_nontrivial_input(shape, dtype, device):
+            if dtype != torch.bfloat16:
+                return torch.randint(2, shape, device=device, dtype=dtype)
+            else:
+                # windows does not work for bfloat16 randing
+                return torch.randint(2, shape, device=device, dtype=torch.float).to(dtype)
 
-        def gen_nontrivial_input(num_src, dtype, device):
-            while True:
-                tensor = torch.rand(num_src).mul(2).floor().to(device=device, dtype=dtype)
-                if tensor.sum() > 0:
-                    return tensor
-
-        for dtype in dtypes:
-            for shape, num_src in zip(shapes, num_srcs):
-                tensor = gen_nontrivial_input(num_src, dtype, device)
-                tensor = tensor.clone().resize_(shape)
-                dst1 = torch.nonzero(tensor)
-                dst2 = tensor.nonzero()
-                dst3 = torch.LongTensor().to(device)
-                torch.nonzero(tensor, out=dst3)
-
+        for shape in shapes:
+            tensor = gen_nontrivial_input(shape, dtype, device)
+            dst1 = torch.nonzero(tensor, as_tuple=False)
+            dst2 = tensor.nonzero(as_tuple=False)
+            dst3 = torch.empty([], dtype=torch.long, device=device)
+            torch.nonzero(tensor, out=dst3)
+            self.assertRaisesRegex(
+                TypeError,
+                "received an invalid combination of arguments",
+                lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
+            if self.device_type != 'xla':
+                # xla does not raise runtime error
                 self.assertRaisesRegex(
-                    TypeError,
-                    "received an invalid combination of arguments",
-                    lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
-                if len(shape) == 1:
-                    dst = []
-                    for i in range(num_src):
-                        if tensor[i] != 0:
-                            dst += [i]
-                    dst = torch.LongTensor(dst).to(device)
-                    self.assertEqual(dst1.select(1, 0), dst, atol=0, rtol=0)
-                    self.assertEqual(dst2.select(1, 0), dst, atol=0, rtol=0)
-                    self.assertEqual(dst3.select(1, 0), dst, atol=0, rtol=0)
-                elif len(shape) == 2:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
-                elif len(shape) == 3:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
-                    lex = is_lexicographically_sorted(dst1)
-                    self.assertEqual(torch.ones_like(lex), lex)
-                if TEST_NUMPY:
-                    tup1 = torch.nonzero(tensor, as_tuple=True)
-                    tup2 = tensor.nonzero(as_tuple=True)
-                    tup3 = torch.where(tensor)
-                    np1 = tensor.cpu().numpy().nonzero()
-                    for t in (tup1, tup2, tup3):
-                        self.assertEqual(len(t), len(np1))
-                        for i in range(len(t)):
-                            self.assertEqual(t[i].cpu().numpy(), np1[i])
+                    RuntimeError,
+                    "scalar type Long",
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float))
+                )
+            if self.device_type == 'cuda':
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "on the same device",
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.long))
+                )
+            np_array = tensor.cpu().numpy() if dtype != torch.bfloat16 else tensor.float().cpu().numpy()
+            np_result = torch.from_numpy(np.stack(np_array.nonzero())).t()
+            self.assertEqual(dst1.cpu(), np_result, atol=0, rtol=0)
+            self.assertEqual(dst2.cpu(), np_result, atol=0, rtol=0)
+            self.assertEqual(dst3.cpu(), np_result, atol=0, rtol=0)
+            tup1 = torch.nonzero(tensor, as_tuple=True)
+            tup2 = tensor.nonzero(as_tuple=True)
+            tup1 = torch.stack(tup1).t().cpu()
+            tup2 = torch.stack(tup2).t().cpu()
+            self.assertEqual(tup1, np_result, atol=0, rtol=0)
+            self.assertEqual(tup2, np_result, atol=0, rtol=0)
+
+    @onlyOnCPUAndCUDA
+    def test_nonzero_discontiguous(self, device):
+        shape = (4, 4)
+        tensor = torch.randint(2, shape, device=device)
+        tensor_nc = torch.empty(shape[0], shape[1] * 2, device=device)[:, ::2].copy_(tensor)
+        dst1 = tensor.nonzero(as_tuple=False)
+        dst2 = tensor_nc.nonzero(as_tuple=False)
+        self.assertEqual(dst1, dst2, atol=0, rtol=0)
+        dst3 = torch.empty_like(dst1)
+        data_ptr = dst3.data_ptr()
+        # expect dst3 storage to be reused
+        torch.nonzero(tensor, out=dst3)
+        self.assertEqual(data_ptr, dst3.data_ptr())
+        self.assertEqual(dst1, dst3, atol=0, rtol=0)
+        # discontiguous out
+        dst4 = torch.empty(dst1.size(0), dst1.size(1) * 2, dtype=torch.long, device=device)[:, ::2]
+        data_ptr = dst4.data_ptr()
+        strides = dst4.stride()
+        torch.nonzero(tensor, out=dst4)
+        self.assertEqual(data_ptr, dst4.data_ptr())
+        self.assertEqual(dst1, dst4, atol=0, rtol=0)
+        self.assertEqual(strides, dst4.stride())
 
     def test_nonzero_non_diff(self, device):
         x = torch.randn(10, requires_grad=True)
