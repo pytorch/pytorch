@@ -5,6 +5,7 @@ import multiprocessing.dummy
 import os
 import queue
 import pickle
+import re
 import statistics
 import subprocess
 import sys
@@ -21,7 +22,13 @@ HEAD = "head"
 VERSIONS = (HEAD, "1.6", "1.5", "1.4")
 ENV_TEMPLATE = "historic_microbenchmark_{version}"
 
-Task = collections.namedtuple("Task", ("version", "num_cores", "device", "tag_filter"))
+EXCLUDE = [
+    "hardsigmoid_test.py",
+    "hardswish_test.py",
+    "q.+_test.py",
+]
+
+Task = collections.namedtuple("Task", ("version", "test", "num_cores", "device", "tag_filter"))
 
 CPU_QUEUE = queue.Queue()
 for i in range(0, multiprocessing.cpu_count() - 6, 4):
@@ -99,7 +106,7 @@ def launch_subtask(t: Task):
             f"cd {OP_BENCHMARK_ROOT} && "
             f"source activate {ENV_TEMPLATE.format(version=t.version)} && "
             f"taskset --cpu-list {cpu_list} "
-            f"python -m pt.benchmark_all_test --framework PyTorch "
+            f"python -m {t.test} "
             f"--tag_filter {t.tag_filter} --ai_pep_format --device {t.device} "
             f"--omp_num_threads {t.num_cores} --mkl_num_threads  {t.num_cores}"
         )
@@ -108,7 +115,10 @@ def launch_subtask(t: Task):
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={"CUDA_VISIBLE_DEVICES": "" if gpu is None else str(gpu)},
+            env={
+                "CUDA_VISIBLE_DEVICES": "" if gpu is None else str(gpu),
+                "PATH": os.getenv("PATH"),
+            },
         )
         if not result.returncode:
             RESULT_QUEUE.put((t, result.stdout.decode("utf-8")))
@@ -174,17 +184,27 @@ def process(results):
 
 
 def run():
+    tests = []
+    for i in sorted(os.listdir(os.path.join(OP_BENCHMARK_ROOT, "pt"))):
+        if not i.endswith("_test.py"):
+            continue
+
+        if any(re.search(pattern, i) for pattern in EXCLUDE):
+            continue
+        tests.append(f"pt.{i[:-3]}")
+
     cpu_tasks, gpu_tasks = [], []
     for v in VERSIONS:
-        cpu_tasks.extend([
-            Task(v, 1, "cpu", "short"),
-            Task(v, 1, "cpu", "long"),
-            Task(v, 2, "cpu", "short"),
-            Task(v, 2, "cpu", "long"),
-            Task(v, 4, "cpu", "short"),
-            Task(v, 4, "cpu", "long"),
-        ])
-        gpu_tasks.append(Task(v, 2, "cuda", "all"))
+        for test in tests:
+            cpu_tasks.extend([
+                Task(v, test, 1, "cpu", "short"),
+                Task(v, test, 1, "cpu", "long"),
+                Task(v, test, 2, "cpu", "short"),
+                Task(v, test, 2, "cpu", "long"),
+                Task(v, test, 4, "cpu", "short"),
+                Task(v, test, 4, "cpu", "long"),
+            ])
+            gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
     gpu_pool = multiprocessing.dummy.Pool(GPU_QUEUE.qsize())
     cpu_pool = multiprocessing.dummy.Pool(CPU_QUEUE.qsize())

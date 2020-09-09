@@ -7,7 +7,7 @@ binary_ops_list = op_bench.op_list(
     attrs=[
         ['add', torch.add],
         ['mul', torch.mul],
-        ['div', torch.true_divide],
+        ['div', getattr(torch, "true_divide", torch.div)],
     ],
 )
 
