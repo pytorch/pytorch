@@ -9,7 +9,7 @@ import sys
 import time
 import tempfile
 import unittest
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from io import StringIO
@@ -2891,7 +2891,7 @@ class DistributedTest:
                     if i % sync_interval != 0:
                         context = net.no_sync()
                     else:
-                        context = nullcontext()
+                        context = suppress()
                     with context:
                         if isinstance(inp, tuple):
                             loss = net(*inp).sum()
