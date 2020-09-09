@@ -28,8 +28,9 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto observer = torch::observerConfig().getModuleObserver();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
+  auto module_meta = metadata();
   std::unordered_map<std::string, std::string> copied_metadata = metadata();
-  if (metadata().find("model_name") == metadata().end()) {
+  if (module_meta.find("model_name") == metadata.end()) {
     copied_metadata["model_name"] = name();
   }
   if (observer) {
@@ -37,8 +38,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
-  auto metadata = metadata();
-  debug_info->setModelName(metadata.find("model_name") == metadata.end() ? name() : metadata.at("model_name"));
+  debug_info->setModelName(module_meta.find("model_name") == module_meta.end() ? name() : module_meta.at("model_name"));
   debug_info->setMethodName(method_name);
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
