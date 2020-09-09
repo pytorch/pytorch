@@ -218,9 +218,11 @@ else
     # set only when building other architectures
     # only use for "python setup.py install" line
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-      WERROR=1 python setup.py install bdist_wheel
+      WERROR=1 python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
-      python setup.py install bdist_wheel
+      python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
