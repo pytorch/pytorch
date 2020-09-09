@@ -64,6 +64,5 @@ void RemoveProfilingNodes(std::shared_ptr<Graph> graph) {
   removeProfilingNodes(graph->block());
 }
 
-
 } // namespace jit
 } // namespace torch

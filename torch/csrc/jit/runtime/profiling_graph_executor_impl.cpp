@@ -371,7 +371,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
     RemoveProfilingNodes(copy);
-    GRAPH_DEBUG("After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
+    GRAPH_DEBUG(
+        "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
     runNoGradOptimizations(copy);
   }
