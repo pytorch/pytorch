@@ -152,9 +152,6 @@ ConvParamsSerializationType serialize_conv(
   auto output_padding = params->output_padding().vec();
   params_vec.insert(params_vec.end(), output_padding.begin(),
                     output_padding.end());
-  for (int i = 0; i < kSpatialDim; i++) {
-    params_vec.push_back(0);
-  }
   params_vec.push_back(params->groups());
   params_vec.push_back(params->transpose());
   int64_t vec_size = params_vec.size();
