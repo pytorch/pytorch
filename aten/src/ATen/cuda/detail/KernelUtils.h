@@ -28,7 +28,7 @@ constexpr int CUDA_NUM_THREADS = 1024;
 inline int GET_BLOCKS(const int N)
 {
   AT_ASSERTM(N > 0, "CUDA kernel launch blocks must be positive, but got N=", N);
-  return (N + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
+  return N / CUDA_NUM_THREADS + (N % CUDA_NUM_THREADS == 0 ? 0 : 1);
 }
 
 inline int GET_BLOCKS(const int64_t N) {
