@@ -3894,13 +3894,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     @staticmethod
     def _gpu_add(x, y):
-        print("--- in user func")
         if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
-            ret = (x + y).to(0)
+            return (x + y).to(0)
         else:
             raise ValueError("Wrong device affinity")
-        print("--- out user func")
-        return ret
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
@@ -3916,15 +3913,13 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        if self.rank == 0:
-            print("++++++++ before rpc_sync")
-            ret = rpc.rpc_sync(
-                dst,
-                TensorPipeAgentRpcTest._gpu_add,
-                args=(torch.zeros(2).to(0), torch.ones(2).to(0))
-            )
-            self.assertEqual(ret.device, torch.device(1))
-            self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add,
+            args=(torch.zeros(2).to(0), torch.ones(2).to(0))
+        )
+        self.assertEqual(ret.device, torch.device(1))
+        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
         rpc.shutdown()
 
     @staticmethod

@@ -601,6 +601,7 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
         at::getCPUAllocator()->allocate(tensor.length));
     tensor.data = buffers.tensors.back().get();
   }
+
   return buffers;
 }
 
