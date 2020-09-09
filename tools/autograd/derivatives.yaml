@@ -667,9 +667,6 @@
   mask: non_differentiable
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
-# normally broadcasting is handled implicitly, but here, because we call an inplace
-# function as an optimization and the LHS doesn't broadcast for inplace functions,
-# we need to explicitly broadcast.
   self: masked_select_backward(grad, self, mask)
   mask: non_differentiable
 
