@@ -998,13 +998,13 @@ Tensor kaiser_window(
     return at::empty({0}, options);
   }
   if (window_length == 1) {
-    return native::ones({1}, options);
+    return at::ones({1}, options);
   }
   if (periodic) {
     window_length += 1;
   }
-  auto initial = native::arange(window_length, options);
-  auto window = native::zeros(window_length, options);
+  auto initial = at::arange(window_length, options);
+  auto window = at::empty(window_length, options);
   auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
