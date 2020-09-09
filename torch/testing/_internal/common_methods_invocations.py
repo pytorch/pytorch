@@ -399,7 +399,7 @@ def method_tests():
         ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('mul', (S, S, S), (3.14,), 'constant', (True,)),
         ('mul', (), (3.14,), 'scalar_constant', (True,)),
-        # TODO: enable these tests @anjali411
+        # TODO(@anjali411): enable these tests
         # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
         # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
@@ -495,7 +495,7 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        # TODO: add the commented tests back after updating the formula based on tensorflow definition. - @anjali411
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
         # ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
         # ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         # ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
@@ -536,7 +536,7 @@ def method_tests():
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        # TODO: add the commented test back after updating the formula based on tensorflow definition. - @anjali411
+        # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
         # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
@@ -549,7 +549,7 @@ def method_tests():
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        # TODO: add the commented tests back after updating the formula based on tensorflow definition. - @anjali411
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
         # ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
         # ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),

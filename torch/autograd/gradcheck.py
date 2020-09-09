@@ -88,7 +88,13 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
             w_d = 0.5 * (ds_dx - ds_dy * 1j)
             d[d_idx] = v.conjugate() * conj_w_d + v * w_d.conj()
         elif ds_dx.is_complex():  # R -> C
+            # w_d = conj_w_d = 0.5 * ds_dx
             dL_dz_conj = 0.5 * (v.conjugate() * ds_dx + v * ds_dx.conj())
+            # The above formula is derived for a C -> C function that's a part of
+            # bigger function with real valued output. From separate calculations,
+            # it can be verified that the gradient for R -> C function
+            # equals to real value of the result obtained from the generic formula for
+            # C -> C functions used above.
             d[d_idx] = torch.real(dL_dz_conj)
         else:
             d[d_idx] = ds_dx
@@ -224,8 +230,10 @@ def gradcheck(
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
-    For functions with complex output, the gradients are computed using :attr:`grad_output`
-    values 1 and 1j.
+    For functions with complex output, the numerical and analytical gradients are computed
+    using :attr:`grad_output` both values 1 and 1j and compared against other in each case.
+    For more details on how the gradient for complex functions is calculated, check out
+    the note :ref:`complex_autograd-doc`
 
     .. note::
         The default values are designed for :attr:`input` of double precision.
@@ -356,13 +364,11 @@ def gradcheck(
                     a_with_imag_v = analytical_with_imag_v[j]
                     n_with_imag_v = numerical_with_imag_v[j]
                     checkIfNumericalAnalyticAreClose(a_with_imag_v, n_with_imag_v, j,
-                                                     "Imaginary value(s) of Conjugate Wirtinger derivative \
-                                                     (Im(ds/dx + ds/dy * 1j)) failed to compare equal. ")
+                                                     "Gradients failed to compare equal for grad output = 1j. ")
                 if inp.is_complex():
                     # C -> R, C -> C
                     checkIfNumericalAnalyticAreClose(a, n, j,
-                                                     "Real value(s) of Conjugate Wirtinger derivative \
-                                                      (Re(ds/dx + ds/dy * 1j) failed to compare equal. ")
+                                                     "Gradients failed to compare equal for grad output = 1. ")
                 else:
                     # R -> R, R -> C
                     checkIfNumericalAnalyticAreClose(a, n, j)

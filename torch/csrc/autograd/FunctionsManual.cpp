@@ -223,6 +223,15 @@ Tensor mul_scalar_backward(Tensor grad, Tensor self, Scalar other) {
   return result;
 }
 
+Tensor mul_tensor_backward(Tensor grad, Tensor self, Tensor other) {
+  auto result = grad * other.conj();
+  if (!self.is_complex() && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();

@@ -43,7 +43,6 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
                                                                 exclude_tensor_method,
                                                                 mask_not_all_zeros,
-                                                                EXCLUDE_METHOD_FOR_ATTRIBUTES,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
@@ -4654,7 +4653,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-# TODO: add the commented tests back after updating the formula based on tensorflow definition - @anjali411
+# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition
 separate_complex_tests = ['view_as_real', 'real', 'imag']  # ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
@@ -4667,7 +4666,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh', 'cosh'] + separate_complex_tests
 
-# TODO: add the commented tests back after updating the formula based on tensorflow definition - @anjali411
+# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 'sin', 'cos', '__rmul__', '__rdiv__', 'mul', 'tanh']
 
 def add_test(
@@ -4762,8 +4761,14 @@ def add_test(
                     if not is_inplace:
                         self_variable = create_input((self_size,), requires_grad=True, dtype=dtype)[0][0]
                         args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs, dtype=dtype)
-                        if hasattr(self_variable, name) and name not in EXCLUDE_METHOD_FOR_ATTRIBUTES:
-                            output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                        if hasattr(self_variable, name):
+                            attribute_result = getattr(self_variable, name)
+                            if callable(attribute_result):
+                                output_variable = attribute_result(*args_variable, **kwargs_variable)
+                            else:
+                                self.assertTrue(len(args_variable) == 0)
+                                self.assertTrue(len(kwargs_variable) == 0)
+                                output_variable = attribute_result
                         else:
                             self_and_args_variable = (self_variable,) + args_variable
                             output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
