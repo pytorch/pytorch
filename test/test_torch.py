@@ -19245,7 +19245,7 @@ class TestViewOps(TestCase):
         # zero dimension tensor
         z = torch.tensor(2.0)
         self.assertRaisesRegex(
-            RuntimeError, "Dimension of tensor can't be zero",
+            RuntimeError, "Input tensor must have one or more dimensions",
             lambda: torch.view_as_complex(z))
 
         y = x.reshape(0, 2)  # torch.Size([0, 2])
