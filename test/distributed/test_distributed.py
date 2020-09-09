@@ -1599,7 +1599,7 @@ class _DistTestBase(object):
             if cuda:
                 in_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in in_tensors]
                 expected_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors]
-                out_tensor = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
+                out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
             dist.all_to_all(out_tensors, in_tensors, group=group_id)
             for t1, t2 in zip(out_tensors, expected_tensors):
                 self.assertEqual(t1, t2)
