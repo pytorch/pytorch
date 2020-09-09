@@ -2180,7 +2180,7 @@ struct to_ir {
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
         kind == c10::TypeKind::FloatType ||
-        kind == c10::TypeKind::NumberType) {
+        kind == c10::TypeKind::NumberType ) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
