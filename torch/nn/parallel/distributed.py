@@ -832,9 +832,6 @@ class DistributedDataParallel(Module):
                         self.require_forward_param_sync = should_sync_backwards
                         if not should_sync_backwards:
                             continue
-                        # print(f"Joined rank require_backward_grad_sync {self.require_backward_grad_sync}")
-                        # if not self.require_backward_grad_sync:
-                        #     continue
                         # Schedules one allreduce per gradient bucket to match
                         # the backwards pass allreduce.
                         self._match_all_reduce_for_bwd_pass()
