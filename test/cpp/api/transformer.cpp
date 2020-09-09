@@ -492,7 +492,7 @@ void transformer_encoder_test_helper(bool is_cuda) {
 
   // test case 3, multiple layers with norm
   LayerNorm norm(LayerNormOptions({encoder_layer.get()->options.d_model()}));
-  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 2).norm(std::move(AnyModule(norm))));
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 2).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -506,7 +506,7 @@ void transformer_encoder_test_helper(bool is_cuda) {
   ASSERT_EQ(result.sizes(), ref_output.sizes());
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
-  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 6).norm(std::move(AnyModule(norm))));
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 6).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -549,7 +549,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerEncoderLayer) {
 TEST_F(TransformerTest, PrettyPrintTransformerEncoder) {
   LayerNorm norm = LayerNorm(LayerNormOptions({4}));
   TransformerEncoderOptions options(
-    TransformerEncoderOptions(TransformerEncoderLayerOptions(4, 2),2).norm(std::move(AnyModule(norm))));
+    TransformerEncoderOptions(TransformerEncoderLayerOptions(4, 2),2).norm(AnyModule(norm)));
   ASSERT_EQ(
       c10::str(TransformerEncoder(options)),
       "torch::nn::TransformerEncoderImpl(\n"
@@ -814,7 +814,7 @@ void transformer_decoder_test_helper(bool is_cuda) {
   // multiple layers with norm
   LayerNorm norm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
   model = TransformerDecoder(
-    TransformerDecoderOptions(decoder_layer, 2).norm(std::move(AnyModule(norm))));
+    TransformerDecoderOptions(decoder_layer, 2).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -831,7 +831,7 @@ void transformer_decoder_test_helper(bool is_cuda) {
 
   // multiple layers with norm
   model = TransformerDecoder(
-    TransformerDecoderOptions(decoder_layer, 6).norm(std::move(AnyModule(norm))));
+    TransformerDecoderOptions(decoder_layer, 6).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -983,8 +983,7 @@ void transformer_decoder_test_helper(bool is_cuda) {
 
   // Multiple layers with norm
   norm = LayerNorm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
-  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6)
-    .norm(std::move(AnyModule(norm))));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -1034,7 +1033,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoder) {
   LayerNorm norm = LayerNorm(LayerNormOptions({4}));
   TransformerDecoderOptions options(
     TransformerDecoderOptions(
-      TransformerDecoderLayerOptions(4, 2),2).norm(std::move(AnyModule(norm))));
+      TransformerDecoderLayerOptions(4, 2),2).norm(AnyModule(norm)));
   ASSERT_EQ(
       c10::str(TransformerDecoder(options)),
       "torch::nn::TransformerDecoderImpl(\n"
@@ -1101,17 +1100,17 @@ void transformer_test_helper(bool is_cuda) {
     // transformer with customized encoder/decoder
     LayerNorm enorm(LayerNormOptions({4}));
     TransformerEncoder encoder(TransformerEncoderOptions(
-      TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 2).norm(std::move(AnyModule(enorm))));
+      TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 2).norm(AnyModule(enorm)));
 
     LayerNorm dnorm(LayerNormOptions({4}));
     TransformerDecoder decoder(TransformerDecoderOptions(
-      TransformerDecoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 1).norm(std::move(AnyModule(dnorm))));
+      TransformerDecoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 1).norm(AnyModule(dnorm)));
 
     Transformer model_cus(TransformerOptions()
       .d_model(4)
       .nhead(2)
-      .custom_encoder(std::move(AnyModule(encoder)))
-      .custom_decoder(std::move(AnyModule(decoder))));
+      .custom_encoder(AnyModule(encoder))
+      .custom_decoder(AnyModule(decoder)));
 
     set_parameter_constants<Transformer>(model_cus, tensor_options);
     if (tensor_options.device() == torch::kCUDA) {

@@ -48,7 +48,7 @@ struct TORCH_API TransformerOptions {
   /// custom encoder (default=None)
   TORCH_ARG(AnyModule, custom_encoder);
 
-  /// custom encoder (default=None)
+  /// custom encoder (default=None)
   TORCH_ARG(AnyModule, custom_decoder);
 };
 

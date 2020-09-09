@@ -199,11 +199,11 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
   for (int64_t i = 0; i < options.num_layers(); ++i) {
-    layers->push_back(std::move(options.encoder_layer()->clone()));
+    layers->push_back(options.encoder_layer()->clone());
   }
 
   if (!options.norm().is_empty()) {
-    norm = std::move(options.norm().clone());
+    norm = options.norm().clone();
     this->register_module("norm", norm.ptr());
   }
 }
@@ -221,10 +221,10 @@ void TransformerEncoderImpl::reset_parameters() {
   // b. Allow user to add/delete normalization module when reset parameters
   if (!norm.is_empty()) {
     this->unregister_module("norm");
-    norm = std::move(AnyModule());
+    norm = AnyModule();
   }
   if (!options.norm().is_empty()) {
-    norm = std::move(options.norm().clone());
+    norm = options.norm().clone();
     this->register_module("norm", norm.ptr());
   }
 }
@@ -259,11 +259,11 @@ void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
   for (int64_t i = 0; i < options.num_layers(); ++i) {
-    layers->push_back(std::move(options.decoder_layer()->clone()));
+    layers->push_back(options.decoder_layer()->clone());
   }
 
   if (!options.norm().is_empty()) {
-    norm = std::move(options.norm().clone());
+    norm = options.norm().clone();
     this->register_module("norm", norm.ptr());
   }
 }
@@ -282,10 +282,10 @@ void TransformerDecoderImpl::reset_parameters() {
   // b. Allow user to add/delete normalization module when reset parameters
   if (!norm.is_empty()) {
     this->unregister_module("norm");
-    norm = std::move(AnyModule());
+    norm = AnyModule();
   }
   if (!options.norm().is_empty()) {
-    norm = std::move(options.norm().clone());
+    norm = options.norm().clone();
     this->register_module("norm", norm.ptr());
   }
 }
@@ -341,12 +341,12 @@ void TransformerImpl::reset() {
       .dim_feedforward(options.dim_feedforward())
       .dropout(options.dropout())
       .activation(options.activation()), options.num_encoder_layers())
-        .norm(std::move(AnyModule(norm))));
+        .norm(AnyModule(norm)));
 
-    this->encoder = std::move(AnyModule(trans_encoder));
+    this->encoder = AnyModule(trans_encoder);
   }
   else {
-    this->encoder = std::move(options.custom_encoder().clone());
+    this->encoder = options.custom_encoder().clone();
   }
   this->register_module("encoder", this->encoder.ptr());
 
@@ -359,12 +359,12 @@ void TransformerImpl::reset() {
       .dim_feedforward(options.dim_feedforward())
       .dropout(options.dropout())
       .activation(options.activation()), options.num_decoder_layers())
-        .norm(std::move(AnyModule(norm))));
+        .norm(AnyModule(norm)));
 
-    this->decoder = std::move(AnyModule(trans_decoder));
+    this->decoder = AnyModule(trans_decoder);
   }
   else {
-    this->decoder = std::move(options.custom_decoder().clone());
+    this->decoder = options.custom_decoder().clone();
   }
   this->register_module("decoder", this->decoder.ptr());
 
@@ -425,7 +425,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
     TORCH_WARN_ONCE(
       "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
       "the mas with smallest float number on this platform instead of -inf");
-    mask = mask.masked_fill(mask == 0, std::numeric_limits<float>::min()).masked_fill(mask == 1, 0.f);
+    mask = mask.masked_fill(mask == 0, std::numeric_limits<float>::lowest()).masked_fill(mask == 1, 0.f);
   }
 
   return mask;
