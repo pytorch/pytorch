@@ -679,8 +679,8 @@ class QuantizationTestCase(TestCase):
 
         # Check state dict serialization and torch.save APIs
         if is_emb_bag:
-            loaded_qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
-                                            include_last_offset=True, mode='sum')
+            loaded_qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                           include_last_offset=True, mode='sum')
         else:
             loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
         self.check_eager_serialization(qemb, loaded_qemb, inputs)
@@ -707,8 +707,8 @@ class QuantizationTestCase(TestCase):
 
         float_embedding(*inputs)
         if is_emb_bag:
-            q_embeddingbag = nnqd.EmbeddingBag.from_float(float_embedding)
-            expected_name = "DynamicQuantizedEmbeddingBag"
+            q_embeddingbag = nnq.EmbeddingBag.from_float(float_embedding)
+            expected_name = "QuantizedEmbeddingBag"
         else:
             q_embeddingbag = nnq.Embedding.from_float(float_embedding)
             expected_name = "QuantizedEmbedding"

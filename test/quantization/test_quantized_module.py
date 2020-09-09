@@ -740,6 +740,49 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False, is_emb_bag=False)
 
 
+    @given(
+        num_embeddings=st.integers(10, 50),
+        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+        num_offsets=st.integers(1, 20),
+        set_qconfig=st.booleans(),
+    )
+    @skipIfNoFBGEMM
+    def test_embedding_bag_api(self, num_embeddings, embedding_dim, num_offsets, set_qconfig):
+        r"""Test execution and serialization for dynamic quantized embedding_bag modules on int8
+        """
+        num_lengths = np.random.randint(1, 6)
+        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        offsets = lengths_to_offsets(lengths)
+        # include the last offset
+        offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
+        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = default_float_qparams_observer()
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                include_last_offset=True, mode='sum', _weight=qweight)
+        qemb(indices, offsets)
+
+        # Ensure the module has the correct weights
+        self.assertEqual(qweight, qemb.weight())
+
+        w_packed = qemb._packed_params._packed_weight
+        module_out = qemb(indices, offsets)
+
+        # Call the qembedding_bag operator directly
+        ref = torch.ops.quantized.embedding_bag_byte(w_packed, indices, offsets, mode=0,
+                                                     per_sample_weights=None,
+                                                     include_last_offset=True)
+        self.assertEqual(module_out, ref)
+        self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, offsets, set_qconfig, is_emb_bag=True)
+
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
@@ -955,47 +998,3 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 bias_keys = ['bias_ih', 'bias_hh']
                 self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
-
-
-    @given(
-        num_embeddings=st.integers(10, 50),
-        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
-        num_offsets=st.integers(1, 20),
-        set_qconfig=st.booleans(),
-    )
-    @skipIfNoFBGEMM
-    def test_embedding_bag_api(self, num_embeddings, embedding_dim, num_offsets, set_qconfig):
-        r"""Test execution and serialization for dynamic quantized embedding_bag modules on int8
-        """
-        num_lengths = np.random.randint(1, 6)
-        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
-        num_indices = np.sum(lengths)
-        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
-
-        offsets = lengths_to_offsets(lengths)
-        # include the last offset
-        offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
-        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
-
-        obs = default_float_qparams_observer()
-        obs(weights)
-        # Get the scale and zero point for the weight tensor
-        qparams = obs.calculate_qparams()
-        # Quantize the weights to 8bits
-        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim, include_last_offset=True, mode='sum')
-        qemb.set_weight(qweight)
-        qemb(indices, offsets)
-
-        # Ensure the module has the correct weights
-        self.assertEqual(qweight, qemb.weight())
-
-        w_packed = qemb._packed_params._packed_weight
-        module_out = qemb(indices, offsets)
-
-        # Call the qembedding_bag operator directly
-        ref = torch.ops.quantized.embedding_bag_byte(w_packed, indices, offsets, mode=0,
-                                                     per_sample_weights=None,
-                                                     include_last_offset=True)
-        self.assertEqual(module_out, ref)
-        self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, offsets, set_qconfig, is_emb_bag=True)
