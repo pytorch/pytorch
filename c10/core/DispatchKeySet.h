@@ -133,7 +133,7 @@ public:
     using value_type = DispatchKey;
     using difference_type = ptrdiff_t;
 
-    iterator(const uint64_t *data_ptr, uint8_t i=0) : data_ptr_(data_ptr), i_(i) {
+    explicit iterator(const uint64_t *data_ptr, uint8_t i=0) : data_ptr_(data_ptr), i_(i) {
       // Go to the first key in the set
       ++(*this);
     }
