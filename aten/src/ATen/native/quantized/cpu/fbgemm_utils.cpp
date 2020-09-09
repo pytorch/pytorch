@@ -251,8 +251,10 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
     .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
     .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
     .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
+    .def("output_padding", &ConvPackedParamsBase<kSpatialDim>::output_padding)
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
-    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups);
+    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
+    .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
   return register_conv_params;
 }
 

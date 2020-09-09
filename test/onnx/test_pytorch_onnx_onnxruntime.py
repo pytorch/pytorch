@@ -107,6 +107,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
+
         # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
@@ -2502,6 +2503,17 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.ones(7, 3, 5)
         self._argmin_argmax_model(input)
 
+    def test_repeat(self):
+        class RepeatModel(torch.nn.Module):
+            def forward(self, x, y):
+                x2 = x.repeat(y.shape[0], 1)
+                y1 = y.view(-1, 1)
+                return x2 + y1
+
+        x = torch.tensor([1, 2, 3])
+        y = torch.tensor([4, 5, 8, 9])
+        self.run_test(RepeatModel(), (x, y))
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
@@ -2702,6 +2714,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_size_list_to_slice(self):
+        class SplitModule(torch.nn.Module):
+            def forward(self, x, y, t):
+                splits = (x.size(1), y.size(1))
+                out, out2 = torch.split(t, splits, dim=1)
+                return out, out2
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 4)
+        t = torch.randn(2, 7)
+        self.run_test(SplitModule(), (x, y, t))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_dynamic(self):
