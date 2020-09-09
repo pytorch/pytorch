@@ -18862,6 +18862,7 @@ else:
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
                torch.amin, torch.amax, torch.norm]
