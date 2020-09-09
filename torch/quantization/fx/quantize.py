@@ -542,7 +542,8 @@ class Quantizer:
                         root_module, self.quantized_graph,
                         load_non_quantized(node.args[0]), observer_module)
                     continue
-            if is_child_module and  node.op == 'placeholder' and graph_inputs.index(node.name) in model._observed_input_idxs:
+            if is_child_module and node.op == 'placeholder' and \
+               graph_inputs.index(node.name) in model._observed_input_idxs:
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:

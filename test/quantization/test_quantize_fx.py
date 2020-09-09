@@ -254,10 +254,11 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.conv(x)
 
         from torch.fx.symbolic_trace import DefaultDelegate
+
         class CustomDelegate(DefaultDelegate):
             def is_leaf_module(self, m):
-                return (m.__module__.startswith('torch.nn') and \
-                    not isinstance(m, torch.nn.Sequential)) or \
+                return (m.__module__.startswith('torch.nn') and
+                        not isinstance(m, torch.nn.Sequential)) or \
                     isinstance(m, CustomModule)
 
         from torch.quantization import register_traceable_custom_module_class
@@ -296,7 +297,9 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = symbolic_trace(original_m, delegate_class=CustomDelegate).eval()
         qconfig_dict = {'': default_qconfig}
+        # check prepared model
         m = prepare_fx(m, qconfig_dict)
+        # calibration
         m(data)
         # input and output of first conv, observer for custom module
         # will be inserted in the custom module itself
@@ -310,6 +313,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m.custom, expected_node_occurrence=count_check)
 
+        # check converted/quantized model
         m = convert_fx(m)
         count_check = {
             ns.call_function(torch.quantize_per_tensor) : 1,

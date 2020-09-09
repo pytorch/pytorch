@@ -3,7 +3,6 @@ from torch.fx.graph import (
     Node,
 )
 from ..quantization_mappings import (
-    get_static_quant_module_mapping,
     get_static_quant_module_class,
     get_quantized_operator,
 )
