@@ -30,7 +30,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   set the value of "model_name" as name() */
   auto module_meta = metadata();
   std::unordered_map<std::string, std::string> copied_metadata = metadata();
-  if (module_meta.find("model_name") == metadata.end()) {
+  if (module_meta.find("model_name") == module_meta.end()) {
     copied_metadata["model_name"] = name();
   }
   if (observer) {
