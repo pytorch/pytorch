@@ -57,7 +57,16 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
     for (int i = 0; i < X.numel(); i++) {
         float val = X_data[i];
         short shortAbsInput = _cvtss_sh(abs(val), 0);
-        short clampShortAbsInput = std::clamp(shortAbsInput, (short)tanhLUTMinOffset, (short)(tanhLUTMaxOffset - 1));
+        // Clamp the input in the range of
+        //  (short)tanhLUTMinOffset to (short)(tanhLUTMaxOffset - 1)
+        short clampShortAbsInput = shortAbsInput;
+        if (shortAbsInput < (short)tanhLUTMinOffset) {
+            clampShortAbsInput = (short)tanhLUTMinOffset;
+        }
+
+        if (shortAbsInput > (short)(tanhLUTMaxOffset - 1)) {
+            clampShortAbsInput = (short)(tanhLUTMaxOffset - 1);
+        }
         short inputInLutRange = clampShortAbsInput - tanhLUTMinOffset;
         short temp =  tanhLUT[inputInLutRange];
 
