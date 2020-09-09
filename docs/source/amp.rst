@@ -109,14 +109,11 @@ Ops that can autocast to ``float16``
 ``conv_transpose1d``,
 ``conv_transpose2d``,
 ``conv_transpose3d``,
-``GRUCell``,
 ``linear``,
-``LSTMCell``,
 ``matmul``,
 ``mm``,
 ``mv``,
-``prelu``,
-``RNNCell``
+``prelu``
 
 Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""
