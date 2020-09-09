@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from torch.testing import \
     (make_non_contiguous,
      _dispatch_dtypes,
-     floating_types, floating_types_and,
+     floating_types, floating_types_and, floating_types_and_half,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
@@ -62,6 +62,7 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
@@ -82,6 +83,8 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+
+        self.test_inplace_grad = test_inplace_grad
 
         self.skips = skips
         self.decorators = decorators
@@ -197,7 +200,7 @@ class UnaryUfuncInfo(OpInfo):
 
 
 
-# Operator database
+# Operator database (sorted alphabetically)
 op_db = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
@@ -212,6 +215,9 @@ op_db = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float16],
+                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -219,6 +225,46 @@ op_db = [
                        SkipInfo('TestGradients', 'test_inplace_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
+    # NOTE: the derivative for inplace acosh is not implemented
+    UnaryUfuncInfo('acosh',
+                   ref=np.arccosh,
+                   domain=(1, float('inf')),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and_half(),
+                   test_inplace_grad=False),
+    UnaryUfuncInfo('asin',
+                   ref=np.arcsin,
+                   domain=(-1, 1),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    # NOTE: derivative for inplace asinh is not implemented
+    UnaryUfuncInfo('asinh',
+                   ref=np.arcsinh,
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and_half(),
+                   test_inplace_grad=False),
+    UnaryUfuncInfo('atan',
+                   ref=np.arctan,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('atanh',
+                   ref=np.arctanh,
+                   domain=(-1, 1),
+                   dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types_and_half(),
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -241,6 +287,52 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
+    UnaryUfuncInfo('log',
+                   ref=np.log,
+                   domain=(0, float('inf')),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('log10',
+                   ref=np.log10,
+                   domain=(0, float('inf')),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('log1p',
+                   ref=np.log1p,
+                   domain=(-1, float('inf')),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and_half(),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),)),
+    UnaryUfuncInfo('log2',
+                   ref=np.log2,
+                   domain=(0, float('inf')),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('neg',
+                   ref=np.negative,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
@@ -252,11 +344,39 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
-    UnaryUfuncInfo('neg',
-                   ref=np.negative,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+    UnaryUfuncInfo('sinh',
+                   ref=np.sinh,
+                   dtypesIfCPU=floating_and_complex_types(),
+                   decorators=(precisionOverride({torch.float16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=(IS_MACOS or IS_WINDOWS)),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('tan',
+                   ref=np.tan,
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=(IS_MACOS or IS_WINDOWS)),
+                   )),
+    UnaryUfuncInfo('tanh',
+                   ref=np.tanh,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=(IS_MACOS or IS_WINDOWS)),
+                   )),
 ]
 
 # Common operator groupings
