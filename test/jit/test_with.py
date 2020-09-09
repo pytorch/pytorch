@@ -618,8 +618,11 @@ class TestWith(JitTestCase):
         def with_rf(x, y):
             # type: (Tensor, Tensor) -> Tensor
             with torch.autograd.profiler.record_function("foo"):
-                a = x + y
+                # Nested record_function.
+                with torch.autograd.profiler.record_function("nested"):
+                    a = x + y
             return a
+
         scripted = torch.jit.script(with_rf)
         x, y = torch.ones(2), torch.ones(2)
         with torch.autograd.profiler.profile() as p:
@@ -633,4 +636,10 @@ class TestWith(JitTestCase):
         self.assertTrue(len(rf_events), 1)
         rf_event = rf_events[0]
         child_events = rf_event.cpu_children
-        self.assertTrue("aten::add" in (child.name for child in child_events))
+        # Ensure we find nested record_function event
+        self.assertTrue("nested" in (child.name for child in child_events))
+        nested_function_event = [
+            evt for evt in function_events if evt.name == "nested"
+        ][0]
+        nested_child_events = nested_function_event.cpu_children
+        self.assertTrue("aten::add" in (child.name for child in nested_child_events))
