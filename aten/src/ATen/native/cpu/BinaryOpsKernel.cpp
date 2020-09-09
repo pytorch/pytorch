@@ -502,24 +502,24 @@ void minimum_kernel(TensorIterator& iter) {
   }
 }
 
-void smooth_l1_kernel(TensorIterator& iter) {
+void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vec256<scalar_t>;
-        const Vec one_vec(static_cast<scalar_t>(1));
+        const Vec beta_vec(beta);
         const Vec point_five_vec(static_cast<scalar_t>(0.5));
         cpu_kernel_vec(
             iter,
-            [](scalar_t a, scalar_t b) -> scalar_t {
+            [&beta](scalar_t a, scalar_t b) -> scalar_t {
               auto z = std::abs(a - b);
-              return z < static_cast<scalar_t>(1)
-                  ? static_cast<scalar_t>(0.5) * z * z
-                  : z - static_cast<scalar_t>(0.5);
+              return z < beta
+                  ? static_cast<scalar_t>(0.5) * z * z / beta
+                  : z - static_cast<scalar_t>(0.5) * beta;
             },
-            [&one_vec, &point_five_vec](Vec a, Vec b) {
+            [&beta_vec, &point_five_vec](Vec a, Vec b) {
               auto z = (a - b).abs();
               return Vec::blendv(
-                  point_five_vec * z * z, z - point_five_vec, z >= one_vec);
+                  point_five_vec * z * z / beta_vec, z - point_five_vec * beta_vec, z >= beta_vec);
             });
       });
 }
