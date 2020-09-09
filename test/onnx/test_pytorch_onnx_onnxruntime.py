@@ -2252,21 +2252,6 @@ class TestONNXRuntime(unittest.TestCase):
         model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
 
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_scatter_with_scalar_different_types(self):
-        # Tests the case when scalar src (updates values) type is different
-        # from self type. Happens only with scalar src - PyTorch does not
-        # allow this when src is a tensor.
-        class ScatterModel(torch.nn.Module):
-            def forward(self, input, indices):
-                values = 1.0
-                return input.scatter(1, indices, values)
-
-        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float32)
-        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
-        self.run_test(ScatterModel(), input=(input, indices))
-
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_max_tensors(self):
         class MaxModel(torch.nn.Module):

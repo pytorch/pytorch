@@ -721,7 +721,6 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::BatchNormalization"
 
-
     def test_onnx_function_substitution_pass(self):
 
         @torch.jit.script
