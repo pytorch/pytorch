@@ -371,6 +371,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
     GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    // clean up prim::profile nodes in the outermost graph
+    RemoveProfileNodesAndSpecializeTypes(copy);
+    RemoveTensorTypeSpecializations(copy);
   } else {
     runNoGradOptimizations(copy);
   }
