@@ -4664,10 +4664,11 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh', 'cosh'] + separate_complex_tests
+                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
+                'cosh', '__rmul__', 'fill_', 't'] + separate_complex_tests
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
-# complex_list += ['fill_', 'sin', 'cos', '__rmul__', '__rdiv__', 'mul', 'tanh']
+# complex_list += ['__rdiv__', 'tanh']
 
 def add_test(
         name,
@@ -4697,7 +4698,7 @@ def add_test(
 
             if dtype.is_complex:
                 # TODO: remove this. this is temporary while we ramp up the complex support.
-                if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
+                if name in complex_list:
                     if name in separate_complex_tests and 'complex' not in variant_name:
                         continue
                     if not run_only_complex:
