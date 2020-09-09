@@ -13,7 +13,7 @@ namespace jit {
 
 #define JIT_TEST(name) test##name();
 JIT_TEST_API void runJITCPPTests(bool runCuda) {
-  TH_FORALL_TESTS(JIT_TEST)
+  /* TH_FORALL_TESTS(JIT_TEST) */
   /* if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)
   } */
