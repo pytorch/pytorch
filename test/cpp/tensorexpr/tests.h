@@ -247,6 +247,7 @@ namespace jit {
   _(FuserPass_0DimInput)                    \
   _(FuserPass_UnfusibleDevice)              \
   _(FuserPass_UnknownShapes)                \
+  _(FuserPass_Multidevice)                  \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
