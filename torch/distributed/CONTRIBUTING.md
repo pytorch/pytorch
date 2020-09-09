@@ -46,7 +46,7 @@ The RPC framework consists of several additional components:
 
 ### RPC Agents
 
-The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csrc/distributed/rpc/rpc_agent.h) and the TensorPipe and ProcessGroup implementations can be found at [process_group_agent.h](../csrc/distributed/rpc/process_group_agent.h) and [tensorpipe_agent.h](../csrc/distributed/rpc/tensorpipe_agent.h) respectively.
+The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csrc/distributed/rpc/rpc_agent.h) and the TensorPipe and ProcessGroupGloo implementations can be found at [process_group_agent.h](../csrc/distributed/rpc/process_group_agent.h) and [tensorpipe_agent.h](../csrc/distributed/rpc/tensorpipe_agent.h) respectively.
 
 [request_callback.h](../csrc/distributed/rpc/request_callback.h) and [request_callback_impl.h](../csrc/distributed/rpc/request_callback_impl.h) deal with how to handle RPC calls on remote servers.
 
@@ -67,3 +67,21 @@ The distributed optimizer is completely written in Python and can be found at [o
 ### Onboarding Tasks
 
 A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+rpc%22+label%3A%22topic%3A+bootcamp%22+) and [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+rpc%22+label%3Apt_distributed_rampup)
+
+## Running unit tests
+
+All the unit tests can be found under the `test/distributed` directory and RPC tests in particular are under `test/distributed/rpc`. A few examples on how to run unit tests:
+
+```
+# Run the c10d unit test.
+python test/distributed/test_c10d.py
+
+# Run the RPC test suite for the TensorPipeAgent.
+python test/distributed/rpc/test_tensorpipe_agent.py
+
+# Run the RPC test suite for the ProcessGroupAgent.
+python test/distributed/rpc/test_process_group_agent.py
+
+# Run a specific test method.
+pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py
+```

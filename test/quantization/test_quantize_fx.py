@@ -167,9 +167,9 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
         quantized = quantize_dynamic_fx(original, qconfig_dict, debug=True)
-        qparams = (quantized.root._scale_0, quantized.root._zero_point_0)
+        qparams = (quantized._scale_0, quantized._zero_point_0)
         weight_obs = qconfig.weight()
-        weight_obs(quantized.root.weight)
+        weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
 
@@ -350,13 +350,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             3: ns.call_module(nniq.ConvReLU3d),
         }
         for dim, quant_type in options:
-            for orig_m in [ConvNdRelu(dim, True),
-                           ConvNdRelu(dim, False),
-                           ConvNdFunctionalRelu(dim),
-                           ConvNdInplaceFunctionalRelu(dim)]:
-                conv_name = "conv{}d".format(dim)
-                m = self.checkGraphModeFxOp(
-                    orig_m, self.img_data_dict[dim], quant_type,
+            for m in [ConvNdRelu(dim, True),
+                      ConvNdRelu(dim, False),
+                      ConvNdFunctionalRelu(dim),
+                      ConvNdInplaceFunctionalRelu(dim)]:
+                self.checkGraphModeFxOp(
+                    m, self.img_data_dict[dim], quant_type,
                     quantized_nodes[dim])
 
 

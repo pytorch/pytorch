@@ -27,7 +27,10 @@ from .pattern_utils import (
 
 from .quantization_patterns import *
 
-from .utils import _parent_name
+from .utils import (
+    _parent_name,
+    quantize_node,
+)
 
 import copy
 
@@ -182,7 +185,7 @@ class Quantizer:
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         assert not inplace, 'inplace prepare is not supported yet'
-        input_root = model.root
+        input_root = model
         if not inplace:
             input_root = copy.deepcopy(input_root)
 
@@ -215,13 +218,13 @@ class Quantizer:
 
         env = {}
         observed_graph = Graph()
-        observed = set()
+        observed_node_names_set = set()
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            if node.name in observed:
+            if node.name in observed_node_names_set:
                 continue
 
             get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
@@ -236,7 +239,7 @@ class Quantizer:
                     setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
+                    observed_node_names_set.add(node.name)
                     if device:
                         getattr(input_root, observer_name).to(device)
 
@@ -253,15 +256,15 @@ class Quantizer:
 
                     def is_observed(input_arg):
                         if isinstance(input_arg, Node):
-                            return input_arg.name in observed
+                            return input_arg.name in observed_node_names_set
                         elif isinstance(input_arg, list):
                             return all(map(is_observed, input_arg))
                     # propagate observed property from input
                     if is_observed(node.args[0]):
-                        observed.add(node.name)
+                        observed_node_names_set.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
-                    if node.args[0].name in observed:
-                        observed.add(node.name)
+                    if node.args[0].name in observed_node_names_set:
+                        observed_node_names_set.add(node.name)
                 elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
                     new_observer = qconfig.activation()
@@ -271,7 +274,7 @@ class Quantizer:
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
-            if node.name not in observed and node.name in quants:
+            if node.name not in observed_node_names_set and node.name in quants:
                 observer_name = get_new_observer_name(input_root)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
@@ -284,12 +287,12 @@ class Quantizer:
                     self.activation_post_process_map[node.name] = new_observer
                     setattr(input_root, observer_name, self.activation_post_process_map[node.name])
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
+                    observed_node_names_set.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
-        observed = GraphModule(input_root, observed_graph)
-        self.save_state(observed)
-        return observed
+        observed_module = GraphModule(input_root, observed_graph)
+        self.save_state(observed_module)
+        return observed_module
 
     def save_state(self, observed):
         observed._activation_post_process_map = self.activation_post_process_map
@@ -328,7 +331,7 @@ class Quantizer:
                         weight_observer_nodes = collect_producer_nodes(node_arg)
                         if weight_observer_nodes is not None:
                             weight_observer_module = graph_module_from_producer_nodes(
-                                observed.root, weight_observer_nodes)
+                                observed, weight_observer_nodes)
                             # run the weight observer
                             weight_observer_module()
         return
@@ -344,7 +347,7 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
-        observed_root = observed.root
+        observed_root = observed
         observed_graph = observed.graph
         if not inplace:
             observed_root = copy.deepcopy(observed_root)
@@ -377,7 +380,7 @@ class Quantizer:
 
         def load_x(n):
             assert n.name in env or n.name in quant_env, \
-                'node ' + n.name + ' does not exist in either of the environment'
+                'node ' + n.name + ' does not exist in either environment'
             if n.name in quant_env:
                 return quant_env[n.name]
             else:
@@ -467,48 +470,10 @@ class Quantizer:
                         quant_env[node.name] = quant_env[prev_node.name]
                         continue
                     # replace activation post process with quantization ops
-                    parent_name = ''
-
-                    scale, zero_point = observer_module.calculate_qparams()
-                    dtype = observer_module.dtype
-
-                    def is_per_channel(qscheme):
-                        return qscheme == torch.per_channel_affine or \
-                            qscheme == torch.per_channel_symmetric
-
-                    if is_per_channel(observer_module.qscheme):
-                        ch_axis = int(observer_module.ch_axis)
-                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis': ch_axis, '_dtype_': dtype}
-                        quantize_op = torch.quantize_per_channel
-                    else:
-                        scale = float(scale)
-                        zero_point = int(zero_point)
-                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-                        quantize_op = torch.quantize_per_tensor
-                    i = 0
-
-                    def noattr(module, qparams, i):
-                        for name in qparams.keys():
-                            if hasattr(module, name + str(i)):
-                                return False
-                        return True
-
-                    def get_next_i(module, qparams):
-                        i = 0
-                        while not noattr(module, qparams, i):
-                            i += 1
-                        return i
-
-                    parent_module = self.modules[parent_name]
-                    i = get_next_i(parent_module, qparams)
-                    inputs = [load_non_quantized(node.args[0])]
-                    for key, value in qparams.items():
-                        setattr(parent_module, key + str(i), value)
-                        qparam_full_path = key + str(i)
-                        if parent_name:
-                            qparam_full_path = parent_name + '.' + qparam_full_path
-                        inputs.append(self.quantized_graph.create_node('get_param', qparam_full_path))
-                    quant_env[node.name] = self.quantized_graph.create_node('call_function', quantize_op, tuple(inputs), {})
+                    root_module = self.modules['']
+                    quant_env[node.name] = quantize_node(
+                        root_module, self.quantized_graph,
+                        load_non_quantized(node.args[0]), observer_module)
                     continue
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
@@ -539,7 +504,7 @@ class Quantizer:
                         folded_nodes[node_to_fold.name] = node
 
                     prepacking_module = graph_module_from_producer_nodes(
-                        quantized.root, nodes_to_fold)
+                        quantized, nodes_to_fold)
                     packed_weight = prepacking_module()
                     packed_weights[node.name] = packed_weight
 
@@ -550,7 +515,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
-        quantized_root = quantized.root
+        quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
