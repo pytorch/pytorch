@@ -644,9 +644,11 @@ def is_list(ann):
 def is_dict(ann):
     if not hasattr(ann, '__module__'):
         return False
+    origin = getattr(ann, '__origin__', None)
+    orig_bases = getattr(ann, '__orig_bases__', None)
     return ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is Dict or
-            getattr(ann, '__origin__', None) is dict)
+        (origin is Dict or origin is dict) or \
+        (orig_bases is not None and (dict in orig_bases or Dict in orig_bases))
 
 def is_optional(ann):
     # Optional[T] is just shorthand for Union[T, None], so check for both
