@@ -404,6 +404,21 @@ void ProcessGroupNCCL::parseNcclBlockingWait() {
   }
 }
 
+void ProcessGroupNCCL::parseNcclAsyncErrorHandling() {
+  char* errorHandle = getenv(NCCL_ASYNC_ERROR_HANDLING);
+  if (errorHandle != nullptr) {
+    auto val = std::stoi(errorHandle);
+    if (val == 1) {
+      asyncErrorHandling_ = true;
+      LOG(INFO) << "[Rank " << rank_ << "] NCCL Async Error Handling enabled.";
+    } else if (val != 0) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(NCCL_ASYNC_ERROR_HANDLING));
+    }
+  }
+}
+
 bool ProcessGroupNCCL::WorkNCCL::timedOut() {
   auto currentTimepoint = std::chrono::steady_clock::now();
   return (
@@ -428,6 +443,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         "Invalid value for environment variable: " +
         std::string(NCCL_BLOCKING_WAIT));
   }
+  try {
+    parseNcclAsyncErrorHandling();
+  } catch (std::exception& e) {
+    throw std::runtime_error(
+        "Invalid value for environment variable: " +
+        std::string(NCCL_ASYNC_ERROR_HANDLING));
+  }
 
   // If single-process single-device mode, WorkNCCL::getFuture is supported,
   // so get a dedicated stream for each device to run FutureNCCL then callbacks.
@@ -445,7 +467,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
 #endif
 
-  workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
+  if (asyncErrorHandling_) {
+    workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
+  }
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -453,23 +477,26 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   watchdogCV_.notify_one();
   workListCV_.notify_one();
 
-  std::unique_lock<std::mutex> lock(workListMutex_);
-  // TODO: We can potentially merge this functionality into the workCleanup
-  // thread or just allow the destructor to free workList_.
-  // Clean up any remaining items in the workList_ instead of waiting for the
-  // workCleanup Thread to be scheduled again.
-  for (auto it = workList_.begin(); it != workList_.end();
-       /* no increment*/) {
-    auto& work = *it;
-    if (work->isCompleted()) {
-      it = workList_.erase(it);
-    } else {
-      ++it;
+  if (asyncErrorHandling_) {
+    std::unique_lock<std::mutex> lock(workListMutex_);
+    // TODO: We can potentially merge this functionality into the workCleanup
+    // thread or just allow the destructor to free workList_.
+    // Clean up any remaining items in the workList_ instead of waiting for the
+    // workCleanup Thread to be scheduled again.
+    for (auto it = workList_.begin(); it != workList_.end();
+         /* no increment*/) {
+      auto& work = *it;
+      if (work->isCompleted()) {
+        it = workList_.erase(it);
+      } else {
+        ++it;
+      }
     }
+    // Wait for workList_ to become empty before proceeding with shutdown.
+    workListCV_.wait(lock, [&]() -> bool { return workList_.empty(); });
+    lock.unlock();
+    workCleanupThread_.join();
   }
-  // Wait for workList_ to become empty before proceeding with shutdown.
-  workListCV_.wait(lock, [&]() -> bool { return workList_.empty(); });
-  lock.unlock();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
@@ -486,7 +513,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
       }
     }
   }
-  workCleanupThread_.join();
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -542,7 +568,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
       }
     }
 
-    {
+    if (asyncErrorHandling_) {
       std::unique_lock<std::mutex> lock(workListMutex_);
       for (auto& work : workList_) {
         work->checkAndSetException();
@@ -964,7 +990,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->store_ = store_;
   }
 
-  workEnqueue(work);
+  if (asyncErrorHandling_) {
+    workEnqueue(work);
+  }
 
   return work;
 }

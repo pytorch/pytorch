@@ -19,6 +19,10 @@ namespace c10d {
 // non-blocking.
 constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 
+// Environment variable which controls whether or not we perform Async Error
+// Handling with NCCL.
+constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -490,6 +494,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // accordingly.
   void parseNcclBlockingWait();
 
+  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets asyncErrorHandling_
+  // accordingly.
+  void parseNcclAsyncErrorHandling();
+
   void workCleanupLoop();
 
  protected:
@@ -593,6 +601,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
+
+  // Whether ot not the workCleanupThread is used to perform async error
+  // handling.
+  bool asyncErrorHandling_ = false;
 
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
