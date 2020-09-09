@@ -39,8 +39,8 @@
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
@@ -184,6 +184,8 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
@@ -557,6 +559,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
+      .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
+      .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {

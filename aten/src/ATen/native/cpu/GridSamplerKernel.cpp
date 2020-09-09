@@ -420,7 +420,7 @@ static inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
-  #ifndef _MSC_VER
+  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
   # pragma unroll
   #endif
   for (int64_t i = 0; i < len; i++) {
@@ -545,7 +545,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto i_sw_offset = i_nw_offset + iVec(inp_sH);
     auto i_se_offset = i_sw_offset + iVec(inp_sW);
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -619,7 +619,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     scalar_t gInp_corner_arr[Vec::size()];
 
     auto gx = Vec(0), gy = Vec(0);
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -713,7 +713,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     auto out_ptr = out_slice.data() + offset;
     auto out_sC = out_slice.stride(0);
     auto inp_slice_ptr = inp_slice.data();
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
@@ -750,7 +750,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     integer_t gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(gInp_offset_arr);
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -858,14 +858,14 @@ static inline void grid_sample_2d_grid_slice_iterator(
     int64_t spatial_offset = 0;
     const int64_t i_offset_delta = grid_sW * step;
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t h = 0; h < out_H; h++) {
       auto grid_ptr_x = grid_ptr + h * grid_sH;
       auto grid_ptr_y = grid_ptr_x + grid_sCoor;
       auto i_offsets = iVec::arange(0, grid_sW);
-      #ifndef _MSC_VER
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
       # pragma unroll
       #endif
       for (int64_t w = 0; w < out_W; w += step) {
