@@ -341,9 +341,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
-      auto currentTimepoint = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - workStartTime_) > workTimeout) {
+      if (timedOut()) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -404,6 +402,13 @@ void ProcessGroupNCCL::parseNcclBlockingWait() {
           std::string(NCCL_BLOCKING_WAIT));
     }
   }
+}
+
+bool ProcessGroupNCCL::WorkNCCL::timedOut() {
+  auto currentTimepoint = std::chrono::steady_clock::now();
+  return (
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          currentTimepoint - workStartTime_) >= opTimeout_);
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -529,9 +534,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
 
         // Check for Timeouts in the WorkNCCL Operations, and abort all
         // communicators accordingly.
-        auto currentTimepoint = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(
-                currentTimepoint - work->workStartTime_) > work->opTimeout_) {
+        if (work->timedOut()) {
           std::exception_ptr exception_ptr = std::make_exception_ptr(
               std::runtime_error("NCCL Operation Timed Out"));
           work->setException(exception_ptr);
