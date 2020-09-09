@@ -14,9 +14,9 @@ namespace jit {
 #define JIT_TEST(name) test##name();
 JIT_TEST_API void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
-  if (runCuda) {
+  /* if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)
-  }
+  } */
 
   // This test is special since it requires prior setup in python.
   // So it is not part of the general test list (which is shared between the
