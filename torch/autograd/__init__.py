@@ -21,6 +21,11 @@ from ..overrides import has_torch_function, handle_torch_function
 from . import profiler
 from . import functional
 
+# mypy annotations
+def _profiler_enabled() -> bool: ...
+def _RecordFunction() -> Callable[..., Any]: ...
+def _run_before_callbacks(Callable, str): ...
+
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]

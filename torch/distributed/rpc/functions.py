@@ -1,5 +1,16 @@
 import functools
+from typing import Protocol, TypeVar, Callable, Optional, Any, cast
 
+F = TypeVar("F", bound=Callable[..., object])
+
+class WrapWithAttributes(Protocol[F]):
+    _wrapped_async_rpc_function: Optional[Callable [..., Any]]
+    __call__: F
+
+def wrap_with_attributes(fn: F) -> WrapWithAttributes[F]:
+    wrap_with_attributes = cast(WrapWithAttributes[F], fn)
+    wrap_with_attributes._wrapped_async_rpc_function = None
+    return wrap_with_attributes
 
 def async_execution(fn):
     r"""
@@ -130,6 +141,7 @@ def async_execution(fn):
         >>> )
         >>> print(ret)  # prints tensor([4., 4.])
     """
+    @wrap_with_attributes
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)

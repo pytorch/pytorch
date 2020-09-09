@@ -3,6 +3,7 @@ from . import constants as rpc_contants
 
 import torch
 
+from datetime import timedelta
 from typing import Dict, List
 
 
@@ -37,7 +38,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         self,
         *,
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
-        rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
+        rpc_timeout: timedelta = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
         device_maps: Dict = None,
         _transports: List = None,

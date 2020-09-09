@@ -35,7 +35,7 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        self._dispatch_table = copyreg.dispatch_table.copy()
+        self._dispatch_table = copyreg.dispatch_table.copy() # type: ignore
         self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
@@ -78,9 +78,9 @@ class _InternalRPCPickler:
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
-        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer
+        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer # type: ignore
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
-        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer # type: ignore
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables

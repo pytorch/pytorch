@@ -3,6 +3,7 @@ import torch
 import warnings
 from torch._six import string_classes
 from datetime import timedelta
+from typing import Dict, Optional
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
@@ -21,6 +22,8 @@ from . import (
 )
 from . import ReduceOp
 from . import PrefixStore
+from . import ProcessGroup
+from . import Store
 
 
 _MPI_AVAILABLE = True
@@ -143,11 +146,11 @@ class GroupMember(object):
 # Cached process groups
 # For NCCL and GLOO pg, it is a map from ProcessGroup to (Backend, Store)
 # For MPI pg, it is a map from ProcessGroup to (Backend, None)
-_pg_map = {}
+_pg_map: Dict[ProcessGroup, Optional[Store]] = {}
 # Process group's names, map from ProcessGroup to str
-_pg_names = {}
+_pg_names: Dict[ProcessGroup, str] = {}
 # Process group's global rank to local rank mapping
-_pg_group_ranks = {}
+_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 
 # Default process group state
 _default_pg = None
@@ -157,7 +160,7 @@ _default_pg_init_method = None
 _group_count = 0
 
 
-def _rank_not_in_group(group):
+def _rank_not_in_group(group: ProcessGroup):
     """
     Helper that checks if the current process's rank is not in a given group
 
@@ -167,7 +170,7 @@ def _rank_not_in_group(group):
     return group == GroupMember.NON_GROUP_MEMBER
 
 
-def _get_group_rank(group, rank):
+def _get_group_rank(group: ProcessGroup, rank):
     """
     Helper that gets a given group's local rank in the group from a given global
     rank

@@ -4,7 +4,7 @@ import functools
 import inspect
 import logging
 import threading
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, Set, Any
 
 import torch
 
@@ -98,10 +98,10 @@ class AllGatherStates(object):
 
 # States used by `def _all_gather()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
-_ALL_WORKER_NAMES = None
+_ALL_WORKER_NAMES: Set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
 _all_gather_sequence_id = 0
-_all_gather_sequence_id_to_states = collections.defaultdict(AllGatherStates)
+_all_gather_sequence_id_to_states: collections.defaultdict = collections.defaultdict(AllGatherStates)
 
 
 def _init_rpc_states(agent):
@@ -330,16 +330,19 @@ GenericWithOneTypeVar = Generic[T]
 
 try:
     # Combine the implementation class and the type class.
-    class RRef(PyRRef, GenericWithOneTypeVar):
+    # Ignore mypy type error for https://github.com/python/mypy/issues/7791
+    class RRef(PyRRef, GenericWithOneTypeVar): # type: ignore
         pass
 except TypeError as exc:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
-    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
+    # Ignore mypy type error for https://github.com/python/mypy/issues/4177
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__): # type: ignore
         pass
 
     # Combine the implementation class and the type class.
-    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
+    # Ignore mypy type error for https://github.com/python/mypy/issues/7791
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta): # type: ignore
         pass
 
 
