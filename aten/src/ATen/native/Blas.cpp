@@ -14,6 +14,9 @@ scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t inc
 template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
+template<typename scalar_t>
+void addr_impl(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda);
+
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
 }
@@ -135,6 +138,110 @@ Tensor dot(const Tensor &self, const Tensor &other){
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
+}
+
+// this is to port LDA_COND from the TH codebase
+// #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
+// lda_cond function in this file is not used
+// because it requires `lda > std::max<int64_t>(1L, m)`
+// instead of `>=` as defined in the TH implementation
+constexpr inline bool lda_cond_addr(int64_t m, int64_t n, int64_t lda) {
+  return n == 1 || lda >= std::max<int64_t>(1L, m);
+}
+
+template<typename scalar_t>
+Tensor &addr_impl_cpu(Tensor &result, const Tensor &self,
+                    const Tensor& vec1, const Tensor& vec2,
+                    scalar_t beta, scalar_t alpha) {
+  if (&result != &self) {
+    at::native::resize_as_(result, self);
+    at::native::copy_(result, self);
+  }
+  if (beta == 0.0) {
+    at::native::zero_(result);
+  } else if (beta != 1.0) {
+    at::native::mul_(result, beta);
+  }
+
+  if (result.stride(0) == 1 &&
+    lda_cond_addr(vec1.size(0), vec2.size(0), result.stride(1))) {
+    addr_impl<scalar_t>(
+      vec1.size(0), vec2.size(0),
+      alpha, vec1.data_ptr<scalar_t>(), vec1.stride(0),
+      vec2.data_ptr<scalar_t>(), vec2.stride(0),
+      result.data_ptr<scalar_t>(), result.stride(1)
+    );
+  } else if (result.stride(1) == 1 &&
+    lda_cond_addr(vec2.size(0), vec1.size(0), result.stride(0))) {
+    addr_impl<scalar_t>(
+      vec2.size(0), vec1.size(0),
+      alpha, vec2.data_ptr<scalar_t>(), vec2.stride(0),
+      vec1.data_ptr<scalar_t>(), vec1.stride(0),
+      result.data_ptr<scalar_t>(), result.stride(0)
+    );
+  } else {
+    Tensor cr = result.clone();
+    addr_impl<scalar_t>(
+      vec2.size(0), vec1.size(0),
+      alpha, vec2.data_ptr<scalar_t>(), vec2.stride(0),
+      vec1.data_ptr<scalar_t>(), vec1.stride(0),
+      cr.data_ptr<scalar_t>(), cr.stride(0)
+    );
+    result.set_(cr);
+  }
+  return result;
+}
+
+Tensor& addr_out_cpu(Tensor &result, const Tensor& self,
+                      const Tensor& vec1, const Tensor& vec2,
+                      Scalar beta, Scalar alpha) {
+  TORCH_CHECK(vec1.dim() == 1 && vec2.dim() == 1,
+              "vec1 and vec2 should be 1-dimensional vectors. Got dimensions ",
+              vec1.dim(), " and ", vec2.dim());
+
+  Tensor self_;
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  } else {
+    self_ = self;
+  }
+
+  TORCH_CHECK(result.device() == self_.device() &&
+              result.device() == vec1.device() &&
+              result.device() == vec2.device(),
+              "Expected all tensors to be on the same device. Found: ",
+              result.device(), ", ", self_.device(), ", ",
+              vec1.device(), " and ", vec2.device());
+  TORCH_CHECK(self_.dim() == 2,
+              "2D tensor expected, got ", self_.dim(), "D tensor for input");
+  TORCH_CHECK(self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
+              "size mismatch",
+              ", input: ", self_.sizes(),
+              ", v1: ", vec1.sizes(),
+              ", v2: ", vec2.sizes());
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self_.scalar_type(), "addr_out_cpu", [&] {
+    addr_impl_cpu<scalar_t>(
+      result, self_,
+      vec1, vec2,
+      beta.to<scalar_t>(), alpha.to<scalar_t>()
+    );
+  });
+  return result;
+}
+
+Tensor& addr__cpu(Tensor& self,
+                   const Tensor& vec1, const Tensor& vec2,
+                   Scalar beta, Scalar alpha) {
+  addr_out_cpu(self, self, vec1, vec2, beta, alpha);
+  return self;
+}
+
+Tensor addr_cpu(const Tensor& self,
+                 const Tensor& vec1, const Tensor& vec2,
+                 Scalar beta, Scalar alpha) {
+  Tensor result = at::empty({0}, self.options());
+  addr_out_cpu(result, self, vec1, vec2, beta, alpha);
+  return result;
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){
