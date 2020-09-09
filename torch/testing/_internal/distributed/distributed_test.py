@@ -1758,6 +1758,21 @@ class DistributedTest:
             group, group_id, rank = self._init_group_test()
             self._test_all_to_all_helper(group, group_id, rank)
 
+        @unittest.skipIf(SKIP_NCCL_A2A, "NCCL A2A is not enabled for OSS builds")
+        @unittest.skipIf(
+            BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        )
+        @skip_if_small_worldsize
+        def test_all_to_all_group_cuda(self):
+            group, group_id, rank = self._init_group_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU)
+
         @unittest.skipIf(
             BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
         )
