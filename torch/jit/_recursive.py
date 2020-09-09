@@ -367,7 +367,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
             elif isinstance(orig_value, torch.jit.ScriptModule):
-
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
