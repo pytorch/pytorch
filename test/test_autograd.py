@@ -3202,13 +3202,13 @@ class TestAutograd(TestCase):
         with record_function("inner"):
             # test that exiting the record function after starting another one
             # doesn't throw.
-            rf.__exit__()
+            rf.__exit__(None, None, None)
 
         with record_function("inner"):
             rf.__enter__()
         # test that exiting the record function after ending another one
         # doesn't throw.
-        rf.__exit__()
+        rf.__exit__(None, None, None)
 
 
     def test_dir(self):
