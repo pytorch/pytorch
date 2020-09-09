@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -478,8 +479,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   // accordingly.
   void parseNcclBlockingWait();
 
+  void workCleanupLoop();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
+  static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
   std::shared_ptr<Store> store_;
@@ -521,14 +525,29 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
-  // Whether or not we should terminate the watchdog thread.
-  std::atomic<bool> terminateWatchdog_;
+  // Whether or not we should terminate the watchdog and workCleanup threads.
+  std::atomic<bool> terminateProcessGroup_;
 
   // Condition variable to control how long the watchdog thread waits.
   std::condition_variable watchdogCV_;
 
   // Mutex for watchdog.
   std::mutex watchdogCVMutex_;
+
+  // Thread that removes NCCL Work upon timeout
+  std::thread workCleanupThread_;
+
+  // Mutex to Guard workList_
+  std::mutex workListMutex_;
+
+  // Condition Variable for timeout thread sleep
+  std::condition_variable workListCV_;
+
+  // Vector to Store WorkNCCL pointers
+  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workList_;
+
+  // Add Work Pointer to workVector
+  void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA steams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
