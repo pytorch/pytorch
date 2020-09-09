@@ -845,7 +845,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream, i));
+          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
     }
   }
 
@@ -888,8 +888,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream,
-          size_t) {
+          at::cuda::CUDAStream& stream) {
         return ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -919,8 +918,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream,
-          size_t) {
+          at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
         return ncclBcast(
             input.data_ptr(),
@@ -943,8 +941,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream,
-          size_t) {
+          at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
         return ncclReduce(
             input.data_ptr(),
@@ -974,8 +971,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream,
-          size_t) {
+          at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
         return ncclAllGather(
@@ -1026,8 +1022,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream,
-          size_t) {
+          at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
         return ncclReduceScatter(
@@ -1113,8 +1108,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         [&](at::Tensor& input,
             at::Tensor& output,
             ncclComm_t comm,
-            at::cuda::CUDAStream& stream,
-            size_t) {
+            at::cuda::CUDAStream& stream) {
           return ncclAlltoall(
               input.data_ptr(),
               output.data_ptr(),
@@ -1135,8 +1129,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         [&](at::Tensor& input,
             at::Tensor& output,
             ncclComm_t comm,
-            at::cuda::CUDAStream& stream,
-            size_t) {
+            at::cuda::CUDAStream& stream) {
           std::vector<size_t> send_lengths(size_);
           std::vector<size_t> recv_lengths(size_);
           std::vector<size_t> send_offsets(size_);
@@ -1176,33 +1169,43 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
-  check_gpu_tensors(outputTensors);
-  check_gpu_tensors(inputTensors);
+  auto device = outputTensors[0].device();
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
+    TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
+      "Tensors must be on the same device")
+  }
+  std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
+  std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
   return collective(
-    inputTensors,
-    outputTensors,
-    [&](at::Tensor& input,
-        at::Tensor& output,
+    inputTensor0,
+    outputTensor0,
+    [&](at::Tensor& /* unused */,
+        at::Tensor& /* unused */,
         ncclComm_t comm,
-        at::cuda::CUDAStream& stream,
-        size_t r) {
-      if (input.numel() != 0) {
-        C10D_NCCL_CHECK(ncclSend(
-            input.data_ptr(),
-            input.numel(),
-            getNcclDataType(input.scalar_type()),
-            r,
-            comm,
-            stream.stream()));
-      }
-      if (output.numel() != 0) {
-        C10D_NCCL_CHECK(ncclRecv(
-            output.data_ptr(),
-            output.numel(),
-            getNcclDataType(output.scalar_type()),
-            r,
-            comm,
-            stream.stream()));
+        at::cuda::CUDAStream& stream) {
+      for (size_t r = 0; r < outputTensors.size(); r++) {
+        at::Tensor &input = inputTensors[r];
+        at::Tensor &output = outputTensors[r];
+        if (input.numel() != 0) {
+          C10D_NCCL_CHECK(ncclSend(
+              input.data_ptr(),
+              input.numel(),
+              getNcclDataType(input.scalar_type()),
+              r,
+              comm,
+              stream.stream()));
+        }
+        if (output.numel() != 0) {
+          C10D_NCCL_CHECK(ncclRecv(
+              output.data_ptr(),
+              output.numel(),
+              getNcclDataType(output.scalar_type()),
+              r,
+              comm,
+              stream.stream()));
+        }
       }
       return ncclSuccess;
     });
