@@ -12,35 +12,26 @@ namespace native {
 // helper
 namespace {
 
-template <typename scalar_t>
-std::vector<int64_t> sort_indices(const TensorAccessor<scalar_t, 1>& v) {
-  std::vector<int64_t> indices(v.size(0));
-  std::iota(indices.begin(), indices.end(), 0);
-  std::stable_sort(
-      indices.begin(),
-      indices.end(),
-      [&](const scalar_t& i1, const scalar_t& i2) { return v[i1] < v[i2]; });
-  return indices;
-}
-
-template <size_t N>
 std::vector<int64_t> indices2csr(
-    const TensorAccessor<int64_t, N>& indices,
+    const TensorAccessor<int64_t, 1>& indices,
     int64_t dim) {
+  /* Return the new indices using csr sparse format.
+
+    `indices` original indices tensor using coo sparse format.
+    `dim` is the dimension of the sparse part of a sparse tensor.
+  */
   auto nnz = indices.size(0);
   std::vector<int64_t> csr(dim + 1, int64_t(0));
   int64_t last_i = 0;
   for (int64_t index = 0; index < nnz; index++) {
     int64_t i = indices[index];
-    if (i == last_i) {
-      csr[last_i + 1] += 1;
-    } else {
+    if (i != last_i) {
       for (int64_t j = last_i; j < i + 1; j++) {
         csr[j + 1] = csr[last_i + 1];
       }
       last_i = i;
-      csr[last_i + 1] += 1;
     }
+    csr[last_i + 1] += 1;
   }
   for (int64_t j = last_i; j < dim; j++) {
     csr[j + 1] = csr[last_i + 1];
@@ -48,16 +39,28 @@ std::vector<int64_t> indices2csr(
   return csr;
 }
 
-template <typename scalar_t>
+template <typename scalar_t, bool is_coalesced>
 void sparse_matmul_kernel(
     Tensor& result,
-    const Tensor& self,
-    const Tensor& other) {
-  auto indices_a = self._indices().contiguous();
-  auto values_a = self._values().contiguous();
+    const Tensor& mat1,
+    const Tensor& mat2) {
+  /*
+    See test/test_sparse.py:test_sparse_matmul:sparse_mm for the Python
+    prototype of the sparse matmult algorithm that this implementation
+    is based on.
 
-  auto indices_b = other._indices().contiguous();
-  auto values_b = other._values().contiguous();
+    This kernel implements a matrix multiplication of the sparse matrix :attr:`mat1`
+    and sparse matrix :attr:`mat2`. This implementation uses the right operand in CSR format 
+    and collects the elements of the result into a dictionary.
+
+    
+  */
+
+  auto indices_a = mat1._indices().contiguous();
+  auto values_a = mat1._values().contiguous();
+
+  auto indices_b = mat2._indices().contiguous();
+  auto values_b = mat2._values().contiguous();
 
   auto nnz_a = values_a.size(0);
   auto nnz_b = values_b.size(0);
@@ -67,24 +70,22 @@ void sparse_matmul_kernel(
   auto values_accessor_a = values_a.accessor<scalar_t, 1>();
   auto values_accessor_b = values_b.accessor<scalar_t, 1>();
 
-  auto result_indices = result._indices().contiguous();
-  auto result_values = result._values().contiguous();
+  auto result_indices = result._indices();
+  auto result_values = result._values();
 
   std::map<std::pair<int64_t, int64_t>, scalar_t> d;
-  if (self.is_coalesced() && other.is_coalesced()) {
-    for (int64_t n1 = 0; n1 < nnz_a; n1++) {
-      auto r2 = indices2csr(indices_accessor_b[0], other.size(0));
-      for (int n2 = r2[indices_accessor_a[1][n1]];
-           n2 < r2[indices_accessor_a[1][n1] + 1];
-           n2++) {
+  for (int64_t n1 = 0; n1 < nnz_a; n1++) {
+    if constexpr (is_coalesced) {
+      auto r2 = indices2csr(indices_accessor_b[0], mat2.size(0));
+      for (int64_t n2 = r2[indices_accessor_a[1][n1]]; 
+          n2 < r2[indices_accessor_a[1][n1] + 1];
+          n2++) {
         auto current_index = std::make_pair(
             indices_accessor_a[0][n1], indices_accessor_b[1][n2]);
         d[current_index] += values_accessor_a[n1] * values_accessor_b[n2];
       }
-    }
-  } else {
-    for (int64_t n1 = 0; n1 < nnz_a; n1++) {
-      for (int n2 = 0; n2 < nnz_b; n2++) {
+    } else {
+      for (int64_t n2 = 0; n2 < nnz_b; n2++) {
         if (indices_accessor_b[0][n2] == indices_accessor_a[1][n1]) {
           auto current_index = std::make_pair(
               indices_accessor_a[0][n1], indices_accessor_b[1][n2]);
@@ -123,8 +124,8 @@ void sparse_matmul_kernel_grad(Tensor& result, const Tensor& x) {
   auto cols = indices_accessor[0];
   auto values_accessor = x_values.accessor<scalar_t, 1>();
 
-  auto result_indices = result._indices().contiguous();
-  auto result_values = result._values().contiguous();
+  auto result_indices = result._indices();
+  auto result_values = result._values();
 
   auto n = result.size(0);
   auto m = result.size(1);
@@ -148,12 +149,12 @@ void sparse_matmul_kernel_grad(Tensor& result, const Tensor& x) {
   for (int64_t curr_index = 0; curr_index < scalar_values.size();
        curr_index++) {
     if (scalar_values[curr_index] != static_cast<scalar_t>(0)) {
-      for (int64_t other_index = 0; other_index < inner_size; other_index++) {
+      for (int64_t mat2_index = 0; mat2_index < inner_size; mat2_index++) {
         std::pair<int64_t, int64_t> current_index;
         if (grad_by_row) {
-          current_index = std::make_pair(curr_index, other_index);
+          current_index = std::make_pair(curr_index, mat2_index);
         } else {
-          current_index = std::make_pair(other_index, curr_index);
+          current_index = std::make_pair(mat2_index, curr_index);
         }
         d[current_index] += scalar_values[curr_index];
         index++;
@@ -181,19 +182,28 @@ void sparse_matmul_kernel_grad(Tensor& result, const Tensor& x) {
 
 } // end anonymous namespace
 
-Tensor sparse_matmul(const Tensor& self_, const Tensor& other_) {
-  TORCH_INTERNAL_ASSERT(self_.is_sparse());
-  TORCH_CHECK(self_.dim() == 2);
-  TORCH_CHECK(other_.dim() == 2);
-  TORCH_CHECK(self_.size(1) == other_.size(0), "Incompatible matrices");
+Tensor sparse_matmul(const Tensor& mat1_, const Tensor& mat2_) {
+  TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
+  TORCH_CHECK(mat1_.dim() == 2);
+  TORCH_CHECK(mat2_.dim() == 2);
+  TORCH_CHECK(mat1_.size(1) == mat2_.size(0), "Incompatible matrices");
+  TORCH_CHECK(
+      mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
+      mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
 
-  auto self = self_.coalesce();
-  auto other = other_.coalesce();
+  TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
+           "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());
+
+  auto mat1 = mat1_.coalesce();
+  auto mat2 = mat2_.coalesce();
   Tensor output = at::native::empty_sparse(
-      {self_.size(0), other_.size(1)}, self_.options());
+      {mat1_.size(0), mat2_.size(1)}, mat1_.options());
 
-  AT_DISPATCH_FLOATING_TYPES(self_.scalar_type(), "sparse_matmul", [&] {
-    sparse_matmul_kernel<scalar_t>(output, self, other);
+  AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
+    if (mat1.is_coalesced() && mat2.is_coalesced())
+      sparse_matmul_kernel<scalar_t, true>(output, mat1, mat2);
+    else
+      sparse_matmul_kernel<scalar_t, false>(output, mat1, mat2);
   });
   return output;
 }

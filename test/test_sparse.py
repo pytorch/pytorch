@@ -3011,28 +3011,27 @@ class TestSparse(TestCase):
 
     @cpu_only
     def test_sparse_matmul(self):
+        """
+        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
+        """
 
         def _indices2csr(indices, dim):
             nnz = len(indices)
             r = [0] * (dim + 1)
             last_i = 0
             for i in indices:
-                if i == last_i:
-                    r[last_i + 1] += 1
-                else:
+                if i != last_i:
                     for _i in range(last_i, i + 1):
                         r[_i + 1] = r[last_i + 1]
                     last_i = i
-                    r[last_i + 1] += 1
+                r[last_i + 1] += 1
             for _i in range(last_i, dim):
                 r[_i + 1] = r[last_i + 1]
             assert r[-1] == nnz
             return r
 
         def sparse_mm(a, b):
-            if a.shape[1] != b.shape[0]:
-                print("Incompatible matrices")
-                return None
+            assert a.shape[1] != b.shape[0]
             n, p = a.shape
             p, m = b.shape
             indices_a = a._indices()
