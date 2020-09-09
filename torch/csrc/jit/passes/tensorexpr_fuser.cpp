@@ -568,34 +568,37 @@ class TensorExprFuser {
     return true;
   }
 
+#define REQ(cond)                           \
+  if (!(cond)) {                            \
+    GRAPH_DEBUG("Failed cond " #cond "\n"); \
+    return false;                           \
+  }
+
   bool canHandle(Node* node) {
-    if (node->kind() == prim::Constant) {
-      // TODO: add support for tensor constants.
-      return false;
-    }
-    if (!allShapesAreKnown(node)) {
-      return false;
-    }
-    if (!isFusableOnDevice(node)) {
-      return false;
-    }
+    REQ(node->kind() != prim::Constant);
+    REQ(allShapesAreKnown(node));
+    REQ(isFusableOnDevice(node));
 
     // Don't include nodes whose inputs are tensor constants - we cannot handle
     // them at the moment.
     // TODO: actually support tensor constants and remove this.
     for (Value* input : node->inputs()) {
-      if (input->node()->kind() == prim::Constant &&
-          input->type()->cast<TensorType>()) {
-        return false;
+      if (input->node()->kind() == prim::Constant) {
+        REQ(!input->type()->cast<TensorType>())
       }
     }
-    return tensorexpr::isSupported(node);
-  }
+    if (node->kind() == aten::cat) {
+      REQ(node->input(0)->node()->kind() == prim::ListConstruct);
+      REQ(node->input(0)->uses().size() == 1);
+      REQ(node->input(1)->node()->kind() == prim::Constant);
+      auto const& listconstruct = node->input(0)->node();
+      REQ(tensorexpr::pickDeviceType(listconstruct->inputs()));
+    } else {
+      REQ(tensorexpr::pickDeviceType(node->inputs()));
+    }
 
-#define REQ(cond)                           \
-  if (!(cond)) {                            \
-    GRAPH_DEBUG("Failed cond " #cond "\n"); \
-    return false;                           \
+    REQ(tensorexpr::isSupported(node));
+    return true;
   }
 
   bool canMerge(Node* consumer, Node* producer) {
@@ -606,6 +609,17 @@ class TensorExprFuser {
     REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
+
+    // Device checks
+    if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
+      // aten::cat needs a special handling because it takes a Tensor[] as its
+      // input We deal with that in the code below.
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(consumer_device);
+      auto producer_device = tensorexpr::pickDeviceType(producer->inputs());
+      REQ(producer_device);
+      REQ(*consumer_device == *producer_device);
+    }
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -636,6 +650,15 @@ class TensorExprFuser {
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = producer->input(0)->node();
+      // We're merging listconstruct->cat->consumer. cat is the producer here
+      // and we cannot determine its device type - we should use device of the
+      // listconstruct instead
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(listconstruct_device);
+      REQ(consumer_device);
+      REQ(*listconstruct_device == *consumer_device);
       for (auto const& input : listConstruct->inputs()) {
         REQ(isFusableOnDevice(input->node()));
       }
@@ -644,9 +667,13 @@ class TensorExprFuser {
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = consumer->input(0)->node();
-      for (auto const& input : listConstruct->inputs()) {
-        REQ(isFusableOnDevice(input->node()));
-      }
+      // We're merging listconstruct->cat. cat is the consumer and listconstruct
+      // is the producer. cat doesn't have its device type and thus the only
+      // thing we should check is that listconstruct's device is well defined
+      // (e.g. all its inputs has the same device).
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      REQ(listconstruct_device);
     } else {
       REQ(isFusableOnDevice(producer));
     }
