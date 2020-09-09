@@ -22,10 +22,10 @@ def fuse_fx(graph_module, inplace=False):
 
 def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant, is_child_module=False):
     _check_is_graph_module(graph_module)
-
+    graph_module = fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     prepare = quantizer.prepare_dynamic if is_dynamic_quant else quantizer.prepare
-    return prepare(graph_module, qconfig_dict, inplace, is_child_module)
+    return prepare(graph_module, qconfig_dict, inplace=True, is_child_module)
 
 def prepare_child_module_fx(graph_module, qconfig_dict, inplace=False):
     return _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False, is_child_module=True)
