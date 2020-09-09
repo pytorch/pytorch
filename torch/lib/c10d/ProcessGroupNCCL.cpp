@@ -300,6 +300,14 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
+void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  completed_ = true;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
+}
+
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   // Call Synchronize without a timeout. We use this method to avoid adding a
   // timeout argument to the public synchronize API.
@@ -577,7 +585,9 @@ void ProcessGroupNCCL::workCleanupLoop() {
          /* no increment*/) {
       auto& work = *it;
       if (work->isCompleted()) {
-        // Remove all Completed WorkNCCL Objects from the Vector
+        // Handle Exceptions on failed GPU operations and remove completed
+        // workNCCL objects from work vector.
+        work->handleNCCLGuard();
         it = workList_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
