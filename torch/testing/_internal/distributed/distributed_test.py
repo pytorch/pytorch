@@ -2889,7 +2889,6 @@ class DistributedTest:
                     # Use model.no_sync() to disable grad synchronization every
                     # sync_interval.
                     if i % sync_interval != 0:
-                        print(f"iteration {i} - not syncing.")
                         context = net.no_sync()
                     else:
                         context = nullcontext()
