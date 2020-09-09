@@ -812,8 +812,7 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
 
 Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
   // normally broadcasting is handled implicitly, but here, because we call an inplace
-  // function as an optimization and the LHS doesn't broadcast for inplace functions,
-  // we need to explicitly broadcast.
+  // function and the LHS doesn't broadcast for inplace functions, we need to explicitly broadcast.
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
   return result.masked_scatter_(mask, grad);
