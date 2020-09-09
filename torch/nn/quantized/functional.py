@@ -1,5 +1,6 @@
 r""" Functional interface (quantized)."""
 from typing import List, Optional
+import warnings
 
 import torch
 from torch import Tensor

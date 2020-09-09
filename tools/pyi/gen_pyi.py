@@ -387,7 +387,6 @@ def gen_nn_functional(out):
         'avg_pool2d',
         'avg_pool3d',
         'hardtanh_',
-        'hardsigmoid',
         'elu_',
         'leaky_relu_',
         'logsigmoid',
@@ -407,7 +406,7 @@ def gen_nn_functional(out):
 
     # functional.pyi already contains the definitions for those functions
     # so, we don't export then to it
-    from_c.extend(['hardtanh', 'leaky_relu'])
+    from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
     env = {
         'imported_hints': import_code,
