@@ -13,7 +13,6 @@ from ..util.setting import (
 from ..util.utils import (
     clean_up,
     create_folder,
-    get_cov_type,
     print_log,
     raise_no_test_found_exception,
     remove_file,
@@ -22,6 +21,7 @@ from ..util.utils import (
 from ..util.utils_init import add_arguments_utils, create_folders, get_options
 from .utils import (
     clean_up_gcda,
+    detect_compiler_type,
     get_llvm_tool_path,
     get_oss_binary_folder,
     get_pytorch_folder,
@@ -128,7 +128,7 @@ def print_init_info() -> None:
     print_log("pytorch folder: ", get_pytorch_folder())
     print_log("cpp test binaries folder: ", get_oss_binary_folder(TestType.CPP))
     print_log("python test scripts folder: ", get_oss_binary_folder(TestType.PY))
-    print_log("cov_type: ", get_cov_type())
+    print_log("compiler type: ", detect_compiler_type().value)
     print_log(
         "llvm tool folder (only for clang, if you are using gcov please ignore it): ",
         get_llvm_tool_path(),

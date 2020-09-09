@@ -207,7 +207,8 @@ op_db = [
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-1,
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -225,7 +226,6 @@ op_db = [
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     # NOTE: the derivative for inplace acosh is not implemented
-    # TODO: working here
     UnaryUfuncInfo('acosh',
                    ref=np.arccosh,
                    domain=(1, float('inf')),
