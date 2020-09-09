@@ -273,10 +273,11 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
+  Math,
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  EndOfAliasKeys = Autograd, //
+  EndOfAliasKeys = Math, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
@@ -331,7 +332,7 @@ constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
 inline bool isAliasDispatchKey(DispatchKey k) {
-  return k == DispatchKey::Autograd;
+  return k == DispatchKey::Autograd || k == DispatchKey::Math;
 }
 } // namespace c10
 

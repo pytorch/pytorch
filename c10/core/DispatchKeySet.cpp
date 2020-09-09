@@ -12,10 +12,46 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradOther,
 });
 
+constexpr DispatchKeySet math_dispatch_keyset = DispatchKeySet({
+  DispatchKey::CPU,
+  DispatchKey::CUDA,
+  DispatchKey::HIP,
+  DispatchKey::FPGA,
+  DispatchKey::MSNPU,
+  DispatchKey::XLA,
+  DispatchKey::Vulkan,
+  DispatchKey::MKLDNN,
+  DispatchKey::OpenGL,
+  DispatchKey::OpenCL,
+  DispatchKey::IDEEP,
+  DispatchKey::QuantizedCPU,
+  DispatchKey::QuantizedCUDA,
+  DispatchKey::ComplexCPU,
+  DispatchKey::ComplexCUDA,
+  DispatchKey::CustomRNGKeyId,
+  DispatchKey::MkldnnCPU,
+  DispatchKey::SparseCPU,
+  DispatchKey::SparseCUDA,
+  DispatchKey::SparseHIP,
+  DispatchKey::PrivateUse1,
+  DispatchKey::PrivateUse2,
+  DispatchKey::PrivateUse3,
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
+  DispatchKey::AutogradXLA,
+  DispatchKey::AutogradPrivateUse1,
+  DispatchKey::AutogradPrivateUse2,
+  DispatchKey::AutogradPrivateUse3,
+  DispatchKey::AutogradOther,
+});
+
+
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   switch (t) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset;
+    case DispatchKey::Math:
+      return math_dispatch_keyset;
     case DispatchKey::Undefined:
      return DispatchKeySet();
    default:
@@ -38,11 +74,45 @@ constexpr std::array<DispatchKey, 7> autograd_dispatch_keys {
     DispatchKey::AutogradPrivateUse1, DispatchKey::AutogradPrivateUse2,
     DispatchKey::AutogradPrivateUse3, DispatchKey::AutogradOther};
 
+constexpr std::array<DispatchKey, 30> math_dispatch_keys {
+  DispatchKey::CPU,
+  DispatchKey::CUDA,
+  DispatchKey::HIP,
+  DispatchKey::FPGA,
+  DispatchKey::MSNPU,
+  DispatchKey::XLA,
+  DispatchKey::Vulkan,
+  DispatchKey::MKLDNN,
+  DispatchKey::OpenGL,
+  DispatchKey::OpenCL,
+  DispatchKey::IDEEP,
+  DispatchKey::QuantizedCPU,
+  DispatchKey::QuantizedCUDA,
+  DispatchKey::ComplexCPU,
+  DispatchKey::ComplexCUDA,
+  DispatchKey::CustomRNGKeyId,
+  DispatchKey::MkldnnCPU,
+  DispatchKey::SparseCPU,
+  DispatchKey::SparseCUDA,
+  DispatchKey::SparseHIP,
+  DispatchKey::PrivateUse1,
+  DispatchKey::PrivateUse2,
+  DispatchKey::PrivateUse3,
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
+  DispatchKey::AutogradXLA,
+  DispatchKey::AutogradPrivateUse1,
+  DispatchKey::AutogradPrivateUse2,
+  DispatchKey::AutogradPrivateUse3,
+  DispatchKey::AutogradOther};
+
 ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k) {
   if (isAliasDispatchKey(k)) {
     switch (k) {
       case DispatchKey::Autograd:
         return autograd_dispatch_keys;
+      case DispatchKey::Math:
+        return math_dispatch_keys;
       default:
         TORCH_INTERNAL_ASSERT(false, "Unable to resolve alias dispatch key");
     }
