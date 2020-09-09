@@ -480,10 +480,11 @@ class ParameterList(Module):
     def __call__(self, input):
         raise RuntimeError('ParameterList should not be called.')
 
-    def _replicate_for_data_parallel(self)
+    def _replicate_for_data_parallel(self):
         warnings.warn("nn.ParameterList is being used with DataParallel but this is not "
-                      "officieally supported. This list will appear empty for the models "
-                      "replicated on each GPU except the original one.")
+                      "supported. This list will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
         return super(ParameterList, self)._replicate_for_data_parallel()
 
 
@@ -628,8 +629,9 @@ class ParameterDict(Module):
     def __call__(self, input):
         raise RuntimeError('ParameterDict should not be called.')
 
-    def _replicate_for_data_parallel(self)
+    def _replicate_for_data_parallel(self):
         warnings.warn("nn.ParameterDict is being used with DataParallel but this is not "
-                      "officieally supported. This list will appear empty for the models "
-                      "replicated on each GPU except the original one.")
+                      "supported. This dict will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
         return super(ParameterDict, self)._replicate_for_data_parallel()
