@@ -123,7 +123,7 @@ private:
 
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
-  // set. The iterator is only invalidated by the destruction ofthe underlying
+  // set. The iterator is only invalidated by the destruction of the underlying
   // DispatchKeySet as the iterator stores a pointer to the raw represenation of
   // the DispatchKeySet.
   class iterator {
@@ -139,6 +139,8 @@ public:
     }
 
     self_type& operator++() {
+      TORCH_INTERNAL_ASSERT(i_ <= static_cast<uint8_t>(DispatchKey::NumDispatchKeys));
+
       // Create a masked version of the set representation to ignore previous
       // keys that we've iterated through.
       uint64_t masked_data = llvm::maskTrailingZeros<uint64_t>(i_) & *data_ptr_;
@@ -146,7 +148,7 @@ public:
 
       // If there are no keys, set to end iterator value
       if (firstKeyIndex == std::numeric_limits<uint64_t>::max() ||
-          i_ >= static_cast<uint8_t>(DispatchKey::NumDispatchKeys)) {
+         i_ == static_cast<uint8_t>(DispatchKey::NumDispatchKeys)) {
         i_ = static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
         return *this;
       }
