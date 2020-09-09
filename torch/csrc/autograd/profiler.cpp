@@ -36,6 +36,7 @@ namespace {
     CUDA_MEM_USAGE,
     CUDA_DEVICE,
     CUDA_US,
+    SHAPES,
     NUM_EVENT_IVALUE_IDX // must be last in list
   };
 
@@ -516,6 +517,26 @@ void Event::record(bool record_cuda) {
       NUM_EVENT_IVALUE_IDX,
       " elements to reconstruct Event.");
 
+  // Reconstruct input shapes from ivalues.
+  auto shapeListFromServer = ivalues.get(EventIValueIdx::SHAPES);
+  TORCH_INTERNAL_ASSERT(
+    shapeListFromServer.isList(),
+    "Expected profiler shapes IValue to contain type c10::impl::GenericLIst."
+  );
+
+  auto shapeList = shapeListFromServer.toList();
+  std::vector<std::vector<int64_t>> shapesFromServer;
+  shapesFromServer.reserve(shapeList.size());
+  for (size_t i = 0 ; i < shapeList.size(); ++i) {
+    std::vector<int64_t> s;
+    auto curShapesList = shapeList.get(i).toList();
+    s.reserve(curShapesList.size());
+    for (size_t j = 0; j < curShapesList.size(); ++j) {
+      s.emplace_back(curShapesList.get(j).toInt());
+    }
+    shapesFromServer.emplace_back(s);
+  }
+
   Event evt(
       static_cast<EventKind>(
           ivalues.get(EventIValueIdx::KIND).toInt()), // EventKind
@@ -523,7 +544,7 @@ void Event::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::THREAD_ID).toInt(), // thread_id
       static_cast<at::RecordFunctionHandle>(
           ivalues.get(EventIValueIdx::HANDLE).toDouble()), // handle
-      {}, // TODO: record shapes
+      std::move(shapesFromServer), // input shapes
       ivalues.get(EventIValueIdx::NODE_ID).toInt(), // node id
       true, // is remote
       ivalues.get(EventIValueIdx::CPU_MEM_USAGE).toInt(), // cpu_mem_usage
@@ -552,6 +573,19 @@ at::IValue Event::toIValue() const {
   eventIValueList.emplace_back(static_cast<int64_t>(cuda_memory_usage_));
   eventIValueList.emplace_back(device_);
   eventIValueList.emplace_back(cuda_us_);
+  // Shapes
+  c10::impl::GenericList shapesList =
+      c10::impl::GenericList(at::ListType::create(at::IntType::get()));
+  shapesList.reserve(shapes_.size());
+  for (const auto& shape : shapes_) {
+    c10::impl::GenericList s = c10::impl::GenericList(at::IntType::get());
+    s.reserve(shape.size());
+    for (const auto& k : shape) {
+      s.emplace_back(k);
+    }
+    shapesList.emplace_back(s);
+  }
+  eventIValueList.emplace_back(shapesList);
   return at::IValue(eventIValueList);
 }
 
