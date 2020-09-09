@@ -6,7 +6,7 @@ import pickle
 import copy
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 from torch.fx.proxy import TraceError
-from torch.fx.utils import extract_module, fully_outline_module
+from torch.fx.split import extract_module, fully_outline_module
 
 from fx.quantization import Quantizer
 

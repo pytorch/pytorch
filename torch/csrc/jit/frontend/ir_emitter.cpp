@@ -1783,7 +1783,8 @@ struct to_ir {
       auto* rhs = emitExpr(e);
       if (auto namedType = rhs->type()->cast<c10::NamedType>()) {
         if (auto qualname = namedType->name()) {
-          if (*qualname == "__torch__.torch.fx.symbolic_trace.ModuleHierarchyCtxMgr") {
+          if (*qualname ==
+              "__torch__.torch.fx.symbolic_trace.ModuleHierarchyCtxMgr") {
             continue;
           }
         }

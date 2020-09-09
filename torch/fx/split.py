@@ -1,6 +1,5 @@
 import torch
 import torch.fx
-import copy
 
 def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.fx.GraphModule:
     """
@@ -56,6 +55,12 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     block_inputs = block_uses - block_defs
     block_outputs = list(rest_uses - rest_defs)
     assert len(block_outputs) == 1
+    if len(block_outputs) != 1:
+        err = f"Found more than one output value while extracting {target_qualname}. " \
+              f"This could happen if some transformation has modified Module qualified "\
+              f"names in a way that no longer preserves the hierarchical structure."
+        raise RuntimeError(err)
+
 
     # ===== Stage 2: Create submodule for extracted module =====
     # TODO: ideally we would just symbolically trace `target_module` but
