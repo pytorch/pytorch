@@ -513,5 +513,22 @@ class TestFX(JitTestCase):
             assert s in stringed
 
 
+    def test_scriptmod_sidechannel(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand(3, 4)
+
+        f = Foo()
+        sym_traced = symbolic_trace(f)
+        scripted = torch.jit.script(f)
+
+        sm_dict = scripted.__dict__.copy()
+        sm_dict['code'] = sym_traced.code
+        for k, v in sym_traced.__dict__.items():
+            if k.startswith('__tensor_constant'):
+                sm_dict[k] = v
+        loaded_graphmodule = torch.fx.graph_module.deserialize_graphmodule(sm_dict)
+
+
 if __name__ == '__main__':
     run_tests()
