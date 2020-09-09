@@ -1083,7 +1083,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SizeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting list
+    @disableScriptTest()  #  x.stride() not scriptable
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2856,7 +2856,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, inputs)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
     def test_loop_with_list(self):
         class ListLoopModel(torch.jit.ScriptModule):
             @torch.jit.script_method
