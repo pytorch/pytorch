@@ -83,6 +83,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Synchronize streams by blocking each on the NCCL stream
     void synchronizeStreams();
 
+    // Helper function used in CUDA Stream callbacks to complete WorkNCCL
+    // objects and throw exceptions when neeeded.
+    void handleNCCLGuard();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
