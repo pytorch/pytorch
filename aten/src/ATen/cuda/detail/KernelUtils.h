@@ -33,7 +33,7 @@ inline int GET_BLOCKS(const int64_t N) {
   auto block_num = (N - 1) / CUDA_NUM_THREADS + 1;
   AT_ASSERTM(block_num <= max_int, "Can't schedule too many blocks on CUDA device");
 
-  return static_cast<int>(std::min(block_num, max_int));
+  return static_cast<int>(block_num);
 }
 
 }}}  // namespace at::cuda::detail
