@@ -409,9 +409,9 @@ void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
   auto axis = out_tv->getRelativeComputeAtAxis();
   target = out_tv->getComputeAtView();
   while (target->hasComputeAt()) {
-    if (target->getThisComputeAtAxis() < axis)
+    if (target->getThisComputeAtAxis() < axis) {
       break;
-    TORCH_INTERNAL_ASSERT(target->getThisComputeAtAxis() == axis);
+    }
     axis = target->getComputeAtRelPos(axis);
     target = target->getComputeAtView();
   }
