@@ -46,7 +46,7 @@ def prepare_fx(graph_module, qconfig_dict, inplace=False):
       A GraphModule with observer or fake quant modules, ready for
       calibration or quantization aware training
     """
-    prepared, _ = _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False)
+    prepared, _, _ = _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant=False)
     return prepared
 
 def prepare_static_fx(graph_module, qconfig_dict, inplace=False):
@@ -72,7 +72,7 @@ def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
 def prepare_dynamic_fx(graph_module, qconfig_dict, inplace=False):
     r""" Prepare a model for post training dynamic quantization
     """
-    prepared, _ = _prepare_fx(graph_module, qconfig_dict, inplace, True)
+    prepared, _, _ = _prepare_fx(graph_module, qconfig_dict, inplace, True)
     return prepared
 
 def _convert_fx(graph_module, inplace, debug, is_dynamic_quant, is_child_module=False):

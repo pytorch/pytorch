@@ -274,16 +274,66 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.custom(x)
                 return x
 
-        m = symbolic_trace(M(), delegate_class=CustomDelegate)
-        m.eval()
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        data = torch.randn(1, 1, 1, 1)
+        # instantiate M and RefM and align the parameters
+        original_m = M()
+        original_ref_m = RefM()
+        original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
+
+        m = symbolic_trace(original_m, delegate_class=CustomDelegate).eval()
         qconfig_dict = {'': default_qconfig}
         m = prepare_fx(m, qconfig_dict)
-        print(m.graph)
-        m = convert_fx(m)
-        print(m.graph)
-        print(m)
-        print(m.custom)
+        m(data)
+        # input and output of first conv, observer for custom module
+        # will be inserted in the custom module itself
+        count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 2
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        # for output of conv in the custom module
+        count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 1
+        }
+        self.checkGraphModuleNodes(m.custom, expected_node_occurrence=count_check)
 
+        m = convert_fx(m)
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Conv2d) : 1,
+            ns.call_method('dequantize') : 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        count_check = {
+            # quantization of input happens in parent module
+            # quantization of output happens in the quantized conv module
+            ns.call_function(torch.quantize_per_tensor) : 0,
+            # dequantization for output happens in parent module
+            ns.call_method('dequantize') : 0,
+        }
+        self.checkGraphModuleNodes(m.custom, expected_node_occurrence=count_check)
+        res = m(data)
+
+        # quantize the reference model
+        ref_m = symbolic_trace(original_ref_m).eval()
+        ref_m = prepare_fx(ref_m, qconfig_dict)
+        ref_m(data)
+        ref_m = convert_fx(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
 
 
 class TestQuantizeFxOps(QuantizationTestCase):
