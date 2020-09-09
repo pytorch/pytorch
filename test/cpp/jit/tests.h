@@ -78,7 +78,7 @@ namespace jit {
   _(ClassDerive)                                  \
   _(SaveLoadTorchbind)                            \
   _(ModuleInterfaceSerialization)                 \
-  _(ModuleCloneWithModuleInterface)               \
+  _(ModuleCloneWithModuleInterface)             /*\
   _(ClassTypeAddRemoveAttr)                       \
   _(Inliner)                                      \
   _(LiteInterpreterAdd)                           \
@@ -88,7 +88,7 @@ namespace jit {
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
   _(AutogradSymbols)                              \
-  _(DefaultArgTypeHinting)                      /*\
+  _(DefaultArgTypeHinting)                      --\
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
   _(MobileTypeParser)                             \
