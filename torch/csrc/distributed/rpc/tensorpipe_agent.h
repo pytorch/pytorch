@@ -6,6 +6,7 @@
 #include <thread>
 
 #include <c10/core/thread_pool.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
@@ -197,7 +198,9 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&, Message&&)>);
+      std::function<void(const tensorpipe::Error&,
+                         Message&&,
+                         std::vector<at::cuda::CUDAStream>)>);
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -217,7 +220,8 @@ class TensorPipeAgent : public RpcAgent {
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<FutureMessage>& futureResponseMessage,
-      uint64_t messageId);
+      uint64_t messageId,
+      const std::vector<at::cuda::CUDAStream>& streams);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
