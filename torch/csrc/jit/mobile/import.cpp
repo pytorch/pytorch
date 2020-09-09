@@ -402,6 +402,11 @@ mobile::Module _load_for_mobile(
     auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
     BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
+
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      std::cout << "Key not found: model_name\n";
+    }
+
     if (observer) {
       observer->onExitLoadModel(result.metadata());
     }
