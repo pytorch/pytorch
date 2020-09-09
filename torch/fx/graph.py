@@ -219,7 +219,7 @@ class Graph:
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_param':
-                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+                return f'%{n.name} : [uses={n.uses}, module_qualname={n.module_qualname}] = self.{n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}, module_qualname={n.module_qualname}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'

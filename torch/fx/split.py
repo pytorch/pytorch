@@ -1,7 +1,11 @@
 import torch
-import torch.fx
+from .graph_module import GraphModule
+from .node import Node
+from .graph import Graph
+from .symbolic_trace import DefaultDelegate
+from typing import List, Set, Dict
 
-def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.fx.GraphModule:
+def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
     """
     Given a GraphModule and a qualified name for a Module resident in the
     GraphModule's module hierarchy, return a new GraphModule that is equivalent
@@ -22,10 +26,10 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     #
     # We'll use this later to figure out what needs to be inputs/outputs
     # to/from the extracted block
-    block_defs = set()
-    block_uses = set()
-    rest_defs = set()
-    rest_uses = set()
+    block_defs : Set[Node]  = set()
+    block_uses : Set[Node] = set()
+    rest_defs : Set[Node] = set()
+    rest_uses : Set[Node ]= set()
 
     for node in mod.graph.nodes:
         def in_block(node):
@@ -45,16 +49,15 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
             block_nodes.append(node)
 
         for arg in node.args:
-            if isinstance(arg, torch.fx.Node):
+            if isinstance(arg, Node):
                 use_set.add(arg)
         for k, v in node.kwargs.items():
-            if isinstance(v, torch.fx.Node):
+            if isinstance(v, Node):
                 use_set.add(v)
         def_set.add(node)
 
     block_inputs = block_uses - block_defs
     block_outputs = list(rest_uses - rest_defs)
-    assert len(block_outputs) == 1
     if len(block_outputs) != 1:
         err = f"Found more than one output value while extracting {target_qualname}. " \
               f"This could happen if some transformation has modified Module qualified "\
@@ -67,8 +70,8 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     # I have to think through how to associate the positional/kwarg
     # inputs with traced values
 
-    submod_graph = torch.fx.Graph()
-    submod_delegate = torch.fx.DefaultDelegate(target_module, submod_graph)
+    submod_graph = Graph()
+    submod_delegate = DefaultDelegate(target_module, submod_graph)
 
     # Map Node in the original Graph to the node in the new graph
     remap_table = {}
@@ -76,7 +79,7 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
         remap_table[block_input] = submod_delegate.placeholder(block_input.name)
 
     for node in block_nodes:
-        def arg_transform(n : torch.fx.Node):
+        def arg_transform(n : Node):
             return remap_table[n]
 
         # We need to fixup all qualfied names to strip off the base
@@ -92,18 +95,18 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
 
     # Register output
     submod_graph.output(remap_table[block_outputs[0]])
-    submod_module = torch.fx.GraphModule(target_module, submod_graph)
+    submod_module = GraphModule(target_module, submod_graph)
 
     # ===== Stage 3: Create new base GraphModule with submodule nodes replaced
     #       with a callsite to that new submodule =====
 
-    base_graph = torch.fx.Graph()
-    base_delegate = torch.fx.DefaultDelegate(mod, base_graph)
-    base_remap_table = {}
+    base_graph : Graph = Graph()
+    base_delegate : DefaultDelegate = DefaultDelegate(mod, base_graph)
+    base_remap_table : Dict[Node, Node] = {}
 
     callsite_inserted = False
     for orig_node in mod.graph.nodes:
-        def arg_transform(n : torch.fx.Node):
+        def arg_transform(n : Node):
             return base_remap_table[n]
         if orig_node in block_defs:
             if not callsite_inserted:
@@ -118,9 +121,10 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
             base_remap_table[orig_node] = base_graph.node_copy(orig_node, arg_transform)
 
     # Register output
+    assert isinstance(mod.graph.result, Node)
     base_graph.output(base_remap_table[mod.graph.result])
 
-    rv = torch.fx.GraphModule(mod, base_graph)
+    rv = GraphModule(mod, base_graph)
 
     new_root = rv
     new_root_target = new_root
@@ -131,7 +135,7 @@ def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.f
     return rv
 
 
-def fully_outline_module(mod : torch.fx.GraphModule) -> torch.fx.GraphModule:
+def fully_outline_module(mod : GraphModule) -> GraphModule:
     """
     Fully out-line all nodes within a GraphModule. After this happens, all
     nodes will appear in nested GraphModules reflecting the original Module
