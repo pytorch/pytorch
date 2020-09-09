@@ -661,6 +661,8 @@ def method_tests():
         # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
+        ('asin', torch.randn(S, S, S, dtype=torch.cdouble), NO_ARGS, 'complex', (True,)),
+        ('acos', torch.randn(S, S, S, dtype=torch.cdouble), NO_ARGS, 'complex', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
         ('atan', (), NO_ARGS, 'scalar', (True,)),
         ('atan2', (S, S, S), ((S, S, S),)),
