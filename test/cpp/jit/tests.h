@@ -69,7 +69,7 @@ namespace jit {
   _(ModuleDefine)                                 \
   _(QualifiedName)                                \
   _(ClassImport)                                  \
-  _(ScriptObject)                               /*\
+  _(ScriptObject)                             /**/\
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
@@ -88,7 +88,7 @@ namespace jit {
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
   _(AutogradSymbols)                              \
-  _(DefaultArgTypeHinting)                        \
+  _(DefaultArgTypeHinting)                      /*\
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
   _(MobileTypeParser)                             \
