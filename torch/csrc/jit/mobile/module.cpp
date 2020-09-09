@@ -181,8 +181,9 @@ void Method::run(Stack& stack) {
   auto observer = torch::observerConfig().getModuleObserver();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
-  std::unordered_map<std::string, std::string> copied_metadata = metadata();
-  if (metadata().find("model_name") == metadata().end()) {
+  std::unordered_map<std::string, std::string> copied_metadata =
+      owner_->metadata();
+  if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
     copied_metadata["model_name"] = name();
   }
   if (observer) {
