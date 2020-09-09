@@ -45,7 +45,7 @@ namespace {
 Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -125,7 +125,7 @@ Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) {
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, Scalar value) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_fill_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -205,7 +205,7 @@ Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, Scalar value)
 Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -285,7 +285,7 @@ Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & 
 Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tensor & source) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_masked_scatter_bool_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -362,141 +362,10 @@ Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tens
     }
     return self;
 }
-Tensor & _th_nonzero_out(Tensor & result, const Tensor & self) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBoolTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaByteTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaCharTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaIntTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaLongTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaShortTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaHalfTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_nonzero_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBFloat16Tensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_nonzero_out not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return result;
-}
-Tensor _th_nonzero(const Tensor & self) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(ScalarType::Long)).release();
-    auto result = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(result_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBoolTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaByteTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaCharTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaIntTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaLongTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaShortTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaHalfTensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        case ScalarType::BFloat16: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_nonzero", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaBFloat16Tensor_nonzero(globalContext().getTHCState(), result_, self_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_nonzero not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return result;
-}
 Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -569,7 +438,7 @@ Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const
 Tensor & _th_take_out(Tensor & result, const Tensor & self, const Tensor & index) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_take_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -707,7 +576,7 @@ Tensor _th_take(const Tensor & self, const Tensor & index) {
 Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_put_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -780,7 +649,7 @@ Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bo
 Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Bool: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -853,7 +722,7 @@ Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scala
 std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_mode_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -972,7 +841,7 @@ std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdi
 std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1091,7 +960,7 @@ std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descen
 std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_topk_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1219,58 +1088,10 @@ std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, 
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-Tensor _th_var(const Tensor & self, bool unbiased) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THCudaDoubleTensor_var_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Double));
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THCudaTensor_var_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Float));
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_var", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<Half>(THCudaHalfTensor_var_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Half));
-            break;
-        }
-        default:
-            AT_ERROR("_th_var not supported on CUDAType for ", dispatch_scalar_type);
-    }
-}
-Tensor _th_std(const Tensor & self, bool unbiased) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<double>(THCudaDoubleTensor_std_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Double));
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<float>(THCudaTensor_std_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Float));
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_std", false, DeviceType::CUDA, dispatch_scalar_type);
-            return at::scalar_tensor(convert<Half>(THCudaHalfTensor_std_all(globalContext().getTHCState(), self_, unbiased)), options(ScalarType::Half));
-            break;
-        }
-        default:
-            AT_ERROR("_th_std not supported on CUDAType for ", dispatch_scalar_type);
-    }
-}
 Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_renorm_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1336,7 +1157,7 @@ Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
 Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_renorm_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1367,7 +1188,7 @@ Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
 Tensor & _th_fmod_out(Tensor & result, const Tensor & self, Scalar other) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_fmod_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1492,7 +1313,7 @@ Tensor _th_fmod(const Tensor & self, Scalar other) {
 Tensor & _th_fmod_out(Tensor & result, const Tensor & self, const Tensor & other) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_fmod_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1617,7 +1438,7 @@ Tensor _th_fmod(const Tensor & self, const Tensor & other) {
 Tensor & _th_fmod_(Tensor & self, Scalar other) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_fmod_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1675,7 +1496,7 @@ Tensor & _th_fmod_(Tensor & self, Scalar other) {
 Tensor & _th_fmod_(Tensor & self, const Tensor & other) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_fmod_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1733,7 +1554,7 @@ Tensor & _th_fmod_(Tensor & self, const Tensor & other) {
 Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_cross_kernel_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1858,7 +1679,7 @@ Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim) 
 Tensor & _th_bmm_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_bmm_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -1996,7 +1817,7 @@ Tensor _th_bmm(const Tensor & self, const Tensor & mat2) {
 Tensor & _th_baddbmm_out(Tensor & result, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_baddbmm_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2188,7 +2009,7 @@ Tensor _th_baddbmm(const Tensor & self, const Tensor & batch1, const Tensor & ba
 std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto res1_ = checked_dense_tensor_unwrap(res1, "res1", 0, "_th_gels_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2239,7 +2060,7 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
 std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto res1_ = checked_dense_tensor_unwrap(res1, "res1", 0, "_th_eig_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2286,7 +2107,7 @@ std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors) {
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2329,7 +2150,7 @@ Tensor _th_potri(const Tensor & self, bool upper) {
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto res1_ = checked_dense_tensor_unwrap(res1, "res1", 0, "_th_geqrf_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2376,7 +2197,7 @@ std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self) {
 std::tuple<Tensor &,Tensor &> _th_multinomial_alias_setup_out(Tensor & J, Tensor & q, const Tensor & probs) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(J);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto probs_ = checked_dense_tensor_unwrap(probs, "probs", 1, "_th_multinomial_alias_setup_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2435,7 +2256,7 @@ std::tuple<Tensor,Tensor> _th_multinomial_alias_setup(const Tensor & probs) {
 Tensor & _th_multinomial_alias_draw_out(Tensor & result, const Tensor & q, const Tensor & J, int64_t num_samples, c10::optional<Generator> generator) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(result);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
@@ -2495,7 +2316,7 @@ Tensor _th_multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t nu
 Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_copy_ignoring_overlaps_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2553,7 +2374,7 @@ Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src) {
 Tensor & _thnn_multi_margin_loss_forward_out(Tensor & output, const Tensor & self, const Tensor & target, Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_multi_margin_loss_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2631,7 +2452,7 @@ Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & targe
 Tensor & _thnn_multi_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_multi_margin_loss_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2715,7 +2536,7 @@ Tensor _thnn_multi_margin_loss_backward(const Tensor & grad_output, const Tensor
 std::tuple<Tensor &,Tensor &> _thnn_multilabel_margin_loss_forward_out(Tensor & output, Tensor & is_target, const Tensor & self, const Tensor & target, int64_t reduction) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_multilabel_margin_loss_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2794,7 +2615,7 @@ std::tuple<Tensor,Tensor> _thnn_multilabel_margin_loss_forward(const Tensor & se
 Tensor & _thnn_multilabel_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_multilabel_margin_loss_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2883,7 +2704,7 @@ Tensor _thnn_multilabel_margin_loss_backward(const Tensor & grad_output, const T
 std::tuple<Tensor &,Tensor &> _thnn_nll_loss_forward_out(Tensor & output, Tensor & total_weight, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_nll_loss_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -2970,7 +2791,7 @@ std::tuple<Tensor,Tensor> _thnn_nll_loss_forward(const Tensor & self, const Tens
 Tensor & _thnn_nll_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_nll_loss_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3067,7 +2888,7 @@ Tensor _thnn_nll_loss_backward(const Tensor & grad_output, const Tensor & self, 
 std::tuple<Tensor &,Tensor &> _thnn_nll_loss2d_forward_out(Tensor & output, Tensor & total_weight, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_nll_loss2d_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3154,7 +2975,7 @@ std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Te
 Tensor & _thnn_nll_loss2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_nll_loss2d_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3251,7 +3072,7 @@ Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self
 Tensor & _thnn_glu_forward_out(Tensor & output, const Tensor & self, int64_t dim) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_glu_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3305,7 +3126,7 @@ Tensor _thnn_glu_forward(const Tensor & self, int64_t dim) {
 Tensor & _thnn_glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_glu_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3365,7 +3186,7 @@ Tensor _thnn_glu_backward(const Tensor & grad_output, const Tensor & self, int64
 std::tuple<Tensor &,Tensor &> _thnn_log_sigmoid_forward_out(Tensor & output, Tensor & buffer, const Tensor & self) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_log_sigmoid_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3424,7 +3245,7 @@ std::tuple<Tensor,Tensor> _thnn_log_sigmoid_forward(const Tensor & self) {
 Tensor & _thnn_log_sigmoid_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & buffer) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_log_sigmoid_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3490,7 +3311,7 @@ Tensor _thnn_log_sigmoid_backward(const Tensor & grad_output, const Tensor & sel
 Tensor & _thnn_rrelu_with_noise_forward_out(Tensor & output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, c10::optional<at::Generator> generator) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_rrelu_with_noise_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3562,7 +3383,7 @@ Tensor _thnn_rrelu_with_noise_forward(const Tensor & self, const Tensor & noise,
 Tensor & _thnn_rrelu_with_noise_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_rrelu_with_noise_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3640,7 +3461,7 @@ Tensor _thnn_rrelu_with_noise_backward(const Tensor & grad_output, const Tensor 
 Tensor & _thnn_rrelu_with_noise_forward_(Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, c10::optional<at::Generator> generator) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_rrelu_with_noise_forward_", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3674,7 +3495,7 @@ Tensor & _thnn_rrelu_with_noise_forward_(Tensor & self, const Tensor & noise, Sc
 std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_forward_out(Tensor & output, Tensor & columns, Tensor & ones, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_conv2d_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3791,7 +3612,7 @@ std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_forward(const Tensor & self, const
 std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_backward_out(Tensor & grad_input, Tensor & grad_weight, Tensor & grad_bias, const Tensor & grad_output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, const Tensor & columns, const Tensor & ones) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_conv2d_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -3932,7 +3753,7 @@ std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_backward(const Tensor & grad_outpu
 Tensor & _thnn_conv_depthwise2d_forward_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_thnn_conv_depthwise2d_forward_out", false, DeviceType::CUDA, dispatch_scalar_type);
@@ -4045,7 +3866,7 @@ Tensor _thnn_conv_depthwise2d_forward(const Tensor & self, const Tensor & weight
 std::tuple<Tensor &,Tensor &> _thnn_conv_depthwise2d_backward_out(Tensor & grad_input, Tensor & grad_weight, const Tensor & grad_output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
-    
+
     switch (dispatch_scalar_type) {
         case ScalarType::Double: {
             auto grad_output_ = checked_dense_tensor_unwrap(grad_output, "grad_output", 1, "_thnn_conv_depthwise2d_backward_out", false, DeviceType::CUDA, dispatch_scalar_type);
