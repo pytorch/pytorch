@@ -532,12 +532,12 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   for (size_t i = 0; i < pickler.tensorData().size(); ++i) {
-    //const auto& tensorData = jit::getWriteableTensorData(tensor);
     const auto& tensorData =
         jit::getWriteableTensorData(pickler.tensorData()[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
-    std::string metadata = deviceIndices.empty() ? "" : std::to_string(deviceIndices[i]);
+    std::string metadata =
+        deviceIndices.empty() ? "" : std::to_string(deviceIndices[i]);
 
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(
@@ -551,7 +551,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
       tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-        tensorPtr, tensorData.sizeInBytes(), std::move(metadata)});
+          tensorPtr, tensorData.sizeInBytes(), std::move(metadata)});
     }
   }
 
@@ -606,7 +606,6 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
 Message tensorpipeDeserialize(
     tensorpipe::Message&& message,
     TensorpipeReadBuffers&& buffers) {
-
   // Tensors
   std::vector<at::Tensor> tensors;
   const char* pickleData = buffers.pickle.data();
