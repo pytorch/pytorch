@@ -11,7 +11,6 @@ from ..util.setting import (
     TestStatusType,
 )
 from ..util.utils import (
-    check_compiler_type,
     detect_compiler_type,
     print_error,
     print_time,
