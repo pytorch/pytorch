@@ -179,18 +179,20 @@ Method::Method(const Module* owner, Function* function)
 
 void Method::run(Stack& stack) {
   auto observer = torch::observerConfig().getModuleObserver();
-  auto module_metadata = owner_->metadata();
+  /* if the metadata dict doesn't contain "model_name", copy the metadata and
+  set the value of "model_name" as name() */
+  std::unordered_map<std::string, std::string> copied_metadata = metadata();
+  if (metadata().find("model_name") == metadata().end()) {
+    copied_metadata["model_name"] = name();
+  }
   if (observer) {
-    observer->onEnterRunMethod(module_metadata, function_->name());
+    observer->onEnterRunMethod(copied_metadata, method_name);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
-  if (module_metadata.find("model_name") != module_metadata.end()) {
-    debug_info->setModelName(module_metadata.at("model_name"));
-  } else {
-    debug_info->setModelName(name());
-  }
-  debug_info->setMethodName(function_->name());
+  std::string name = copied_metadata["model_name"];
+  debug_info->setModelName(name);
+  debug_info->setMethodName(method_name);
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   try {
