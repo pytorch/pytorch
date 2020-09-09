@@ -270,6 +270,12 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   exception_ = exception_ptr;
 }
 
+void ProcessGroupNCCL::WorkNCCL::setException(
+    std::exception_ptr exception_ptr) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  exception_ = exception_ptr;
+}
+
 // Helper that checks if the NCCL kernels are completed on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
   checkAndSetException();
@@ -489,29 +495,49 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         if (checkForNCCLErrors(ncclComms)) {
           LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
-          if (blockingWait_) {
-            LOG(INFO) << "Aborting communicators that received errors";
-            // We should not abort the communicators if we are performing a
-            // non-blocking wait(). The reason for this is that if we abort the
-            // nccl communicator, wait() might not throw exceptions and
-            // subsequent operations might run on garbage results.
-            // The current model is that when we call wait(), subsequent
-            // operations only run after this work is done or we hang forever
-            // waiting for the operation to complete.
-            for (const auto& ncclComm : ncclComms) {
-              ncclComm->ncclCommAbort();
-              // Note that we don't remove the aborted communicators from the
-              // cache. The reason is that if we do remove the communicator
-              // from the cache, it is possible that a new collective operation
-              // calls `ncclCommInitRank` to create a new communicator whereas
-              // other ranks might have failed/timed out and didn't enter
-              // `ncclCommInitRank`. As a result, when there is a failure on
-              // a communicator the application receives an exception and its
-              // their responsibility to destroy the process group and recreate
-              // it to recover from errors.
-              abortedCommIds.emplace(
-                  buildNcclUniqueIdStr(ncclComm->getNcclId()));
-            }
+          LOG(INFO) << "Aborting communicators that received errors";
+          // We abort NCCL communicators that have received errors from this
+          // thread, and exceptions are set on the corresponding work objects.
+          // The workCleanupThread will then loop through the unfinished
+          // collectives and throw exceptions if an exception has been set on
+          // any of the work objects from this thread.
+          for (const auto& ncclComm : ncclComms) {
+            ncclComm->ncclCommAbort();
+            // Note that we don't remove the aborted communicators from the
+            // cache. The reason is that if we do remove the communicator
+            // from the cache, it is possible that a new collective operation
+            // calls `ncclCommInitRank` to create a new communicator whereas
+            // other ranks might have failed/timed out and didn't enter
+            // `ncclCommInitRank`. As a result, when there is a failure on
+            // a communicator the application receives an exception and its
+            // their responsibility to destroy the process group and recreate
+            // it to recover from errors.
+            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+          }
+        }
+      }
+    }
+
+    {
+      std::unique_lock<std::mutex> lock(workListMutex_);
+      for (auto& work : workList_) {
+        work->checkAndSetException();
+        // Aborting NCCL Communicators due to errors is already handled above.
+        if (work->exception()) {
+          continue;
+        }
+
+        // Check for Timeouts in the WorkNCCL Operations, and abort all
+        // communicators accordingly.
+        auto currentTimepoint = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                currentTimepoint - work->workStartTime_) > work->opTimeout_) {
+          std::exception_ptr exception_ptr = std::make_exception_ptr(
+              std::runtime_error("NCCL Operation Timed Out"));
+          work->setException(exception_ptr);
+          for (const auto& ncclComm : work->ncclComms_) {
+            ncclComm->ncclCommAbort();
+            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
           }
         }
       }
