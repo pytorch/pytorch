@@ -22,8 +22,8 @@ if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
 elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
   build_script='/builder/manywheel/build_rocm.sh'
 else
-  build_script="USE_CUDA='${USE_CUDA}' ${GIT_ROOT_DIR}/packaging/wheel/build.sh"
+  build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
 # Build the package
-SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "$build_script"
+USE_CUDA="${USE_CUDA}" SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "$build_script"
