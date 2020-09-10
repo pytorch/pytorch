@@ -21,10 +21,12 @@ class PackedParameter(torch.nn.Module):
         destination[prefix + 'param'] = self.param
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         self.param = state_dict[prefix + 'param']
         super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                           missing_keys, unexpected_keys, error_msgs)
+                                                           missing_keys, unexpected_keys, error_msgs,
+                                                           tensor_check_fn)
 
 class RNNBase(torch.nn.Module):
 
@@ -189,11 +191,13 @@ class RNNBase(torch.nn.Module):
         return apply_permutation(hx, permutation)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         self.version = version
         super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                   missing_keys, unexpected_keys, error_msgs)
+                                                   missing_keys, unexpected_keys, error_msgs,
+                                                   tensor_check_fn)
 
     @classmethod
     def from_float(cls, mod):
@@ -589,11 +593,13 @@ class RNNCellBase(torch.nn.Module):
 
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         self._packed_weight_ih = state_dict.pop(prefix + '_packed_weight_ih')
         self._packed_weight_hh = state_dict.pop(prefix + '_packed_weight_hh')
         super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+                                                       missing_keys, unexpected_keys, error_msgs,
+                                                       tensor_check_fn)
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.

@@ -72,7 +72,8 @@ class _NormBase(Module):
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
 
         if (version is None or version < 2) and self.track_running_stats:
@@ -84,7 +85,8 @@ class _NormBase(Module):
 
         super(_NormBase, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+            missing_keys, unexpected_keys, error_msgs,
+            tensor_check_fn)
 
 
 class _BatchNorm(_NormBase):

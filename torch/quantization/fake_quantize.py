@@ -129,7 +129,8 @@ class FakeQuantize(Module):
         destination[prefix + 'zero_point'] = self.zero_point
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         # Removing this function throws an error that the the size of the loaded tensor does not match the original size
         # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
         local_state = ['scale', 'zero_point']
@@ -141,7 +142,8 @@ class FakeQuantize(Module):
             elif strict:
                 missing_keys.append(key)
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                        missing_keys, unexpected_keys, error_msgs)
+                                                        missing_keys, unexpected_keys, error_msgs,
+                                                        tensor_check_fn)
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)

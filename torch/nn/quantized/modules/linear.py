@@ -61,7 +61,8 @@ class LinearPackedParams(torch.nn.Module):
         destination[prefix + '_packed_params'] = self._weight_bias()
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         if version is None or version < 2:
             self.dtype = torch.qint8
@@ -80,7 +81,8 @@ class LinearPackedParams(torch.nn.Module):
             self.set_weight_bias(weight, bias)
 
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                              missing_keys, unexpected_keys, error_msgs)
+                                                              missing_keys, unexpected_keys, error_msgs,
+                                                              tensor_check_fn)
 
     @torch.jit.export
     def __getstate__(self):

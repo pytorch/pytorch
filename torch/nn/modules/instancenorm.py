@@ -20,7 +20,8 @@ class _InstanceNorm(_NormBase):
         raise NotImplementedError
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
@@ -47,7 +48,8 @@ class _InstanceNorm(_NormBase):
 
         super(_InstanceNorm, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+            missing_keys, unexpected_keys, error_msgs,
+            tensor_check_fn)
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)

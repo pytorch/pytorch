@@ -130,7 +130,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
     #        |--- running_mean : Tensor (moved from v1.self.running_mean)
     #        |--- running_var : Tensor (moved from v1.self.running_var)
     #        |--- num_batches_tracked : Tensor (moved from v1.self.num_batches_tracked)
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         if version is None or version == 1:
             # BN related parameters and buffers were moved into the BN module for v2
@@ -159,7 +161,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                     missing_keys.append(prefix + v2_name)
 
         super(_ConvBnNd, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            state_dict, prefix, local_metadata, strict, missing_keys,
+            unexpected_keys, error_msgs, tensor_check_fn)
 
     @classmethod
     def from_float(cls, mod):

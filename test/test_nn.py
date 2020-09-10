@@ -3792,7 +3792,7 @@ class TestNN(NNTestCase):
 
             def _load_from_state_dict(self, state_dict, prefix, local_metadata,
                                       strict, missing_keys, unexpected_keys,
-                                      error_msgs):
+                                      error_msgs, tensor_check_fn):
                 # skip some of the error handling
                 self.param.data.copy_(state_dict[prefix + "serialized"] - 1)
 

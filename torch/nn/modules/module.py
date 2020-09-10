@@ -8,7 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -922,7 +922,8 @@ class Module:
         return handle
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
@@ -953,6 +954,14 @@ class Module:
             error_msgs (list of str): error messages should be added to this
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
+            tensor_check_fn (function): Function used to check that
+                the value from the dict is valid compared to the current one.
+                It takes as input the current param, the new one and the list
+                of errors that you can append to notify of an error. It should
+                return True when the current param can be updated by the new
+                one and False when that param should be ignored. The user
+                should make sure that the custom function never raises errors
+                but append them to the given list.
         """
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
@@ -970,11 +979,8 @@ class Module:
                 if len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
 
-                if input_param.shape != param.shape:
-                    # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
-                                      'the shape in current model is {}.'
-                                      .format(key, input_param.shape, param.shape))
+                # check to see if the user wants to load this param
+                if not tensor_check_fn(param, input_param, error_msgs):
                     continue
 
                 try:
@@ -998,7 +1004,8 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
-                        strict: bool = True):
+                        strict: bool = True,
+                        tensor_check_fn: Optional[Callable[[Tensor, Tensor, List[str]], bool]] = None):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -1010,6 +1017,14 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+            tensor_check_fn (function, optional): Function used to check that
+                the value from the dict is valid compared to the current one.
+                It takes as input the current param, the new one and the list
+                of errors that you can append to notify of an error. It should
+                return True when the current param can be updated by the new
+                one and False when that param should be ignored. The user
+                should make sure that the custom function never raises errors
+                but append them to the given list.
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -1026,10 +1041,21 @@ class Module:
         if metadata is not None:
             state_dict._metadata = metadata
 
+        if tensor_check_fn is None:
+            def tensor_check_fn(param, input_param, error_msgs):
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                      'the shape in current model is {}.'
+                                      .format(param, input_param.shape, param.shape))
+                    return False
+                return True
+
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs,
+                tensor_check_fn)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')

@@ -114,7 +114,8 @@ class _ConvNd(nn.Module):
     # Counterpart to the serialization methods, we must pack the serialized
     # QTensor weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         self.set_weight_bias(
             state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
@@ -125,7 +126,7 @@ class _ConvNd(nn.Module):
         state_dict.pop(prefix + 'zero_point')
         super(_ConvNd, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, False, missing_keys,
-            unexpected_keys, error_msgs)
+            unexpected_keys, error_msgs, tensor_check_fn)
 
     @torch.jit.export
     def __setstate__(self, state):

@@ -121,12 +121,14 @@ class QFunctional(torch.nn.Module):
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
 
         self.scale = float(state_dict.pop(prefix + 'scale'))
         self.zero_point = int(state_dict.pop(prefix + 'zero_point'))
         super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+                                                       missing_keys, unexpected_keys, error_msgs,
+                                                       tensor_check_fn)
 
     def _get_name(self):
         return 'QFunctional'

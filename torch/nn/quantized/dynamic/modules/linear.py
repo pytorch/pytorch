@@ -66,11 +66,13 @@ class Linear(nnq.Linear):
         return extra_repr_str
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         self.version = version
         super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                  missing_keys, unexpected_keys, error_msgs)
+                                                  missing_keys, unexpected_keys, error_msgs,
+                                                  tensor_check_fn)
 
     @classmethod
     def from_float(cls, mod):

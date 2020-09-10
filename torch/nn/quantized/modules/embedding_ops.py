@@ -51,7 +51,8 @@ class EmbeddingPackedParams(torch.nn.Module):
         destination[prefix + '_packed_weight'] = self._weight()
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
         self.dtype = state_dict[prefix + 'dtype']
         state_dict.pop(prefix + 'dtype')
@@ -61,7 +62,8 @@ class EmbeddingPackedParams(torch.nn.Module):
         self.set_weight(weight)
 
         super(EmbeddingPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                                 missing_keys, unexpected_keys, error_msgs)
+                                                                 missing_keys, unexpected_keys, error_msgs,
+                                                                 tensor_check_fn)
 
     def __repr__(self):
         return self._weight().__repr__()

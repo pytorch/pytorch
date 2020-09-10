@@ -343,7 +343,8 @@ class _LearnableFakeQuantize(nn.Module):
         destination[prefix + 'zero_point'] = self.zero_point
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         local_state = ['scale', 'zero_point']
         for name in local_state:
             key = prefix + name
@@ -357,6 +358,6 @@ class _LearnableFakeQuantize(nn.Module):
                 missing_keys.append(key)
         super(_LearnableFakeQuantize, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys,
-            unexpected_keys, error_msgs)
+            unexpected_keys, error_msgs, tensor_check_fn)
 
     with_args = classmethod(_with_args)

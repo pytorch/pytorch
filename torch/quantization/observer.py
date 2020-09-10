@@ -2,7 +2,7 @@
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-from typing import Any, List, Tuple, Optional, Dict, Union
+from typing import Any, List, Tuple, Optional, Dict, Union, Callable
 from collections import OrderedDict
 import torch
 import torch.nn as nn
@@ -145,7 +145,8 @@ class _ObserverBase(ObserverBase):
         self.quant_max = quant_max
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
 
         version = local_metadata.get('version', None)
 
@@ -155,7 +156,8 @@ class _ObserverBase(ObserverBase):
             state_dict[prefix + 'eps'] = eps
 
         super(ObserverBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                        missing_keys, unexpected_keys, error_msgs)
+                                                        missing_keys, unexpected_keys, error_msgs,
+                                                        tensor_check_fn)
 
     @torch.jit.export
     def _validate_qmin_qmax(self, quant_min: int, quant_max: int) -> None:
@@ -568,7 +570,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
     @torch.jit.export
     def _load_from_state_dict(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], prefix: str,
                               local_metadata: Dict[str, torch.Tensor], strict: bool,
-                              missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str]):
+                              missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str],
+                              tensor_check_fn: Callable[[Tensor, Tensor, List[str]], bool]):
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
@@ -594,14 +597,17 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
         if not torch.jit.is_scripting():
             super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                                        missing_keys, unexpected_keys, error_msgs)
+                                                                        missing_keys, unexpected_keys, error_msgs,
+                                                                        tensor_check_fn)
 
     @torch.jit.export
     def _load_from_state_dict_script(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
                                      prefix: str, local_metadata: Dict[str, torch.Tensor], strict: bool,
-                                     missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str]):
+                                     missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str],
+                                     tensor_check_fn: Callable[[Tensor, Tensor, List[str]], bool]):
 
-        self._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+        self._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs,
+                                   tensor_check_fn)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -952,7 +958,8 @@ class HistogramObserver(_ObserverBase):
         destination[prefix + 'max_val'] = self.max_val
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+                              missing_keys, unexpected_keys, error_msgs,
+                              tensor_check_fn):
         version = local_metadata.get('version', None)
 
         if version is None or version < 3:
@@ -975,7 +982,8 @@ class HistogramObserver(_ObserverBase):
             elif strict:
                 missing_keys.append(key)
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                             missing_keys, unexpected_keys, error_msgs)
+                                                             missing_keys, unexpected_keys, error_msgs,
+                                                             tensor_check_fn)
 
 class PlaceholderObserver(ObserverBase):
     r"""
@@ -1035,7 +1043,7 @@ class RecordingObserver(_ObserverBase):
     @torch.jit.export
     def get_tensor_value(self):
         return self.tensor_val
-
+tensor_check_fn
 
 class NoopObserver(ObserverBase):
     r"""
