@@ -3465,7 +3465,9 @@ Computes the histogram of a tensor.
 
 Args:
     {input}
-    bins (int or 1D Tensor): number of histogram bins if int, if bins is a Tensor, it defines a monotonically increasing sequence of bin edges, allowing for non-uniform bins. Default: 10
+    bins (int or 1D Tensor): If int, defines the number of bins. If Tensor,
+        defines a monotonically increasing sequence of bin edges, allowing
+        for non-uniform bins. Default: 10
     min (float): lower end of the range (inclusive), ignored if bins is a Tensor
     max (float): upper end of the range (inclusive), ignored if bins is a Tensor
     weights (Tensor): optional, weight for each value in the input tensor.
