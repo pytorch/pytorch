@@ -1879,15 +1879,12 @@ std::vector<Value*> inlineCallTo(
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
-      module_instance_info =
-        c10::make_optional(
-            ModuleInstanceInfo(
-              class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else {
       std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
-      module_instance_info =
-        c10::make_optional(
-            ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
     }
   }
 
@@ -1909,7 +1906,10 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange(), module_instance_info);
+                *new_node_cs,
+                callee,
+                to_replace->sourceRange(),
+                module_instance_info);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(

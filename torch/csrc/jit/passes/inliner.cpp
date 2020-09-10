@@ -19,19 +19,18 @@ void pushScopeInfo(Node* node) {
     const auto opt_module_instance_info = std::get<2>(tup);
     if (opt_module_instance_info) {
       const auto& module_instance_info = opt_module_instance_info.value();
-      if(module_instance_info.class_type()) {
+      if (module_instance_info.class_type()) {
         const auto& class_type = module_instance_info.class_type();
         const auto& instance_name = module_instance_info.instance_name();
         auto type_name = class_type->name()->qualifiedName();
-        type_name = type_name.substr(type_name.find_last_of(".")+1);
+        type_name = type_name.substr(type_name.find_last_of(".") + 1);
         std::string module_fn_name = type_name + "(" + instance_name + ")::";
         module_fn_name += std::get<0>(tup)->name();
         sc = sc->push(Symbol::scope(module_fn_name));
       } else {
         sc = sc->push(Symbol::scope("TYPE_INFO_UNKNOWN::"));
       }
-    }
-    else {
+    } else {
       std::string free_fn = "FreeFunction::" + std::get<0>(tup)->name();
       sc = sc->push(Symbol::scope(free_fn));
     }
@@ -40,7 +39,7 @@ void pushScopeInfo(Node* node) {
 }
 
 void ReconstructScopeFromInlinedCallStackHelper(Block* block) {
-  for(auto node : block->nodes()) {
+  for (auto node : block->nodes()) {
     if (node->callstack()) {
       pushScopeInfo(node);
     }
