@@ -12,7 +12,7 @@ import torch.nn.qat as nnqat
 from .stubs import QuantStub, DeQuantStub
 
 # Map for swapping float module to quantized ones
-STATIC_QUANT_MODULE_MAPPING = {
+STATIC_QUANT_MODULE_MAPPINGS = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
     nn.ReLU6: nnq.ReLU6,
@@ -51,7 +51,7 @@ STATIC_QUANT_MODULE_MAPPING = {
 }
 
 # Map for swapping float module to qat modules
-QAT_MODULE_MAPPING = {
+QAT_MODULE_MAPPINGS = {
     nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
     # Intrinsic modules:
@@ -62,7 +62,7 @@ QAT_MODULE_MAPPING = {
 }
 
 # Map for swapping dynamic modules
-DYNAMIC_QUANT_MODULE_MAPPING = {
+DYNAMIC_QUANT_MODULE_MAPPINGS = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,
@@ -79,70 +79,78 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 }
 
 # mapping from floating point function or torch ops to quantized ops
-FLOAT_TO_QUANTIZED_OPERATOR_MAPPING = {
+FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.elu: torch._ops.ops.quantized.elu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
 }
 
-def register_static_quant_module_class(module_class, static_quant_module_class):
-    ''' Register a mapping from float module class to quantized module class,
-    quantized module class must have from_float defined as a class method
+def register_static_quant_module_mapping(
+        float_source_module_class, static_quant_target_module_class):
+    ''' Register a mapping from `float_source__module_class` to `static_quant_target_module_class`
+    `static_quant_target_module_class` must have from_float defined as a class method
+    The mapping is used in the convert step of post training static quantization to
+    convert a float module to a statically quantized module.
     '''
-    assert hasattr(static_quant_module_class, 'from_float'), 'from_float must be defined' + \
-        ' in quantized module type'
-    STATIC_QUANT_MODULE_MAPPING[module_class] = static_quant_module_class
+    assert hasattr(static_quant_target_module_class, 'from_float'), 'from_float must be defined' + \
+        ' in quantized module class'
+    STATIC_QUANT_MODULE_MAPPINGS[float_source_module_class] = static_quant_target_module_class
 
-def get_static_quant_module_mapping():
+def get_static_quant_module_mappings():
     ''' Get module mapping for post training static quantization
     '''
-    return STATIC_QUANT_MODULE_MAPPING
+    return STATIC_QUANT_MODULE_MAPPINGS
 
 def get_static_quant_module_class(float_module_class):
     ''' Get the statically quantized module class corresponding to
     the floating point module class
     '''
-    quantized_module_class = STATIC_QUANT_MODULE_MAPPING.get(float_module_class, None)
-    assert quantized_module_class is not None, \
+    static_quant_module_class = STATIC_QUANT_MODULE_MAPPINGS.get(float_module_class, None)
+    assert static_quant_module_class is not None, \
         'Floating point module class {}'.format(float_module_class) + \
         ' does not have a corresponding quantized module class'
-    return quantized_module_class
+    return static_quant_module_class
 
-def register_qat_module_class(float_module_class, qat_module_class):
-    ''' Register a mapping from float module class to qat module class,
-    qat module class must have from_float defined as a class method
+def register_qat_module_mapping(float_source_module_class, qat_target_module_class):
+    '''Register a mapping from `float_source_module_class` to `qat_target_module_class`,
+    `qat_target_module_class` must have from_float defined as a class method
+    This mapping is used in prepare step of quantization aware training to swap
+    a float module to a qat module.
     '''
-    assert hasattr(qat_module_class, 'from_float'), 'from_float must be defined' + \
-        ' in qat module type'
-    QAT_MODULE_MAPPING[float_module_class] = qat_module_class
+    assert hasattr(qat_target_module_class, 'from_float'), 'from_float must be defined' + \
+        ' in qat module class'
+    QAT_MODULE_MAPPINGS[float_source_module_class] = qat_target_module_class
 
-def get_qat_module_mapping():
+def get_qat_module_mappings():
     ''' Get module mapping for quantization aware training
     '''
-    return QAT_MODULE_MAPPING
+    return QAT_MODULE_MAPPINGS
 
-def register_dynamic_quant_module_class(module_class, dynamic_quant_module_class):
-    ''' Register a mapping from float module class to dynamically quantized module class,
-    dynamic quant module class must have from_float defined as a class method
+def register_dynamic_quant_module_class(float_source_module_class, dynamic_quant_target_module_class):
+    ''' Register a mapping from `float_source_module_class` to `dynamic_quant_target_module_class`,
+    `dynamic_quant_target_module_class` must have from_float defined as a class method
+    This mapping is used in convert step of post training dynamic
+    quantization to swap a float module to a dynamically quantized
+    module.
     '''
-    assert hasattr(dynamic_quant_module_class, 'from_float'), 'from_float must be defined' + \
+    assert hasattr(dynamic_quant_target_module_class, 'from_float'), 'from_float must be defined' + \
         ' in dynamically quantized module type'
-    DYNAMIC_QUANT_MODULE_MAPPING[module_class] = dynamic_quant_module_class
+    DYNAMIC_QUANT_MODULE_MAPPINGS[float_source_module_class] = dynamic_quant_target_module_class
 
-def get_dynamic_quant_module_mapping():
+def get_dynamic_quant_module_mappings():
     ''' Get module mapping for post training dynamic quantization
     '''
-    return DYNAMIC_QUANT_MODULE_MAPPING
+    return DYNAMIC_QUANT_MODULE_MAPPINGS
 
 def get_qconfig_propagation_list():
     ''' Get the list of module types that we'll attach qconfig
     attribute to in prepare
     '''
     QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
-        (set(STATIC_QUANT_MODULE_MAPPING.keys()) |
-         set(QAT_MODULE_MAPPING.keys()) |
-         set(DYNAMIC_QUANT_MODULE_MAPPING.keys()) |
+        (set(STATIC_QUANT_MODULE_MAPPINGS.keys()) |
+         set(QAT_MODULE_MAPPINGS.keys()) |
+         set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
          _INCLUDE_QCONFIG_PROPAGATE_LIST) -
         _EXCLUDE_QCONFIG_PROPAGATE_LIST
     )
@@ -153,25 +161,27 @@ def get_compare_output_module_list():
     in numeric suite
     '''
     NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST = (
-        set(STATIC_QUANT_MODULE_MAPPING.values())
-        | set(QAT_MODULE_MAPPING.values())
-        | set(DYNAMIC_QUANT_MODULE_MAPPING.values())
-        | set(STATIC_QUANT_MODULE_MAPPING.keys())
-        | set(QAT_MODULE_MAPPING.keys())
-        | set(DYNAMIC_QUANT_MODULE_MAPPING.keys())
+        set(STATIC_QUANT_MODULE_MAPPINGS.values())
+        | set(QAT_MODULE_MAPPINGS.values())
+        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.values())
+        | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
+        | set(QAT_MODULE_MAPPINGS.keys())
+        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
         | _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
-def register_quantized_operator(float_op, quantized_op):
-    ''' Register a mapping from floating point ops(torch or functional) to quantized op
+def register_quantized_operator_mapping(float_op, quantized_op):
+    ''' Register a mapping from `floating_point_op` (torch or functional) to `quantized_op`
+    This is used in convert step of fx based graph mode quantization
+    to convert a float op to quantized op.
     '''
-    FLOAT_TO_QUANTIZED_OPERATOR_MAPPING[float_op] = quantized_op
+    FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS[float_op] = quantized_op
 
 def get_quantized_operator(float_op):
     ''' Get the quantized operator corresponding to the float operator
     '''
-    quantized_op = FLOAT_TO_QUANTIZED_OPERATOR_MAPPING.get(float_op, None)
+    quantized_op = FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
         'Operator {} does not have corresponding quantized op'.format(float_op)
     return quantized_op

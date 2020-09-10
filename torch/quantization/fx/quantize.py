@@ -5,7 +5,7 @@ from torch.quantization import (
 )
 
 from ..quantization_mappings import (
-    get_qat_module_mapping,
+    get_qat_module_mappings,
 )
 
 from torch.fx import (
@@ -166,7 +166,7 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root):
-        convert(root, mapping=get_qat_module_mapping(), inplace=True, remove_qconfig=False)
+        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self, root, input_graph):
         def get_qconfig(module):

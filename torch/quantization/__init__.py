@@ -32,15 +32,15 @@ _all__ = [
     'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
     'QuantType',  # quantization type
     # custom module APIs
-    'register_static_quant_module_class',
-    'get_static_quant_module_mapping', 'get_static_quant_module_class',
-    'register_dynamic_quant_module_class',
-    'get_dynamic_quant_module_mapping',
-    'register_qat_module_class',
-    'get_qat_module_mapping',
+    'register_static_quant_module_mapping',
+    'get_static_quant_module_mappings', 'get_static_quant_module_class',
+    'register_dynamic_quant_module_mapping',
+    'get_dynamic_quant_module_mappings',
+    'register_qat_module_mapping',
+    'get_qat_module_mappings',
     'get_qconfig_propagation_list',
     'get_compare_output_module_list',
-    'register_quantized_operator', 'get_quantized_operator',
+    'register_quantized_operator_mapping', 'get_quantized_operator',
     'register_fuser_method', 'get_fuser_method',
     'register_traceable_custom_module_class',
     # Sub functions for `prepare` and `swap_module`
