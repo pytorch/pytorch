@@ -88,7 +88,7 @@ namespace jit {
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
   _(AutogradSymbols)                              \
-  _(DefaultArgTypeHinting)                      --\
+  _(DefaultArgTypeHinting)                      */\
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
   _(MobileTypeParser)                             \
@@ -116,7 +116,7 @@ namespace jit {
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
   _(LiteSequentialSampler)                        \
-  _(FusionAliasing)*/
+  _(FusionAliasing)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
