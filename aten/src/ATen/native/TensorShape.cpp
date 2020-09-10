@@ -930,6 +930,12 @@ Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
 
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
@@ -1048,6 +1054,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
   return result;
+}
+
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {

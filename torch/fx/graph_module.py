@@ -128,6 +128,10 @@ def forward(self, {', '.join(free_variables)}):
         return the_copy
 
 
+    def __str__(self) -> str:
+        orig_str = super().__str__()
+        return '\n'.join([orig_str, self.code])
+
 # workarounds for issues in __torch_function__
 
 # WAR for __torch_function__ not handling tensor lists,
