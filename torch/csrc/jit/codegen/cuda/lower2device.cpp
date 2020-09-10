@@ -107,6 +107,14 @@ void GpuLower::lower() {
 
   // We now have the lowered expressions, store the final lowered Kernel IR
   kernel_ = std::make_unique<Kernel>(indexed_loops);
+
+  // Set the kernel inputs & outputs
+  for (auto input : fusion_->inputs()) {
+    kernel_->addInput(kir::lowerValue(input));
+  }
+  for (auto output : fusion_->outputs()) {
+    kernel_->addOutput(kir::lowerValue(output));
+  }
 }
 
 Kernel* GpuLower::kernel() const {

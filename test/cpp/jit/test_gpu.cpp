@@ -2339,7 +2339,7 @@ void test_op(
       gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
   std::vector<at::Tensor> output_vect = {output};
   cudaDeviceSynchronize();
-  if (fusion.hasRNG())
+  if (fusion.isStochastic())
     at::manual_seed(0);
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -2347,7 +2347,7 @@ void test_op(
   fe.runFusion(aten_inputs_ivalues, output_vect);
   cudaDeviceSynchronize();
 
-  if (fusion.hasRNG())
+  if (fusion.isStochastic())
     at::manual_seed(0);
   at::Tensor ref_output = af(aten_inputs);
   cudaDeviceSynchronize(); // This sync shouldn't be necessary;

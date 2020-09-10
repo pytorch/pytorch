@@ -243,6 +243,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
@@ -289,7 +290,7 @@ class TORCH_CUDA_API TensorView : public Val {
     return domain_;
   }
 
-  MemoryType getMemoryType() const {
+  MemoryType memoryType() const {
     return memory_type_;
   }
 

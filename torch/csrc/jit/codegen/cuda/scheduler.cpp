@@ -58,7 +58,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
   // maybe has_reduction for scheudling should be done on a per output tensor
   // basis.
   const bool has_reduction = fusion->hasReduction();
-  const bool disable_unroll = fusion->hasRNG();
+  const bool disable_unroll = fusion->isStochastic();
   bool fcd_reduction = false;
 
   for (auto out_val : fusion->outputs()) {

@@ -36,14 +36,6 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
     return print_inline_;
   }
 
-  bool printInline() const { return print_inline_; }
-
-  void printHeader(
-      Fusion* fusion,
-      const std::string& kernel_name_,
-      const std::vector<Val*>& global_buffers,
-      bool hasDynamicSmem);
-
   virtual void handle(Fusion* f);
 
   // handle calls some non const fusion ops,
@@ -110,25 +102,10 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
     print_inline_ = prev;
   }
 
-  void printReductionOps(Fusion* fusion);
-
-  void printKernel(
-      const std::vector<Expr*>& exprs,
-      const std::string& kernel_name,
-      const std::vector<Val*>& global_buffers,
-      bool hasDynamicSmem);
-
- private:
-  const ThreadPredicateMap& getThreadPredicateMap();
-
  private:
   std::ostream& os_;
   bool print_inline_ = false;
-
-  // Track the indentation size for pretty printing
   int indent_size_ = 0;
-
-  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
 };
 
 TORCH_CUDA_API std::ostream& operator<<(

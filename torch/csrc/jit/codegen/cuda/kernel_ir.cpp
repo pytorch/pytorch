@@ -120,6 +120,12 @@ bool TensorDomain::hasGridReduction() const {
   });
 }
 
+bool TensorDomain::hasBlockBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isThreadDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }
@@ -386,7 +392,7 @@ Allocate::Allocate(
     TORCH_INTERNAL_ASSERT(
         buffer_->getValType().value() == ValType::KirTensorView);
     TORCH_INTERNAL_ASSERT(
-        buffer_->as<TensorView>()->getMemoryType() == memory_type_);
+        buffer_->as<TensorView>()->memoryType() == memory_type_);
     const auto domain = buffer_->as<TensorView>()->domain();
     size_ = domain->nDims() == 0 ? new Int(1) : domain->axis(0)->extent();
     for (size_t i = 1; i < domain->nDims(); i++) {

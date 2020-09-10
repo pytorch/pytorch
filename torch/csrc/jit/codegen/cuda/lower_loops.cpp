@@ -61,7 +61,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   // Create the allocation node
   const auto lowered_tv = new kir::TensorView(tv);
   const auto alloc =
-      new kir::Allocate(lowered_tv, lowered_tv->getMemoryType(), size);
+      new kir::Allocate(lowered_tv, lowered_tv->memoryType(), size);
 
   // Track Shared Memory Allocation Nodes
   bool hasDynamicSmemAlloc = false;

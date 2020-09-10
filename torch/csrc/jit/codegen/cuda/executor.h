@@ -117,6 +117,7 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
  private:
   Fusion fusion_;
 
+  // TODO(kir): caching the values here is no longer needed
   bool has_block_reductions = false;
   bool has_grid_reductions = false;
   bool has_block_broadcasts = false;
@@ -128,9 +129,6 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   // TensorViews actually used in the kernel.
   std::vector<TensorView*> used_tvs_;
-
-  // State of the fusion that's important
-  bool has_random_ = false;
 
   // Counter to be used for kernel name.
   int fusion_id_ = -1;

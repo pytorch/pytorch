@@ -37,96 +37,6 @@ void IrPrinter::handle(const Expr* e) {
   OptInConstDispatch::handle(e);
 }
 
-void IrPrinter::printHeader(
-    Fusion* fusion,
-    const std::string& kernel_name_,
-    const std::vector<Val*>& global_buffers,
-    bool hasDynamicSmem) {
-  os_ << "__global__ void " << kernel_name_ << "(";
-
-  std::vector<Val*> vals;
-
-  for (auto val : fusion->inputs()) {
-    vals.push_back(val);
-  }
-  for (auto val : fusion->outputs()) {
-    vals.push_back(val);
-  }
-
-  for (auto val : global_buffers) {
-    vals.push_back(val);
-  }
-
-  for (Val* val : vals) {
-    switch (val->getValType().value()) {
-      case ValType::TensorView:
-        os_ << "Tensor<" << val->getDataType().value() << ", "
-            << TensorDomain::noReductions(
-                   val->as<TensorView>()->getRootDomain())
-                   .size()
-            << "> T" << val->name();
-        break;
-      case ValType::KirTensorView:
-        os_ << "Tensor<" << val->getDataType().value() << ", "
-            << TensorDomain::noReductions(val->as<kir::TensorView>()
-                                              ->fuserTv()
-                                              ->getMaybeRFactorDomain())
-                   .size()
-            << "> T" << val->name();
-        break;
-      case ValType::Scalar:
-        os_ << val->getDataType().value() << " " << val;
-        break;
-      default:
-        TORCH_CHECK(
-            false,
-            "printHeader() found an input to the fusion of unexpected data type.");
-    }
-
-    if (val != vals.back())
-      os_ << ", ";
-  }
-
-  if (fusion->hasRNG())
-    os_ << ", unsigned long long seed, unsigned long long offset";
-
-  os_ << "){\n";
-  indent_size_++;
-
-  if (fusion->hasRNG()) {
-    indent();
-    os_ << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
-    indent();
-    os_ << "Philox rnd(seed, idx, offset);\n";
-  }
-
-  // Dynamic Shared Memory
-  const bool hasWorkspace =
-      fusion->hasBlockReduction() || fusion->hasGridReduction();
-  if (hasDynamicSmem || hasWorkspace) {
-    indent();
-    os_ << "alignas(";
-    os_ << dataTypeSize(fusion->getMaximumSmemDataType());
-    os_ << ") extern __shared__ char array[];\n";
-  }
-
-  if (hasDynamicSmem) {
-    indent();
-    os_ << "unsigned offset = 0;\n";
-  }
-
-  if (hasWorkspace) {
-    indent();
-    os_ << "void* shared_mem = array;\n";
-    if (hasDynamicSmem) {
-      indent();
-      os_ << "offset += ((blockDim.x * blockDim.y * blockDim.z) * sizeof(";
-      os_ << fusion->getMaximumSmemDataType();
-      os_ << "));\n";
-    }
-  }
-}
-
 void IrPrinter::handle(Fusion* fusion) {
   resetIndent();
   for (const Expr* expr : fusion->exprs()) {
@@ -970,6 +880,8 @@ class ReductionOps : OptOutDispatch {
 
 } // namespace
 
+#if 0
+
 void IrPrinter::printReductionOps(Fusion* fusion) {
   FusionGuard fg(fusion);
 
@@ -982,10 +894,8 @@ void IrPrinter::printReductionOps(Fusion* fusion) {
 
     indent();
     os_ << "__device__ void reduction_" << op_type << "_" << d_type << "("
-        << d_type << "& a, "
-        << "const " << d_type << " b) {\n";
+        << d_type << "& a, " << d_type << " b) {\n";
     indent_size_++;
-
     handle(new BinaryOp(op_type, a, a, b));
     indent_size_--;
     indent();
@@ -1011,6 +921,7 @@ void IrPrinter::printKernel(
   for (auto* expr : exprs) {
     handle(expr);
   }
+
   os_ << "}\n";
 }
 
@@ -1021,6 +932,8 @@ const ThreadPredicateMap& IrPrinter::getThreadPredicateMap() {
   }
   return *thread_predicates_;
 }
+
+#endif
 
 std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
   IrPrinter p(os);
