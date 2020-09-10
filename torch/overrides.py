@@ -442,6 +442,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction='mean': -1,
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
+        torch.histogram: lambda input, bins=10, weights=None, density=False: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.hstack: lambda tensors, out=None: -1,
         torch.hypot: lambda input, other, out=None: -1,

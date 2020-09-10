@@ -350,6 +350,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: heaviside
    .. automethod:: histc
+   .. automethod:: histogram
    .. automethod:: hypot
    .. automethod:: hypot_
    .. automethod:: i0

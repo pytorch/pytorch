@@ -6962,6 +6962,20 @@
     CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
 
+- func: histogram.uniformbins(Tensor self, int bins=10, Tensor? weights=None, Scalar min=0, Scalar max=0, bool density=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU: _histogram_cpu
+    CUDA: _histogram_cuda
+
+- func: histogram.custombins(Tensor self, Tensor bins, Tensor? weights=None, bool density=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU: _histogram_cpu
+    CUDA: _histogram_cuda
+
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:

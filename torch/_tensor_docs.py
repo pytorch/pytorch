@@ -1727,6 +1727,14 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
+add_docstr_all('histogram',
+               r"""
+histogram(bins, weights=None, density=False) -> Tensor
+histogram(bins=10, weights=None, min=0, max=0, density=False) -> Tensor
+
+See :func:`torch.histogram`
+""")
+
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor) -> Tensor
