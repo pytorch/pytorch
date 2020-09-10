@@ -30,7 +30,9 @@ if [[ -z "${TORCH_CUDA_ARCH_LIST:-}" ]]; then
     esac
 fi
 
-LIBGOMP_PATH=$(find / -name libgomp.so.1 | head -1)
+# Searching only in /usr can be problematic but this find command
+# can also fail if it reaches a spot where it gets a permission denied
+LIBGOMP_PATH=$(find /usr -name libgomp.so.1 -type f | head -1)
 if ! find / -name libgomp.so.1 | head -1 >/dev/null 2>/dev/null; then
     echo "ERROR: libgomp.so.1 not found, exiting"
     exit 1

@@ -12,7 +12,9 @@ _GLIBCXX_USE_CXX11_ABI=${_GLIBCXX_USE_CXX11_ABI:-0}
 CMAKE_ARGS=${CMAKE_ARGS:-}
 EXTRA_CAFFE2_CMAKE_FLAGS="${EXTRA_CAFFE2_CMAKE_FLAGS:-}"
 
-if nvcc --version >/dev/null 2>/dev/null; then
+USE_CUDA=${USE_CUDA:-0}
+
+if [[ "${USE_CUDA}" = 1 ]]; then
     source "${SOURCE_DIR}"/cuda_helpers.sh
 fi
 
