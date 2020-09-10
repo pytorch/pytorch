@@ -1,10 +1,9 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, List
 import torch
 
 from .delegate import DefaultDelegate, DelegateBase, ModuleHierarchyCtxMgr
-from .node import Node, Argument
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import Proxy, _create_proxy
