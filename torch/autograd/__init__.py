@@ -8,8 +8,9 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 import torch
 import warnings
-from typing import Any, Callable, Union, Tuple, Sequence, Optional
+
 from torch.types import _TensorOrTensors
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
@@ -22,9 +23,10 @@ from . import functional
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
+_OptionalTensor = Optional[torch.Tensor]
 
-def _make_grads(outputs, grads):
-    new_grads = []
+def _make_grads(outputs: Sequence[torch.Tensor], grads) -> Tuple[_OptionalTensor, ...]:
+    new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
             if not out.shape == grad.shape:
@@ -33,7 +35,7 @@ def _make_grads(outputs, grads):
                                    + str(grad.shape) + " and output["
                                    + str(outputs.index(out)) + "] has a shape of "
                                    + str(out.shape) + ".")
-            if (out.dtype.is_complex != grad.dtype.is_complex):
+            if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
                                    " are required to have the same dtype."
                                    " Mismatch in dtype: grad_output["
@@ -112,19 +114,20 @@ def backward(
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
 
+    grad_tensors_: Tuple[_OptionalTensor, ...]
     if grad_tensors is None:
-        grad_tensors = [None] * len(tensors)
+        grad_tensors_ = (None, ) * len(tensors)
     elif isinstance(grad_tensors, torch.Tensor):
-        grad_tensors = [grad_tensors]
+        grad_tensors_ = (grad_tensors, )
     else:
-        grad_tensors = list(grad_tensors)
+        grad_tensors_ = tuple(grad_tensors)
 
-    grad_tensors = _make_grads(tensors, grad_tensors)
+    grad_tensors_ = _make_grads(tensors, grad_tensors_)
     if retain_graph is None:
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors, retain_graph, create_graph,
+        tensors, grad_tensors_, retain_graph, create_graph,
         allow_unreachable=True)  # allow_unreachable flag
 
 
@@ -189,20 +192,21 @@ def grad(
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
 
+    grad_outputs_: Tuple[_OptionalTensor, ...]
     if grad_outputs is None:
-        grad_outputs = [None] * len(outputs)
+        grad_outputs_ = (None,) * len(outputs)
     elif isinstance(grad_outputs, torch.Tensor):
-        grad_outputs = [grad_outputs]
+        grad_outputs_ = (grad_outputs,)
     else:
-        grad_outputs = list(grad_outputs)
+        grad_outputs_ = tuple(grad_outputs)
 
-    grad_outputs = _make_grads(outputs, grad_outputs)
+    grad_outputs_ = _make_grads(outputs, grad_outputs_)
 
     if retain_graph is None:
         retain_graph = create_graph
 
     return Variable._execution_engine.run_backward(
-        outputs, grad_outputs, retain_graph, create_graph,
+        outputs, grad_outputs_, retain_graph, create_graph,
         inputs, allow_unused)
 
 
