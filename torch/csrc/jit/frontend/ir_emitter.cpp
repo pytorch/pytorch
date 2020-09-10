@@ -3099,14 +3099,19 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
     TypePtr output_type = nullptr;
     if (rpc_op == prim::rpc_async) {
+      // rpc_async returns FutureType of the functionSchema's return type
       output_type = FutureType::create(returns[0].type());
+    } else if (rpc_op == prim::rpc_sync) {
+      // rpc_sync returns the functionSchema's return type
+      output_type = returns[0].type();
     } else if (rpc_op == prim::rpc_remote) {
+      // rpc_remote returns RRefType of the functionSchema's return type
       output_type = RRefType::create(returns[0].type());
     } else {
-      output_type = returns[0].type();
+      throw ErrorReport(apply)
+          << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
     }
     rpc_node_output->setType(output_type);
-
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
