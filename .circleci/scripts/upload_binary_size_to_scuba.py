@@ -46,6 +46,7 @@ def build_message(size):
             "time": int(time.time()),
             "size": size,
             "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
+            "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
         },
     }
 
@@ -118,6 +119,7 @@ def report_android_sizes(file_dir):
                 "int": {
                     "time": int(time.time()),
                     "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
+                    "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
                     "size": comp_size,
                     "raw_size": uncomp_size,
                 },
