@@ -261,7 +261,8 @@ op_db = [
                    ref=np.exp2,
                    dtypes=floating_types_and(torch.half),
                    dtypesIfCPU=None,
-                   dtypesIfCUDA=None,),
+                   dtypesIfCUDA=None,
+                   dtypesIfROCM=None,),
 ]
 
 # Common operator groupings
