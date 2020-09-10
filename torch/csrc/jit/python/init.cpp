@@ -306,7 +306,7 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.runOnModule(m);
           })
       .def(
-e          "_jit_pass_custom_pattern_based_rewrite_graph",
+          "_jit_pass_custom_pattern_based_rewrite_graph",
           [](const std::string& pattern,
              const std::string& fused_node_name,
              std::shared_ptr<Graph> g) {
