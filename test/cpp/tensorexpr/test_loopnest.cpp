@@ -426,7 +426,7 @@ void testExprSliceAndNormalize() {
   // tail: [2, 10)
 
   For* normalized_tail;
-  LoopNest::normalize(tail, &normalized_tail, false);
+  LoopNest::normalize(tail, &normalized_tail);
   // normalized_tail: [0, 8)
 
   Block* body = getSimplifiedBody(l);

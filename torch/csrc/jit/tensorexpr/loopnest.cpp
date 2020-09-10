@@ -939,7 +939,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*tail, tail, false);
+    LoopNest::normalize(*tail, tail);
   }
 
   // TODO: record history of transformations
@@ -982,7 +982,7 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*head, head, false);
+    LoopNest::normalize(*head, head);
   }
 
   // TODO: record history of transformations
