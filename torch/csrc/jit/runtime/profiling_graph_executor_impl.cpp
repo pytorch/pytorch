@@ -460,7 +460,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   if (optimized_plan_) {
-    GRAPH_DUMP("plan already optimized:", graph);
+    GRAPH_DUMP("plan already optimized:", (*optimized_plan_).graph);
     return *optimized_plan_;
   }
 

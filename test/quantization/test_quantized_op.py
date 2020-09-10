@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines
+from torch.quantization import PerChannelMinMaxObserver
 
 np_dtype = {
     torch.quint8 : np.uint8,
@@ -2716,7 +2717,7 @@ class TestQuantizedLinear(unittest.TestCase):
 
 
 @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
-class TestQuantizedEmbeddingBag(TestCase):
+class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
@@ -2727,7 +2728,6 @@ class TestQuantizedEmbeddingBag(TestCase):
         if bit_rate == 8:
             # Check numerics of prepack function that accepts qtensor as input.
             # We use min-max observer to mimic the quantization performed in the original function.
-            from torch.quantization import PerChannelMinMaxObserver
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
@@ -2884,7 +2884,6 @@ class TestQuantizedEmbeddingBag(TestCase):
 
         if bit_rate == 8:
             # Test operator that accepts TorchBind packed weights.
-            from torch.quantization import PerChannelMinMaxObserver
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
@@ -2931,6 +2930,37 @@ class TestQuantizedEmbeddingBag(TestCase):
                                                include_last_offset, atol=0.1,
                                                rtol=1e-2)
 
+    """ Tests the correctness of the quantized embedding lookup operator """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
+    def test_embedding_byte(self, num_embeddings, embedding_dim):
+        quant_op = torch.ops.quantized.embedding_byte
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+
+        weights = torch.from_numpy((np.random.random_sample((
+            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        max_segments = 5
+        max_segment_length = 20
+        num_lengths = np.random.randint(1, max_segments + 1)
+        lengths = np.random.randint(1, max_segment_length + 1,
+                                    size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(
+            low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        packed_weight = prepack_op(qweight)
+        qresult = quant_op(packed_weight, indices, sparse=False)
+
+        ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
+        torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
 
 class TestQuantizedConv(unittest.TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
@@ -3503,6 +3533,39 @@ class TestPadding(TestCase):
         qx = torch.quantize_per_tensor(x, scale, zp, qtype)
 
         padding_op = torch.nn.ReflectionPad1d(padding)
+
+        y_ref = padding_op(x)
+        qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
+        qy_hat = padding_op(qx)
+
+        self.assertEqual(qy_ref, qy_hat)
+
+    @given(batch_size=st.integers(1, 64),
+           channels=st.integers(1, 64),
+           hwd=st.integers(1, 16),  # For 3D, max input size would be 16x16x16
+           d=st.sampled_from([1, 2, 3]),
+           value=st.floats(-5, 5, allow_nan=False, allow_infinity=False),
+           qtype=st.sampled_from(hu._ALL_QINT_TYPES))
+    def test_constant_padNd(self, batch_size, channels, d, hwd, value, qtype):
+        padding = hwd // 4
+
+        shape = [batch_size, channels, hwd]
+        op = torch.nn.ConstantPad1d
+        if d >= 2:
+            shape.append(hwd)
+            op = torch.nn.ConstantPad2d
+        if d == 3:
+            shape.append(hwd)
+            op = torch.nn.ConstantPad3d
+        numel = np.prod(shape)
+
+        x = torch.arange(numel).to(torch.float)
+        x = x.resize(*shape)
+        # Per-Tensor test
+        scale, zp = _calculate_dynamic_qparams(x, qtype)
+        qx = torch.quantize_per_tensor(x, scale, zp, qtype)
+
+        padding_op = op(padding, value)
 
         y_ref = padding_op(x)
         qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)

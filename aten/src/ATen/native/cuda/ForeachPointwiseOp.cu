@@ -36,8 +36,7 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     });
 }
 
-
-#define FOREACH_UNARY_OP(NAME, OP)                      \
+#define FOREACH_UNARY_OP(NAME, OP)                                                                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
     TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                               \
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");                                 \
@@ -65,7 +64,6 @@ void foreach_tensor_##NAME##_cuda_(TensorList input, TensorList tensors1, Tensor
                                                                                                                                \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);                                                              \
 }
-
 
 FOREACH_UNARY_OP(addcmul, std::multiplies);
 FOREACH_UNARY_OP(addcdiv, std::divides);
