@@ -168,7 +168,7 @@ def launch_subtask(t: Task):
                 return "\n".join(lines)
             print(
                 f"Run failed: {t}\n"
-                f"Return code: {result.returncode}"
+                f"Return code: {result.returncode}\n"
                 f"stdout:\n{condense(stdout)}\n"
                 f"stderr:\n{condense(stderr)}")
 
@@ -220,7 +220,6 @@ def process(results):
     sorted_results = {}
     for k in sorted(structured_results.keys()):
         v = sorted(structured_results[k])
-        assert v[-1][0] == HEAD
         sorted_results[k] = v
 
     return sorted_results
@@ -262,7 +261,7 @@ def run():
 
     results = []
     def snapshot():
-        print("Snapshotting results.")
+        print("\nSnapshotting results.")
         with open("/tmp/microbenchmarks.pkl", "wb") as f:
             pickle.dump(results, f)
 
