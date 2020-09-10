@@ -1230,21 +1230,12 @@
 - func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU, CUDA: true_divide
-    SparseCPU, SparseCUDA: true_divide_sparse
 
 - func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
-  dispatch:
-    CPU, CUDA: true_divide_
-    SparseCPU, SparseCUDA: true_divide_sparse_
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: true_divide_out
-    SparseCPU, SparseCUDA: true_divide_out_sparse_zerodim
 
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full

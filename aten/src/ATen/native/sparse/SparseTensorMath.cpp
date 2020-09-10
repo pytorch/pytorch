@@ -223,32 +223,6 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 }
 
 // --------------------------------------------------------------------
-// true_divide(SparseTensor, Scalar), alias for div
-// --------------------------------------------------------------------
-
-SparseTensor& true_divide_out_sparse_zerodim(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    const Tensor& divisor) {
-  return div_out_sparse_zerodim(result, dividend, divisor);
-}
-
-Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
-  return div_sparse(self, value);
-}
-
-SparseTensor& true_divide_out_sparse_scalar(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    Scalar divisor) {
-  return div_out_sparse_scalar(result, dividend, divisor);
-}
-
-Tensor& true_divide_sparse_(Tensor& self, const Tensor& divisor) {
-  return div_sparse_(self, divisor);
-}
-
-// --------------------------------------------------------------------
 // floor_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 

@@ -78,7 +78,7 @@ Tensor& addcdiv_out(
       "for integer inputs and as ",
       "(input + value * tensor1 / tensor2) for float inputs. ",
       "The future addcdiv behavior is just the latter implementation: ",
-      "(input + value * tensor1 / tensor2).");
+      "(input + value * tensor1 / tensor2), for all dtypes.");
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()

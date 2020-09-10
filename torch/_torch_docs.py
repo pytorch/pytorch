@@ -324,7 +324,7 @@ multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
     (input + value * torch.trunc(tensor1 / tensor2)).to(input.dtype)
     for integer inputs and as (input + value * tensor1 / tensor2) for float inputs.
     The future addcdiv behavior is just the latter implementation:
-    (input + value * tensor1 / tensor2).
+    (input + value * tensor1 / tensor2), for all dtypes.
 
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
@@ -2386,7 +2386,7 @@ Always promotes integer types to the default scalar type.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or Scalar): the divisor
+    other (Tensor or Number): the divisor
 
 Keyword args:
     {out}
