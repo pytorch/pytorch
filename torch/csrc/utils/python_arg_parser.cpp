@@ -14,7 +14,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <string>
 namespace torch {
 
 static std::unordered_map<std::string, ParameterType> type_map = {
@@ -113,8 +112,6 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto name_str = fmt.substr(space + 1);
-  std::cout << "\n\n" << std::endl;
-  std::cout << "type_str: " << type_str << std::endl;
   auto it = type_map.find(type_str);
   if (it == type_map.end()) {
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
@@ -350,7 +347,7 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
   return false;
 }
 
-bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_error) {
+bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -359,11 +356,6 @@ bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_
   for (size_t idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
-      if (throw_error) {
-        throw 20;
-        throw TypeError("expected Scalar as element %d in argument %d, but got %s",
-            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
-      }
       return false;
     }
   }
@@ -456,7 +448,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     case ParameterType::SCALAR_LIST: {
-      return is_scalar_list_and_append_overloaded(obj, argnum, true /* throw_error */);
+      return is_scalar_list_and_append_overloaded(obj, argnum);
     }
     default: throw std::runtime_error("unknown parameter type");
   }
@@ -1019,6 +1011,27 @@ at::Scalar PythonArgs::scalar_slow(int i) {
     return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
   }
   return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(arg)) {
+    return ((THPVariable*)arg)->cdata.item();
+  }
+
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+  }
+
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
+  }
+
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
+  }
+  return at::Scalar(THPUtils_unpackDouble(arg));
 }
 
 } // namespace torch
