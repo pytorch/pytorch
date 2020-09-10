@@ -776,7 +776,6 @@ def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], 
                 arguments_acc = out_arguments
         else:
             assert arguments_acc is not out_arguments
-        #print(parg)
         arguments_acc.append(parg)
 
     return arguments, kwarg_only_arguments, out_arguments

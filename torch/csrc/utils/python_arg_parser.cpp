@@ -14,7 +14,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <string>
 namespace torch {
 
 static std::unordered_map<std::string, ParameterType> type_map = {
@@ -348,7 +347,7 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
   return false;
 }
 
-bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_error) {
+bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -357,10 +356,6 @@ bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_
   for (size_t idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
-      //if (throw_error) {
-      //  throw TypeError("expected Scalar as element %d in argument %d, but got %s",
-      //      static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
-      //}
       return false;
     }
   }
@@ -454,7 +449,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     case ParameterType::SCALAR_LIST: {
-      return is_scalar_list_and_append_overloaded(obj, argnum, true /* throw_error */);
+      return is_scalar_list_and_append_overloaded(obj, argnum);
     }
     default: throw std::runtime_error("unknown parameter type");
   }
