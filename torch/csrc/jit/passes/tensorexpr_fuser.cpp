@@ -136,10 +136,29 @@ bool isSupported(Node* node) {
   };
   // clang-format on
 
-  if (node->isMemberOf(supported_operator_set)) {
-    return true;
-  }
-  if (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set)) {
+  if (node->isMemberOf(supported_operator_set) ||
+      (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
+    // We only insert guards on Tensor types, so we rely on the output
+    // of a node being uniquely determined by its input types.
+    // bail if any non-Tensor input affects the output type
+    // and cannot be reasoned about statically
+
+    // Value is either an int or a float (can occur from .item())
+    for (Value* v : node->inputs()) {
+      if (v->type()->cast<NumberType>()) {
+        return false;
+      }
+    }
+
+    // non-const dtype / device
+    for (auto arg_name : {"dtype", "device"}) {
+      if (auto index = node->schema().argumentIndexWithName(arg_name)) {
+        if (!toIValue(node->input(*index))) {
+          return false;
+        }
+      }
+    }
+
     return true;
   }
 
@@ -596,6 +615,17 @@ class TensorExprFuser {
     for (Value* input : node->inputs()) {
       if (input->node()->kind() == prim::Constant) {
         REQ(!input->type()->cast<TensorType>())
+      }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
       }
     }
     if (node->kind() == aten::cat) {
