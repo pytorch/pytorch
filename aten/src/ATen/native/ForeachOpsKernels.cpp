@@ -3,7 +3,15 @@
 
 namespace at { namespace native {
 
-#define FOREACH_BINARY_OP(NAME)                                                                           \
+#define FOREACH_BINARY_OP_SCALAR(NAME)                                                                    \
+void foreach_tensor_##NAME##_scalar_kernel_slow_(TensorList tensors, Scalar scalar) {                     \
+  check_foreach_api_restrictions(tensors);                                                                \
+                                                                                                          \
+  for (auto& t: tensors) {                                                                                \
+    t.NAME##_(scalar);                                                                                    \
+  }                                                                                                       \
+}                                                                                                         \
+                                                                                                          \
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_slow(TensorList tensors, Scalar scalar) {       \
   check_foreach_api_restrictions(tensors);                                                                \
                                                                                                           \
@@ -14,16 +22,9 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_slow(TensorList tensor
   }                                                                                                       \
                                                                                                           \
   return result;                                                                                          \
-}                                                                                                         \
-                                                                                                          \
-void foreach_tensor_##NAME##_scalar_kernel_slow_(TensorList tensors, Scalar scalar) {                     \
-  check_foreach_api_restrictions(tensors);                                                                \
-                                                                                                          \
-  for (auto& t: tensors) {                                                                                \
-    t.NAME##_(scalar);                                                                                    \
-  }                                                                                                       \
-}                                                                                                         \
-                                                                                                          \
+}
+
+#define FOREACH_BINARY_OP_LIST(NAME)                                                                      \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_slow(TensorList tensors1, TensorList tensors2) {  \
   check_foreach_api_restrictions(tensors1, tensors2);                                                     \
                                                                                                           \
@@ -44,6 +45,26 @@ void foreach_tensor_##NAME##_list_kernel_slow_(TensorList tensors1, TensorList t
   }                                                                                                       \
 }
 
+#define FOREACH_BINARY_OP_LIST_ALPHA(NAME)                                                                              \
+std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_slow(TensorList tensors1, TensorList tensors2, Scalar alpha) {  \
+  check_foreach_api_restrictions(tensors1, tensors2);                                                                   \
+                                                                                                                        \
+  std::vector<Tensor> result;                                                                                           \
+  result.reserve(tensors1.size());                                                                                      \
+  for (int i = 0; i < tensors1.size(); i++) {                                                                           \
+    result.emplace_back(tensors1[i].NAME(tensors2[i], alpha));                                                          \
+  }                                                                                                                     \
+                                                                                                                        \
+  return result;                                                                                                        \
+}                                                                                                                       \
+                                                                                                                        \
+void foreach_tensor_##NAME##_list_kernel_slow_(TensorList tensors1, TensorList tensors2, Scalar alpha) {                \
+  check_foreach_api_restrictions(tensors1, tensors2);                                                                   \
+                                                                                                                        \
+  for (int i = 0; i < tensors1.size(); i++) {                                                                           \
+    tensors1[i].NAME##_(tensors2[i], alpha);                                                                            \
+  }                                                                                                                     \
+}
 
 #define FOREACH_UNARY_OP(NAME)                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors) {     \
@@ -90,10 +111,14 @@ void foreach_tensor_##NAME##_slow_(TensorList input, TensorList tensors1, Tensor
   }                                                                                                                           \
 }                                                                                                                             \
 
-FOREACH_BINARY_OP(add);
-FOREACH_BINARY_OP(sub);
-FOREACH_BINARY_OP(mul);
-FOREACH_BINARY_OP(div);
+FOREACH_BINARY_OP_LIST_ALPHA(add);
+FOREACH_BINARY_OP_LIST_ALPHA(sub);
+FOREACH_BINARY_OP_SCALAR(add);
+FOREACH_BINARY_OP_SCALAR(sub);
+FOREACH_BINARY_OP_SCALAR(mul);
+FOREACH_BINARY_OP_SCALAR(div);
+FOREACH_BINARY_OP_LIST(mul);
+FOREACH_BINARY_OP_LIST(div);
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
 FOREACH_POINTWISE_OP(addcdiv);
