@@ -15,9 +15,11 @@ namespace api {
 
 //
 // Vulkan Context holds onto all relevant Vulkan state as it pertains to our
-// use of Vulkan in PyTorch.  The context is currently a global object, but
-// technically it does not need to be if we were to make it explicit to the
-// user.
+// use of Vulkan in PyTorch.  A Context is associated with one, and only one,
+// Adapter as a precursor to multi-GPU support.  All Vulkan tensors in PyTorch
+// are associated with a Context to make tensor <-> device affinity explicit.
+// The context is currently a global object, but technically it does not need
+// to be if we were to make it explicit to the user.
 //
 
 class Context final {
@@ -30,6 +32,7 @@ class Context final {
   ~Context() = default;
 
   inline GPU gpu() {
+    // A GPU is simply a (physical device, logical device, device queue) trio.
     return {
       &adapter_,
       device(),
@@ -37,9 +40,9 @@ class Context final {
     };
   }
 
-  // inline Command& command() {
-  //   return command_;
-  // }
+  inline Command& command() {
+    return command_;
+  }
 
   inline Descriptor& descriptor() {
     return descriptor_;
@@ -73,7 +76,7 @@ class Context final {
   Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
-  // Command command_;
+  Command command_;
   Descriptor descriptor_;
   Shader shader_;
   Pipeline pipeline_;

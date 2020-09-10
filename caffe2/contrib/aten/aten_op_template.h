@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <string>
 #include <ATen/ATen.h>
+#include <c10/macros/Macros.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
@@ -30,7 +31,7 @@ class ATenOp : public Operator<Context> {
   : Operator<Context>(operator_def, ws) {
     VLOG(2) << "ATen OpDef: " << ProtoDebugString(operator_def) << "\n";
     switch(findImplementation(operator_def)) {
-      ${implementations}
+      ${cases}
       default:
         CAFFE_THROW("Unexpected key value for aten operator");
     }
@@ -217,6 +218,8 @@ private:
     }
     return result;
   }
+
+  ${implementations}
 };
 
 }

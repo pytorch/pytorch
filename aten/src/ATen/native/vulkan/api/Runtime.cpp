@@ -122,6 +122,7 @@ VkInstance create_instance(const Runtime::Type type) {
 
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
+  TORCH_CHECK(instance, "Invalid Vulkan instance!");
 
   return instance;
 }
@@ -160,13 +161,25 @@ VkDebugReportCallbackEXT create_debug_report_callback(
       nullptr,
       &debug_report_callback));
 
+  TORCH_CHECK(
+      debug_report_callback,
+      "Invalid Vulkan debug report callback!");
+
   return debug_report_callback;
 }
 
-std::vector<VkPhysicalDevice> acquire_physical_devices(const VkInstance instance) {
+std::vector<VkPhysicalDevice> acquire_physical_devices(
+    const VkInstance instance) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      instance,
+      "Invalid Vulkan instance!");
+
   uint32_t device_count = 0;
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
-  TORCH_CHECK(device_count > 0, "Vulkan: Could not find a device with Vulkan support!");
+
+  TORCH_CHECK(
+      device_count > 0,
+      "Vulkan: Could not find a device with Vulkan support!");
 
   std::vector<VkPhysicalDevice> devices(device_count);
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
@@ -176,19 +189,37 @@ std::vector<VkPhysicalDevice> acquire_physical_devices(const VkInstance instance
 
 VkPhysicalDeviceProperties query_physical_device_properties(
     const VkPhysicalDevice physical_device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
   VkPhysicalDeviceProperties physical_device_properties{};
-  vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
+  vkGetPhysicalDeviceProperties(
+      physical_device,
+      &physical_device_properties);
+
   return physical_device_properties;
 }
 
 VkPhysicalDeviceMemoryProperties query_physical_device_memory_properties(
     const VkPhysicalDevice physical_device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
   VkPhysicalDeviceMemoryProperties physical_device_memory_properties{};
-  vkGetPhysicalDeviceMemoryProperties(physical_device, &physical_device_memory_properties);
+  vkGetPhysicalDeviceMemoryProperties(
+      physical_device,
+      &physical_device_memory_properties);
+
   return physical_device_memory_properties;
 }
 
 uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
   uint32_t queue_family_count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(
       physical_device, &queue_family_count, nullptr);
@@ -221,6 +252,9 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
 
 Runtime::Debug::Debug(const VkInstance instance)
   : instance_(instance) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        instance,
+        "Invalid Vulkan instance!");
 }
 
 void Runtime::Debug::operator()(
@@ -275,7 +309,7 @@ Runtime* initialize() {
   static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
 #ifdef USE_VULKAN_WRAPPER
     if (!InitVulkan()) {
-      TORCH_WARN("Vulkan: Wrapper Failed to InitVulkan");
+      TORCH_WARN("Vulkan: Wrapper Failed to InitVulkan!");
       return nullptr;
     }
 #endif
