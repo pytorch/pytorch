@@ -3096,11 +3096,18 @@ struct to_ir {
     // Set output type from FunctionSchema and corresponding rpc_op.
     const std::vector<Argument>& returns = functionSchema.returns();
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
-    auto output_type = returns[0].type();
+    TypePtr output_type = nullptr;
     if (rpc_op == prim::rpc_async) {
-      rpc_node_output->setType(FutureType::create(output_type));
+      // rpc_async returns FutureType of the functionSchema's return type
+      output_type = FutureType::create(returns[0].type());
+    } else if (rpc_op == prim::rpc_sync) {
+      // rpc_sync returns the functionSchema's return type
+      output_type = returns[0].type();
+    } else {
+      throw ErrorReport(apply)
+          << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
     }
-
+    rpc_node_output->setType(output_type);
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
