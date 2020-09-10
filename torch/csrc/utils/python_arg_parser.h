@@ -201,6 +201,7 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
+  at::Scalar scalar_slow(PyObject* arg);
 };
 
 struct FunctionParameter {
@@ -282,15 +283,16 @@ inline at::Scalar PythonArgs::scalar(int i) {
 }
 
 inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
-  std::cout << "hello from scalarList" << std::endl;
   if (!args[i]) return std::vector<at::Scalar>();
-  //THPObjectPtr arg = six::maybeAsTuple(args[i]);
-  //auto size = PyList_GET_SIZE(arg.get());
-  //std::vector<at::Scalar> res(size);
-  //for (int idx = 0; idx < size; idx++) {
-  //  res[idx] = scalar_slow(PyList_GET_ITEM(arg.get(), idx));
-  //}
-  return std::vector<at::Scalar>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  std::vector<at::Scalar> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    res[idx] = scalar_slow(obj);
+  }
+  return res;
 }
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {

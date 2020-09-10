@@ -113,14 +113,12 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto name_str = fmt.substr(space + 1);
-  std::cout << "\n\n" << std::endl;
-  std::cout << "type_str: " << type_str << std::endl;
   auto it = type_map.find(type_str);
   if (it == type_map.end()) {
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
   }
   type_ = it->second;
-
+ 
   auto eq = name_str.find('=');
   if (eq != std::string::npos) {
     name = name_str.substr(0, eq);
@@ -359,11 +357,10 @@ bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_
   for (size_t idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
-      if (throw_error) {
-        throw 20;
-        throw TypeError("expected Scalar as element %d in argument %d, but got %s",
-            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
-      }
+      //if (throw_error) {
+      //  throw TypeError("expected Scalar as element %d in argument %d, but got %s",
+      //      static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
+      //}
       return false;
     }
   }
@@ -400,11 +397,12 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
-    case ParameterType::COMPLEX:
+    case ParameterType::COMPLEX: 
       if (PyComplex_Check(obj)) {
         return true;
       }
       // fallthrough
+    
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;
@@ -1019,6 +1017,27 @@ at::Scalar PythonArgs::scalar_slow(int i) {
     return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
   }
   return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(arg)) {
+    return ((THPVariable*)arg)->cdata.item();
+  }
+
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+  }
+
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
+  }
+
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
+  }
+  return at::Scalar(THPUtils_unpackDouble(arg));
 }
 
 } // namespace torch
