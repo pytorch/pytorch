@@ -49,7 +49,7 @@ VkInstance create_instance(const Runtime::Type type) {
   std::vector<const char*> enabled_instance_layers;
   std::vector<const char*> enabled_instance_extensions;
 
-  if (type == Runtime::Type::Debug) {
+  if (Runtime::Type::Debug == type) {
     uint32_t instance_layers_count = 0;
     VK_CHECK(vkEnumerateInstanceLayerProperties(
         &instance_layers_count, nullptr));
@@ -297,7 +297,10 @@ bool available() {
 
 Runtime* runtime() {
   Runtime* const runtime = initialize();
-  TORCH_CHECK(runtime, "Vulkan: Backend not available on this platform!");
+  TORCH_CHECK(
+      runtime,
+      "Vulkan: Backend not available on this platform!"
+      "Calls to api::runtime() must have been guarded by api::available().");
 
   return runtime;
 }

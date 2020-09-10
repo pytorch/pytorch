@@ -70,7 +70,7 @@ struct Descriptor final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Pool::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorPool) Deleter;
@@ -101,7 +101,7 @@ struct Descriptor final {
 
     VkDescriptorPool primary;
 
-    explicit Pool(VkDevice device);
+    explicit Pool(const GPU& gpu);
   } pool;
 
   /*
@@ -119,8 +119,8 @@ struct Descriptor final {
     VkDescriptorPool descriptor_pool_;
   } set;
 
-  explicit Descriptor(const VkDevice device)
-    : pool(device),
+  explicit Descriptor(const GPU& gpu)
+    : pool(gpu),
       set(device, pool.primary) {
   }
 };

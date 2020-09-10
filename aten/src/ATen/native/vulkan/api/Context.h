@@ -29,22 +29,20 @@ class Context final {
   Context& operator=(Context&&) = default;
   ~Context() = default;
 
-  inline const Adapter& adapter() const {
-    return adapter_;
+  inline GPU gpu() {
+    return {
+      &adapter_,
+      device(),
+      queue(),
+    };
   }
 
-  inline VkDevice device() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
-    return device_.get();
-  }
+  // inline Command& command() {
+  //   return command_;
+  // }
 
-  inline VkQueue queue() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
-    return queue_;
-  }
-
-  inline Command& command() {
-    return command_;
+  inline Descriptor& descriptor() {
+    return descriptor_;
   }
 
   inline Shader& shader() {
@@ -55,12 +53,19 @@ class Context final {
     return pipeline_;
   }
 
-  inline Descriptor& descriptor() {
-    return descriptor_;
-  }
-
   inline Resource& resource() {
     return resource_;
+  }
+
+ private:
+  inline VkDevice device() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
+    return device_.get();
+  }
+
+  inline VkQueue queue() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
+    return queue_;
   }
 
  private:
@@ -68,14 +73,13 @@ class Context final {
   Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
-  Command command_;
+  // Command command_;
+  Descriptor descriptor_;
   Shader shader_;
   Pipeline pipeline_;
-  Descriptor descriptor_;
   Resource resource_;
 };
 
-bool available();
 Context* context();
 
 } // namespace api
