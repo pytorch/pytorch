@@ -4101,7 +4101,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(5, 10),
-        target_size=(5, 10),
+        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
@@ -4343,7 +4343,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
