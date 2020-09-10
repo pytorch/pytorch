@@ -4253,10 +4253,12 @@ class TestTorchDeviceType(TestCase):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
         # bins dimension mismatch
         with self.assertRaisesRegex(RuntimeError, 'bins must be 1d, when a tensor'):
-            torch.histogram(torch.tensor([1], dtype=torch.float, device=device), bins=torch.tensor([[1, 2], [3, 4]], dtype=torch.float, device=device))
+            torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
+                            bins=torch.tensor([[1, 2], [3, 4]], dtype=torch.float, device=device))
         # bins not sorted
         with self.assertRaisesRegex(RuntimeError, 'bins must increase monotonically'):
-            torch.histogram(torch.tensor([1], dtype=torch.float, device=device), bins=torch.tensor([2, 1], dtype=torch.float, device=device))
+            torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
+                            bins=torch.tensor([2, 1], dtype=torch.float, device=device))
         # empty tensor
         actual = torch.histogram(torch.tensor([], device=device), min=0, max=3)
         expected = torch.zeros(10, dtype=torch.long, device=device)
@@ -4305,7 +4307,8 @@ class TestTorchDeviceType(TestCase):
             else:
                 npweights = None
             actual = torch.histogram(tensor, bins=bins, weights=weights, min=min, max=max, density=density)
-            expected = torch.from_numpy(np.histogram(nparr, bins=bins, range=(min, max), weights=npweights, density=density)[0])
+            expected = torch.from_numpy(np.histogram(nparr, bins=bins,
+                                                     range=(min, max), weights=npweights, density=density)[0])
             self.assertEqual(actual, expected)
 
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
@@ -4330,7 +4333,8 @@ class TestTorchDeviceType(TestCase):
             test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device), density=True)
 
             # test weights and density arg
-            test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device), weights=torch.rand(5000, dtype=torch.double, device=device), density=True)
+            test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device),
+                                        weights=torch.rand(5000, dtype=torch.double, device=device), density=True)
 
             # Test bins arg
             test_against_np_uniformbins(torch.randn(301, device=device), bins=20)
@@ -4347,7 +4351,8 @@ class TestTorchDeviceType(TestCase):
             expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
             test_against_np_uniformbins(expanded)
 
-            test_against_np_custombins(torch.tensor([1., 2, 1], device=device), torch.tensor([0, 1, 2, 3], device=device))
+            test_against_np_custombins(torch.tensor([1., 2, 1], device=device),
+                                       torch.tensor([0, 1, 2, 3], device=device))
             test_against_np_custombins(torch.tensor([1., 2, 1], device=device), torch.tensor([0, 1, 2], device=device))
             test_against_np_custombins(torch.randn(5000, device=device), torch.rand(101, device=device).sort()[0])
 
@@ -4356,16 +4361,19 @@ class TestTorchDeviceType(TestCase):
             test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
                                        torch.randn(101, device=device, dtype=torch.double).sort()[0],
                                        weights=torch.rand(5000, device=device, dtype=torch.double))
-            test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0], weights=torch.rand(5000, device=device), rtol=1e-3, atol=1e-5)
+            test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0],
+                                       weights=torch.rand(5000, device=device), rtol=1e-3, atol=1e-5)
 
             # test density arg
-            test_against_np_custombins(torch.randn(5000, device=device), torch.rand(101, device=device).sort()[0], density=True)
+            test_against_np_custombins(torch.randn(5000, device=device), 
+                                       torch.rand(101, device=device).sort()[0], density=True)
 
             # test weights and density arg
             test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
                                        torch.rand(101, device=device, dtype=torch.double).sort()[0],
                                        weights=torch.rand(5000, device=device, dtype=torch.double), density=True)
-            test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0], weights=torch.rand(5000, device=device), density=True, rtol=1e-3, atol=1e-5)
+            test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0],
+                                       weights=torch.rand(5000, device=device), density=True, rtol=1e-3, atol=1e-5)
             noncontig = torch.randn(100, 3, device=device)[:, 2]
             test_against_np_custombins(noncontig, torch.randn(101, device=device).sort()[0])
 
