@@ -55,7 +55,8 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
+  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::getRuntimeDispatchKeySet(DispatchKey::Autograd));
 #endif
 }
 }

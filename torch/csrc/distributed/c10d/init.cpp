@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroup.hpp>
@@ -50,6 +51,9 @@ std::vector<std::string> split(char separator, const std::string& string) {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
+// template <typename T>
+// using intrusive_ptr_class_ = py::class_<c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -712,7 +716,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
   });
 #endif
 
-  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+//   py::class_<c10::intrusive_ptr<torch::CustomClassHolder>>(module, "Capsule");
+  py::class_<::c10d::ProcessGroup::Work, c10::intrusive_ptr<::c10d::ProcessGroup::Work>>(module, "Work")
+//   intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+//   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)

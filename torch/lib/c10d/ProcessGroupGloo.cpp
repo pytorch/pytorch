@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include <type_traits>
-#include "c10/util/intrusive_ptr.h"
 
 #include <gloo/allgather.h>
 #include <gloo/allgatherv.h>
@@ -33,6 +32,7 @@
 #endif
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/intrusive_ptr.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>

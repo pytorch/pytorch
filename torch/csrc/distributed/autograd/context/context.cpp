@@ -127,17 +127,17 @@ void DistAutogradContext::addOutstandingRpc(
   futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
     if (futureMessage.hasError()) {
       // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err((*futureMessage.error()).what());
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
-          graphTask_->future_result_->setErrorIfNeeded(err.what());
+          graphTask_->future_result_->setErrorIfNeeded(
+              std::make_exception_ptr(*futureMessage.error()));
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
-                     << err.what();
+                     << (*futureMessage.error()).what();
       }
     }
   });
