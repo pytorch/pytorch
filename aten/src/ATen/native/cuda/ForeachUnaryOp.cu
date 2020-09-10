@@ -12,7 +12,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
 
-    tensor_lists.emplace_back(std::move(tensors.vec()));
+    tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
@@ -24,7 +24,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 template <template<class> class Op>
 void foreach_unary_op_(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
-    tensor_lists.emplace_back(std::move(tensors.vec()));
+    tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         multi_tensor_apply<1>(tensor_lists, UnaryOpFunctor_<scalar_t, Op>());
