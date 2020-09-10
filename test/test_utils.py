@@ -611,6 +611,28 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
 
+    def test_adaptive_timer(self):
+        # Validate both on different sizes validate against blocked_autorange
+        # This looks for relative differences btetween orders of magnitude to
+        # provide a stable/portable test which is somewhat informative.
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(torch.ones((10,10)))",
+        )
+        small = timer.adaptive_autorange(min_run_time=0.1).median
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(torch.ones((100,100)))",
+        )
+        medium = timer.adaptive_autorange(min_run_time=0.1).median
+        blocked_medium = timer.blocked_autorange(min_run_time=0.1).median
+        self.assertLess(small, medium)
+        self.assertLess(small, blocked_medium)
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(torch.ones((1000,1000)))",
+        )
+        large = timer.adaptive_autorange(min_run_time=0.1).median
+        self.assertLess(medium, large)
+        self.assertLess(blocked_medium, large)
+
     def test_compare(self):
         compare = benchmark_utils.Compare([
             benchmark_utils.Timer(
