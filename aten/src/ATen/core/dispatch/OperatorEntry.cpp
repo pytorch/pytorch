@@ -194,7 +194,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     } else if (kernels_.find(getBackendKeyFromAutograd(dispatch_key)) == kernels_.end()
             && !catchAllKernel_.empty()) {
       TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-      return {catchAllKernel_.front(), "autograd catch all"};
+      return {catchAllKernel_.front(), "catch all"};
     }
   }
 
