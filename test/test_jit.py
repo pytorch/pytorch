@@ -62,6 +62,7 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
 from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
@@ -1418,6 +1419,7 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @with_tf32_off
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()

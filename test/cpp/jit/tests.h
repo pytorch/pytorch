@@ -78,17 +78,17 @@ namespace jit {
   _(ClassDerive)                                  \
   _(SaveLoadTorchbind)                            \
   _(ModuleInterfaceSerialization)                 \
-  _(ModuleCloneWithModuleInterface)               \
+  _(ModuleCloneWithModuleInterface)           /**/\
   _(ClassTypeAddRemoveAttr)                       \
-  _(Inliner)                                      \
+  _(Inliner)                                    /*\
   _(LiteInterpreterAdd)                           \
   _(LiteInterpreterConv)                          \
-  _(LiteInterpreterInline)                        \
+  _(LiteInterpreterInline)                      --\
   _(LiteInterpreterTuple)                         \
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
   _(AutogradSymbols)                              \
-  _(DefaultArgTypeHinting)                        \
+  _(DefaultArgTypeHinting)                      --\
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
   _(MobileTypeParser)                             \
@@ -116,7 +116,7 @@ namespace jit {
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
   _(LiteSequentialSampler)                        \
-  _(FusionAliasing)
+  _(FusionAliasing)*/
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \

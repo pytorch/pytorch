@@ -121,3 +121,12 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         return wrapped
     return wrapper
+
+
+def with_tf32_off(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        with tf32_off():
+            return f(*args, **kwargs)
+
+    return wrapped

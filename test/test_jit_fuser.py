@@ -15,6 +15,7 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _in
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent
 from itertools import product, permutations
+from torch.testing._internal.common_cuda import with_tf32_off
 
 from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
@@ -715,6 +716,7 @@ class TestFuser(JitTestCase):
                                                   "aten::_grad_sum_to_size"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @with_tf32_off
     def test_lstm_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
@@ -745,6 +747,7 @@ class TestFuser(JitTestCase):
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @with_tf32_off
     def test_lstm_traced_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
