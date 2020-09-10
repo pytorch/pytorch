@@ -1,9 +1,9 @@
 #include <torch/csrc/distributed/c10d/comm.h>
 
 #include <deque>
-#include "c10/util/intrusive_ptr.h"
 
 #include <ATen/core/functional.h>
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
@@ -89,7 +89,7 @@ void broadcast_coalesced(
 GradBucket::GradBucket(std::vector<at::Tensor> tensors)
     : tensors_(std::move(tensors)){};
 
-const std::vector<at::Tensor>& GradBucket::getTensors() {
+const std::vector<at::Tensor>& GradBucket::getTensors() const {
   return tensors_;
 }
 
