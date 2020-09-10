@@ -197,6 +197,11 @@ def parse_output():
             data = json.loads(l.strip())
             results[-1].append(data)
 
+    if not results:
+        print("Failed to extract data:")
+        print(t)
+        print(stdout)
+
     return t, results
 
 
@@ -262,16 +267,19 @@ def run():
     results = []
     def snapshot():
         print("\nSnapshotting results.")
-        with open("/tmp/microbenchmarks.pkl", "wb") as f:
-            pickle.dump(results, f)
-
         parsed_results = process(results)
         with open("/tmp/microbenchmarks_parsed.pkl", "wb") as f:
             pickle.dump(parsed_results, f)
 
+    with open("/tmp/microbenchmarks.pkl", "wb") as f:
+        pass
+
     n_tasks = len(cpu_tasks) + len(gpu_tasks)
     for i in range(1, n_tasks + 1):
-        results.append(parse_output())
+        ri = parse_output()
+        with open("/tmp/microbenchmarks.pkl", "ab") as f:
+            pickle.dump(ri, f)
+        results.append(ri)
         print(f"\r{i} / {n_tasks}", end="")
 
         if not (i % int(n_tasks / 10)):
@@ -281,13 +289,9 @@ def run():
     snapshot()
 
 
-
-
 def main():
     # for v in VERSIONS:
     #     make_env(v)
-    # make_env("1.3")
-    # make_env("1.4")
     run()
 
 
