@@ -10426,7 +10426,7 @@ class TestTorchDeviceType(TestCase):
         # Generate some random test cases
         ops = ['quantile', 'nanquantile']
         inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        quantiles = [tuple(np.random.rand(i)) for i in range(1, 5)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
         keepdims = [True, False]
 
         # Add corner cases
@@ -10440,7 +10440,7 @@ class TestTorchDeviceType(TestCase):
             if type(x) is tuple:
                 a = torch.randn(x, dtype=dtype, device=device)
                 # Make some random elements NaN
-                a.masked_fill_(torch.randint_like(a, 10) == 0, float('nan'))
+                a.masked_fill_(torch.randint_like(a, 20) == 0, float('nan'))
             else:
                 a = torch.tensor(x, dtype=dtype, device=device)
 
