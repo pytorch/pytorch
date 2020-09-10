@@ -1160,11 +1160,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_slice_index(self):
         class IndexPutModel(torch.nn.Module):
             def forward(self, x, update):
-                x[1:2, 1:3, torch.tensor([1])] += update[-1]
+                x[1:2, 1:3, torch.tensor([1])] += update
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.tensor([10, 15]).view(2, 1).to(dtype=torch.float)
+        update = torch.tensor([10, 15]).view(2, 1)
         self.run_test(IndexPutModel(), (x, update))
 
         class IndexPutModel2(torch.nn.Module):
@@ -1173,7 +1173,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.randn(2, 5).to(dtype=torch.float)
+        update = torch.randn(2, 5)
         self.run_test(IndexPutModel2(), (x, update))
 
         class IndexPutModel3(torch.nn.Module):
@@ -1182,7 +1182,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.tensor([10, 15]).view(2, 1, 1).to(dtype=torch.float)
+        update = torch.tensor([10, 15]).view(2, 1, 1)
         self.run_test(IndexPutModel3(), (x, update))
 
         class IndexPutModel4(torch.nn.Module):
@@ -1191,7 +1191,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.tensor([10, 15]).view(2, 1).to(dtype=torch.float)
+        update = torch.tensor([10, 15]).view(2, 1)
         self.run_test(IndexPutModel4(), (x, update))
 
         class IndexPutModel5(torch.nn.Module):
@@ -1200,7 +1200,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.tensor([10, 15]).view(2, 1).to(dtype=torch.float)
+        update = torch.tensor([10, 15]).view(2, 1)
         self.run_test(IndexPutModel5(), (x, update))
 
         class IndexPutModel6(torch.nn.Module):
@@ -1209,7 +1209,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.arange(2 * 5).to(torch.float).view(2, 5).to(dtype=torch.float)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
         self.run_test(IndexPutModel6(), (x, update))
 
         class IndexPutModel7(torch.nn.Module):
@@ -1218,7 +1218,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.arange(2 * 5).to(torch.float).view(2, 5).to(dtype=torch.float)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
         self.run_test(IndexPutModel7(), (x, update))
 
         class IndexPutModel8(torch.nn.Module):
@@ -1227,7 +1227,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.arange(3 * 5).to(torch.float).view(3, 5).to(dtype=torch.float)
+        update = torch.arange(3 * 5).to(torch.float).view(3, 5)
         self.run_test(IndexPutModel8(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -1335,7 +1335,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_copy_ellipsis_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
-                x[1, ..., 1:2] = update
+                x[2, ..., 1:3] = update
                 return x
 
         x = torch.randn(3, 4, 5, 6)
@@ -4554,11 +4554,6 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                          keep_initializers_as_inputs=False))
 
-# opset 12 tests, with use_new_jit_passes=True for using new jit API
-TestONNXRuntime_opset12_new_jit_API = type(str("TestONNXRuntime_opset12_new_jit_API"),
-                                           (unittest.TestCase,),
-                                           dict(TestONNXRuntime.__dict__, opset_version=12,
-                                                use_new_jit_passes=True))
 
 # opset 9 tests, with use_new_jit_passes=True for using new jit API,
 # and with keep_initializers_as_inputs=False for IR version 4 style export.
