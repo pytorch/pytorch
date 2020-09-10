@@ -72,7 +72,7 @@ class TestSparseGCS(TestCase):
                 v = v[i]
             if v == fill_value or np.isnan(v):
                 continue
-            print(index)
+            # print(index)
             p1 = apply_reduction(index, strides1, dims1)
             p2 = apply_reduction(index, strides2, dims2)
             col_value[p1].append((p2, v))
@@ -125,18 +125,14 @@ class TestSparseGCS(TestCase):
     def test_dense_convert(self):
         ones = np.ones((5, 5, 5, 5, 5))
         sparse = self.make_sparse_gcs(ones)
-
         self.assertEqual(sparse.to_dense(), ones)
         
         rand = np.random.randn(4, 6)
         sparse = self.make_sparse_gcs(rand)
-
         self.assertEqual(sparse.to_dense(), rand)
 
         multi_dim = np.random.randn(3, 2, 2, 2, 6)
-        
         sparse = self.make_sparse_gcs(multi_dim)
-
         self.assertEqual(sparse.to_dense(), multi_dim)
 
     def test_basic_ops(self):
@@ -144,7 +140,7 @@ class TestSparseGCS(TestCase):
         x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
         x2 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 140)
         y1 = x1 + x2
-        expected = x1.to_dense() * x2.to_dense()
+        expected = x1.to_dense() + x2.to_dense()
         self.assertEqual(y1.to_dense(), expected)
 
         # sparse-dense addition

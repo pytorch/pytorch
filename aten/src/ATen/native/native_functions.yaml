@@ -329,6 +329,7 @@
   dispatch:
     CPU, CUDA: add
     SparseCPU, SparseCUDA: add_sparse
+    SparseGCS_CPU: add_sparse_gcs
     MkldnnCPU: mkldnn_add
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
