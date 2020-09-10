@@ -372,7 +372,10 @@ struct Environment {
           as_simple_value,
           /*allow_conversions=*/true);
       std::stringstream why_not;
-      if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
+      // if parent type is none we should allow the new assignment
+      // as previous assignment is blank initialization
+      if (parent_type->kind() != TypeKind::NoneType &&
+          !as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
               << simple_parent->type()->repr_str()

@@ -2700,6 +2700,19 @@ class TestScript(JitTestCase):
 
         self.checkScript(fn, (torch.ones(2, 2), ))
 
+    def test_func_call_for_optional(self):
+        @torch.jit.script
+        def fn(flag: bool):
+            x = None
+            if flag is True:
+                x = torch.tensor([3])
+            return x
+
+        res = fn(False)
+        self.assertEqual(res, None)
+        res = fn(True)
+        self.assertEqual(res, torch.tensor([3]))
+
     def test_request_bailout(self):
         with enable_profiling_mode_for_profiling_tests():
 
@@ -2937,6 +2950,24 @@ class TestScript(JitTestCase):
         m = torch.jit.script(A())
         self.assertEqual(m.x, None)
         m(torch.rand(1))
+        self.assertEqual(m.x, torch.tensor([3]))
+
+    def test_set_attribute_through_optional_conditional(self):
+        class A(torch.nn.Module):
+            __annotations__ = {"x": Optional[torch.Tensor]}
+
+            def __init__(self, flag: torch.bool):
+                super(A, self).__init__()
+                self.x = None
+                if flag:
+                    self.x = torch.tensor([3])
+
+            def forward(self, x):
+                pass
+
+        m = torch.jit.script(A(False))
+        self.assertEqual(m.x, None)
+        m = torch.jit.script(A(True))
         self.assertEqual(m.x, torch.tensor([3]))
 
     def test_mutate_constant(self):
@@ -15049,7 +15080,7 @@ a")
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # 🤷🤷🤷🤷
+            # ����
             return torch.nn.functional.relu(a)
 
     def test_dict_in_not_in(self):

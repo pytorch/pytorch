@@ -308,7 +308,10 @@ void SimpleValue::setAttr(
 
   // Check type correctness
   const auto newType = newValue->type();
-  if (!newType->isSubtypeOf(expectedType)) {
+  // if parent type is none we should allow the new assignment
+  // as previous assignment is blank initialization
+  if (expectedType->kind() != TypeKind::NoneType &&
+      !newType->isSubtypeOf(expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
                            << expectedType->repr_str() << " but got "
                            << newType->repr_str();
