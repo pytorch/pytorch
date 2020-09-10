@@ -193,6 +193,14 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
   return SS;
 }
 
+/* Short-time Fourier Transform, for signal analysis.
+ *
+ * This is modelled after librosa but with support for complex time-domain
+ * signals and complex windows.
+ *
+ * NOTE: librosa's center and pad_mode arguments are currently only implemented
+ * in python because it uses torch.nn.functional.pad which is python-only.
+ */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const Tensor& window,
             const bool normalized, const optional<bool> onesidedOpt,
@@ -306,6 +314,11 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   }
 }
 
+/* Inverse Short-time Fourier Transform
+ *
+ * This is modelled after librosa but with support for complex time-domain
+ * signals and complex windows.
+ */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,

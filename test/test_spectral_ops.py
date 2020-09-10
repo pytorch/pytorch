@@ -30,6 +30,10 @@ def _complex_stft(x, *args, **kwargs):
 
 
 def _hermitian_conj(x, dim):
+    """Returns the hermitian conjugate along a single dimension
+
+    H(x)[i] = conj(x[-i])
+    """
     out = torch.empty_like(x)
     mid = (x.size(dim) - 1) // 2
     idx = [slice(None)] * out.dim()
@@ -60,10 +64,17 @@ def _complex_istft(x, *args, **kwargs):
     x_antihermitian = (x - hconj) / 2
     istft_real = torch.istft(x_hermitian[slc], *args, **kwargs, onesided=True)
     istft_imag = torch.istft(-1j * x_antihermitian[slc], *args, **kwargs, onesided=True)
-    return istft_real + 1j * istft_imag
+    return torch.complex(istft_real, istft_imag)
 
 
-def stft_definition(x, hop_length, window):
+def _stft_reference(x, hop_length, window):
+    r"""Reference stft implementation
+
+    This doesn't implement all of torch.stft, only the STFT definition:
+
+    .. math:: X(m, \omega) = \sum_n x[n]w[n - m] e^{-jn\omega}
+
+    """
     n_fft = window.numel()
     X = torch.empty((n_fft, (x.numel() - n_fft + hop_length) // hop_length),
                     device=x.device, dtype=torch.cdouble)
@@ -482,7 +493,7 @@ class TestFFT(TestCase):
 
         for args in test_args:
             window = torch.randn(args[1], device=device, dtype=dtype)
-            expected = stft_definition(args[0], args[2], window)
+            expected = _stft_reference(args[0], args[2], window)
             actual = torch.stft(*args, window=window, center=False)
             self.assertEqual(actual, expected)
 

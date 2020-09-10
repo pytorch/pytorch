@@ -399,6 +399,12 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
+    The STFT computes the Fourier transform of short overlapping windows of the
+    input. This giving frequency components of the signal as they change over
+    time. The interface of this function is modelled after librosa_.
+
+    .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
+
     Ignoring the optional batch dimension, this method computes the following
     expression:
 
@@ -452,10 +458,10 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       dimension represents the real and imaginary components.
 
     Returns either a complex tensor of size :math:`(* \times N \times T)` if
-    :attr:`return_complex`, or a real tensor of size :math:`(* \times N \times
-    T \times 2)`. :math:`*` is the optional batch size of :attr:`input`,
-    :math:`N` is the number of frequencies where STFT is applied and :math:`T`
-    is the total number of frames used.
+    :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
+    \times T \times 2)`. Where :math:`*` is the optional batch size of
+    :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
+    and :math:`T` is the total number of frames used.
 
     .. warning::
       This function changed signature at version 0.4.1. Calling with the
@@ -479,7 +485,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
              Default: ``False``
         onesided (bool, optional): controls whether to return half of results to
             avoid redundancy for real inputs.
-            Default: ``True`` for real input and window, ``False`` otherwise.
+            Default: ``True`` for real :attr:`input` and :attr:`window`, ``False`` otherwise.
         return_complex (bool, optional): whether to return a complex tensor, or
             a real tensor with an extra last dimension for the real and
             imaginary components.
