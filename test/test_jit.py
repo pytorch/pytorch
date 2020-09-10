@@ -61,7 +61,7 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
 
-from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests, new_criterion_tests
+from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
 from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
@@ -15831,7 +15831,7 @@ for test in nn_functional_tests:
 for test in module_tests + new_module_tests + additional_module_tests:
     add_nn_module_test(**test)
 
-for test in criterion_tests + new_criterion_tests:
+for test in criterion_tests:
     test['no_grad'] = True
     add_nn_module_test(**test)
 
