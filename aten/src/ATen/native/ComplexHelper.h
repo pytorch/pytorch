@@ -50,7 +50,7 @@ Tensor view_as_complex(const Tensor& self) {
 
   TORCH_CHECK(self.dim() != 0, "Input tensor must have one or more dimensions");
   auto new_sizes = self.sizes().vec();
-  TORCH_CHECK(self.dim() != 0 && new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
+  TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
   new_sizes.pop_back();
 
   const auto new_strides = computeStrideForViewAsComplex(self.strides());
