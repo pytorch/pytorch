@@ -56,10 +56,17 @@ def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
                 use_set.add(v)
         def_set.add(node)
 
+    if hasattr(mod.graph, 'result'):
+        rest_uses.add(mod.graph.result)
+
     block_inputs = block_uses - block_defs
     block_outputs = list(rest_uses - rest_defs)
-    if len(block_outputs) != 1:
-        err = f"Found more than one output value while extracting {target_qualname}. " \
+    if len(block_outputs) == 0:
+        err = f"Nodes from block {target_qualname} had no externally used data dependencies! "\
+              f"Please file an issue with the [FX] tag on GitHub"
+        raise RuntimeError(err)
+    if len(block_outputs) > 1:
+        err = f"Found more than one output value while extracting {target_qualname}: {block_outputs} " \
               f"This could happen if some transformation has modified Module qualified "\
               f"names in a way that no longer preserves the hierarchical structure."
         raise RuntimeError(err)

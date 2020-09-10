@@ -2757,34 +2757,6 @@ class AbstractTestCases:
             b = pickle.loads(serialized)
             self.assertEqual(a, b)
 
-        def test_norm_fastpaths(self):
-            x = torch.randn(3, 5)
-
-            # slow path
-            result = torch.norm(x, 4.5, 1)
-            expected = torch.pow(x.abs().pow(4.5).sum(1), 1.0 / 4.5)
-            self.assertEqual(result, expected)
-
-            # fast 0-norm
-            result = torch.norm(x, 0, 1)
-            expected = (x != 0).type_as(x).sum(1)
-            self.assertEqual(result, expected)
-
-            # fast 1-norm
-            result = torch.norm(x, 1, 1)
-            expected = x.abs().sum(1)
-            self.assertEqual(result, expected)
-
-            # fast 2-norm
-            result = torch.norm(x, 2, 1)
-            expected = torch.sqrt(x.pow(2).sum(1))
-            self.assertEqual(result, expected)
-
-            # fast 3-norm
-            result = torch.norm(x, 3, 1)
-            expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
-            self.assertEqual(result, expected)
-
         def test_generator_cpu(self):
             # test default generators are equal
             self.assertEqual(torch.default_generator, torch.default_generator)
@@ -7728,6 +7700,9 @@ class TestTorchDeviceType(TestCase):
             A, b = A.to(dtype=dtype, device=device), b.to(dtype=dtype, device=device)
             L = torch.cholesky(A, upper)
             x = torch.cholesky_solve(b, L, upper=upper)
+            self.assertEqual(x, x_exp)
+            # issue gh-42695
+            x = torch.cholesky_solve(b, L, upper=upper, out=x)
             self.assertEqual(x, x_exp)
 
         # test against numpy.linalg.solve
@@ -20304,7 +20279,19 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('sqrt'),
+torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin'),
+                  _TorchMathTestMeta('asinh', reffn='arcsinh'),
+                  _TorchMathTestMeta('sinh'),
+                  _TorchMathTestMeta('acosh', reffn='arccosh'),
+                  _TorchMathTestMeta('tan'),
+                  _TorchMathTestMeta('atan', reffn='arctan'),
+                  _TorchMathTestMeta('atanh', reffn='arctanh'),
+                  _TorchMathTestMeta('tanh'),
+                  _TorchMathTestMeta('log'),
+                  _TorchMathTestMeta('log10'),
+                  _TorchMathTestMeta('log1p'),
+                  _TorchMathTestMeta('log2'),
+                  _TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
