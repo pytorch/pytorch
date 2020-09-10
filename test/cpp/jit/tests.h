@@ -81,8 +81,8 @@ namespace jit {
   _(ModuleCloneWithModuleInterface)           /**/\
   _(ClassTypeAddRemoveAttr)                       \
   _(Inliner)                                      \
-  _(LiteInterpreterAdd)                         /*\
-  _(LiteInterpreterConv)                          \
+  _(LiteInterpreterAdd)                           \
+  _(LiteInterpreterConv)                        /*\
   _(LiteInterpreterInline)                      --\
   _(LiteInterpreterTuple)                         \
   _(LiteInterpreterUpsampleNearest2d)             \
