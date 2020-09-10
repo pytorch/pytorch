@@ -504,7 +504,7 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
 
 Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
   Tensor result_tmp;
-  result_tmp = at::_cholesky_solve_helper(self, A, upper);
+  result_tmp = at::cholesky_solve(self, A, upper);
   result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
 }

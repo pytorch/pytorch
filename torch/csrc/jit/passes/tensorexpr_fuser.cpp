@@ -17,6 +17,8 @@
 namespace torch {
 namespace jit {
 
+static bool texpr_reductions_enabled = false;
+
 bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
@@ -102,8 +104,6 @@ bool isSupported(Node* node) {
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
-      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
@@ -130,9 +130,35 @@ bool isSupported(Node* node) {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  static const OperatorSet supported_reduction_set{
+      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+  };
   // clang-format on
 
-  if (node->isMemberOf(supported_operator_set)) {
+  if (node->isMemberOf(supported_operator_set) ||
+      (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
+    // We only insert guards on Tensor types, so we rely on the output
+    // of a node being uniquely determined by its input types.
+    // bail if any non-Tensor input affects the output type
+    // and cannot be reasoned about statically
+
+    // Value is either an int or a float (can occur from .item())
+    for (Value* v : node->inputs()) {
+      if (v->type()->cast<NumberType>()) {
+        return false;
+      }
+    }
+
+    // non-const dtype / device
+    for (auto arg_name : {"dtype", "device"}) {
+      if (auto index = node->schema().argumentIndexWithName(arg_name)) {
+        if (!toIValue(node->input(*index))) {
+          return false;
+        }
+      }
+    }
+
     return true;
   }
 
@@ -149,6 +175,7 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = false;
+
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
@@ -162,6 +189,16 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
+}
+
+bool setTexprReductionsEnabled(bool value) {
+  bool old_value = texpr_reductions_enabled;
+  texpr_reductions_enabled = value;
+  return old_value;
+}
+
+bool texprReductionsEnabled() {
+  return texpr_reductions_enabled;
 }
 
 struct nodesComparator {
@@ -523,41 +560,56 @@ class TensorExprFuser {
   }
 
   bool isFusableOnDevice(Node* node) {
-    for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
-        if (!canFuseOnDevice(output)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  bool canHandle(Node* node) {
-    if (node->kind() == prim::Constant) {
-      // TODO: add support for tensor constants.
-      return false;
-    }
-    if (!allShapesAreKnown(node)) {
-      return false;
-    }
-
-    // Don't include nodes whose inputs are tensor constants - we cannot handle
-    // them at the moment.
-    // TODO: actually support tensor constants and remove this.
-    for (Value* input : node->inputs()) {
-      if (input->node()->kind() == prim::Constant &&
-          input->type()->cast<TensorType>()) {
+    for (const auto& input : node->inputs()) {
+      if (!canFuseOnDevice(input)) {
         return false;
       }
     }
-    return tensorexpr::isSupported(node);
+    return true;
   }
 
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
     return false;                           \
+  }
+
+  bool canHandle(Node* node) {
+    REQ(node->kind() != prim::Constant);
+    REQ(allShapesAreKnown(node));
+    REQ(isFusableOnDevice(node));
+
+    // Don't include nodes whose inputs are tensor constants - we cannot handle
+    // them at the moment.
+    // TODO: actually support tensor constants and remove this.
+    for (Value* input : node->inputs()) {
+      if (input->node()->kind() == prim::Constant) {
+        REQ(!input->type()->cast<TensorType>())
+      }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
+      }
+    }
+    if (node->kind() == aten::cat) {
+      REQ(node->input(0)->node()->kind() == prim::ListConstruct);
+      REQ(node->input(0)->uses().size() == 1);
+      REQ(node->input(1)->node()->kind() == prim::Constant);
+      auto const& listconstruct = node->input(0)->node();
+      REQ(tensorexpr::pickDeviceType(listconstruct->inputs()));
+    } else {
+      REQ(tensorexpr::pickDeviceType(node->inputs()));
+    }
+
+    REQ(tensorexpr::isSupported(node));
+    return true;
   }
 
   bool canMerge(Node* consumer, Node* producer) {
@@ -568,6 +620,17 @@ class TensorExprFuser {
     REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
+
+    // Device checks
+    if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
+      // aten::cat needs a special handling because it takes a Tensor[] as its
+      // input We deal with that in the code below.
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(consumer_device);
+      auto producer_device = tensorexpr::pickDeviceType(producer->inputs());
+      REQ(producer_device);
+      REQ(*consumer_device == *producer_device);
+    }
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -598,6 +661,15 @@ class TensorExprFuser {
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = producer->input(0)->node();
+      // We're merging listconstruct->cat->consumer. cat is the producer here
+      // and we cannot determine its device type - we should use device of the
+      // listconstruct instead
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(listconstruct_device);
+      REQ(consumer_device);
+      REQ(*listconstruct_device == *consumer_device);
       for (auto const& input : listConstruct->inputs()) {
         REQ(isFusableOnDevice(input->node()));
       }
@@ -606,9 +678,13 @@ class TensorExprFuser {
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = consumer->input(0)->node();
-      for (auto const& input : listConstruct->inputs()) {
-        REQ(isFusableOnDevice(input->node()));
-      }
+      // We're merging listconstruct->cat. cat is the consumer and listconstruct
+      // is the producer. cat doesn't have its device type and thus the only
+      // thing we should check is that listconstruct's device is well defined
+      // (e.g. all its inputs has the same device).
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      REQ(listconstruct_device);
     } else {
       REQ(isFusableOnDevice(producer));
     }
