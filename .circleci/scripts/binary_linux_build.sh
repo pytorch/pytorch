@@ -36,6 +36,7 @@ else
   pydir="/opt/python/$DESIRED_PYTHON"
   export PATH="$pydir/bin:$PATH"
   git submodule update --init --recursive
+  pip install -q -r requirements.txt
   build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
