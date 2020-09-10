@@ -174,6 +174,16 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_UNLIKELY(expr)  (expr)
 #endif
 
+/// C10_NOINLINE - Functions whose declaration is annotated with this will not
+/// be inlined.
+#ifdef __GNUC__
+#define C10_NOINLINE __attribute__((__noinline__))
+#elif _MSC_VER
+#define C10_NOINLINE __declspec(noinline)
+#else
+#define C10_NOINLINE
+#endif
+
 #include <sstream>
 #include <string>
 
