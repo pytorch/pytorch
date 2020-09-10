@@ -246,6 +246,18 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+TEST_F(FunctionalTest, SmoothL1LossBeta) {
+  auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
+  auto expected = torch::tensor(5.52, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
