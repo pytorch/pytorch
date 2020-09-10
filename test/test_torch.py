@@ -15928,10 +15928,10 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double)
-    def test_eig(self, device, dtype):
+    def test_eig_basic(self, device, dtype):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
                           (-6.49, 3.80, 0.00, 0.00, 0.00),
                           (-0.47, -6.39, 4.17, 0.00, 0.00),
@@ -15948,7 +15948,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
         self.assertEqual(vv, tv, atol=1e-12, rtol=0)
 
-        # test reuse
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig_reuse(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
         X = torch.mm(X.t(), X)
         e = torch.zeros(4, 2, dtype=dtype, device=device)
@@ -15963,7 +15966,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
-        # test non-contiguous
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig_non_contiguous(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
         X = torch.mm(X.t(), X)
         e = torch.zeros(4, 2, 2, dtype=dtype, device=device)[:, 1]
@@ -15974,6 +15980,10 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test_eig_invalid_input(self, device, dtype):
         # test invalid input
         self.assertRaisesRegex(
             RuntimeError,
