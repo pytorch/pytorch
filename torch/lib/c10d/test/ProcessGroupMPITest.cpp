@@ -352,7 +352,7 @@ class ProcessGroupMPITest : public ::testing::Test {
 #endif
   }
 
-  void skipTest() {
+  bool skipTest() {
 #ifdef MPIEXEC
     return false;
 #else
