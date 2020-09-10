@@ -64,6 +64,8 @@ struct Descriptor final {
       c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
     };
 
+    static const Descriptor kDefault;
+
     /*
       Factory
     */
@@ -81,7 +83,6 @@ struct Descriptor final {
       };
 
       Handle operator()(const Descriptor& descriptor) const;
-      void purge(VkDescriptorPool descriptor_pool);
 
      private:
       VkDevice device_;
@@ -94,34 +95,32 @@ struct Descriptor final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    // This field simply stores a reference to the primary descriptor pool in
-    // the cache for ease of access, and carries no significance otherwise.
-    // This object's lifetime is managed by the cache as usual.  Purge the
-    // contents of the pool regularly through the factory it was created.
+    explicit Pool(const GPU& gpu)
+      : cache(Factory(gpu)) {
+    }
 
-    VkDescriptorPool primary;
-
-    explicit Pool(const GPU& gpu);
+    static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
   } pool;
 
   /*
-    Set
+    Factory
   */
 
-  class Set final {
+  class Factory final {
    public:
-    Set(VkDevice device, VkDescriptorPool descriptor_pool);
+    Factory(VkDevice device, VkDescriptorPool descriptor_pool);
 
     VkDescriptorSet allocate(VkDescriptorSetLayout descriptor_set_layout);
+    void purge();
 
    private:
     VkDevice device_;
     VkDescriptorPool descriptor_pool_;
-  } set;
+  } factory;
 
   explicit Descriptor(const GPU& gpu)
     : pool(gpu),
-      set(device, pool.primary) {
+      factory(gpu.device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
 

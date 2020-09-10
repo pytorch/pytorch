@@ -29,6 +29,10 @@ Context* initialize() {
 VkDevice create_device(
     const VkPhysicalDevice physical_device,
     const uint32_t compute_queue_family_index) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
   const float queue_priorities = 1.0f;
   const VkDeviceQueueCreateInfo device_queue_create_info{
     VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -53,6 +57,7 @@ VkDevice create_device(
 
   VkDevice device{};
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
+  TORCH_CHECK(device, "Invalid Vulkan device!");
 
   return device;
 }
@@ -60,8 +65,14 @@ VkDevice create_device(
 VkQueue acquire_queue(
     const VkDevice device,
     const uint32_t compute_queue_family_index) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
   VkQueue queue{};
   vkGetDeviceQueue(device, compute_queue_family_index, 0, &queue);
+  TORCH_CHECK(queue, "Invalid Vulkan queue!");
+
   return queue;
 }
 
@@ -75,7 +86,7 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      // command_(device(), {adapter.compute_queue_family_index}),
+      command_(gpu()),
       descriptor_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),

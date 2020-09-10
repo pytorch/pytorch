@@ -7,6 +7,16 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+//
+// A Vulkan Runtime initializes a Vulkan instance and decouples the concept of
+// Vulkan instance initialization from intialization of, and subsequent
+// interactions with,  Vulkan [physical and logical] devices as a precursor to
+// multi-GPU support.  The Vulkan Runtime can be queried for available Adapters
+// (i.e. physical devices) in the system which in turn can be used for creation
+// of a Vulkan Context (i.e. logical devices).  All Vulkan tensors in PyTorch
+// are associated with a Context to make tensor <-> device affinity explicit.
+//
+
 class Runtime final {
  public:
   enum class Type {

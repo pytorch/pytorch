@@ -11,25 +11,6 @@ namespace api {
 
 struct Command final {
   //
-  // Buffer
-  //
-
-  class Buffer final {
-   public:
-    Buffer(VkDevice device, VkCommandPool command_pool);
-
-    void begin();
-    void end();
-
-    void bind(VkPipeline pipeline);
-    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
-    void dispatch();
-
-   private:
-    VkCommandBuffer command_buffer_;
-  };
-
-  //
   // Pool
   //
 
@@ -48,7 +29,7 @@ struct Command final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Pool::Descriptor Descriptor;
       typedef VK_DELETER(CommandPool) Deleter;
@@ -59,7 +40,6 @@ struct Command final {
       };
 
       Handle operator()(const Descriptor& descriptor) const;
-      void purge(VkCommandPool command_pool);
 
      private:
       VkDevice device_;
@@ -72,18 +52,34 @@ struct Command final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    // This field simply stores a reference to the primary command pool in
-    // the cache for ease of access, and carries no significance otherwise.
-    // This object's lifetime is managed by the cache as usual.  Purge the
-    // contents of the pool regularly through the factory it was created.
+    explicit Pool(const GPU& gpu)
+      : cache(Factory(gpu)) {
+    }
 
-    VkCommandPool primary;
-
-    explicit Pool(const Processor& processor);
+    static void purge(VkDevice device, VkCommandPool command_pool);
   } pool;
 
-  explicit Command(const Processor& processor)
-    : pool(device) {
+  //
+  // Buffer
+  //
+
+  class Buffer final {
+   public:
+    Buffer(VkDevice device, VkCommandPool command_pool);
+
+    void begin();
+    void end();
+
+    void bind(VkPipeline pipeline);
+    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
+    void dispatch();
+
+   private:
+    VkCommandBuffer command_buffer_;
+  };
+
+  explicit Command(const GPU& gpu)
+    : pool(gpu) {
   }
 };
 
