@@ -12660,16 +12660,16 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @onlyCUDA
-    def test_scatter_reduce_multiply_unsupported_dtypes(self, device):
+    @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() + torch.testing.get_all_int_dtypes()))
+    @dtypesIfCPU(*(torch.testing.get_all_int_dtypes()))
+    def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
-        for dtype in torch.testing.get_all_complex_dtypes() + torch.testing.get_all_int_dtypes():
-            input = torch.ones(height, width, device=device, dtype=dtype)
-            src = torch.ones(height, width, device=device, dtype=dtype)
-            with self.assertRaises(RuntimeError):
-                input.scatter_(0, index, src, reduce="multiply")
+        input = torch.ones(height, width, device=device, dtype=dtype)
+        src = torch.ones(height, width, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            input.scatter_(0, index, src, reduce="multiply")
 
     def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
