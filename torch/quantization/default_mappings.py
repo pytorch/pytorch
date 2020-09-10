@@ -30,6 +30,8 @@ DEFAULT_MODULE_MAPPING = {
     nn.InstanceNorm1d: nnq.InstanceNorm1d,
     nn.InstanceNorm2d: nnq.InstanceNorm2d,
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
+    nn.Embedding: nnq.Embedding,
+    nn.EmbeddingBag: nnq.EmbeddingBag,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -76,10 +78,9 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
     nn.GRUCell: nnqd.GRUCell,
-    nn.EmbeddingBag: nnqd.EmbeddingBag,
 }
 
-# Whitelist for propagating the qconfig
+# Allowed list for propagating the qconfig
 _EXCLUDE_QCONFIG_PROPAGATE_LIST = {
     DeQuantStub,
 }
@@ -87,7 +88,7 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
     nn.Sequential,
 }
 
-DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
+DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST = (
     (set(DEFAULT_MODULE_MAPPING.keys()) |
      set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
      set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
@@ -95,7 +96,7 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
 
-DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST = (
     set(DEFAULT_MODULE_MAPPING.values())
     | set(DEFAULT_QAT_MODULE_MAPPING.values())
     | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
