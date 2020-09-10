@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import pickle
 import torch
@@ -763,14 +764,18 @@ def async_collective(func):
 
         should_profile = torch.autograd._profiler_enabled()
         if should_profile:
-            with torch.autograd.profiler.record_function(func.__name__) as rf:
-                fut = rf._call_end_callbacks_on_future(work.get_future())
-                work._set_profiling_future(fut)
-
-        if async_op:
-            return work
+            rf = torch.autograd.profiler.record_function(func.__name__)
         else:
-            work.wait()
+            rf = contextlib.suppress()
+
+        with rf:
+            if async_op:
+                if should_profile:
+                    fut = rf._call_end_callbacks_on_future(work.get_future())
+                    work._set_profiling_future(fut)
+                return work
+            else:
+                work.wait()
 
     return wrapped
 

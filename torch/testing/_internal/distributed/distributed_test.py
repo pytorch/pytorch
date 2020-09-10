@@ -914,20 +914,30 @@ class DistributedTest:
             expected_value,
             cuda=False,
             rank_to_GPU=None,
+            async_op=False,
         ):
             for src in group:
                 if rank == src:
                     tensor = _build_tensor(src + 1).fill_(master_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.all_reduce(tensor, op, group_id)
-                    self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
                 else:
                     tensor = _build_tensor(src + 1).fill_(worker_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.all_reduce(tensor, op, group_id)
-                    self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+                if cuda:
+                    tensor = tensor.cuda(rank_to_GPU[rank][0])
+                with torch.autograd.profiler.profile() as prof:
+                    work = dist.all_reduce(tensor, op, group_id, async_op=async_op)
+                    if async_op:
+                        work.wait()
+                        work._get_profiling_future().wait()
+
+                self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+
+                def get_event(partial_key):
+                    return [event for event in prof.function_events if partial_key in event.name][0]
+
+                recv_event = get_event("all_reduce")
+                self.assertEqual(recv_event.count, 1)
+                self.assertGreater(recv_event.cpu_time, 0)
+
 
             self._barrier()
 
@@ -944,10 +954,21 @@ class DistributedTest:
                 2 + (10 * (len(group) - 1)),
             )
 
-        @unittest.skipIf(
-            BACKEND != "gloo",
-            "Only Gloo backend will have CUDA allReduce tested",
-        )
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_sum_async(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                2,
+                10,
+                2 + (10 * (len(group) - 1)),
+                async_op=True
+            )
+
+        @require_backends_available({"gloo", "nccl"})
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda(self):
             group, group_id, rank = self._init_global_test()
@@ -962,6 +983,25 @@ class DistributedTest:
                 2 + (10 * (len(group) - 1)),
                 True,
                 rank_to_GPU,
+            )
+
+
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_no_gpu
+        def test_all_reduce_sum_cuda_async(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                2,
+                10,
+                2 + (10 * (len(group) - 1)),
+                True,
+                rank_to_GPU,
+                async_op=True
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
