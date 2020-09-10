@@ -51,6 +51,24 @@ namespace api {
 
 struct Descriptor final {
   //
+  // Set
+  //
+
+  class Set final {
+   public:
+    Set(
+        VkDevice device,
+        VkDescriptorPool descriptor_pool,
+        VkDescriptorSetLayout descriptor_set_layout);
+
+    void bind();
+
+   private:
+    VkDevice device_;
+    VkDescriptorSet descriptor_set_;
+  };
+
+  //
   // Pool
   //
 
@@ -63,8 +81,6 @@ struct Descriptor final {
       uint32_t capacity;
       c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
     };
-
-    static const Descriptor kDefault;
 
     /*
       Factory
@@ -95,32 +111,27 @@ struct Descriptor final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const GPU& gpu)
-      : cache(Factory(gpu)) {
-    }
+    /*
+      Object
+    */
 
-    static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
+    class Object final {
+     public:
+      Object(VkDevice device, VkDescriptorPool descriptor_pool);
+
+      Set allocate(VkDescriptorSetLayout descriptor_set_layout);
+      void purge();
+
+     private:
+      VkDevice device_;
+      VkDescriptorPool descriptor_pool_;
+    } primary /* [thread_count] */;
+
+    explicit Pool(const GPU& gpu);
   } pool;
 
-  /*
-    Factory
-  */
-
-  class Factory final {
-   public:
-    Factory(VkDevice device, VkDescriptorPool descriptor_pool);
-
-    VkDescriptorSet allocate(VkDescriptorSetLayout descriptor_set_layout);
-    void purge();
-
-   private:
-    VkDevice device_;
-    VkDescriptorPool descriptor_pool_;
-  } factory;
-
   explicit Descriptor(const GPU& gpu)
-    : pool(gpu),
-      factory(gpu.device, pool.cache.retrieve(Pool::kDefault)) {
+    : pool(gpu) {
   }
 };
 
