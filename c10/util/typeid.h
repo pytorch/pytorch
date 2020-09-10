@@ -499,13 +499,24 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define CAFFE_KNOWN_TYPE(T)                                        \
-  template <>                                                      \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                    \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                  \
-    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton = \
-        detail::_makeTypeMetaDataInstance<T>();                    \
-    return &singleton;                                             \
+template<class T>
+struct TypeMetaDataInstance {
+  static const detail::TypeMetaData singleton;
+
+  static const detail::TypeMetaData* get() noexcept {
+    return &singleton;
+  }
+};
+
+template<class T>
+const detail::TypeMetaData TypeMetaDataInstance<T>::singleton =
+  detail::_makeTypeMetaDataInstance<T>();
+
+#define CAFFE_KNOWN_TYPE(T)                                             \
+  template <>                                                           \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                         \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
+    return TypeMetaDataInstance<T>::get();                              \
   }
 
 } // namespace caffe2
