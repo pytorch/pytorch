@@ -429,6 +429,11 @@ class ParameterList(Module):
         idx = self._get_abs_string_index(idx)
         return self.register_parameter(str(idx), param)
 
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterList is not supported.")
+        super(ParameterList, self).__setattr__(key, value)
+
     def __len__(self) -> int:
         return len(self._parameters)
 
@@ -539,6 +544,11 @@ class ParameterDict(Module):
 
     def __delitem__(self, key: str) -> None:
         del self._parameters[key]
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        super(ParameterDict, self).__setattr__(key, value)
 
     def __len__(self) -> int:
         return len(self._parameters)
