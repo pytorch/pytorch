@@ -4,54 +4,6 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-
-Command::Pool::Factory::Factory(const GPU& gpu)
-  : device_(gpu.device) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        device_,
-        "Invalid Vulkan device!");
-}
-
-typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
-    const Descriptor& descriptor) const {
-  const VkCommandPoolCreateInfo command_pool_create_info{
-    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-    nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    descriptor.queue_family_index,
-  };
-
-  VkCommandPool command_pool{};
-  VK_CHECK(vkCreateCommandPool(
-      device_,
-      &command_pool_create_info,
-      nullptr,
-      &command_pool));
-
-  TORCH_CHECK(
-      command_pool,
-      "Invalid Vulkan command pool!");
-
-  return Handle{
-    command_pool,
-    Deleter(device_),
-  };
-}
-
-void Command::Pool::purge(
-    const VkDevice device,
-    const VkCommandPool command_pool) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_pool,
-      "Invalid Vulkan command pool!");
-
-  VK_CHECK(vkResetCommandPool(device, command_pool, 0u));
-}
-
 namespace {
 
 VkCommandBuffer allocate_command_buffer(
@@ -88,7 +40,9 @@ VkCommandBuffer allocate_command_buffer(
 
 } // namespace
 
-Command::Buffer::Buffer(const VkDevice device, const VkCommandPool command_pool)
+Command::Buffer::Buffer(
+    const VkDevice device,
+    const VkCommandPool command_pool)
   : command_buffer_(allocate_command_buffer(device, command_pool)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
@@ -143,6 +97,64 @@ void Command::Buffer::bind(
       &descriptor_set,
       0u,
       nullptr);
+}
+
+void Command::Buffer::dispatch() {
+}
+
+Command::Pool::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        device_,
+        "Invalid Vulkan device!");
+}
+
+typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
+    const Descriptor& descriptor) const {
+  const VkCommandPoolCreateInfo command_pool_create_info{
+    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+    nullptr,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    descriptor.queue_family_index,
+  };
+
+  VkCommandPool command_pool{};
+  VK_CHECK(vkCreateCommandPool(
+      device_,
+      &command_pool_create_info,
+      nullptr,
+      &command_pool));
+
+  TORCH_CHECK(
+      command_pool,
+      "Invalid Vulkan command pool!");
+
+  return Handle{
+    command_pool,
+    Deleter(device_),
+  };
+}
+
+Command::Pool::Object::Object(
+    const VkDevice device,
+    const VkCommandPool command_pool)
+  : device_(device),
+    command_pool_(command_pool) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_pool_,
+      "Invalid Vulkan command pool!");
+}
+
+Command::Buffer Command::Pool::Object::allocate() {
+  return Buffer(device_, command_pool_);
+}
+
+void Command::Pool::Object::purge() {
+  VK_CHECK(vkResetCommandPool(device_, command_pool_, 0u));
 }
 
 } // namespace api
