@@ -571,7 +571,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def _load_from_state_dict(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], prefix: str,
                               local_metadata: Dict[str, torch.Tensor], strict: bool,
                               missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str],
-                              tensor_check_fn: Callable[[Tensor, Tensor, List[str]], bool]):
+                              tensor_check_fn: Callable[[torch.Tensor, torch.Tensor, List[str]], bool]):
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
@@ -604,7 +604,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def _load_from_state_dict_script(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
                                      prefix: str, local_metadata: Dict[str, torch.Tensor], strict: bool,
                                      missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str],
-                                     tensor_check_fn: Callable[[Tensor, Tensor, List[str]], bool]):
+                                     tensor_check_fn: Callable[[torch.Tensor, torch.Tensor, List[str]], bool]):
 
         self._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs,
                                    tensor_check_fn)
@@ -1043,7 +1043,6 @@ class RecordingObserver(_ObserverBase):
     @torch.jit.export
     def get_tensor_value(self):
         return self.tensor_val
-tensor_check_fn
 
 class NoopObserver(ObserverBase):
     r"""
