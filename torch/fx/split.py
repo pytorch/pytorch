@@ -2,7 +2,7 @@ import torch
 from .graph_module import GraphModule
 from .node import Node
 from .graph import Graph
-from .symbolic_trace import DefaultDelegate
+from .delegate import DefaultDelegate
 from typing import List, Set, Dict
 
 def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
