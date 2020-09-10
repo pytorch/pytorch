@@ -55,10 +55,10 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
 
     const float* X_data = X.template data<float>();
     for (int i = 0; i < X.numel(); i++) {
-        float val = X_data[i];
-        short shortAbsInput = _cvtss_sh(abs(val), 0);
-        // Clamp the input in the range of
-        //  (short)tanhLUTMinOffset to (short)(tanhLUTMaxOffset - 1)
+        short val = _cvtss_sh(X_data[i], 0);
+        unsigned short max16BitPositive = 0x7FFF;
+        unsigned short input16Bit = (*(unsigned short*)& val);
+        short shortAbsInput = input16Bit & max16BitPositive; // mask out negative bit
         short clampShortAbsInput = shortAbsInput;
         if (shortAbsInput < (short)tanhLUTMinOffset) {
             clampShortAbsInput = (short)tanhLUTMinOffset;
@@ -70,7 +70,7 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
         short inputInLutRange = clampShortAbsInput - tanhLUTMinOffset;
         short temp =  tanhLUT[inputInLutRange];
 
-        if (val < 0.0) {
+        if (input16Bit > max16BitPositive) {  // negative value
             temp = temp - Y_offset;
             temp = temp * (-1);
             temp = temp + Y_offset;

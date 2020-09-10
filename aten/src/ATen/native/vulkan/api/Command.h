@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
 
@@ -10,6 +11,25 @@ namespace vulkan {
 namespace api {
 
 struct Command final {
+  //
+  // Buffer
+  //
+
+  class Buffer final {
+   public:
+    Buffer(VkDevice device, VkCommandPool command_pool);
+
+    void begin();
+    void end();
+
+    void bind(VkPipeline pipeline);
+    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
+    void dispatch();
+
+   private:
+    VkCommandBuffer command_buffer_;
+  };
+
   //
   // Pool
   //
@@ -52,31 +72,29 @@ struct Command final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
+    /*
+      Object
+    */
+
+    class Object final {
+     public:
+      Object(VkDevice device, VkCommandPool command_pool);
+
+      Buffer allocate();
+      void purge();
+
+     private:
+      VkDevice device_;
+      VkCommandPool command_pool_;
+    } primary /* [thread_count] */;
+
     explicit Pool(const GPU& gpu)
-      : cache(Factory(gpu)) {
+      : cache(Factory(gpu)),
+        primary(
+            gpu.device,
+            cache.retrieve({gpu.adapter->compute_queue_family_index})) {
     }
-
-    static void purge(VkDevice device, VkCommandPool command_pool);
   } pool;
-
-  //
-  // Buffer
-  //
-
-  class Buffer final {
-   public:
-    Buffer(VkDevice device, VkCommandPool command_pool);
-
-    void begin();
-    void end();
-
-    void bind(VkPipeline pipeline);
-    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
-    void dispatch();
-
-   private:
-    VkCommandBuffer command_buffer_;
-  };
 
   explicit Command(const GPU& gpu)
     : pool(gpu) {
