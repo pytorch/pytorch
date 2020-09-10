@@ -321,6 +321,7 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
     }
 
     @staticmethod

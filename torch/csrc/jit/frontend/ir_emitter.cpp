@@ -1956,6 +1956,8 @@ struct to_ir {
         return use_inplace_op ? aten::mul_ : aten::mul;
       case '%':
         return use_inplace_op ? aten::fmod_ : aten::fmod;
+      case '|':
+        return use_inplace_op ? aten::bitwise_or : aten::__or__;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
