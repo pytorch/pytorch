@@ -67,13 +67,7 @@ class TestSparse(TestCase):
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.sparse_coo_tensor(*args, **kwargs)
 
-        def csr_sparse_tensor_factory(*args, **kwargs):
-            kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
-            kwargs['device'] = kwargs.get('device', self.device)
-            return torch.sparse_csr_tensor(*args, **kwargs)
-            
         self.sparse_tensor = sparse_tensor_factory
-        self.csr_sparse_tensor = csr_sparse_tensor_factory
         self.legacy_sparse_tensor = torch.sparse.DoubleTensor
         super(TestSparse, self).setUp()
 

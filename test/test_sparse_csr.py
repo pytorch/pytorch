@@ -135,6 +135,31 @@ class TestSparseGCS(TestCase):
         sparse = self.make_sparse_gcs(multi_dim)
         self.assertEqual(sparse.to_dense(), multi_dim)
 
+    def test_gcs_matmul(self):
+        side = 1000
+        gcs = self.gen_sparse_gcs((side, side), 1000)
+        vec = torch.randn(side)
+
+        res = gcs.matmul(vec)
+        expected = gcs.to_dense().matmul(vec)
+
+        self.assertEqual(res, expected)
+
+    def test_bench_matmul(self):
+        from IPython import get_ipython
+
+        for m in [1000, 5000, 10000, 25000]:
+            for nnz_ratio in [0.1, 0.2, 0.3, 0.4, 0.5, 0.8]:
+                nnz_num = int(m * m * nnz_ratio)
+                
+                gcs = self.gen_sparse_gcs((m, m), nnz_num)
+                vector = torch.randn(m)
+
+                print(f"SIZE: {m}x{m}, NNZ: {nnz_num}:")
+                print(f"\tGCS: ")
+                ipython.magic("timeit gcs.matmul(vec)")
+                
+
     def test_basic_ops(self):
         # sparse-sparse addition
         x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
