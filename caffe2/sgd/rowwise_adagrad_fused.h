@@ -126,7 +126,7 @@ inline float compute_square_average_with_weight_decay_inlined_(
  * and evaluation results.
  */
 template <
-    typename Tdata, // embedding and momentum types
+    typename Tdata, // embedding types
     typename T, // everything else
     typename TLengths,
     typename rowWiseAdagradT,
@@ -390,7 +390,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 };
 
 template <
-    typename Tdata, // embedding and momentum types
+    typename Tdata, // embedding types
     typename T, // everything else
     typename TLengths,
     typename rowWiseAdagradT>
@@ -694,7 +694,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
 };
 
 template <
-    typename Tdata, // embedding and momentum types
+    typename Tdata, // embedding types
     typename T, // everything else
     typename TLengths,
     typename rowWiseAdagradT>

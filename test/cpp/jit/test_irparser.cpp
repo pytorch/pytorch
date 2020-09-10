@@ -358,6 +358,20 @@ graph():
     AT_ASSERT(int_vals.size() == 3);
     AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
   }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%x : Float(10, *, 10)):
+  return (%x)
+)IR");
+    checkRoundtrip(
+        R"IR(
+graph(%x : Double(*, 200, *, requires_grad=1, device=cuda:1),
+      %b : Float(5, *, requires_grad=1),
+      %c : Long(*, 10, device=cpu)):
+  return (%x)
+)IR");
+  }
 }
 } // namespace jit
 } // namespace torch
