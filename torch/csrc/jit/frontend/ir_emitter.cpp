@@ -29,6 +29,7 @@
 #include <climits>
 #include <set>
 #include <stack>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -2997,7 +2998,7 @@ struct to_ir {
           << op_name << "(dst_worker_name, user_callable, args, kwargs)"
           << "does not support kwargs yet";
     }
-    // TODO: Make rpc_async(..) support taking kwargs,
+    // TODO: Make rpc_op(..) support taking kwargs,
     // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
 
     auto& input_trees = apply.inputs().tree()->trees();
@@ -3050,12 +3051,12 @@ struct to_ir {
             args_tree->range(),
             entrie_sugared_value->asValue(args_tree->range(), method));
       }
-      // NB: Can't do schema check on kwargs, given the async RPC API is
-      // rpc_async(to, user_callable, args, kwargs),
+      // NB: Can't do schema check on kwargs, given the RPC API is
+      // rpc_op(to, user_callable, args, kwargs),
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // rpc_op(to, user_callable, arg_0, arg_1, kwarg_0="foo",
       // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
@@ -3067,26 +3068,33 @@ struct to_ir {
         graphPtr->insertConstant(userCallableQualNameIValue, loc);
 
     // Graph insert the corresponding RPC node to the graph.
-    Node* rpc_async_node =
+    Node* rpc_node =
         graphPtr->insertNode(graphPtr->create(rpc_op, 1))->setSourceRange(loc);
     {
-      WithInsertPoint insert(rpc_async_node);
-      rpc_async_node->addInput(dst_worker_name_value);
-      rpc_async_node->addInput(userCallableQualNameValue);
+      WithInsertPoint insert(rpc_node);
+      rpc_node->addInput(dst_worker_name_value);
+      rpc_node->addInput(userCallableQualNameValue);
 
       for (const auto& tree : args_kwargs_timeout_trees) {
-        rpc_async_node->addInput(emitExpr(Expr(tree)));
+        rpc_node->addInput(emitExpr(Expr(tree)));
       }
     }
-    Value* rpc_async_node_output = rpc_async_node->output();
+    Value* rpc_node_output = rpc_node->output();
 
-    // Set output type from FunctionSchema.
+    // Set output type from FunctionSchema and corresponding rpc_op.
     const std::vector<Argument>& returns = functionSchema.returns();
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
-    auto output_type = returns[0].type();
-    rpc_async_node_output->setType(FutureType::create(output_type));
+    TypePtr output_type = nullptr;
+    if (rpc_op == prim::rpc_async) {
+      output_type = FutureType::create(returns[0].type());
+    } else if (rpc_op == prim::rpc_remote) {
+      output_type = RRefType::create(returns[0].type());
+    } else {
+      output_type = returns[0].type();
+    }
+    rpc_node_output->setType(output_type);
 
-    return std::make_shared<SimpleValue>(rpc_async_node_output);
+    return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
   Value* emitSimpleExpr(

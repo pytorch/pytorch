@@ -149,7 +149,7 @@ void prepare_and_call_rpc_op(
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
       // throw error if future hasError
-      throw std::runtime_error(futureIValuePtr->error()->what());
+      throw std::runtime_error(futureIValuePtr->tryRetrieveErrorMessage());
     } else {
       auto res = futureIValuePtr->value();
       // Push output to the stack.
@@ -165,7 +165,8 @@ void prepare_and_call_rpc_op(
         rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
-    stack->emplace_back(std::move(rrefPtr));
+    stack->emplace_back(
+        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rrefPtr));
   } else {
     throw std::runtime_error(
         c10::str(rpc_op, "() is not supported in TorchScript!'"));
@@ -261,7 +262,7 @@ RegisterOperators reg_rpc_ops(
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
            return [num_inputs](Stack* stack) {
-             prepare_and_call_rpc_op(stack, num_inputs, "remote");
+             prepare_and_call_rpc_op(stack, num_inputs, "rpc_remote");
            };
          },
          aliasAnalysisSpecialCase()),
