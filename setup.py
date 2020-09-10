@@ -309,7 +309,6 @@ def build_deps():
             sys.exit(1)
 
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
