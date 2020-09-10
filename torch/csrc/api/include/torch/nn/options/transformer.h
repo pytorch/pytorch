@@ -14,7 +14,9 @@ namespace nn {
 ///
 /// Example:
 /// ```
-///
+/// TransformerOptions options;
+/// TransformerOptions options(16, 4);
+/// auto options = TransformerOptions().d_model(4).nhead(2).dropout(0.0);
 /// ```
 struct TORCH_API TransformerOptions {
 

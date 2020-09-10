@@ -9,8 +9,8 @@ using namespace torch::nn;
 struct TransformerTest : torch::test::SeedingFixture {};
 
 // a generic function to set constants for parameters so we have fixed result for deterministic test
-template<typename M>
-void set_parameter_constants(M& model, const torch::TensorOptions& tensor_options) {
+template<typename Model>
+void set_parameter_to_constants(Model& model, const torch::TensorOptions& tensor_options) {
   torch::NoGradGuard guard;
   for (auto& p : model->parameters()) {
     auto sz = p.view(-1).size(0);
@@ -33,7 +33,7 @@ T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
   }
 
   // set constant weights of the model
-  set_parameter_constants<T_LAYER>(layer, tensor_options);
+  set_parameter_to_constants<T_LAYER>(layer, tensor_options);
 
   return layer;
 }
@@ -1092,7 +1092,7 @@ void transformer_test_helper(bool is_cuda) {
       .dropout(0.0)
       .activation(torch::kReLU));
 
-    set_parameter_constants<Transformer>(model, tensor_options);
+    set_parameter_to_constants<Transformer>(model, tensor_options);
     if (tensor_options.device() == torch::kCUDA) {
       model->to(torch::kCUDA);
     }
@@ -1112,7 +1112,7 @@ void transformer_test_helper(bool is_cuda) {
       .custom_encoder(AnyModule(encoder))
       .custom_decoder(AnyModule(decoder)));
 
-    set_parameter_constants<Transformer>(model_cus, tensor_options);
+    set_parameter_to_constants<Transformer>(model_cus, tensor_options);
     if (tensor_options.device() == torch::kCUDA) {
       model_cus->to(torch::kCUDA);
     }

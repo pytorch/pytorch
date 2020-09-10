@@ -18,8 +18,8 @@ TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
 }
 
 void TransformerEncoderLayerImpl::reset() {
-  // NOTE: reset() is for initializing the model only, call reset() after the model is created
-  // will cause throwing exceptions. Call reset_parameter() if the created model need a reset
+  // NOTE: reset() is for initializing the model only, calling reset() after the model is created
+  // will cause throwing exceptions. Call reset_parameter() if the created model needs a reset
 
   self_attn = this->register_module("self_attn",
     MultiheadAttention(MultiheadAttentionOptions(
@@ -85,8 +85,8 @@ TransformerDecoderLayerImpl::TransformerDecoderLayerImpl(
 }
 
 void TransformerDecoderLayerImpl::reset() {
-  // NOTE: reset() is for initializing the model only, call reset() after the model is created
-  // will cause throwing exceptions. Call reset_parameter() if the created model need a reset.
+  // NOTE: reset() is for initializing the model only, calling reset() after the model is created
+  // will cause throwing exceptions. Call reset_parameter() if the created model needs a reset.
 
   // initialize self attention
   self_attn = this->register_module("self_attn",
@@ -396,10 +396,10 @@ Tensor TransformerImpl::forward(
     "src and tgt should have 3 dimensions, but got ", src.dim(), " and ", tgt.dim());
 
   TORCH_CHECK(src.size(1) == tgt.size(1),
-    "src and tgt should have same size at dimension 1, but got ", src.size(1), " and ", tgt.size(1));
+    "src and tgt should have equal batch number (at dim 1), but got ", src.size(1), " and ", tgt.size(1));
 
   TORCH_CHECK(src.size(2) == options.d_model() && tgt.size(2) == options.d_model(),
-    "src and tgt should have a same size as d_model at dimension 2, but got ",
+    "src and tgt should have same feature number as d_model (at dim 2), but got ",
     src.size(2), " and ", tgt.size(2), " while d_model is ", options.d_model());
 
   Tensor memory = this->encoder.forward<Tensor>(src, src_mask, src_key_padding_mask);
@@ -424,7 +424,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   else {
     TORCH_WARN_ONCE(
       "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
-      "the mas with smallest float number on this platform instead of -inf");
+      "the mask with smallest float number on this platform instead of -inf");
     mask = mask.masked_fill(mask == 0, std::numeric_limits<float>::lowest()).masked_fill(mask == 1, 0.f);
   }
 
