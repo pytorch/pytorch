@@ -592,7 +592,6 @@ cc_library(
         "aten/src/THCUNN/generic/*.cu.cc",
     ]) + [
         ":generated_cpp",
-        ":aten_src_ATen_config",
     ],
     includes = [
         "aten/src",
