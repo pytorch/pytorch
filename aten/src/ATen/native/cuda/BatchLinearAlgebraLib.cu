@@ -67,6 +67,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
       finished.block(main_stream);
     }
   } else {
+    // cublas batched kernels require input be "device array of device pointers"
     Tensor self_array = at::arange(
       reinterpret_cast<long>(self_data),
       reinterpret_cast<long>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
