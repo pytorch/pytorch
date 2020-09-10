@@ -82,8 +82,8 @@ namespace jit {
   _(ClassTypeAddRemoveAttr)                       \
   _(Inliner)                                      \
   _(LiteInterpreterAdd)                           \
-  _(LiteInterpreterConv)                        /*\
-  _(LiteInterpreterInline)                      --\
+  _(LiteInterpreterConv)                          \
+  _(LiteInterpreterInline)                      /*\
   _(LiteInterpreterTuple)                         \
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
