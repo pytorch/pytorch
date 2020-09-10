@@ -51,8 +51,8 @@ def make_env(version):
         conda env remove --name {env_name} 2> /dev/null || true
         conda create --no-default-packages -yn {env_name} python=3
         source activate {env_name}
-        conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi hypothesis
-        conda install -y -c pytorch magma-cuda102
+        conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi hypothesis cudatoolkit=10.1
+        conda install -y -c pytorch magma-cuda101
         {nvcc_install if version in ('1.3', '1.4') else ''}
     """).strip().replace("\n", " && ")
 
@@ -260,7 +260,8 @@ def run():
                 Task(v, test, 2, "cpu", "short"),
                 Task(v, test, 2, "cpu", "long"),
             ])
-            gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
+            if v not in ("1.3", "1.4"):
+                gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
     print("Beginning run:")
     gpu_pool = multiprocessing.dummy.Pool(GPU_QUEUE.qsize())
