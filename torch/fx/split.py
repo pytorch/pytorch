@@ -15,8 +15,13 @@ def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
     target_qualname_atoms : List[str] = target_qualname.split('.')
     target_module : torch.nn.Module = mod
     for atom in target_qualname_atoms:
+        # Stateless Modules could not appear on the original GraphModule,
+        # since they are eliminated during symbolic tracing. Use a fake
+        # `nn.Module` instance here in this situtation
+        if not hasattr(target_module, atom):
+            target_module = torch.nn.Module()
+            break
         target_module = getattr(target_module, atom)
-
 
     # ===== Stage 1: identify Nodes to split off and external data deps =====
     block_nodes = []
@@ -57,6 +62,7 @@ def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
         def_set.add(node)
 
     if hasattr(mod.graph, 'result'):
+        assert isinstance(mod.graph.result, Node)
         rest_uses.add(mod.graph.result)
 
     block_inputs = block_uses - block_defs
@@ -131,15 +137,32 @@ def extract_module(mod : GraphModule, target_qualname : str) -> GraphModule:
     assert isinstance(mod.graph.result, Node)
     base_graph.output(base_remap_table[mod.graph.result])
 
-    rv = GraphModule(mod, base_graph)
+    # A bit of explanation is in order here. Since we're inserting a callsite
+    # to a submodule that may not exist on the original root (as is the case
+    # with stateless submodules) we may need to construct "fake" submodules
+    # up to and including the new submodule we've just constructed. This
+    # function recursively traverses through the target_qualname_atoms to make
+    # sure we have instantiated Modules up to and including the new submodule.
+    # In the base case, we construct the final GraphModule with the new graph,
+    # containing the call to the new `target` module. On the return path, we
+    # return the hierarchy within the passed-in `mod` back to its original state
+    def construct_graphmodule_with_correct_submod(
+            target_atom_idx : int, root_submod : torch.nn.Module):
+        if target_atom_idx == len(target_qualname_atoms):
+            return GraphModule(mod, base_graph)
+        curr_atom : str = target_qualname_atoms[target_atom_idx]
+        orig_submod : torch.nn.Module = getattr(root_submod, curr_atom, None)
+        if not orig_submod:
+            setattr(root_submod, curr_atom, torch.nn.Module())
+        if target_atom_idx == len(target_qualname_atoms) - 1:
+            setattr(root_submod, curr_atom, submod_module)
 
-    new_root = rv
-    new_root_target = new_root
-    for atom in target_qualname.split('.')[:-1]:
-        new_root_target = getattr(new_root_target, atom)
-    setattr(new_root_target, target_qualname.split('.')[-1], submod_module)
+        rv = construct_graphmodule_with_correct_submod(target_atom_idx + 1, getattr(root_submod, curr_atom))
 
-    return rv
+        setattr(root_submod, curr_atom, orig_submod)
+        return rv
+
+    return construct_graphmodule_with_correct_submod(0, mod)
 
 
 def fully_outline_module(mod : GraphModule) -> GraphModule:

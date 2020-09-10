@@ -543,7 +543,6 @@ class TestFX(JitTestCase):
 
         # Test extracting a single submodule from the GraphModule
         with_extracted_module : torch.fx.GraphModule = extract_module(traced, 'bar.rn')
-        # print(with_extracted_module)
 
         test_input = torch.randn(1, 3, 224, 224)
         self.assertEqual(with_extracted_module(test_input), traced(test_input))
@@ -563,6 +562,24 @@ class TestFX(JitTestCase):
         # print(uninlined)
 
         self.assertEqual(uninlined(test_input), traced(test_input))
+
+    def test_extract_stateless_mod(self):
+        class Stateless(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sl = Stateless()
+
+            def forward(self, x):
+                return self.sl(x) + 3.0
+
+        b : torch.nn.Module = Baz()
+        traced : torch.fx.GraphModule = symbolic_trace(b)
+        extracted : torch.fx.GraphModule = extract_module(traced, 'sl')
+
 
 if __name__ == '__main__':
     run_tests()
