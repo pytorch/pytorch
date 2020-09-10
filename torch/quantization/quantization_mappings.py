@@ -28,6 +28,8 @@ STATIC_QUANT_MODULE_MAPPING = {
     nn.InstanceNorm1d: nnq.InstanceNorm1d,
     nn.InstanceNorm2d: nnq.InstanceNorm2d,
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
+    nn.Embedding: nnq.Embedding,
+    nn.EmbeddingBag: nnq.EmbeddingBag,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -66,7 +68,6 @@ DYNAMIC_QUANT_MODULE_MAPPING = {
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
     nn.GRUCell: nnqd.GRUCell,
-    nn.EmbeddingBag: nnqd.EmbeddingBag,
 }
 
 # Whitelist for propagating the qconfig

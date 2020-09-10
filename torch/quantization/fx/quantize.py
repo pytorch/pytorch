@@ -258,7 +258,7 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
                 # index for input of custom module that needs to be observed in parent
-                custom_module_input_idxs = None
+                child_module_input_idxs = None
                 if node.name in custom_module_nodes:
                     # observe custom module
                     custom_module = self.modules[node.target]
@@ -267,11 +267,9 @@ class Quantizer:
                         prepare = torch.quantization.prepare_dynamic_child_module_fx
                     else:
                         prepare = torch.quantization.prepare_child_module_fx
-                    observed_custom_module, custom_module_input_idxs, \
-                        output_is_observed = prepare(traced_custom_module, {'': qconfig})
+                    observed_custom_module = prepare(traced_custom_module, {'': qconfig})
                     observed_custom_module._is_custom_module = True
-                    observed_custom_module._observed_input_idxs = custom_module_input_idxs
-                    observed_custom_module._output_is_observed = output_is_observed
+                    child_module_input_idxs = observed_custom_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
 
@@ -303,14 +301,16 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                # elif qconfig is not None and obj.all_nodes:
-                #     # observer for outputs
-                #     new_observer = qconfig.activation()
-                #     # respect device affinity when adding observers
-                #     device = assert_and_get_unique_device(model)
-                #     insert_observer(node, new_observer, device)
-                if custom_module_input_idxs is not None:
-                    for idx in custom_module_input_idxs:
+                elif qconfig is not None and obj.all_nodes:
+                    # observer for outputs
+                    new_observer = qconfig.activation()
+                    # respect device affinity when adding observers
+                    device = assert_and_get_unique_device(model)
+                    insert_observer(node, new_observer, device)
+
+                # insert observer for input of child module
+                if child_module_input_idxs is not None:
+                    for idx in child_module_input_idxs:
                         if node.args[idx].name not in observed_node_names_set:
                             new_observer = qconfig.activation()
                             device = assert_and_get_unique_device(model)
@@ -342,11 +342,14 @@ class Quantizer:
         observed_graph.output(load_arg(model.graph.result))
         # indicate whether output is observed or not.
         # This used for correctly quantize child modules
-        output_observed = model.graph.result.name in observed_node_names_set
+        output_is_observed = model.graph.result.name in observed_node_names_set
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
-        return model, observed_input_idxs, output_observed
+        if is_child_module:
+            model._observed_input_idxs = observed_input_idxs
+            model._output_is_observed = output_is_observed
+        return model
 
     def save_state(self, observed):
         observed._activation_post_process_map = self.activation_post_process_map
