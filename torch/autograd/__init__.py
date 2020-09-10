@@ -16,6 +16,7 @@ from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
+from ..overrides import has_torch_function, handle_torch_function
 from . import profiler
 from . import functional
 
@@ -167,13 +168,26 @@ def grad(
             used when computing outputs (and therefore their grad is always zero)
             is an error. Defaults to ``False``.
     """
+    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
+    overridable_args = outputs + inputs
+    if has_torch_function(overridable_args):
+        return handle_torch_function(
+            grad,
+            overridable_args,
+            outputs,
+            inputs,
+            grad_outputs=grad_outputs,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            only_inputs=only_inputs, 
+            allow_unused=allow_unused,
+        )
+
     if not only_inputs:
         warnings.warn("only_inputs argument is deprecated and is ignored now "
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
-
-    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
-    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
 
     if grad_outputs is None:
         grad_outputs = [None] * len(outputs)
