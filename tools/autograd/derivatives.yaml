@@ -254,7 +254,7 @@
   self: grad * (-self * self + 1).rsqrt().conj()
 
 - name: atan(Tensor self) -> Tensor
-  self: grad / (self * self + 1)
+  self: grad / (self.conj() * self.conj() + 1)
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -397,11 +397,11 @@
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
 # Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad / other
-  other: -grad * (self / other) / other
+  self: div_tensor_self_backward(grad, other, self.scalar_type())
+  other: div_tensor_other_backward(grad, self, other)
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad / other
+  self: div_scalar_backward(grad, other, self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor

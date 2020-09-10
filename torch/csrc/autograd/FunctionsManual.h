@@ -45,6 +45,9 @@ at::Tensor pow_backward_exponent(at::Tensor grad, const at::Tensor& self, const 
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Scalar & base, const at::Tensor& exponent, at::Tensor result);
 at::Tensor mul_scalar_backward(Tensor grad, Scalar other, ScalarType self_st);
 at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+at::Tensor div_scalar_backward(Tensor grad, Scalar other, ScalarType self_st);
 at::Tensor mvlgamma_backward(at::Tensor grad, const at::Tensor & self, int64_t p);
 at::Tensor permute_backwards(const at::Tensor & grad, at::IntArrayRef fwd_dims);
 at::Tensor rad2deg_backward(const at::Tensor& grad);

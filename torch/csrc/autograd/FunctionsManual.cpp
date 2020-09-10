@@ -232,6 +232,34 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return result;
 }
 
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  auto result = grad / other.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  auto other_conj = other.conj();
+  auto result = -grad * (self.conj() / other_conj * other_conj);
+  if (!other.is_complex() && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_scalar_backward(Tensor grad, Scalar other, ScalarType self_st) {
+  auto scalar_as_tensor = at::scalar_to_tensor(other);
+  auto result = grad / scalar_as_tensor.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();
