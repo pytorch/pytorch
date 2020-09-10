@@ -1136,7 +1136,7 @@ void transformer_test_helper(bool is_cuda) {
     ASSERT_TRUE(result.equal(result_cus));
     ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
-    torch::Tensor src_mask = model->generate_square_subsequent_mask(src.size(0)).to(tensor_options);
+    torch::Tensor src_mask = Transformer::Impl::generate_square_subsequent_mask(src.size(0)).to(tensor_options);
     ref_output = torch::tensor({
       {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}},
       {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}}}, tensor_options);

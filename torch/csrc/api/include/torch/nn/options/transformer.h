@@ -22,6 +22,8 @@ struct TORCH_API TransformerOptions {
 
   using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
+  // The following constructors are commonly used
+  // Please don't add more unless it is proved as a common usage
   TransformerOptions() = default;
   TransformerOptions(int64_t d_model, int64_t nhead);
   TransformerOptions(int64_t d_model, int64_t nhead, int64_t num_encoder_layers, int64_t num_decoder_layers);

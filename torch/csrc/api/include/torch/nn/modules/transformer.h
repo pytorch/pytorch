@@ -106,7 +106,7 @@ class TORCH_API TransformerImpl : public Cloneable<TransformerImpl> {
     ///      be valid only when IEEE754 is supported. If the platform doesn't support IEEE754,
     ///      this function will fill the mask with the smallest float number instead of `-inf`,
     ///      a one time warning will be pop up as well.
-    Tensor generate_square_subsequent_mask(int64_t sz);
+    static Tensor generate_square_subsequent_mask(int64_t sz);
 
   protected:
     FORWARD_HAS_DEFAULT_ARGS(
