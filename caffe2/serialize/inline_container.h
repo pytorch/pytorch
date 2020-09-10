@@ -140,7 +140,7 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 // should be increased too. The relationship is:
 // kMaxSupportedFileFormatVersion >= (most likely ==) kProducedBytecodeVersion
 //   >= kProducedFileFormatVersion
-constexpr uint64_t kProducedBytecodeVersion = 0x3L;
+constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
@@ -151,9 +151,6 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // we should support this model_version. For example, we provide a wrapper to
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
-
-// Writer-specific constants
-constexpr uint64_t kFieldAlignment = 64;
 
 class CAFFE2_API PyTorchStreamReader final {
  public:
@@ -231,6 +228,19 @@ class CAFFE2_API PyTorchStreamWriter final {
       const void* pBuf,
       size_t n);
 };
+
+namespace detail {
+// Writer-specific constants
+constexpr uint64_t kFieldAlignment = 64;
+
+// Returns a record to be appended to the local user extra data entry in order
+// to make data beginning aligned at kFieldAlignment bytes boundary.
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf);
+}
 
 } // namespace serialize
 } // namespace caffe2

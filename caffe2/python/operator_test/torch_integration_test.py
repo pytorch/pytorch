@@ -904,6 +904,61 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
         torch.testing.assert_allclose(expected_merged_values, output_merged_values)
 
+    def test_learning_rate(self):
+        base_lr = 0.05
+        no_iter = torch.tensor([0])
+        one_iter = torch.tensor([1])
+        two_iter = torch.tensor([2])
+
+        # Fixed policy
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+
+        # Step policy
+        gamma = 0.99
+        stepsize = 1
+
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (1.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (2.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=two_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -180,22 +180,38 @@ mobile::Module _load_data(
     auto mcu = std::make_shared<mobile::CompilationUnit>();
     mobile::Module result = mobile::Module(
         deserializer.deserialize(std::move(device)).toObject(), mcu);
-    std::string name = result.name();
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata["model_name"] = result.name();
+    }
     if (observer) {
-      observer->onExitLoadModel(name);
+      observer->onExitLoadModel(copied_metadata);
     }
     return result;
-  } catch (const std::exception& ex) {
+  } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailLoadModel(
-          "Error occured during loading model: " + (std::string)ex.what());
+      observer->onFailLoadModel(error.what());
     }
-    TORCH_CHECK(false, ex.what());
+    TORCH_RETHROW(error);
   } catch (...) {
-    if (observer) {
-      observer->onFailLoadModel("unknown exception");
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailLoadModel(error.what());
+      }
+      TORCH_RETHROW(error);
     }
-    TORCH_CHECK(false, "unknown exception");
   }
 }
 

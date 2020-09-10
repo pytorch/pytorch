@@ -798,6 +798,27 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
   auto mean2 = getInputTensorQParamOpFusionInfo(
       "aten::mean", {"%dim", "%keepdim", "%out"});
 
+  auto upsample_nearest1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest1d", {"%output_size", "%scale_factors"});
+
+  auto upsample_nearest2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest2d", {"%output_size", "%scale_factors"});
+
+  auto upsample_nearest3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest3d", {"%output_size", "%scale_factors"});
+
+  auto upsample_linear1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_linear1d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
+  auto upsample_bilinear2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_bilinear2d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
+  auto upsample_trilinear3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_trilinear3d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
 
@@ -974,6 +995,12 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       upsample_linear1d,
       upsample_bilinear2d,
       upsample_trilinear3d,
+      upsample_nearest1d_vec,
+      upsample_nearest2d_vec,
+      upsample_nearest3d_vec,
+      upsample_linear1d_vec,
+      upsample_bilinear2d_vec,
+      upsample_trilinear3d_vec,
       clamp,
       hardtanh,
       hardtanh_,
