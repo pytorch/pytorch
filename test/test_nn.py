@@ -11188,7 +11188,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_embedding_bag_non_contiguous_weight(self, device, dtype):
-        weight_tensor = torch.randn(4, 3, dtype=dtype, device=device)
+        weight_tensor = torch.randn(3, 4, dtype=dtype, device=device)
 
         weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
         weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
