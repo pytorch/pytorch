@@ -3,15 +3,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 
 import torch.nn as nn
-import torch.nn.intrinsic as nni
 
 from .fuser_method_mappings import get_fuser_method
 from .fuser_method_mappings import (
-    fuse_conv_bn,
-    fuse_conv_bn_relu
+    fuse_conv_bn,  # noqa: F401
+    fuse_conv_bn_relu  # noqa: F401
 )
 
-from typing import Type, List, Optional
+from typing import List, Optional
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
