@@ -294,6 +294,35 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
+Tensor mul(const Tensor& self, Scalar other) {
+  return native::mul(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& mul_(Tensor& self, Scalar other) {
+  return native::mul_(self, wrapped_scalar_tensor(other));
+}
+
+// multiply, alias for mul
+Tensor& multiply_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, other);
+}
+
+Tensor multiply(const Tensor& self, const Tensor& other) {
+  return self.mul(other);
+}
+
+Tensor& multiply_(Tensor& self, const Tensor& other) {
+  return self.mul_(other);
+}
+
+Tensor multiply(const Tensor& self, Scalar other) {
+  return self.mul(other);
+}
+
+Tensor& multiply_(Tensor& self, Scalar other) {
+  return self.mul_(other);
+}
+
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -458,14 +487,6 @@ Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
   //   BC with TH, but in the future, we should use normal type promotion,
   //   like in numpy
   return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
-}
-
-Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {

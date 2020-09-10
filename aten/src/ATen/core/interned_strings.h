@@ -214,6 +214,10 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, mul)                       \
+  _(aten, mul_)                      \
+  _(aten, multiply)                  \
+  _(aten, multiply_)                 \
   _(aten, ne)                        \
   _(aten, ne_)                       \
   _(aten, not_equal)                 \

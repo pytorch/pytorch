@@ -26,6 +26,7 @@ static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::less, aten::lt},          {aten::less_, aten::lt_},
     {aten::not_equal, aten::ne},     {aten::not_equal_, aten::ne_},
     {aten::divide, aten::div},       {aten::divide_, aten::div_},
+    {aten::multiply, aten::mul},       {aten::multiply_, aten::mul_},
 };
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {

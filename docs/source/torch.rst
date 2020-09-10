@@ -309,6 +309,7 @@ Pointwise Ops
     hypot
     i0
     mul
+    multiply
     mvlgamma
     neg
     negative
