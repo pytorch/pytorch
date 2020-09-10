@@ -69,11 +69,11 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   } else {
     Tensor self_array = at::arange(
       reinterpret_cast<long>(self_data),
-      reinterpret_cast<long>(&self_data[(n-1) * self_mat_stride]) + 1,
+      reinterpret_cast<long>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
       static_cast<long>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
     Tensor self_inv_array = at::arange(
       reinterpret_cast<long>(self_inv_data),
-      reinterpret_cast<long>(&self_inv_data[(n-1) * self_inv_mat_stride]) + 1,
+      reinterpret_cast<long>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
       static_cast<long>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
 
     int* ipiv_array = reinterpret_cast<int*>(allocator.allocate(sizeof(int)*batch_size*n).get());
