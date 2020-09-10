@@ -6854,7 +6854,7 @@ a")
     # Testing bitwise shorthand aug assignment
     def test_bool_augassign(self):
         @torch.jit.script
-        def func(a:bool, b:bool):
+        def func(a : bool, b : bool):
             a |= b
             return a
         self.assertEqual(func(True, False), True | False)
