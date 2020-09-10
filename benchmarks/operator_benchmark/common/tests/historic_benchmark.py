@@ -32,7 +32,7 @@ EXCLUDE = [
 Task = collections.namedtuple("Task", ("version", "test", "num_cores", "device", "tag_filter"))
 
 CPU_QUEUE = queue.Queue()
-for i in range(0, multiprocessing.cpu_count() - 4, 2):
+for i in range(0, multiprocessing.cpu_count() - 3, 2):
     CPU_QUEUE.put(i)
 
 GPU_QUEUE = queue.Queue()
@@ -246,11 +246,11 @@ def run():
         for v in VERSIONS:
             cpu_tasks.extend([
                 Task(v, test, 1, "cpu", "short"),
-                Task(v, test, 1, "cpu", "long"),
-                Task(v, test, 2, "cpu", "short"),
-                Task(v, test, 2, "cpu", "long"),
+                # Task(v, test, 1, "cpu", "long"),
+                # Task(v, test, 2, "cpu", "short"),
+                # Task(v, test, 2, "cpu", "long"),
             ])
-            gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
+            # gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
     print("Beginning run:")
     gpu_pool = multiprocessing.dummy.Pool(GPU_QUEUE.qsize())
@@ -261,23 +261,27 @@ def run():
     cpu_work = cpu_pool.map_async(launch_subtask, cpu_tasks, 1)
 
     results = []
+    def snapshot():
+        print("Snapshotting results.")
+        with open("/tmp/microbenchmarks.pkl", "wb") as f:
+            pickle.dump(results, f)
+
+        parsed_results = process(results)
+        with open("/tmp/microbenchmarks_parsed.pkl", "wb") as f:
+            pickle.dump(parsed_results, f)
+
     n_tasks = len(cpu_tasks) + len(gpu_tasks)
     for i in range(1, n_tasks + 1):
         results.append(parse_output())
         print(f"\r{i} / {n_tasks}", end="")
-    print("\r")
 
-    print("Snapshotting results.")
-    with open("/tmp/microbenchmarks.pkl", "wb") as f:
-        pickle.dump(results, f)
+        if not (i % int(n_tasks / 10)):
+            snapshot()
 
-    gpu_work.wait()
-    cpu_work.wait()
+    print("")
+    snapshot()
 
-    parsed_results = process(results)
-    print("Snapshotting parsed results.")
-    with open("/tmp/microbenchmarks_parsed.pkl", "wb") as f:
-        pickle.dump(parsed_results, f)
+
 
 
 def main():
