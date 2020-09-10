@@ -4,9 +4,8 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-namespace {
 
-const Descriptor::Pool::Descriptor kPrimary{
+const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
   1024u,
   {
     // Note: It is OK for the sum of descriptors per type, below, to exceed
@@ -45,16 +44,11 @@ const Descriptor::Pool::Descriptor kPrimary{
   },
 };
 
-} // namespace
-
-Descriptor::Pool::Pool(const GPU& gpu)
-  : cache(Factory(gpu)),
-    primary(cache.retrieve(kPrimary)) {
-}
-
-Descriptor::Pool::Factory::Factory(const VkDevice device)
-  : device_(device) {
-    TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
+Descriptor::Pool::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 }
 
 typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
@@ -70,7 +64,14 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
 
   VkDescriptorPool descriptor_pool{};
   VK_CHECK(vkCreateDescriptorPool(
-      device_, &descriptor_pool_create_info, nullptr, &descriptor_pool));
+      device_,
+      &descriptor_pool_create_info,
+      nullptr,
+      &descriptor_pool));
+
+  TORCH_CHECK(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
 
   return Handle{
     descriptor_pool,
@@ -78,28 +79,36 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
   };
 }
 
-void Descriptor::Pool::Factory::purge(
+void Descriptor::Pool::purge(
+    const VkDevice device,
     const VkDescriptorPool descriptor_pool) {
-  TORCH_INTERNAL_ASSERT(descriptor_pool, "Invalid Vulkan descriptor pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 
-  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool, 0u));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
+
+  VK_CHECK(vkResetDescriptorPool(device, descriptor_pool, 0u));
 }
 
-// Descriptor::Set::Set(
-//     const VkDevice device,
-//     const VkDescriptorPool descriptor_pool)
-//   : device_(device),
-//     descriptor_pool_(descriptor_pool) {
-//   TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
-//   TORCH_INTERNAL_ASSERT(descriptor_pool_, "Invalid Vulkan descriptor pool!");
-// }
+Descriptor::Factory::Factory(
+    const VkDevice device,
+    const VkDescriptorPool descriptor_pool)
+  : device_(device),
+    descriptor_pool_(descriptor_pool) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 
-VkDescriptorSet Descriptor::Set::allocate(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
+}
+
+VkDescriptorSet Descriptor::Factory::allocate(
     const VkDescriptorSetLayout descriptor_set_layout) {
-  TORCH_INTERNAL_ASSERT(
-      descriptor_set_layout,
-      "Invalid Vulkan descriptor set layout!");
-
   const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
     nullptr,
@@ -110,9 +119,19 @@ VkDescriptorSet Descriptor::Set::allocate(
 
   VkDescriptorSet descriptor_set{};
   VK_CHECK(vkAllocateDescriptorSets(
-      device_, &descriptor_set_allocate_info, &descriptor_set));
+      device_,
+      &descriptor_set_allocate_info,
+      &descriptor_set));
+
+  TORCH_CHECK(
+      descriptor_set,
+      "Invalid Vulkan descriptor set!");
 
   return descriptor_set;
+}
+
+void Descriptor::Factory::purge() {
+  Pool::purge(device_, descriptor_pool_);
 }
 
 } // namespace api

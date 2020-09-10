@@ -7,12 +7,14 @@ namespace api {
 
 Pipeline::Layout::Factory::Factory(const GPU& gpu)
  : device_(gpu.device) {
-  TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
 }
 
 typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor.descriptor_set_layout,
       "Invalid Vulkan descriptor set layout!");
 
@@ -28,7 +30,14 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
 
   VkPipelineLayout pipeline_layout{};
   VK_CHECK(vkCreatePipelineLayout(
-      device_, &pipeline_layout_create_info, nullptr, &pipeline_layout));
+      device_,
+      &pipeline_layout_create_info,
+      nullptr,
+      &pipeline_layout));
+
+  TORCH_CHECK(
+      pipeline_layout,
+      "Invalid Vulkan pipeline layout!");
 
   return Handle{
     pipeline_layout,
@@ -39,7 +48,9 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
 namespace {
 
 VkPipelineCache create_pipeline_cache(const VkDevice device) {
-  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 
   const VkPipelineCacheCreateInfo pipeline_cache_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
@@ -51,7 +62,14 @@ VkPipelineCache create_pipeline_cache(const VkDevice device) {
 
   VkPipelineCache pipeline_cache{};
   VK_CHECK(vkCreatePipelineCache(
-      device, &pipeline_cache_create_info, nullptr, &pipeline_cache));
+      device,
+      &pipeline_cache_create_info,
+      nullptr,
+      &pipeline_cache));
+
+  TORCH_CHECK(
+      pipeline_cache,
+      "Invalid Vulkan pipeline cache!");
 
   return pipeline_cache;
 }
@@ -63,15 +81,22 @@ Pipeline::Factory::Factory(const GPU& gpu)
    pipeline_cache_(
       create_pipeline_cache(device_),
       VK_DELETER(PipelineCache)(device_)) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      pipeline_cache_,
+      "Invalid Vulkan pipeline cache!");
 }
 
 typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     const Descriptor& descriptor) const {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor.pipeline_layout,
       "Invalid Vulkan pipeline layout!");
 
-  TORCH_INTERNAL_ASSERT(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor.shader_module,
       "Invalid Vulkan shader module!");
 
@@ -136,6 +161,10 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
       &compute_pipeline_create_info,
       nullptr,
       &pipeline));
+
+  TORCH_CHECK(
+      pipeline,
+      "Invalid Vulkan pipeline!");
 
   return Handle{
     pipeline,
