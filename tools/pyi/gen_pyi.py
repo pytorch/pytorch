@@ -680,6 +680,7 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

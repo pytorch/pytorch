@@ -9,6 +9,7 @@ from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
 from .conv import Conv1d, Conv2d, Conv3d
 from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
+from .embedding_ops import Embedding, EmbeddingBag
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -100,6 +101,8 @@ __all__ = [
     'InstanceNorm1d',
     'InstanceNorm2d',
     'InstanceNorm3d',
+    'Embedding',
+    'EmbeddingBag',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',
