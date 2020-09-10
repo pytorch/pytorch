@@ -149,7 +149,7 @@ void prepare_and_call_rpc_op(
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
       // throw error if future hasError
-      throw std::runtime_error(futureIValuePtr->error()->what());
+      throw std::runtime_error(futureIValuePtr->tryRetrieveErrorMessage());
     } else {
       auto res = futureIValuePtr->value();
       // Push output to the stack.
