@@ -16,7 +16,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop, is_ignored_fn, is_static_fn
+from torch._jit_internal import SourceContext, should_drop, is_static_fn
 import torch.jit.annotations
 
 # Borrowed from cPython implementation
