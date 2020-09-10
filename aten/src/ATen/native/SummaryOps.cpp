@@ -53,6 +53,13 @@ Tensor _bincount_cpu_template(
 }
 
 ///////////////// histogram /////////////////
+template <typename input_t>
+inline int64_t getbin(input_t x, input_t min, input_t max, int64_t bins) {
+  if (x == max)
+    return bins - 1;
+  return (int64_t)((x - min) / (max - min) * bins);
+}
+
 template <typename input_t, typename weights_t>
 Tensor _histogram_cpu_template_uniformbins(
     const Tensor& self,
@@ -82,17 +89,34 @@ Tensor _histogram_cpu_template_uniformbins(
       maxval,
       "] is not finite"); 
   TORCH_CHECK(minval < maxval, "max must be larger than min");
-  input_t scale = (input_t)nbins / (maxval - minval);
-  Tensor index = ((self - minval) * scale+1).to(kLong);
-  index = index.where(self != maxval, index-1); //The uppermost bin is closed at both sides
-  index.clamp_(0, nbins + 1);
-  Tensor hist =
-      _bincount_cpu_template<int64_t,weights_t>(index, weights, nbins + 1); // A workaround, since histc doesn't take
-                                 // weights, we'll instead use bincount
 
-  hist = hist.slice(0, 1, nbins+1);
+  bool has_weights = weights.defined();
+  TORCH_CHECK(
+      !has_weights || weights.size(0) == self.size(0),
+      "input and weights should have the same length");
+  
+  Tensor output;
+  int64_t self_size = self.size(0);
 
-  return hist;
+  const input_t* self_p = self.data_ptr<input_t>();
+  if (has_weights) {
+    output = native::zeros({nbins}, weights.options());
+    weights_t* output_p = output.data_ptr<weights_t>();
+    const weights_t* weights_p = weights.data_ptr<weights_t>();
+    for (int64_t i = 0; i < self_size; i++) {
+      if (self_p[i] >= minval && self_p[i] <= maxval)
+        output_p[getbin(self_p[i],minval,maxval,nbins)] += weights_p[i];
+    }
+  } else {
+    output = native::zeros({nbins}, kLong);
+    int64_t* output_p = output.data_ptr<int64_t>();
+    for (int64_t i = 0; i < self_size; i++) {
+      if (self_p[i] >= minval && self_p[i] <= maxval)
+        output_p[getbin(self_p[i], minval, maxval, nbins)] += 1L;
+    }
+  }
+
+  return output;
 
 }
 
