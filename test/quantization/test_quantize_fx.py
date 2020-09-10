@@ -248,7 +248,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_dict_output(self):
-        """ Make quantization runs for models with dictionary output
+        """ Make sure quantization runs for models with dictionary output
         """
         class M(torch.nn.Module):
             def __init__(self):
