@@ -22,6 +22,19 @@ if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
 elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
   build_script='/builder/manywheel/build_rocm.sh'
 else
+  if [[ -n "$DESIRED_PYTHON" && "$DESIRED_PYTHON" != cp* ]]; then
+      if [[ "$DESIRED_PYTHON" == '2.7mu' ]]; then
+        DESIRED_PYTHON='cp27-cp27mu'
+      elif [[ "$DESIRED_PYTHON" == '3.8m' ]]; then
+        DESIRED_PYTHON='cp38-cp38'
+      else
+        python_nodot="$(echo $DESIRED_PYTHON | tr -d m.u)"
+        DESIRED_PYTHON="cp${python_nodot}-cp${python_nodot}m"
+      fi
+  fi
+  py_majmin="${DESIRED_PYTHON:2:1}.${DESIRED_PYTHON:3:1}"
+  pydir="/opt/python/$DESIRED_PYTHON"
+  export PATH="$pydir/bin:$PATH"
   build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
