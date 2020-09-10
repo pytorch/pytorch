@@ -264,3 +264,5 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+out/

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+GIT_ROOT_DIR=$(git rev-parse --show-toplevel)
+
 echo "RUNNING ON $(uname -a) WITH $(nproc) CPUS AND $(free -m)"
 set -eux -o pipefail
 source /env
@@ -11,14 +13,12 @@ export MAX_JOBS=18
 
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-  build_script='conda/build_pytorch.sh'
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  build_script='manywheel/build_cpu.sh'
+  build_script='/builder/conda/build_pytorch.sh'
 elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
-  build_script='manywheel/build_rocm.sh'
+  build_script='/builder/manywheel/build_rocm.sh'
 else
-  build_script='manywheel/build.sh'
+  build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
 # Build the package
-SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "/builder/$build_script"
+SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "$build_script"
