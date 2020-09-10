@@ -5,14 +5,11 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Command::Pool::Pool(const VkDevice device, const Descriptor& primary)
-  : cache(Factory(device)),
-    primary(cache.retrieve(primary)) {
-}
-
 Command::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
-    TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        device_,
+        "Invalid Vulkan device!");
 }
 
 typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
@@ -26,7 +23,14 @@ typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
 
   VkCommandPool command_pool{};
   VK_CHECK(vkCreateCommandPool(
-      device_, &command_pool_create_info, nullptr, &command_pool));
+      device_,
+      &command_pool_create_info,
+      nullptr,
+      &command_pool));
+
+  TORCH_CHECK(
+      command_pool,
+      "Invalid Vulkan command pool!");
 
   return Handle{
     command_pool,
@@ -34,11 +38,18 @@ typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
   };
 }
 
-void Command::Pool::Factory::purge(
+void Command::Pool::purge(
+    const VkDevice device,
     const VkCommandPool command_pool) {
-  TORCH_INTERNAL_ASSERT(command_pool, "Invalid Vulkan command pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 
-  VK_CHECK(vkResetCommandPool(device_, command_pool, 0u));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_pool,
+      "Invalid Vulkan command pool!");
+
+  VK_CHECK(vkResetCommandPool(device, command_pool, 0u));
 }
 
 namespace {
@@ -46,8 +57,13 @@ namespace {
 VkCommandBuffer allocate_command_buffer(
     const VkDevice device,
     const VkCommandPool command_pool) {
-  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
-  TORCH_INTERNAL_ASSERT(command_pool, "Invalid Vulkan command pool!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_pool,
+      "Invalid Vulkan command pool!");
 
   const VkCommandBufferAllocateInfo command_buffer_allocate_info{
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -59,7 +75,13 @@ VkCommandBuffer allocate_command_buffer(
 
   VkCommandBuffer command_buffer{};
   VK_CHECK(vkAllocateCommandBuffers(
-      device, &command_buffer_allocate_info, &command_buffer));
+      device,
+      &command_buffer_allocate_info,
+      &command_buffer));
+
+  TORCH_CHECK(
+      command_buffer,
+      "Invalid Vulkan command buffer!");
 
   return command_buffer;
 }
@@ -68,6 +90,9 @@ VkCommandBuffer allocate_command_buffer(
 
 Command::Buffer::Buffer(const VkDevice device, const VkCommandPool command_pool)
   : command_buffer_(allocate_command_buffer(device, command_pool)) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer!");
 }
 
 void Command::Buffer::Buffer::begin() {
@@ -78,7 +103,9 @@ void Command::Buffer::Buffer::begin() {
     nullptr,
   };
 
-  VK_CHECK(vkBeginCommandBuffer(command_buffer_, &command_buffer_begin_info));
+  VK_CHECK(vkBeginCommandBuffer(
+      command_buffer_,
+      &command_buffer_begin_info));
 }
 
 void Command::Buffer::Buffer::end() {
@@ -86,16 +113,26 @@ void Command::Buffer::Buffer::end() {
 }
 
 void Command::Buffer::bind(const VkPipeline pipeline) {
-  TORCH_INTERNAL_ASSERT(pipeline, "Invalid Vulkan pipeline!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      pipeline,
+      "Invalid Vulkan pipeline!");
 
-  vkCmdBindPipeline(command_buffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdBindPipeline(
+      command_buffer_,
+      VK_PIPELINE_BIND_POINT_COMPUTE,
+      pipeline);
 }
 
 void Command::Buffer::bind(
     const VkPipelineLayout pipeline_layout,
     const VkDescriptorSet descriptor_set) {
-  TORCH_INTERNAL_ASSERT(pipeline_layout, "Invalid Vulkan pipeline layout!");
-  TORCH_INTERNAL_ASSERT(descriptor_set, "Invalid Vulkan descriptor set!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      pipeline_layout,
+      "Invalid Vulkan pipeline layout!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      descriptor_set,
+      "Invalid Vulkan descriptor set!");
 
   vkCmdBindDescriptorSets(
       command_buffer_,

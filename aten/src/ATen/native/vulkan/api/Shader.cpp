@@ -11,7 +11,9 @@ namespace api {
 
 Shader::Layout::Factory::Factory(const VkDevice device)
   : device_(device) {
-    TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        device_,
+        "Invalid Vulkan device!");
 }
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
@@ -31,6 +33,10 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
       nullptr,
       &descriptor_set_layout));
 
+  TORCH_CHECK(
+      descriptor_set_layout,
+      "Invalid Vulkan descriptor set layout!");
+
   return Handle{
     descriptor_set_layout,
     Deleter(device_),
@@ -39,6 +45,8 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
 
 Shader::Descriptor::Descriptor(const char* const glsl)
  : type(Type::Source) {
+  TORCH_CHECK(glsl, "Invalid shader source code!");
+
   shader.source = {
     glsl,
     0u,
@@ -47,6 +55,8 @@ Shader::Descriptor::Descriptor(const char* const glsl)
 
 Shader::Descriptor::Descriptor(const uint32_t* const code, const uint32_t size)
  : type(Type::Binary) {
+  TORCH_CHECK(code && (0u != size), "Invalid shader binary!");
+
   shader.binary = {
     code,
     size,
@@ -72,6 +82,10 @@ struct Shader::Factory::Compiler final {
   }
 
   std::vector<uint32_t> compile(const char* const source) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        source,
+        "Invalid shader source code!");
+
     const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
         source,
         ::strlen(source),
@@ -143,7 +157,14 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
 
   VkShaderModule shader_module{};
   VK_CHECK(vkCreateShaderModule(
-      device_, &shader_module_create_info, nullptr, &shader_module));
+      device_,
+      &shader_module_create_info,
+      nullptr,
+      &shader_module));
+
+  TORCH_CHECK(
+      shader_module,
+      "Invalid Vulkan shader module!");
 
   return Handle{
     shader_module,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -17,6 +18,10 @@ namespace c10d {
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
+
+// Environment variable which controls whether or not we perform Async Error
+// Handling with NCCL.
+constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -82,6 +87,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Synchronize streams by blocking each on the NCCL stream
     void synchronizeStreams();
 
+    // Helper function used in CUDA Stream callbacks to complete WorkNCCL
+    // objects and throw exceptions when neeeded.
+    void handleNCCLGuard();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
@@ -89,6 +98,13 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Get a Future object that will be marked as completed internally.
     // It actually returns a FutureNCCL object which is a sub class Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
+    // Helper function that sets an exception_ptr on the WorkNCCL object.
+    void setException(std::exception_ptr exception_ptr);
+
+    // Helper function that returns True if the WorkNCCL object has timed out
+    // and False otherwise.
+    bool timedOut();
 
    protected:
     // The cached list of CUDA devices to operate on
@@ -478,8 +494,15 @@ class ProcessGroupNCCL : public ProcessGroup {
   // accordingly.
   void parseNcclBlockingWait();
 
+  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets asyncErrorHandling_
+  // accordingly.
+  void parseNcclAsyncErrorHandling();
+
+  void workCleanupLoop();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
+  static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
   std::shared_ptr<Store> store_;
@@ -521,14 +544,29 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
-  // Whether or not we should terminate the watchdog thread.
-  std::atomic<bool> terminateWatchdog_;
+  // Whether or not we should terminate the watchdog and workCleanup threads.
+  std::atomic<bool> terminateProcessGroup_;
 
   // Condition variable to control how long the watchdog thread waits.
   std::condition_variable watchdogCV_;
 
   // Mutex for watchdog.
   std::mutex watchdogCVMutex_;
+
+  // Thread that removes NCCL Work upon timeout
+  std::thread workCleanupThread_;
+
+  // Mutex to Guard workList_
+  std::mutex workListMutex_;
+
+  // Condition Variable for timeout thread sleep
+  std::condition_variable workListCV_;
+
+  // Vector to Store WorkNCCL pointers
+  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workList_;
+
+  // Add Work Pointer to workVector
+  void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA steams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
@@ -563,6 +601,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
+
+  // Whether ot not the workCleanupThread is used to perform async error
+  // handling.
+  bool asyncErrorHandling_ = false;
 
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
