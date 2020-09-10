@@ -110,7 +110,7 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
     case ScalarType::Short:
       return "short";
     case ScalarType::Long:
-      return "long";
+      return "long long";
     default:
       return dtype.ToCppString();
   }
@@ -198,7 +198,7 @@ void CudaPrinter::visit(const Cast* v) {
     return;
   }
 
-  os() << cudaDtypeCppString(v->dtype());
+  os() << "(" << cudaDtypeCppString(v->dtype()) << ")";
   os() << "(";
   v->src_value()->accept(this);
   os() << ")";
@@ -220,6 +220,9 @@ void CudaPrinter::visit(const Intrinsics* v) {
 
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
+  }
+  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
+    func_name = "abs";
   }
 
   os() << func_name << "(";
