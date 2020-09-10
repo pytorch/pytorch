@@ -6851,6 +6851,17 @@ a")
                     with self.assertRaisesRegex(RuntimeError, 'division by 0'):
                         foo(i, j)
 
+    # Testing bitwise shorthand aug assignment
+    def test_bool_augassign(self):
+        @torch.jit.script
+        def func(a:bool, b:bool):
+            a |= b
+            return a
+        self.assertEqual(func(True, False), True | False)
+        self.assertEqual(func(True, True), True | True)
+        self.assertEqual(func(False, False), False | False)
+        self.assertEqual(func(False, True), False | True)
+
     def test_number_augassign(self):
         def func():
             z = 1
