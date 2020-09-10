@@ -259,7 +259,9 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half)),
     UnaryUfuncInfo('exp2',
                    ref=np.exp2,
-                   dtypes=floating_types_and(torch.half)),
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,),
 ]
 
 # Common operator groupings
