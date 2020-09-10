@@ -35,6 +35,7 @@ else
   py_majmin="${DESIRED_PYTHON:2:1}.${DESIRED_PYTHON:3:1}"
   pydir="/opt/python/$DESIRED_PYTHON"
   export PATH="$pydir/bin:$PATH"
+  git submodule update --init --recursive
   build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
