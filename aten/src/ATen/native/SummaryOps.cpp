@@ -120,29 +120,6 @@ Tensor _histogram_cpu_template_uniformbins(
 
 }
 
-template <typename input_t, typename weights_t>
-Tensor _histogram_cpu_template_custombins(
-    const Tensor& self,
-    const Tensor& bins,
-    const Tensor& weights,
-    bool density) {
-  TORCH_CHECK(bins.dim() == 1, "bins must be 1d, when a tensor");
-  TORCH_CHECK(
-      at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1)).item<bool>(),
-      "bins must increase monotonically");
-  input_t maxval = bins[-1].item<input_t>();
-  int64_t nbins = bins.numel() - 1L;
-  Tensor index = searchsorted_cpu(bins,self,false,true);
-  index.clamp_(0, nbins + 2L);
-  index = index.where(self != maxval, index - 1L);
-  Tensor hist = _bincount_cpu_template<int64_t, weights_t>(
-      index, weights, nbins + 2L); 
-
-  hist = hist.slice(0, 1, -1);
-
-  return hist;
-}
-
 } // namespace
 
 Tensor _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
@@ -208,21 +185,18 @@ Tensor _histogram_cpu(
     const Tensor& weights,
     bool density) {
 
-    auto hist = AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cpu_custombins", [&] {
-        const auto scalar = weights.scalar_type();
-        if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-          return _histogram_cpu_template_custombins<scalar_t, float>(
-              self.flatten(0).contiguous(),
-              bins,
-              weights.contiguous(),
-              density);
-        return _histogram_cpu_template_custombins<scalar_t, double>(
-            self.flatten(0).contiguous(),
-            bins,
-            weights.contiguous().to(kDouble),
-            density);
-      });
+  TORCH_CHECK(bins.dim() == 1, "bins must be 1d, when a tensor");
+  TORCH_CHECK(
+      at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
+          .item<bool>(),
+      "bins must increase monotonically");
+  int64_t nbins = bins.size(0) - 1L;
+  Tensor index = searchsorted_cpu(bins, self.flatten(0), false, true);
+  index.clamp_(0, nbins + 2L);
+  index = index.where(self != bins[-1], index - 1L);
+  Tensor hist = bincount(index, weights, nbins + 2L);
+
+  hist = hist.slice(0, 1, -1);
 
   if (density) { // Compute the density
     hist = hist.to(kDouble);
