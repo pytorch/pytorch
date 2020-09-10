@@ -19,10 +19,11 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 OP_BENCHMARK_ROOT = os.path.split(os.path.split(ROOT)[0])[0]
 
 HEAD = "head"
-VERSIONS = (HEAD, "1.6", "1.5", "1.4")
+VERSIONS = (HEAD, "1.6", "1.5", "1.4", "1.3")
 ENV_TEMPLATE = "historic_microbenchmark_{version}"
 
 EXCLUDE = [
+    "channel_shuffle_test.py",
     "hardsigmoid_test.py",
     "hardswish_test.py",
     "q.+_test.py",
@@ -31,7 +32,7 @@ EXCLUDE = [
 Task = collections.namedtuple("Task", ("version", "test", "num_cores", "device", "tag_filter"))
 
 CPU_QUEUE = queue.Queue()
-for i in range(0, multiprocessing.cpu_count() - 6, 4):
+for i in range(0, multiprocessing.cpu_count() - 4, 2):
     CPU_QUEUE.put(i)
 
 GPU_QUEUE = queue.Queue()
@@ -45,12 +46,14 @@ def make_env(version):
     assert version in VERSIONS
     env_name = ENV_TEMPLATE.format(version=version)
 
+    nvcc_install = "conda install -y -c nvidia nvcc_linux-64"
     cmd = textwrap.dedent(f"""
         conda env remove --name {env_name} 2> /dev/null || true
         conda create --no-default-packages -yn {env_name} python=3
         source activate {env_name}
         conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi hypothesis
         conda install -y -c pytorch magma-cuda102
+        {nvcc_install if version in ('1.3', '1.4') else ''}
     """).strip().replace("\n", " && ")
 
     print(f"Making clean env: {env_name}")
@@ -93,6 +96,38 @@ def make_env(version):
         assert not result.returncode
 
 
+def count_benchmarks(test: str):
+    cmd = (
+        f"cd {OP_BENCHMARK_ROOT} && "
+        f"source activate {ENV_TEMPLATE.format(version=HEAD)} && "
+        f"python -m {test} --list_tests"
+    )
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={
+            "CUDA_VISIBLE_DEVICES": "",
+            "PATH": os.getenv("PATH"),
+        },
+    )
+    assert not result.returncode
+    count, active = 0, False
+    for l in result.stdout.decode("utf-8").splitlines():
+        l = l.strip()
+        if l.startswith("# List of tests:"):
+            active = True
+            continue
+
+        if not l:
+            active = False
+            continue
+
+        count += 1
+    return count
+
+
 def launch_subtask(t: Task):
     cpu = None
     gpu = None
@@ -124,10 +159,18 @@ def launch_subtask(t: Task):
             RESULT_QUEUE.put((t, result.stdout.decode("utf-8")))
         else:
             RESULT_QUEUE.put((None, None))
+            stdout = result.stdout.decode("utf-8")
+            stderr = result.stderr.decode("utf-8")
+            def condense(s: str):
+                lines = s.splitlines()
+                if len(lines) > 20:
+                    lines = lines[:10] + ["..."] + lines[-10:]
+                return "\n".join(lines)
             print(
                 f"Run failed: {t}\n"
-                f"stdout:\n{result.stdout.decode('utf-8')}\n"
-                f"stderr:\n{result.stderr.decode('utf-8')}")
+                f"Return code: {result.returncode}"
+                f"stdout:\n{condense(stdout)}\n"
+                f"stderr:\n{condense(stderr)}")
 
     except KeyboardInterrupt:
         pass
@@ -193,19 +236,23 @@ def run():
             continue
         tests.append(f"pt.{i[:-3]}")
 
+    # By pre-sorting based on the number of test cases, we can prevent
+    # stragglers and reduce the overall test time.
+    print("Sorting tests by the number of cases.")
+    tests.sort(key=count_benchmarks, reverse=True)
+
     cpu_tasks, gpu_tasks = [], []
-    for v in VERSIONS:
-        for test in tests:
+    for test in tests:
+        for v in VERSIONS:
             cpu_tasks.extend([
                 Task(v, test, 1, "cpu", "short"),
                 Task(v, test, 1, "cpu", "long"),
                 Task(v, test, 2, "cpu", "short"),
                 Task(v, test, 2, "cpu", "long"),
-                Task(v, test, 4, "cpu", "short"),
-                Task(v, test, 4, "cpu", "long"),
             ])
             gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
+    print("Beginning run:")
     gpu_pool = multiprocessing.dummy.Pool(GPU_QUEUE.qsize())
     cpu_pool = multiprocessing.dummy.Pool(CPU_QUEUE.qsize())
 
@@ -220,7 +267,7 @@ def run():
         print(f"\r{i} / {n_tasks}", end="")
     print("\r")
 
-    # Snapshot results.
+    print("Snapshotting results.")
     with open("/tmp/microbenchmarks.pkl", "wb") as f:
         pickle.dump(results, f)
 
@@ -228,6 +275,7 @@ def run():
     cpu_work.wait()
 
     parsed_results = process(results)
+    print("Snapshotting parsed results.")
     with open("/tmp/microbenchmarks_parsed.pkl", "wb") as f:
         pickle.dump(parsed_results, f)
 
@@ -235,6 +283,8 @@ def run():
 def main():
     # for v in VERSIONS:
     #     make_env(v)
+    # make_env("1.3")
+    # make_env("1.4")
     run()
 
 

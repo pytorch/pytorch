@@ -29,7 +29,7 @@ class DiagBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dim, M, N, diagonal, out, device):
         self.input = torch.rand(M, N, device=device) if dim == 2 else torch.rand(M, device=device)
         self.diagonal = diagonal
-        self.out = torch.tensor((),) if out else None
+        self.out = torch.tensor((), device=device) if out else None
         self.set_module_name('diag')
 
     def forward(self):
