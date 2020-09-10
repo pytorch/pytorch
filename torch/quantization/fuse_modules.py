@@ -5,10 +5,9 @@ import copy
 import torch.nn as nn
 
 from .fuser_method_mappings import get_fuser_method
-from .fuser_method_mappings import (
-    fuse_conv_bn,  # noqa: F401
-    fuse_conv_bn_relu  # noqa: F401
-)
+# for backward compatiblity
+from .fuser_method_mappings import fuse_conv_bn  # noqa: F401
+from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F40
 
 from typing import List, Optional
 
