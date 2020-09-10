@@ -131,6 +131,7 @@ def count_benchmarks(test: str):
 def launch_subtask(t: Task):
     cpu = None
     gpu = None
+    published_result = (None, None)
     try:
         cpu = CPU_QUEUE.get()
         if t.device == "cuda":
@@ -156,9 +157,8 @@ def launch_subtask(t: Task):
             },
         )
         if not result.returncode:
-            RESULT_QUEUE.put((t, result.stdout.decode("utf-8")))
+            published_result = (t, result.stdout.decode("utf-8"))
         else:
-            RESULT_QUEUE.put((None, None))
             stdout = result.stdout.decode("utf-8")
             stderr = result.stderr.decode("utf-8")
             def condense(s: str):
@@ -175,7 +175,13 @@ def launch_subtask(t: Task):
     except KeyboardInterrupt:
         pass
 
+    except Exception as e:
+        print(f"Unknown exception: {t}")
+
     finally:
+        # We must always produce a result even if the call fails so that the
+        # downstream consumer does not hang. (Failure is a valid result.)
+        RESULT_QUEUE.put(published_result)
         if cpu is not None:
             CPU_QUEUE.put(cpu)
         if gpu is not None:
