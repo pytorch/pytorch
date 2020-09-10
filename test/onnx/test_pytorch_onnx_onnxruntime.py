@@ -1083,7 +1083,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SizeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  #  x.stride() not scriptable
+    @disableScriptTest()  # x.stride() not scriptable
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2744,7 +2744,7 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):
-            def forward(self, input, split_sizes:List[int]):
+            def forward(self, input, split_sizes: List[int]):
                 out = []
                 split_list: List[torch.Tensor] = input.split(split_sizes)
 
@@ -3537,7 +3537,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  #  prim_uninitialized
+    @disableScriptTest()  # prim_uninitialized
     def test_im2col(self):
         class Unfold(torch.nn.Module):
             def forward(self, input):
@@ -4474,8 +4474,7 @@ def setup_rnn_tests():
                 bidirectional_opts,
                 initial_state_opts,
                 variable_length_opts,
-                dropout_opts,
-            ):
+                dropout_opts,):
 
         for base, name, extra_kwargs in (
                 ('elman', 'elman_relu', {'nonlinearity': u'relu'}),
