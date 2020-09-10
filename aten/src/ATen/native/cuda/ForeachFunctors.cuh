@@ -119,10 +119,11 @@ struct BinaryOpScalarFunctor {
 };
 
 template<typename T, template<class> class Op>
-struct BinaryOpListFunctor_ {
+struct BinaryOpListAlphaFunctor_ {
     __device__ void operator() (
         int chunk_size,
-        TensorListMetadata<2>& tl) {
+        TensorListMetadata<2>& tl, 
+        T alpha) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -146,7 +147,7 @@ struct BinaryOpListFunctor_ {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
                     // store
                     load_store(x, r_x, i_start , 0);
@@ -166,7 +167,7 @@ struct BinaryOpListFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -180,10 +181,11 @@ struct BinaryOpListFunctor_ {
 };
 
 template<typename T, template<class> class Op>
-struct BinaryOpListFunctor {
+struct BinaryOpListAlphaFunctor {
     __device__ void operator() (
         int chunk_size,
-        TensorListMetadata<3>& tl) {
+        TensorListMetadata<3>& tl,
+        T alpha) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -210,7 +212,7 @@ struct BinaryOpListFunctor {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
                     // store
                     load_store(out, r_x, i_start , 0);
@@ -230,7 +232,7 @@ struct BinaryOpListFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
