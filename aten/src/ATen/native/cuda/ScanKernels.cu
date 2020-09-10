@@ -460,31 +460,8 @@ __global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, func_
    *out = binary_op(*a, *b);
 }
 
-#ifdef __HIP_PLATFORM_HCC__
-template<typename T>
-struct ROCm_Bug {
-  char bytes[sizeof(T)];
-};
-#endif
-
 template<typename scalar_t, typename BinaryFunction>
 void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
-  #ifdef __HIP_PLATFORM_HCC__
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  using rocm_bug_t = ROCm_Bug<scalar_t>;
-  thrust::device_ptr<rocm_bug_t> src_data(reinterpret_cast<rocm_bug_t *>(self.data_ptr<scalar_t>()));
-  thrust::device_ptr<rocm_bug_t> dst_data(reinterpret_cast<rocm_bug_t *>(result.data_ptr<scalar_t>()));
-  ptrdiff_t size = self.numel();
-  auto rocm_bug_binary_op = [=]C10_HOST_DEVICE(const rocm_bug_t a, const rocm_bug_t b) -> rocm_bug_t {
-    auto result = binary_op((*reinterpret_cast<const scalar_t*>(&a)),
-    (*reinterpret_cast<const scalar_t*>(&b)));
-    return *reinterpret_cast<rocm_bug_t *>(&result);
-  };
-  thrust::inclusive_scan(
-      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
-      src_data, src_data + size, dst_data,
-      rocm_bug_binary_op);
-  #else
   int64_t size = self.numel();
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -533,8 +510,6 @@ void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, Binar
       }
     }
   }
-
-#endif
 }
 
 template<typename scalar_t, typename BinaryFunction>
