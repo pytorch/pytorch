@@ -151,7 +151,6 @@ class UnaryUfuncInfo(OpInfo):
       - they typically have method and inplace variants
       - they typically support the out kwarg
       - they typically have NumPy or SciPy references
-
     See NumPy's universal function documentation
     (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
     about the concept of ufuncs.
@@ -418,6 +417,19 @@ def method_tests():
         ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
+        ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
+        ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
+        ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
+        ('div', (S, 1, S), (torch.rand(M, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_all', (True,)),
+        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar', (True,)),
+        ('div', (S, S, S), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_rhs', (True,)),
+        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
+        ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
+        # ('__rdiv__', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant',
+        #     (True, [], ['aten::mul', 'aten::reciprocal'])),
+        ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
+        # ('__rdiv__', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant',
+        #     (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs', (True,)),
         ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
@@ -541,8 +553,6 @@ def method_tests():
         # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
-        ('asin', torch.randn(S, S, S, dtype=torch.cdouble), NO_ARGS, 'complex', (True,)),
-        ('acos', torch.randn(S, S, S, dtype=torch.cdouble), NO_ARGS, 'complex', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
         ('atan', (), NO_ARGS, 'scalar', (True,)),
         ('atan2', (S, S, S), ((S, S, S),)),
@@ -1489,6 +1499,7 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_slogdet_batched_symmetric',
     'test_cdist',
 }
+
 
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
