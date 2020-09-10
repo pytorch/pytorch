@@ -171,7 +171,7 @@ class QRelu6 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("relu6", TORCH_FN(QRelu6::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::relu6"), TORCH_FN(QRelu6::run));
 }
 
 } // namespace

@@ -451,14 +451,12 @@ class QEmbedding final {
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   // Function that works on TorchBind packed weights.
-  m.impl("embedding_bag_byte", TORCH_FN(QEmbeddingBag<8>::run));
-  m.impl("embedding_byte", TORCH_FN(QEmbedding<8>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte"), TORCH_FN(QEmbeddingBag<8>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_byte"), TORCH_FN(QEmbedding<8>::run));
 
   // Functions that work on at::Tensor packed weight.
-  m.impl(
-      "embedding_bag_byte_rowwise_offsets", embedding_bag_byte_rowwise_offsets);
-  m.impl(
-      "embedding_bag_4bit_rowwise_offsets", embedding_bag_4bit_rowwise_offsets);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_rowwise_offsets"), embedding_bag_byte_rowwise_offsets);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_rowwise_offsets"), embedding_bag_4bit_rowwise_offsets);
 }
 } // namespace
 } // namespace native
