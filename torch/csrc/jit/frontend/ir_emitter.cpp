@@ -943,9 +943,23 @@ struct to_ir {
       const SourceRange& val_range = subscript.value().range();
       Value* idx = emitExpr(subscript_exprs[0]);
       Value* val = sv->asValue(val_range, method);
-      auto node = graph->create(aten::Delete, {val, idx}, 0)
-                      ->setSourceRange(stmt.range());
-      graph->insertNode(node);
+
+      // If val is a class instance, this is a method call to a type-specific
+      // implementation of del defined in a __delitem__ method.
+      if (auto cls = val->type()->cast<ClassType>()) {
+        if (!cls->findMethod("__delitem__")) {
+          throw ErrorReport(stmt.range())
+              << "Class does not define __delitem__";
+        }
+
+        // Use MethodValue to call the method to handle recursion.
+        MethodValue(val, "__delitem__")
+            .call(stmt.range(), method, {idx}, {}, 0);
+      } else {
+        auto node = graph->create(aten::Delete, {val, idx}, 0)
+                        ->setSourceRange(stmt.range());
+        graph->insertNode(node);
+      }
     } else if (stmt.expr().kind() == TK_VAR) {
       Var var(stmt.expr());
       environment_stack->removeVar(var.name(), /*check_if_removed=*/true);

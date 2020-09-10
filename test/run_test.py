@@ -217,7 +217,7 @@ def get_executable_command(options, allow_pytest):
 
 
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
-    unittest_args = options.additional_unittest_args
+    unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append('--verbose')
     if test_module in RUN_PARALLEL_BLOCKLIST:
