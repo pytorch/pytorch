@@ -4656,6 +4656,15 @@ computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
 not exist. If all values in a reduced row are ``NaN`` then the quantiles for
 that reduction will be ``NaN``. See the documentation for :func:`torch.quantile.
 
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    {dim}
+    {keepdim}
+
+Keyword arguments:
+    {out}
+
 Example::
 
     >>> t = torch.tensor([float('nan'), 1, 2])
