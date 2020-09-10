@@ -11,9 +11,17 @@ VmaAllocator create_allocator(
     const VkInstance instance,
     const VkPhysicalDevice physical_device,
     const VkDevice device) {
-  TORCH_INTERNAL_ASSERT(instance, "Invalid Vulkan instance!");
-  TORCH_INTERNAL_ASSERT(physical_device, "Invalid Vulkan physical device!");
-  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      instance,
+      "Invalid Vulkan instance!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 
   const VmaAllocatorCreateInfo allocator_create_info{
     0u,
@@ -32,6 +40,7 @@ VmaAllocator create_allocator(
 
   VmaAllocator allocator{};
   VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator));
+  TORCH_CHECK(allocator, "Invalid VMA allocator!");
 
   return allocator;
 }
@@ -51,6 +60,7 @@ VmaAllocationCreateInfo create_allocation_create_info(
 }
 
 void release_buffer(const Resource::Buffer& buffer) {
+  // Safe to pass null as buffer or allocation.
   vmaDestroyBuffer(
       buffer.memory.allocator,
       buffer.handle,
@@ -64,6 +74,7 @@ void release_image(const Resource::Image& image) {
     vkDestroyImageView(allocator_info.device, image.view, nullptr);
   }
 
+  // Safe to pass null as image or allocation.
   vmaDestroyImage(
       image.memory.allocator,
       image.handle,
@@ -92,6 +103,13 @@ Resource::Memory::Scope::Scope(
   : allocator_(allocator),
     allocation_(allocation),
     access_(access) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocator,
+      "Invalid VMA allocator!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocation,
+      "Invalid VMA allocation!");
 }
 
 void Resource::Memory::Scope::operator()(const void* const data) const {
@@ -121,7 +139,8 @@ Resource::Pool::Pool(const GPU& gpu)
     images_.reserve(Configuration::kReserve);
 }
 
-Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) {
+Resource::Buffer Resource::Pool::allocate(
+    const Buffer::Descriptor& descriptor) {
   const VkBufferCreateInfo buffer_create_info{
     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     nullptr,
@@ -148,6 +167,9 @@ Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) 
       &allocation,
       &allocation_info));
 
+  TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
+  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+
   buffers_.emplace_back(
       Buffer{
         buffer,
@@ -162,7 +184,8 @@ Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) 
   return buffers_.back().get();
 }
 
-Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
+Resource::Image Resource::Pool::allocate(
+    const Image::Descriptor& descriptor) {
   const VkImageCreateInfo image_create_info{
     VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
     nullptr,
@@ -196,6 +219,9 @@ Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
       &allocation,
       &allocation_info));
 
+  TORCH_CHECK(image, "Invalid Vulkan image!");
+  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+
   const VkImageViewCreateInfo image_view_create_info{
     VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
     nullptr,
@@ -220,7 +246,14 @@ Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
 
   VkImageView view{};
   VK_CHECK(vkCreateImageView(
-      device_, &image_view_create_info, nullptr, &view))
+      device_,
+      &image_view_create_info,
+      nullptr,
+      &view));
+
+  TORCH_CHECK(
+      view,
+      "Invalid Vulkan image view!");
 
   images_.emplace_back(
       Image{
