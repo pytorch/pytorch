@@ -4379,6 +4379,7 @@ new_criterion_tests = [
         check_half=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
+        check_jit=False,
     ),
     dict(
         module_name='CTCLoss',
@@ -4392,7 +4393,8 @@ new_criterion_tests = [
         desc='alert_nondeterministic',
         test_cpu=False,
         check_half=False,
-        decorator=expectedAlertNondeterministic('ctc_loss_backward_gpu', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('ctc_loss_backward_gpu', fn_has_device_arg=False),
+        check_jit=False,
     ),
     dict(
         module_name='CTCLoss',
@@ -4440,6 +4442,7 @@ new_criterion_tests = [
         convert_target=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
+        check_jit=False,
     ),
     dict(
         module_name='CTCLoss',
