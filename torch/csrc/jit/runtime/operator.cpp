@@ -107,8 +107,9 @@ struct OperatorRegistry {
 
     auto& op_vec = op_it->second;
     auto it = op_vec.begin();
-    while (it != op_vec.end() && (*it)->schema() != schema)
+    while (it != op_vec.end() && (*it)->schema() != schema) {
       ++it;
+    }
     if (it != op_vec.end()) {
       op_vec.erase(it);
     }
