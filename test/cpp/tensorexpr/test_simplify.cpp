@@ -46,13 +46,6 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->name_hint(), name);          \
   }
 
-#define IS_RAND(node)                                    \
-  {                                                      \
-    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
-    ASSERT_NE(nullptr, node_);                           \
-    ASSERT_EQ(node_->op_type(), kRand);                  \
-  }
-
 void testConstantFoldSimple() {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -394,26 +387,6 @@ void testHashEquivalence() {
   // Intrinsics sanity check.
   ExprHandle f5 = Intrinsics::make(kSin, x) * Intrinsics::make(kCos, x);
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
-}
-
-void testHashEquivalenceRand() {
-  KernelScope kernel_scope;
-  ExprHandle f =
-      Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
-
-  const Add* root = f.AsNode<Add>();
-  ASSERT_NE(root, nullptr);
-
-  HashProvider hasher;
-  auto hash_f = hasher.hash(f.node());
-  auto hash_l = hasher.hash(root->lhs());
-  auto hash_r = hasher.hash(root->rhs());
-
-  // Root not equal to either branch.
-  ASSERT_NE(hash_f, hash_l);
-  ASSERT_NE(hash_f, hash_r);
-  // and branches are NOT equal.
-  ASSERT_NE(hash_l, hash_r);
 }
 
 void testHashEquivalenceAfterFolding() {
@@ -2557,40 +2530,6 @@ void testSimplifyEliminateZeroLengthAlloc() {
     Stmt* simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
-  }
-}
-
-void testDontSimplifyRand() {
-  KernelScope kernel_scope;
-
-  {
-    // rand() + rand() = rand() + rand() NOT 2 * rand().
-    ExprHandle body =
-        Intrinsics::make(kRand, kInt) + Intrinsics::make(kRand, kInt);
-    ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Add, simplified.node(), add);
-    IS_RAND(add->lhs());
-    IS_RAND(add->rhs());
-  }
-
-  {
-    // rand() - rand() = rand() - rand() NOT 0.
-    ExprHandle body =
-        Intrinsics::make(kRand, kFloat) - Intrinsics::make(kRand, kFloat);
-    ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
-    IS_RAND(sub->lhs());
-    IS_RAND(sub->rhs());
-  }
-
-  {
-    // rand() * rand() = rand() * rand().
-    ExprHandle body =
-        Intrinsics::make(kRand, kInt) * Intrinsics::make(kRand, kInt);
-    ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_RAND(mul->lhs());
-    IS_RAND(mul->rhs());
   }
 }
 
