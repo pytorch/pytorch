@@ -1017,9 +1017,11 @@ TEST(OperatorRegistrationTest, BackendOverridesMathKernel) {
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
-  expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-  }, "_test::dummy does not have a kernel registered for Autograd.");
+  // Fallthrough AutogradCPU and reaches CPU
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 
   called_nonautograd = called_autograd = false;
   op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CUDA, /*requires_grad=*/true));
