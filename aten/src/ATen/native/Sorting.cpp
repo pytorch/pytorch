@@ -16,8 +16,6 @@ DEFINE_DISPATCH(topk_stub);
 
 namespace {
 
-// maybe these days, one should define a random access iterator and use
-// std::sort...
 /* Note from TH:
 
    I cut and pasted (slightly adapted) the quicksort code from
@@ -34,7 +32,6 @@ namespace {
 
    Julien, November 12th 2013
 */
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
@@ -94,6 +91,169 @@ void quick_select_template(
   } while (true);
 }
 
+// Returns pointer to pivot used to partition range [first, last]
+// There should be at least 3 elements in [first, last]
+template <typename random_it, typename comp>
+random_it partition(random_it first, random_it last, comp lt) {
+  // Use median of three for pivot choice
+  random_it pivot = first + (std::distance(first, last) >> 1);
+  std::swap(first[1], *pivot);
+  if (lt(*last, first[1])) {
+    std::swap(first[1], *last);
+  }
+  if (lt(*last, *first)) {
+    std::swap(*first, *last);
+  }
+  if (lt(*first, first[1])) {
+    std::swap(first[1], *first);
+  }
+  pivot = first++;
+
+  do {
+    do {
+      ++first;
+    } while (lt(*first, *pivot));
+    do {
+      --last;
+    } while (lt(*pivot, *last));
+    if (last < first) {
+      break;
+    }
+    std::swap(*first, *last);
+  } while (true);
+  std::swap(*pivot, *last);
+
+  return last;
+}
+
+template <typename random_it, typename kth_iterator, typename comp>
+void quickselect_helper(
+    random_it start,
+    random_it first,
+    random_it last,
+    kth_iterator kbegin,
+    kth_iterator kend,
+    comp lt) {
+  // Base case: one element or no kth values
+  if (last <= first || kbegin == kend) {
+    return;
+  }
+
+  // Base case: two elements
+  if (last == first + 1) {
+    if (lt(*last, *first)) {
+      std::swap(*first, *last);
+    }
+    return;
+  }
+
+  random_it pivot = partition(first, last, lt);
+  int64_t pivot_rank = std::distance(start, pivot);
+
+  auto lt_kend = std::lower_bound(kbegin, kend, pivot_rank);
+  quickselect_helper(start, first, pivot - 1, kbegin, lt_kend, lt);
+
+  auto gt_kbegin = std::upper_bound(lt_kend, kend, pivot_rank);
+  quickselect_helper(start, pivot + 1, last, gt_kbegin, kend, lt);
+}
+
+// Rearranges elements in range [first, last) such that kths elements
+// are in their sorted location.
+template <typename random_it, typename comp>
+void quickselect(
+    random_it first,
+    random_it last,
+    std::vector<int64_t> kths,
+    comp lt) {
+  return quickselect_helper(
+      first, first, last - 1, kths.begin(), kths.end(), lt);
+}
+
+void quantile_cpu_impl(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    const optional<int64_t>& _dim,
+    bool ignore_nan) {
+  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
+
+  // Checks that all q values are between 0 and 1, inclusive
+  // NOTE: this check is only performed when running on the CPU to avoid
+  // synchronizing an accelerator with the CPU
+  TORCH_CHECK(
+      q.ge(0).logical_and_(q.le(1)).all().item<bool>(),
+      "quantile() q values must be in the range [0, 1]");
+
+  // If dim is None flatten. Move dimension to reduce as last dim and flatten
+  // remaining dims so in shape is num_reductions by size of dim to reduce.
+  Tensor in;
+  if (!_dim || self.dim() <= 1) {
+    in = self.clone(at::MemoryFormat::Contiguous).view({1, -1});
+  } else if (dim == self.dim() - 1) {
+    in = self.clone(at::MemoryFormat::Contiguous).view({-1, self.size(-1)});
+  } else {
+    in = self.unsqueeze(-1)
+             .transpose_(dim, -1)
+             .clone(at::MemoryFormat::Contiguous)
+             .view({-1, self.size(dim)});
+  }
+
+  int64_t q_size = q.numel();
+  int64_t num_reductions = in.size(0);
+  int64_t reduction_size = in.size(1);
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "quantile_cpu_impl", [&] {
+    scalar_t* const OP = out.data_ptr<scalar_t>();
+    scalar_t* const IP = in.data_ptr<scalar_t>();
+    const scalar_t* const QP = q.data_ptr<scalar_t>();
+
+    auto lt = [](scalar_t a, scalar_t b) {
+      return (_isnan(b) && !_isnan(a)) || (a < b);
+    };
+
+    at::parallel_for(0, num_reductions, 0, [&](int64_t begin, int64_t end) {
+      scalar_t* ip = IP + begin * reduction_size;
+      for (int64_t it = begin; it < end; ++it, ip += reduction_size) {
+        scalar_t* op = OP + it;
+
+        int64_t num_nans = std::count_if<scalar_t*>(
+            ip, ip + reduction_size, [](scalar_t a) { return _isnan(a); });
+
+        // Check if all quantiles should be set to NaN
+        if (num_nans == reduction_size || (!ignore_nan && num_nans > 0)) {
+          for (int64_t i = 0; i < q_size; ++i, op += num_reductions) {
+            *op = NAN;
+          }
+          continue;
+        }
+
+        // Partition data around kth values
+        std::vector<int64_t> kths;
+        for (int64_t i = 0; i < q_size; ++i) {
+          long double rank = QP[i] * (reduction_size - num_nans - 1);
+          int64_t r = rank;
+          kths.emplace_back(r);
+          if (rank - r > 0) {
+            kths.emplace_back(r + 1);
+          }
+        }
+        std::sort(kths.begin(), kths.end());
+        quickselect(ip, ip + reduction_size, kths, lt);
+
+        // Compute quantiles
+        for (int64_t i = 0; i < q_size; ++i, op += num_reductions) {
+          long double rank = QP[i] * (reduction_size - num_nans - 1);
+          int64_t r = rank;
+          *op = ip[r];
+          if (rank - r > 0) {
+            *op += (rank - r) * (ip[r + 1] - *op);
+          }
+        }
+      }
+    });
+  });
+}
+
 void quantile_impl(
     Tensor& out,
     const Tensor& self,
@@ -150,13 +310,8 @@ void quantile_impl(
     resize_output(out, out_shape);
   }
 
-  // Checks that all q values are between 0 and 1, inclusive
-  // NOTE: this check is only performed when running on the CPU to avoid
-  // synchronizing an accelerator with the CPU
   if (self.device().is_cpu()) {
-    TORCH_CHECK(
-        q.ge(0).logical_and_(q.le(1)).all().item<bool>(),
-        "quantile() q values must be in the range [0, 1]");
+    return quantile_cpu_impl(out, self, q, _dim, ignore_nan);
   }
 
   // Treat q as a 1D tensor for the following computations
@@ -188,9 +343,9 @@ void quantile_impl(
 
   Tensor ranks;
   if (ignore_nan) {
-    // For nanquantile, compute ranks based on number of non-nan values since sort
-    // compares nans as largest value. If all values are nan, set rank to 0 so that
-    // the quantile computed will be nan.
+    // For nanquantile, compute ranks based on number of non-nan values since
+    // sort compares nans as largest value. If all values are nan, set rank to 0
+    // so that the quantile computed will be nan.
     ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
     ranks.masked_fill_(ranks == -1, 0);
   } else {
@@ -214,7 +369,7 @@ void quantile_impl(
   at::lerp_out(result, values_below, values_above, weights);
 
   if (!ignore_nan) {
-    // If there are nan values and nans are not ignored then 
+    // If there are nan values and nans are not ignored then
     // all quantiles should be nan
     out.masked_fill_(sorted.isnan().any(-1, false), NAN);
   }
@@ -318,7 +473,7 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ false);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -344,7 +499,7 @@ Tensor quantile(
     optional<int64_t> _dim,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ false);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -365,7 +520,7 @@ Tensor& nanquantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ true);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -391,7 +546,7 @@ Tensor nanquantile(
     optional<int64_t> _dim,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ true);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
   return out;
 }
 
