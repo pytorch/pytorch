@@ -49,6 +49,12 @@ struct Resource;
 class Runtime;
 struct Shader;
 
+struct GPU final {
+  const Adapter* adapter;
+  VkDevice device;
+  VkQueue queue;
+};
+
 VK_DELETER_DISPATCHABLE_DECLARE(Instance);
 VK_DELETER_DISPATCHABLE_DECLARE(Device);
 VK_DELETER_NON_DISPATCHABLE_DECLARE(Semaphore);

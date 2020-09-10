@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/Runtime.h>
 
 #include <sstream>
 
@@ -72,15 +71,15 @@ Context::Context(const Adapter& adapter)
     : adapter_(adapter),
       device_(
           create_device(
-              adapter.physical_device,
+              adapter.handle,
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(device(), {adapter.compute_queue_family_index}),
-      shader_(device()),
-      pipeline_(device()),
-      descriptor_(device()),
-      resource_(adapter.runtime->instance(), adapter.physical_device, device()) {
+      // command_(device(), {adapter.compute_queue_family_index}),
+      descriptor_(gpu()),
+      shader_(gpu()),
+      pipeline_(gpu()),
+      resource_(gpu()) {
 }
 
 Context* context() {

@@ -9,8 +9,8 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Layout::Factory::Factory(const VkDevice device)
-  : device_(device) {
+Shader::Layout::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
     TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
 }
 
@@ -26,7 +26,10 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
 
   VkDescriptorSetLayout descriptor_set_layout{};
   VK_CHECK(vkCreateDescriptorSetLayout(
-      device_, &descriptor_set_layout_create_info, nullptr, &descriptor_set_layout));
+      device_,
+      &descriptor_set_layout_create_info,
+      nullptr,
+      &descriptor_set_layout));
 
   return Handle{
     descriptor_set_layout,
@@ -96,8 +99,8 @@ struct Shader::Factory::Compiler final {
 
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-Shader::Factory::Factory(const VkDevice device)
- : device_(device),
+Shader::Factory::Factory(const GPU& gpu)
+ : device_(gpu.device),
    compiler_(new Compiler) {
 }
 

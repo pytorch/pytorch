@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -108,16 +109,13 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
   }
 }
 
-Resource::Pool::Pool(
-    const VkInstance instance,
-    const VkPhysicalDevice physical_device,
-    const VkDevice device)
-  : device_(device),
+Resource::Pool::Pool(const GPU& gpu)
+  : device_(gpu.device),
     allocator_(
         create_allocator(
-          instance,
-          physical_device,
-          device),
+          gpu.adapter->runtime->instance(),
+          gpu.adapter->handle,
+          device_),
         vmaDestroyAllocator) {
     buffers_.reserve(Configuration::kReserve);
     images_.reserve(Configuration::kReserve);
