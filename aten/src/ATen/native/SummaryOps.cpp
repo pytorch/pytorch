@@ -190,11 +190,11 @@ Tensor _histogram_cpu(
       at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
           .item<bool>(),
       "bins must increase monotonically");
-  int64_t nbins = bins.size(0) - 1L;
+  int64_t nbins = bins.size(0) - 1;
   Tensor index = searchsorted_cpu(bins, self, false, true);
-  index.clamp_(0, nbins + 2L);
-  index = index.where(self != bins[-1], index - 1L);
-  Tensor hist = bincount(index.flatten(0), weights, nbins + 2L);
+  index.clamp_(0, nbins + 2);
+  index = index.where(self != bins[-1], index - 1);
+  Tensor hist = bincount(index.flatten(0), weights, nbins + 2);
 
   hist = hist.slice(0, 1, -1);
 
