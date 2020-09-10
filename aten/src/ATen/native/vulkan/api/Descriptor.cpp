@@ -47,8 +47,8 @@ const Descriptor::Pool::Descriptor kPrimary{
 
 } // namespace
 
-Descriptor::Pool::Pool(const VkDevice device)
-  : cache(Factory(device)),
+Descriptor::Pool::Pool(const GPU& gpu)
+  : cache(Factory(gpu)),
     primary(cache.retrieve(kPrimary)) {
 }
 
@@ -85,14 +85,14 @@ void Descriptor::Pool::Factory::purge(
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool, 0u));
 }
 
-Descriptor::Set::Set(
-    const VkDevice device,
-    const VkDescriptorPool descriptor_pool)
-  : device_(device),
-    descriptor_pool_(descriptor_pool) {
-  TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
-  TORCH_INTERNAL_ASSERT(descriptor_pool_, "Invalid Vulkan descriptor pool!");
-}
+// Descriptor::Set::Set(
+//     const VkDevice device,
+//     const VkDescriptorPool descriptor_pool)
+//   : device_(device),
+//     descriptor_pool_(descriptor_pool) {
+//   TORCH_INTERNAL_ASSERT(device_, "Invalid Vulkan device!");
+//   TORCH_INTERNAL_ASSERT(descriptor_pool_, "Invalid Vulkan descriptor pool!");
+// }
 
 VkDescriptorSet Descriptor::Set::allocate(
     const VkDescriptorSetLayout descriptor_set_layout) {

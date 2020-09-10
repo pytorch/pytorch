@@ -11,6 +11,25 @@ namespace api {
 
 struct Command final {
   //
+  // Buffer
+  //
+
+  class Buffer final {
+   public:
+    Buffer(VkDevice device, VkCommandPool command_pool);
+
+    void begin();
+    void end();
+
+    void bind(VkPipeline pipeline);
+    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
+    void dispatch();
+
+   private:
+    VkCommandBuffer command_buffer_;
+  };
+
+  //
   // Pool
   //
 
@@ -60,30 +79,11 @@ struct Command final {
 
     VkCommandPool primary;
 
-    Pool(VkDevice device, const Descriptor& primary);
+    explicit Pool(const Processor& processor);
   } pool;
 
-  //
-  // Buffer
-  //
-
-  class Buffer final {
-   public:
-    Buffer(VkDevice device, VkCommandPool command_pool);
-
-    void begin();
-    void end();
-
-    void bind(VkPipeline pipeline);
-    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
-    void dispatch();
-
-   private:
-    VkCommandBuffer command_buffer_;
-  };
-
-  explicit Command(const VkDevice device, const Pool::Descriptor& primary)
-    : pool(device, primary) {
+  explicit Command(const Processor& processor)
+    : pool(device) {
   }
 };
 

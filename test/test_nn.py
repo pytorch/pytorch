@@ -11157,6 +11157,31 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, dtype, test_backward=test_backward)
         self._test_EmbeddingBag(device, 'mean', True, dtype, test_backward=test_backward)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_embedding_bag_non_contiguous_weight(self, device, dtype):
+        weight_tensor = torch.randn(4, 3, dtype=dtype, device=device)
+
+        weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
+        weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
+
+        index = torch.tensor([0, 1, 2], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        for mode in ['sum', 'mean', 'max']:
+            output_non_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_non_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+            output_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+        self.assertEqual(output_non_contig, output_contig)
+
 
     @onlyCUDA
     @skipCUDAIfNotRocm
