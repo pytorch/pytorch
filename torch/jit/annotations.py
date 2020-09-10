@@ -298,6 +298,13 @@ def try_ann_to_type(ann, loc):
                 return DictType(key, value)
             else:
                 warnings.warn("Dict must have a key and value type")
+        else:
+            # If we don't return early here, the
+            # inspect.isclass(ann) branch below will execute
+            # in python3.6 and below, which will give the caller
+            # the impression that the type of this dict was
+            # successfully resolved.
+            return None
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
             contained = ann.__args__[0]
