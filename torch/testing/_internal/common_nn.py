@@ -3879,7 +3879,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(2, 3, 4),
-        target_size=(2, 3, 4),
+        target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
     ),
@@ -4277,7 +4277,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
         desc='scalar',
     ),
