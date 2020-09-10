@@ -4654,7 +4654,7 @@ nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
 computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
 not exist. If all values in a reduced row are ``NaN`` then the quantiles for
-that reduction will be ``NaN``. See the documentation for :func:`torch.quantile.
+that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`.
 
 Args:
     {input}
