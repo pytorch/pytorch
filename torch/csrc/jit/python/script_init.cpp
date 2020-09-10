@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/python_materializer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -1668,6 +1669,10 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
+  });
+  m.def("_jit_python_materialize", [](const Module& mod, py::object def_cb, py::object obj_cb) {
+    PythonMaterializer pm(std::move(def_cb), std::move(obj_cb));
+    return pm.materialize(mod);
   });
 }
 } // namespace jit
