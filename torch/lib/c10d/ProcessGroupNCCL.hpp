@@ -615,8 +615,14 @@ class ProcessGroupNCCL : public ProcessGroup {
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
 
-  // Dedicated CUDA stream for each available device that runs FutureNCCL then
-  // callbacks.
+  // In single-process single-device mode, WorkNCCL::getFuture is supported.
+  // Depending on the device index of collective outputs, WorkNCCL will pass
+  // the corresponding device's then callback stream to FutureNCCL.
+  // We just inititalize futureNCCLCallbackStreams_ inside the constructor and
+  // set its size to the total number of available devices and depending on the
+  // device of the NCCL collective's outputs, we later set the callback stream
+  // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
+  // before.
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
 };
 
