@@ -8,17 +8,34 @@ namespace jit {
 namespace tensorexpr {
 
 // Walk the Statment looking for Half size loads/stores.
-class CudaHalfChecker : public IRVisitor {
+class CudaHalfChecker : public IRMutator {
  public:
   bool hasHalf() {
     return hasHalf_;
   }
 
-  void visit(const Load* v) override {
-    hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
+  const Expr* mutate(const Load* v) override {
+    const Expr* child = IRMutator::mutate(v);
+    if (child->dtype().scalar_type() != ScalarType::Half) {
+      return child;
+    }
+
+    hasHalf_ = true;
+
+    // TODO discards lanes.
+    return new Cast(kFloat, child);
   }
-  void visit(const Store* v) override {
-    hasHalf_ |= v->value()->dtype().scalar_type() == ScalarType::Half;
+
+  Stmt* mutate(const Store* v) override {
+    const Expr* new_val = v->value()->accept_mutator(this);
+
+    if (v->value()->dtype().scalar_type() == ScalarType::Half) {
+      // TODO discards lanes.
+      new_val = new Cast(kHalf, new_val);
+      hasHalf_ = true;
+    }
+
+    return new Store(v->buf(), v->indices(), new_val, v->mask());
   }
 
  private:

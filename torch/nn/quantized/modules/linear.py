@@ -1,11 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch
 
-from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
     _version = 3
@@ -20,8 +18,7 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
-    def set_weight_bias(self, weight, bias):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, weight: torch.Tensor, bias: Optional[torch.Tensor]) -> None:
         if self.dtype == torch.qint8:
             self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
         elif self.dtype == torch.float16:
@@ -236,8 +233,7 @@ class Linear(torch.nn.Module):
     def bias(self):
         return self._weight_bias()[1]
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod
