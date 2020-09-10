@@ -531,9 +531,10 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   // kTpMessagePickleIdx = 3
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
-  for (size_t i = 0; i < pickler.tensorData().size(); ++i) {
+  const auto& tensorDataVec = pickler.tensorData();
+  for (size_t i = 0; i < tensorDataVec.size(); ++i) {
     const auto& tensorData =
-        jit::getWriteableTensorData(pickler.tensorData()[i]);
+        jit::getWriteableTensorData(tensorDataVec[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     std::string metadata =
