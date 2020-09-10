@@ -2757,34 +2757,6 @@ class AbstractTestCases:
             b = pickle.loads(serialized)
             self.assertEqual(a, b)
 
-        def test_norm_fastpaths(self):
-            x = torch.randn(3, 5)
-
-            # slow path
-            result = torch.norm(x, 4.5, 1)
-            expected = torch.pow(x.abs().pow(4.5).sum(1), 1.0 / 4.5)
-            self.assertEqual(result, expected)
-
-            # fast 0-norm
-            result = torch.norm(x, 0, 1)
-            expected = (x != 0).type_as(x).sum(1)
-            self.assertEqual(result, expected)
-
-            # fast 1-norm
-            result = torch.norm(x, 1, 1)
-            expected = x.abs().sum(1)
-            self.assertEqual(result, expected)
-
-            # fast 2-norm
-            result = torch.norm(x, 2, 1)
-            expected = torch.sqrt(x.pow(2).sum(1))
-            self.assertEqual(result, expected)
-
-            # fast 3-norm
-            result = torch.norm(x, 3, 1)
-            expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
-            self.assertEqual(result, expected)
-
         def test_generator_cpu(self):
             # test default generators are equal
             self.assertEqual(torch.default_generator, torch.default_generator)
