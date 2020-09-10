@@ -774,6 +774,8 @@ class TestTEFuser(JitTestCase):
         ge(*inputs_cuda0)
         ge(*inputs_cuda1)
 
+    # TODO: we're currently not checking 'device' in the type info when pulling
+    # nodes into a fusion group. We should fix that and re-enable this test.
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_kernel_cache_multi_gpu(self):

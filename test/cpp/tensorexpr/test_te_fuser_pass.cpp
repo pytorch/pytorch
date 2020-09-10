@@ -287,5 +287,29 @@ void testFuserPass_Multidevice() {
     testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
   }
 }
+
+void testFuserPass_MergeGroups() {
+  WithCPUFuser cf;
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%a : Float(128:1, device=cpu),
+          %b : Float(128:1, device=cpu)):
+      %x : Float(128:1, device=cpu) = aten::mul(%a, %a)
+      %y : Float(128:1, device=cpu) = aten::mul(%b, %b)
+      return (%x, %y))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 1);
+
+  // The %x and %y computations are completely independent and yet we should put
+  // them into a single fusion group rather than having two separate ones.
+  testing::FileCheck()
+      .check("= prim::TensorExprGroup_")
+      ->check_not("= prim::TensorExprGroup_")
+      ->run(*g);
+}
+
 } // namespace jit
 } // namespace torch
