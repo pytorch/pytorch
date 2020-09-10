@@ -25,7 +25,7 @@ __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
 
-def _make_grads(outputs: Sequence[torch.Tensor], grads) -> Tuple[_OptionalTensor, ...]:
+def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor]) -> Tuple[_OptionalTensor, ...]:
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
@@ -55,6 +55,14 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads) -> Tuple[_OptionalTensor
             raise TypeError("gradients can be either Tensors or None, but got " +
                             type(grad).__name__)
     return tuple(new_grads)
+
+
+def _tensor_or_tensors_to_tuple(tensors: Optional[_TensorOrTensors], length: int) -> Tuple[_OptionalTensor, ...]:
+    if tensors is None:
+        return (None, ) * length
+    if isinstance(tensors, torch.Tensor):
+        return (tensors, )
+    return tuple(tensors)
 
 
 def backward(
@@ -114,14 +122,7 @@ def backward(
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
 
-    grad_tensors_: Tuple[_OptionalTensor, ...]
-    if grad_tensors is None:
-        grad_tensors_ = (None, ) * len(tensors)
-    elif isinstance(grad_tensors, torch.Tensor):
-        grad_tensors_ = (grad_tensors, )
-    else:
-        grad_tensors_ = tuple(grad_tensors)
-
+    grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
     if retain_graph is None:
         retain_graph = create_graph
@@ -192,14 +193,7 @@ def grad(
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
 
-    grad_outputs_: Tuple[_OptionalTensor, ...]
-    if grad_outputs is None:
-        grad_outputs_ = (None,) * len(outputs)
-    elif isinstance(grad_outputs, torch.Tensor):
-        grad_outputs_ = (grad_outputs,)
-    else:
-        grad_outputs_ = tuple(grad_outputs)
-
+    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
     grad_outputs_ = _make_grads(outputs, grad_outputs_)
 
     if retain_graph is None:
