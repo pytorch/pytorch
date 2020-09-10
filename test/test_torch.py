@@ -16006,8 +16006,10 @@ class TestTorchDeviceType(TestCase):
         out_evals = torch.full_like(evals, fill_value=math.nan)
         out_evecs = torch.full_like(evecs, fill_value=math.nan)
         evals2, evecs2 = torch.eig(t, eigenvectors=True, out=(out_evals, out_evecs))
-        self.assertIs(evals2, out_evals)
-        self.assertIs(evecs2, out_evecs)
+        # check that the out tensors were used in-place
+        self.assertEqual(evals2.data_ptr(), out_evals.data_ptr())
+        self.assertEqual(evecs2.data_ptr(), out_evecs.data_ptr())
+        # check that the result is the same as the non-out version
         self.assertEqual(evals, out_evals)
         self.assertEqual(evecs, out_evecs)
 
