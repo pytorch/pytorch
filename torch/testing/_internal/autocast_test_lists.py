@@ -3,6 +3,21 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 class AutocastTestLists(object):
+    def _rnn_cell_args(self, n, num_chunks, is_lstm, dev, dtype):
+        input = (torch.randn((n, n), device=dev, dtype=torch.float32),)
+
+        hx = ((torch.randn((n, n), device=dev, dtype=torch.float32),
+               torch.randn((n, n), device=dev, dtype=torch.float32)) if is_lstm else
+              torch.randn((n, n), device=dev, dtype=torch.float32),)
+
+        weights = (torch.randn((num_chunks * n, n), device=dev, dtype=torch.float32),  # weight_ih
+                   torch.randn((num_chunks * n, n), device=dev, dtype=torch.float32),  # weight_hh
+                   torch.randn((num_chunks * n), device=dev, dtype=torch.float32),  # bias_ih
+                   torch.randn((num_chunks * n), device=dev, dtype=torch.float32))  # bias_hh
+
+        # returns args as a tuple
+        return input + hx + weights
+
     # Supplies ops and arguments for test_autocast_* in test/test_cuda.py
     def __init__(self, dev):
         super().__init__()
@@ -102,6 +117,13 @@ class AutocastTestLists(object):
                          torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("bmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                      torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+            # _thnn_fused_lstm_cell and _thnn_fused_gru_cell are not Python-exposed as far as I can tell.
+            # ("_thnn_fused_lstm_cell", mat0_fp32 + mat1_fp32 + mat2_fp32 + pointwise0_fp32 + pointwise1_fp32),
+            # ("_thnn_fused_gru_cell", mat0_fp32 + mat1_fp32 + mat2_fp32 + pointwise0_fp32 + pointwise1_fp32),
+            ("lstm_cell", self._rnn_cell_args(n, num_chunks=4, is_lstm=True, dev=dev, dtype=torch.float32)),
+            ("gru_cell", self._rnn_cell_args(n, num_chunks=3, is_lstm=False, dev=dev, dtype=torch.float32)),
+            ("rnn_tanh_cell", self._rnn_cell_args(n, num_chunks=1, is_lstm=False, dev=dev, dtype=torch.float32)),
+            ("rnn_relu_cell", self._rnn_cell_args(n, num_chunks=1, is_lstm=False, dev=dev, dtype=torch.float32)),
         ]
         self.torch_fp32 = [
             ("acos", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
