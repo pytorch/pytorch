@@ -634,6 +634,11 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
+        # Force set to None.
+        module.zero_grad(set_to_none=True)
+        self.assertIsNone(module.weight.grad)
+
+
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
             module = nn.Conv2d(2, 5, kernel_size=3, padding=1).to(dtype)
@@ -11188,7 +11193,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_embedding_bag_non_contiguous_weight(self, device, dtype):
-        weight_tensor = torch.randn(4, 3, dtype=dtype, device=device)
+        weight_tensor = torch.randn(3, 4, dtype=dtype, device=device)
 
         weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
         weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
