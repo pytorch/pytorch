@@ -7,8 +7,7 @@ from .graph import magic_methods, reflectable_magic_methods
 from typing import TYPE_CHECKING, Tuple, Dict, Optional, Iterable, NoReturn, Any
 from .node import Target, Node
 
-if TYPE_CHECKING:
-    from .symbolic_trace import DelegateBase
+from .tracer_base import TracerBase
 
 class TraceError(ValueError):
     pass
@@ -20,23 +19,24 @@ class TraceError(ValueError):
 
 # Unwrap the proxies inside args, and kwargs, create the resulting node
 # and then wrap the result in a proxy.
-def _create_proxy(delegate: 'DelegateBase', op: str, target: Target, args_: Tuple[Any, ...], kwargs_: Dict[str, Any], name=None):
-    args = delegate.create_arg(args_)
-    kwargs = delegate.create_arg(kwargs_)
+def _create_proxy(tracer: TracerBase, op: str, target: Target, args_: Tuple[Any, ...], kwargs_: Dict[str, Any], name=None):
+    args = tracer.create_arg(args_)
+    kwargs = tracer.create_arg(kwargs_)
     assert isinstance(args, tuple)
     assert isinstance(kwargs, dict)
-    rn = delegate.create_node(op, target, args, kwargs, name)
-    return Proxy(rn, delegate)
+    rn = tracer.create_node(op, target, args, kwargs, name)
+    return Proxy(rn, tracer)
+
+class GraphAppendingTracer(TracerBase):
+    def __init__(self, graph: Graph):
+        self.graph = graph
 
 class Proxy:
-    def __init__(self, node: Node, delegate: 'Optional[DelegateBase]' = None):
-        if delegate is None:
-            # this allows you to create a proxy object around a raw node
-            # so that if you are doing graph transforms you can use the overloaded operators
-            # to add additional things to a graph.
-            from .symbolic_trace import DelegateBase
-            delegate = DelegateBase(node.graph)
-        self.delegate = delegate
+    def __init__(self, node: Node, tracer: Optional[TracerBase] = None):
+        if tracer is None:
+            tracer = GraphAppendingTracer(node.graph)
+
+        self.tracer = tracer
         self.node = node
 
     def __repr__(self) -> str:
@@ -48,7 +48,7 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
-        return _create_proxy(self.delegate, 'call_method', '__call__', (self,) + args, kwargs)
+        return _create_proxy(self.tracer, 'call_method', '__call__', (self,) + args, kwargs)
 
     def __iter__(self) -> Iterable['Proxy']:
         frame = inspect.currentframe()
@@ -76,16 +76,16 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
         if torch.overrides.is_tensor_method_or_property(orig_method):
-            return _create_proxy(self.delegate, 'call_method', orig_method.__name__, args, kwargs)
+            return _create_proxy(self.tracer, 'call_method', orig_method.__name__, args, kwargs)
         else:
-            return _create_proxy(self.delegate, 'call_function', orig_method, args, kwargs,
-                                 name=self.delegate.graph._name(orig_method.__name__))
+            return _create_proxy(self.tracer, 'call_function', orig_method, args, kwargs,
+                                 name=self.tracer.graph._name(orig_method.__name__))
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
         self.root = root
         self.attr = attr
-        self.delegate = root.delegate
+        self.tracer = root.tracer
         self._node: Optional[Node] = None
 
     @property
@@ -93,18 +93,18 @@ class Attribute(Proxy):
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
         if self._node is None:
-            self._node = _create_proxy(self.delegate, 'call_function', getattr, (self.root, self.attr), {}).node
+            self._node = _create_proxy(self.tracer, 'call_function', getattr, (self.root, self.attr), {}).node
         return self._node
 
     def __call__(self, *args, **kwargs):
-        return _create_proxy(self.delegate, 'call_method', self.attr, (self.root,) + args, kwargs)
+        return _create_proxy(self.tracer, 'call_method', self.attr, (self.root,) + args, kwargs)
 
 for method in magic_methods:
     def scope(method):
         def impl(*args, **kwargs):
-            delegate = args[0].delegate
+            tracer = args[0].tracer
             target = getattr(operator, method)
-            return _create_proxy(delegate, 'call_function', target, args, kwargs)
+            return _create_proxy(tracer, 'call_function', target, args, kwargs)
         impl.__name__ = method
         as_magic = f'__{method}__'
         setattr(Proxy, as_magic, impl)
@@ -115,7 +115,7 @@ def _define_reflectable(orig_method_name):
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)
-        return _create_proxy(self.delegate, 'call_function', target, (rhs, self), {})
+        return _create_proxy(self.tracer, 'call_function', target, (rhs, self), {})
     impl.__name__ = method_name
     impl.__qualname__ = method_name
     setattr(Proxy, method_name, impl)
