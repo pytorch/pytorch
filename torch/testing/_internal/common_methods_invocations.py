@@ -204,7 +204,8 @@ op_db = [
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-1,
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
