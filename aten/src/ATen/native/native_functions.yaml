@@ -5960,6 +5960,21 @@
     CPU: foreach_tensor_add_scalar_kernel_slow_
     CUDA: foreach_tensor_add_scalar_kernel_cuda_
 
+- func: _foreach_add.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist_kernel_slow
+    CUDA: foreach_tensor_add_scalarlist_kernel_cuda
+
+- func: _foreach_add_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
+
 - func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_guard: False
   variants: function

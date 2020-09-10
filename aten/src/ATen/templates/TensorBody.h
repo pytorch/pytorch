@@ -48,6 +48,7 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+using ScalarList = ArrayRef<Scalar>;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {

@@ -56,6 +56,27 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
     return foreach_binary_op<OP>(tensors, scalar);                                                  \
 }
 
+void foreach_tensor_add_scalarlist_kernel_cuda_(TensorList tensors, ScalarList scalar) {               
+    check_foreach_api_restrictions(tensors);                                                        
+                                                                                                    
+    //if (!can_use_fast_route(tensors, scalar)) {                                                     
+    //    return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_(tensors, scalar);            
+    //}                                                                                               
+    //                                                                                                
+    //foreach_binary_op_<OP>(tensors, scalar);                                                        
+}                                                                                                   
+                                                                                                    
+std::vector<Tensor> foreach_tensor_add_scalarlist_kernel_cuda(TensorList tensors, ScalarList scalar) { 
+    check_foreach_api_restrictions(tensors);                                                        
+                                                                                                    
+    //if (!can_use_fast_route(tensors, scalar)) {                                                     
+    //    return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             
+    //}                                                                                               
+                                                                                                    
+    //return foreach_binary_op<OP>(tensors, scalar);                                                  
+    return tensors.vec();
+}
+
 FOREACH_BINARY_OP_SCALAR(add, std::plus);
 FOREACH_BINARY_OP_SCALAR(sub, std::minus);
 FOREACH_BINARY_OP_SCALAR(mul, std::multiplies);

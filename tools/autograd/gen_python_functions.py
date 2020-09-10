@@ -287,6 +287,7 @@ UNPACK_METHODS = {
     'Dimname': 'dimname',
     'DimnameList': 'dimnamelist',
     'TensorList': 'tensorlist',
+    'ScalarList': 'scalarlist',
     'int64_t': 'toInt64',
     'bool': 'toBool',
     'double': 'toDouble',
@@ -295,6 +296,7 @@ UNPACK_METHODS = {
 
 UNPACK_WITH_SIZE_METHODS = {
     'TensorList': 'tensorlist_n<{}>',
+    'ScalarList': 'scalarlist_n<{}>',
     'DimnameList': 'dimnamelist',
     'IntArrayRef': 'intlist',
     'c10::optional<IntArrayRef>': 'intlistOptional',
@@ -1158,6 +1160,8 @@ def sort_declarations(grouped_decls):
     def normalized_dynamic_type(arg):
         if arg['dynamic_type'] == 'real':
             return 'Scalar'
+        if arg['dynamic_type'] == 'ArrayRef<Scalar>':
+            return 'ScalarList'
         return arg['dynamic_type']
 
     def is_coord_smaller(arg1, arg2):

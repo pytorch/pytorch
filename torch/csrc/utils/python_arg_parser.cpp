@@ -14,7 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
+#include <string>
 namespace torch {
 
 static std::unordered_map<std::string, ParameterType> type_map = {
@@ -38,6 +38,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"std::string", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
+  {"ScalarList", ParameterType::SCALAR_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -112,6 +113,8 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto name_str = fmt.substr(space + 1);
+  std::cout << "\n\n" << std::endl;
+  std::cout << "type_str: " << type_str << std::endl;
   auto it = type_map.find(type_str);
   if (it == type_map.end()) {
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
@@ -347,6 +350,26 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
   return false;
 }
 
+bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum, bool throw_error) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (size_t idx = 0; idx < size; idx++) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!THPUtils_checkScalar(iobj)) {
+      if (throw_error) {
+        throw 20;
+        throw TypeError("expected Scalar as element %d in argument %d, but got %s",
+            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -432,6 +455,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
+    case ParameterType::SCALAR_LIST: {
+      return is_scalar_list_and_append_overloaded(obj, argnum, true /* throw_error */);
+    }
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -458,6 +484,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STRING: return "str";
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
+    case ParameterType::SCALAR_LIST: return "tuple of Scalars";
     default: throw std::runtime_error("unknown parameter type");
   }
 }

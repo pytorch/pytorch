@@ -31,6 +31,7 @@ class TestForeach(TestCase):
         tensors2 = self._get_test_data(device, dtype, N)
 
         expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
+        print(foreach_op)
         res = foreach_op(tensors1, tensors2)
         foreach_op_(tensors1, tensors2)
         self.assertEqual(res, tensors1)

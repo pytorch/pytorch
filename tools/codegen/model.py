@@ -305,6 +305,7 @@ class FunctionSchema:
             if str(self.name) not in [
                     '_amp_non_finite_check_and_unscale_',
                     '_foreach_add_.Scalar',
+                    '_foreach_add_.ScalarList',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',
                     '_foreach_div_.Scalar',
@@ -772,6 +773,7 @@ def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], 
                 arguments_acc = out_arguments
         else:
             assert arguments_acc is not out_arguments
+        #print(parg)
         arguments_acc.append(parg)
 
     return arguments, kwarg_only_arguments, out_arguments
