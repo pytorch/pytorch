@@ -18,9 +18,9 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
 from torch.quantization.quantization_mappings import (
-    get_dynamic_quant_module_mapping,
+    get_dynamic_quant_module_mappings,
     get_qconfig_propagation_list,
-    get_qat_module_mapping,
+    get_qat_module_mappings,
 )
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -191,7 +191,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, get_dynamic_quant_module_mapping(), inplace=True)
+    convert(module, get_dynamic_quant_module_mappings(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -355,7 +355,7 @@ class QuantizationTestCase(TestCase):
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in get_qat_module_mapping().values():
+        if type(module) not in get_qat_module_mappings().values():
             for child in module.children():
                 self.checkObservers(child)
 

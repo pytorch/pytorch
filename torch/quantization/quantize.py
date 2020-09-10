@@ -10,9 +10,9 @@ import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic.qat as nniqat
 
-from .quantization_mappings import (get_dynamic_quant_module_mapping,
-                                    get_static_quant_module_mapping,
-                                    get_qat_module_mapping,
+from .quantization_mappings import (get_dynamic_quant_module_mappings,
+                                    get_static_quant_module_mappings,
+                                    get_qat_module_mappings,
                                     get_qconfig_propagation_list)
 
 from .stubs import DeQuantStub, QuantWrapper
@@ -242,7 +242,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         Quantized model.
     """
     if mapping is None:
-        mapping = get_static_quant_module_mapping()
+        mapping = get_static_quant_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
@@ -319,7 +319,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
 
     if mapping is None:
-        mapping = get_dynamic_quant_module_mapping()
+        mapping = get_dynamic_quant_module_mappings()
 
     if not inplace:
         model = copy.deepcopy(model)
@@ -344,7 +344,7 @@ def prepare_qat(model, mapping=None, inplace=False):
                  is mutated
     """
     if mapping is None:
-        mapping = get_qat_module_mapping()
+        mapping = get_qat_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -409,7 +409,7 @@ def _convert(module, mapping=None, inplace=False):
 
     """
     if mapping is None:
-        mapping = get_static_quant_module_mapping()
+        mapping = get_static_quant_module_mappings()
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
