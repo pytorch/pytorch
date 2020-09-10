@@ -611,6 +611,20 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
 
+    def test_cache_clearing(self):
+        timer = benchmark_utils.Timer(
+            stmt='sum(x)', globals={'x': list(range(2000))}
+        )
+        cached = timer.blocked_autorange(min_run_time=0.2).median
+        uncached = timer.uncached_autorange(min_run_time=1).median
+        self.assertLess(cached * 1.2, uncached)
+
+    def test_cache_sensistive_check(self):
+        timer = benchmark_utils.Timer(
+            stmt='sum(x)', globals={'x': list(range(2000))}
+        )
+        self.assertTrue(timer.is_cache_sensitive())
+
     def test_compare(self):
         compare = benchmark_utils.Compare([
             benchmark_utils.Timer(
