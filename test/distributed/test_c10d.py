@@ -1974,13 +1974,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _prepare_single_device_module(self, process_group, devices, device_ids, global_batch_size):
+    def _prepare_single_device_module(self, process_group, devices, device_ids, global_batch_size, grad_is_view=False):
         model = Net()
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(devices[0]),
             device_ids=device_ids,
             process_group=process_group,
-            bucket_cap_mb=0.001)
+            bucket_cap_mb=0.001,
+            grad_is_view=grad_is_view)
 
         model.to(devices[0])
 
@@ -2695,9 +2696,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             num_iters=4, ddp_comm_hook=allreduce_with_then_hook
         )
 
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_accumulate_gradients_module(self):
+    def _test_accumulate_gradients_module(self, grad_is_view=False):
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
         # module.
@@ -2709,7 +2708,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         model, ddp_model, input, target = \
             self._prepare_single_device_module(
-                process_group, devices, devices, global_batch_size)
+                process_group, devices, devices, global_batch_size, grad_is_view)
 
         def step_model(model, input, target):
             model.train()
@@ -2748,6 +2747,16 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_accumulate_gradients_module(self):
+        self._test_accumulate_gradients_module()
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_accumulate_gradients_module_with_grad_is_view(self):
+        self._test_accumulate_gradients_module(grad_is_view=True)
 
     @requires_gloo()
     def test_ignored_output(self):
