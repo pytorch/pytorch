@@ -87,7 +87,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return c10::make_optional<Method>(Method(_ivalue(), fn.get()));
+      return c10::make_optional<Method>(Method(this, fn.get()));
     }
   }
   return c10::nullopt;
@@ -169,19 +169,64 @@ bool Module::is_training() const {
   return true;
 }
 
-Method::Method(
-    c10::intrusive_ptr<c10::ivalue::Object> owner,
-    Function* function)
-    : owner_(std::move(owner)), function_(function) {}
+Method::Method(const Module* owner, Function* function)
+    : owner_(owner), function_(function) {}
 
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner_);
-  function_->run(stack);
+  auto observer = torch::observerConfig().getModuleObserver();
+  /* if the metadata dict doesn't contain "model_name", copy the metadata and
+  set the value of "model_name" as name() */
+  std::unordered_map<std::string, std::string> copied_metadata =
+      owner_->metadata();
+  if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
+    copied_metadata["model_name"] = name();
+  }
+  if (observer) {
+    observer->onEnterRunMethod(copied_metadata, function_->name());
+  }
+
+  auto debug_info = std::make_shared<MobileDebugInfo>();
+  std::string name = copied_metadata["model_name"];
+  debug_info->setModelName(name);
+  debug_info->setMethodName(function_->name());
+  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
+
+  try {
+    stack.insert(stack.begin(), owner_->_ivalue());
+    function_->run(stack);
+    if (observer) {
+      observer->onExitRunMethod();
+    }
+  } catch (c10::Error& error) {
+    if (observer) {
+      observer->onFailRunMethod(error.what());
+    }
+    TORCH_RETHROW(error);
+  } catch (...) {
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailRunMethod(error.what());
+      }
+      TORCH_RETHROW(error);
+    }
+  }
 }
 
 c10::IValue Method::operator()(std::vector<IValue> stack) {
-  stack.insert(stack.begin(), owner_);
-  return (*function_)(stack);
+  run(stack);
+  TORCH_INTERNAL_ASSERT(!stack.empty());
+  return stack.front();
 }
 
 } // namespace mobile
