@@ -1331,7 +1331,8 @@ AT_ERROR("symeig: MAGMA library not found in "
 
   // magmaEig returns column-ordered tensors, turn them into row-ordered
   out_eigvals.transpose_(0, 1);
-  out_eigvecs.transpose_(0, 1);
+  if (jobvr == MagmaVec)
+      out_eigvecs.transpose_(0, 1);
 #endif
 }
 
