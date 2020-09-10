@@ -949,8 +949,6 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-
-
         # ALL REDUCE
         def _test_all_reduce_helper(
             self,
