@@ -26,7 +26,7 @@ class TestForeach(TestCase):
 
         return tensors
 
-    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=2):
+    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
         tensors1 = self._get_test_data(device, dtype, N)
         tensors2 = self._get_test_data(device, dtype, N)
 
