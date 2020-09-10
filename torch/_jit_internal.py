@@ -646,9 +646,14 @@ def is_dict(ann):
         return False
     origin = getattr(ann, '__origin__', None)
     orig_bases = getattr(ann, '__orig_bases__', None)
+    origin_is_dict = origin is Dict or origin is dict
+    try:
+        orig_bases_has_dict = dict in orig_bases or Dict in orig_bases
+    except Exception as _:
+        orig_bases_has_dict = False
+
     return ann.__module__ == 'typing' and \
-        (origin is Dict or origin is dict) or \
-        (orig_bases is not None and (dict in orig_bases or Dict in orig_bases))
+        (origin_is_dict or orig_bases_has_dict)
 
 def is_optional(ann):
     # Optional[T] is just shorthand for Union[T, None], so check for both
