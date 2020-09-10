@@ -12,8 +12,6 @@
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <algorithm>
-#include "ATen/core/ivalue.h"
-#include "ATen/core/jit_type.h"
 
 using c10::QualifiedName;
 

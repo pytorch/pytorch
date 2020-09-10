@@ -14,6 +14,8 @@ if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   build_script='conda/build_pytorch.sh'
 elif [[ "$DESIRED_CUDA" == cpu ]]; then
   build_script='manywheel/build_cpu.sh'
+elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+  build_script='manywheel/build_rocm.sh'
 else
   build_script='manywheel/build.sh'
 fi
