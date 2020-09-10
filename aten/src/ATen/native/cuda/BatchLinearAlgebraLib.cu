@@ -44,17 +44,6 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   auto self_inv_data = self_inv.data_ptr<scalar_t>();
   auto self_inv_mat_stride = matrixStride(self_inv);
 
-  Tensor self_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
-  Tensor self_inv_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
-  scalar_t** p_self_array = reinterpret_cast<scalar_t**>(self_array.data_ptr());
-  scalar_t** p_self_inv_array = reinterpret_cast<scalar_t**>(self_inv_array.data_ptr());
-
-  // Set up the created arrays
-  for (int64_t i = 0; i < batch_size; i++) {
-    p_self_array[i] = &self_data[i * self_mat_stride];
-    p_self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
-  }
-
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
   if (use_loop_launch(batch_size, n)) {
@@ -71,15 +60,22 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
       int* pivot = reinterpret_cast<int*>(allocator.allocate(sizeof(int) * n).get());
       _apply_single_inverse_helper<scalar_t>(
-        p_self_array[i], p_self_inv_array[i], pivot, p_infos + i, n);
+        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, p_infos + i, n);
 
       at::cuda::CUDAEvent finished;
       finished.record(stream);
       finished.block(main_stream);
     }
   } else {
-    self_array = self_array.cuda();
-    self_inv_array = self_inv_array.cuda();
+    Tensor self_array = at::arange(
+      reinterpret_cast<long>(self_data),
+      reinterpret_cast<long>(&self_data[(n-1) * self_mat_stride]) + 1,
+      static_cast<long>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+    Tensor self_inv_array = at::arange(
+      reinterpret_cast<long>(self_inv_data),
+      reinterpret_cast<long>(&self_inv_data[(n-1) * self_inv_mat_stride]) + 1,
+      static_cast<long>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+
     int* ipiv_array = reinterpret_cast<int*>(allocator.allocate(sizeof(int)*batch_size*n).get());
 
     at::cuda::blas::getrfBatched<scalar_t>(n, n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
