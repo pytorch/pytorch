@@ -159,6 +159,12 @@ struct CaptureList {
     }
   }
 
+  void release_variables() {
+    for (auto& var_capture_ : var_captures_) {
+      var_capture_.reset_data();
+    }
+  }
+
  private:
   enum Capture : uint8_t {
     CAPTURE_TENSOR,
@@ -309,6 +315,10 @@ struct DifferentiableGraphBackward : public autograd::Node {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }
+  }
+
+  void release_variables() override {
+    captures_.release_variables();
   }
 
  private:
