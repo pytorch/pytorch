@@ -69,7 +69,7 @@ namespace jit {
   _(ModuleDefine)                                 \
   _(QualifiedName)                                \
   _(ClassImport)                                  \
-  _(ScriptObject)                             /**/\
+  _(ScriptObject)                                 \
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
@@ -78,12 +78,12 @@ namespace jit {
   _(ClassDerive)                                  \
   _(SaveLoadTorchbind)                            \
   _(ModuleInterfaceSerialization)                 \
-  _(ModuleCloneWithModuleInterface)             /*\
+  _(ModuleCloneWithModuleInterface)           /**/\
   _(ClassTypeAddRemoveAttr)                       \
   _(Inliner)                                      \
   _(LiteInterpreterAdd)                           \
   _(LiteInterpreterConv)                          \
-  _(LiteInterpreterInline)                        \
+  _(LiteInterpreterInline)                      /*\
   _(LiteInterpreterTuple)                         \
   _(LiteInterpreterUpsampleNearest2d)             \
   _(CommonAncestor)                               \
