@@ -254,7 +254,7 @@
   self: grad * (-self * self + 1).rsqrt()
 
 - name: atan(Tensor self) -> Tensor
-  self: grad / (self * self + 1)
+  self: grad / (self.conj() * self.conj() + 1)
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
