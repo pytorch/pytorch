@@ -10532,7 +10532,7 @@ a")
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
+    @unittest.skip("temp disabled")
     def test_rand_profiling(self):
         def test_rand():
             a = torch.rand([3, 4])

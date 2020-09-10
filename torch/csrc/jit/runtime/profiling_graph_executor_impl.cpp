@@ -45,7 +45,7 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
@@ -371,6 +371,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
     GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    RemoveProfileNodesAndSpecializeTypes(copy);
+    RemoveTensorTypeSpecializations(copy);
   } else {
     runNoGradOptimizations(copy);
   }
