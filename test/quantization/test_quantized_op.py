@@ -3540,6 +3540,39 @@ class TestPadding(TestCase):
 
         self.assertEqual(qy_ref, qy_hat)
 
+    @given(batch_size=st.integers(1, 64),
+           channels=st.integers(1, 64),
+           hwd=st.integers(1, 16),  # For 3D, max input size would be 16x16x16
+           d=st.sampled_from([1, 2, 3]),
+           value=st.floats(-5, 5, allow_nan=False, allow_infinity=False),
+           qtype=st.sampled_from(hu._ALL_QINT_TYPES))
+    def test_constant_padNd(self, batch_size, channels, d, hwd, value, qtype):
+        padding = hwd // 4
+
+        shape = [batch_size, channels, hwd]
+        op = torch.nn.ConstantPad1d
+        if d >= 2:
+            shape.append(hwd)
+            op = torch.nn.ConstantPad2d
+        if d == 3:
+            shape.append(hwd)
+            op = torch.nn.ConstantPad3d
+        numel = np.prod(shape)
+
+        x = torch.arange(numel).to(torch.float)
+        x = x.resize(*shape)
+        # Per-Tensor test
+        scale, zp = _calculate_dynamic_qparams(x, qtype)
+        qx = torch.quantize_per_tensor(x, scale, zp, qtype)
+
+        padding_op = op(padding, value)
+
+        y_ref = padding_op(x)
+        qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
+        qy_hat = padding_op(qx)
+
+        self.assertEqual(qy_ref, qy_hat)
+
 
 @unittest.skipUnless('qnnpack' in supported_qengines,
                      "This Pytorch Build has not been built with or does not support QNNPACK")
