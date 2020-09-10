@@ -246,11 +246,11 @@ def run():
         for v in VERSIONS:
             cpu_tasks.extend([
                 Task(v, test, 1, "cpu", "short"),
-                # Task(v, test, 1, "cpu", "long"),
-                # Task(v, test, 2, "cpu", "short"),
-                # Task(v, test, 2, "cpu", "long"),
+                Task(v, test, 1, "cpu", "long"),
+                Task(v, test, 2, "cpu", "short"),
+                Task(v, test, 2, "cpu", "long"),
             ])
-            # gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
+            gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
     print("Beginning run:")
     gpu_pool = multiprocessing.dummy.Pool(GPU_QUEUE.qsize())
