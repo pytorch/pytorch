@@ -4152,9 +4152,6 @@ criterion_tests = [
         desc='margin',
         check_sum_reduction=True,
     ),
-]
-
-new_criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
