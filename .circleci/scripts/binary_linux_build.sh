@@ -11,13 +11,18 @@ source /env
 # But ncpu will return total number of cores on the system
 export MAX_JOBS=18
 
+USE_CUDA=${USE_CUDA:-}
+if [[ "${DESIRED_CUDA}" == *"cpu"* ]]; then
+  USE_CUDA="1"
+fi
+
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   build_script='/builder/conda/build_pytorch.sh'
 elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
   build_script='/builder/manywheel/build_rocm.sh'
 else
-  build_script="${GIT_ROOT_DIR}/packaging/wheel/build.sh"
+  build_script="USE_CUDA='${USE_CUDA}' ${GIT_ROOT_DIR}/packaging/wheel/build.sh"
 fi
 
 # Build the package
