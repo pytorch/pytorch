@@ -285,12 +285,14 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, int quant_type_int) {
+          [](Module& module, int quant_type_int,
+             std::vector<std::string>& preserved_attrs) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type);
+            return Finalize(module, quant_type, preserved_attrs);
           },
           py::arg("module"),
-          py::arg("quant_type_int") = 1)
+          py::arg("quant_type_int") = 1,
+          py::arg("preserved_attrs") = std::vector<std::string>())
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -304,7 +306,7 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.runOnModule(m);
           })
       .def(
-          "_jit_pass_custom_pattern_based_rewrite_graph",
+e          "_jit_pass_custom_pattern_based_rewrite_graph",
           [](const std::string& pattern,
              const std::string& fused_node_name,
              std::shared_ptr<Graph> g) {
