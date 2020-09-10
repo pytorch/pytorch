@@ -2,6 +2,7 @@ import torch
 from torch.types import _TensorOrTensors
 from torch._six import container_abcs, istuple
 import torch.testing
+from torch.overrides import is_tensor_like
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional
@@ -15,13 +16,14 @@ def zero_gradients(x):
         for elem in x:
             zero_gradients(elem)
 
+
 def make_jacobian(input, num_out):
-    if isinstance(input, torch.Tensor):
+    if is_tensor_like(input):
         if not input.is_floating_point() and not input.is_complex():
             return None
         if not input.requires_grad:
             return None
-        return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
+        return input.new_zeros((input.nelement(), num_out), dtype=input.dtype, layout=torch.strided)
     elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
@@ -33,7 +35,7 @@ def make_jacobian(input, num_out):
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if isinstance(x, torch.Tensor):
+    if is_tensor_like(x):
         if x.requires_grad or not only_requiring_grad:
             yield x
     elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
@@ -54,6 +56,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
         target = input
     output_size = fn(input).numel()
     jacobian = make_jacobian(target, output_size)
+
     # It's much easier to iterate over flattened lists of tensors.
     # These are reference to the same objects in jacobian, so any changes
     # will be reflected in it as well.
@@ -98,7 +101,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
             # C -> C functions used above.
             d[d_idx] = torch.real(dL_dz_conj)
         else:
-            d[d_idx] = ds_dx
+            d[d_idx] = ds_dx * v
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
@@ -275,13 +278,13 @@ def gradcheck(
         return False
 
     tupled_inputs = _as_tuple(inputs)
-    if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
+    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
-        if isinstance(inp, torch.Tensor) and inp.requires_grad:
+        if is_tensor_like(inp) and inp.requires_grad:
             if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                 warnings.warn(
                     'The {}th input requires gradient and '
@@ -383,10 +386,10 @@ def gradcheck(
             return fail_test(error_msg)
 
         if not reentrant:
-            not_reentrant_error()
+            return not_reentrant_error()
 
         if out_is_complex and not reentrant_with_imag_v:
-            not_reentrant_error(' (calculated using complex valued grad output)')
+            return not_reentrant_error(' (calculated using complex valued grad output)')
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))

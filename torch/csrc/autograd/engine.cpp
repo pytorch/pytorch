@@ -609,7 +609,6 @@ void validate_outputs(
     bool grad_is_complex = isComplexType(grad.scalar_type());
 
     TORCH_CHECK(isFloatingType(grad.scalar_type()) || (input_is_complex == grad_is_complex));
-
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
