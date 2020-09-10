@@ -359,6 +359,9 @@ public:
     }
     return loadu(tmp);
   }
+  Vec256<float> i0() const {
+    return map(calc_i0);
+  }
   Vec256<float> log() const {
     return map(std::log);
   }
