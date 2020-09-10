@@ -379,7 +379,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   // of the bucket it would otherwise hold.
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
-      check_grad_layout(grad, bucket_view);
+      this->check_grad_layout(grad, bucket_view);
       // When grad_is_view_ is false, or even when grad_is_view_ is true,
       // in rare cases users may set grad to be None after every iteration.
       // In these cases, grad and bucket_view are pointing
@@ -388,7 +388,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       // If grad has already been set as views of buckets in previous
       // iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
-        copy_grad_to_bucket(grad, bucket_view);
+        this->copy_grad_to_bucket(grad, bucket_view);
         if (grad_is_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
