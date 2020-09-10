@@ -2655,16 +2655,17 @@ Example::
 
 add_docstr(torch.exp2,
            r"""
-exp2(input, out=None) -> Tensor
+exp2(input, *, out=None) -> Tensor
 
-Returns a new tensor with the 2 raised to the elements
-of the input tensor :attr:`input`.
+Computes the base two exponential function of :attr:`input`.
 
 .. math::
     y_{i} = 2^{x_{i}}
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
