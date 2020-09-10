@@ -376,7 +376,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_interpret_graph",
-          [](std::shared_ptr<Graph> graph, py::tuple inputs) {
+          [](std::shared_ptr<Graph>& graph, py::tuple inputs) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
@@ -391,7 +391,9 @@ void initJITBindings(PyObject* module) {
             Code code(graph, "<on-demand-func>");
             InterpreterState(code).run(stack);
             return createPyObjectForStack(std::move(stack));
-          })
+          },
+          py::doc(
+              "Interpret a JIT graph with given inputs without running any optimization passes on it"))
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
