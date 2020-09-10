@@ -791,7 +791,7 @@ class TestDataParallel(TestCase):
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self._testcase.assertWarnsRegex(
+        with self.assertWarnsRegex(
                 UserWarning,
                 r"nn\.ParameterList is being used with DataParallel but this"):
             model(input)
@@ -800,7 +800,7 @@ class TestDataParallel(TestCase):
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self._testcase.assertWarnsRegex(
+        with self.assertWarnsRegex(
                 UserWarning,
                 r"nn\.ParameterDict is being used with DataParallel but this"):
             model(input)
