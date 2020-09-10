@@ -1,16 +1,17 @@
 #pragma once
 
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/serialization/type_name_uniquer.h>
-#include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/python/pybind.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 namespace torch {
 namespace jit {
 
 class TORCH_API PythonMaterializer {
  public:
-  PythonMaterializer(py::object def_cb, py::object obj_cb) : def_cb_(std::move(def_cb)), obj_cb_(std::move(obj_cb)) {}
+  PythonMaterializer(py::object def_cb, py::object obj_cb)
+      : def_cb_(std::move(def_cb)), obj_cb_(std::move(obj_cb)) {}
 
   py::object materialize(const Module& module) {
     class_deps_.push_back(module.type());
@@ -27,7 +28,7 @@ class TORCH_API PythonMaterializer {
  private:
   void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.count(class_type)) {
-        return;
+      return;
     }
     converted_types_.insert(class_type);
     auto qualname = type_name_uniquer_.getUniqueName(class_type);
@@ -42,7 +43,11 @@ class TORCH_API PythonMaterializer {
       return c10::nullopt;
     };
 
-    PythonPrint pp(constant_table_, class_deps_, type_printer, /*enforce_importable=*/true);
+    PythonPrint pp(
+        constant_table_,
+        class_deps_,
+        type_printer,
+        /*enforce_importable=*/true);
 
     pp.printNamedType(class_type);
     def_cb_(pp.str(), qualifier);
@@ -50,22 +55,23 @@ class TORCH_API PythonMaterializer {
 
   py::object pyInstanceFromIValueInstance(ObjectPtr obj) {
     if (obj->type()->findMethod("__setstate__")) {
-        throw std::runtime_error("NYI");
+      throw std::runtime_error("NYI");
     }
 
     std::unordered_map<std::string, py::object> for_cb;
     for (size_t i = 0; i < obj->type()->numAttributes(); ++i) {
       auto name = obj->type()->getAttributeName(i);
-      auto &attr = obj->getSlot(i);
+      auto& attr = obj->getSlot(i);
       if (attr.isObject()) {
-          for_cb[name] = pyInstanceFromIValueInstance(attr.toObject());
+        for_cb[name] = pyInstanceFromIValueInstance(attr.toObject());
       } else {
-          for_cb[name] = toPyObject(attr);
+        for_cb[name] = toPyObject(attr);
       }
     }
 
     TORCH_CHECK(obj->type()->name());
-    py::object pyobj = obj_cb_(obj->type()->name()->qualifiedName(), std::move(for_cb));
+    py::object pyobj =
+        obj_cb_(obj->type()->name()->qualifiedName(), std::move(for_cb));
 
     return pyobj;
   }
@@ -79,5 +85,5 @@ class TORCH_API PythonMaterializer {
   TypeNameUniquer type_name_uniquer_;
 };
 
-
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch
