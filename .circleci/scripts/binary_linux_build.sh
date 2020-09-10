@@ -11,9 +11,9 @@ source /env
 # But ncpu will return total number of cores on the system
 export MAX_JOBS=18
 
-USE_CUDA=${USE_CUDA:-}
+USE_CUDA=${USE_CUDA:-1}
 if [[ "${DESIRED_CUDA}" == *"cpu"* ]]; then
-  USE_CUDA="1"
+  USE_CUDA="0"
 fi
 
 # Parse the parameters
