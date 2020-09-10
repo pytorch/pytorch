@@ -155,6 +155,23 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
+  // [Note] DispatchTable computation
+  // dispatchTable contains entries for runtime dispatch keys.
+  // For any dispatch key, it'll pick a kernel using the following order:
+  //  (1) Use kernel if it's directly registered to this key
+  //  (2) Handle runtime keys that have kernels available from alias keys
+  //    (2.1) Use kernel from DispatchKey::Autograd if available
+  //    (2.2) Use catchAllKernel_(as if it was populated to DispatchKey::Autograd) if available
+  //          Tensor factory functions used to have no registration to Autograd key but only to catchAll.
+  //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
+  //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
+  //          with catchAll as well.
+  //  (3) Use fallthrough kernel that are registered as fallback.
+  //  (4) Use catchAll kernel if available
+  // TODO: currently Autograd is the only alias key, we'll update alias key precedence after we add new
+  //      alias keys AutogradDispatchCPUOrCUDA and Math.
+  // TODO: we can remove (2.2) and (4) after TypeDefault registrations are moved from catchAll to Math
+  //       so that Math can populate to Autograd backend keys before fallback kernels.
 
   // 1. Operator registration
   auto kern_it = kernels_.find(dispatch_key);
@@ -163,25 +180,43 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     TORCH_INTERNAL_ASSERT(kern_it->second.front().kernel.isValid());
     return {kern_it->second.front(), "kernel"};
 
-  // 2. Backend fallback
-  } else if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
+  } else if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
+    // 2.1. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+    auto kern_autograd = kernels_.find(DispatchKey::Autograd);
+    if (kern_autograd != kernels_.end()) {
+      TORCH_INTERNAL_ASSERT(!kern_autograd->second.empty());
+      TORCH_INTERNAL_ASSERT(kern_autograd->second.front().kernel.isValid());
+      return {kern_autograd->second.front(), "autograd kernel"};
+
+    // 2.2. For autograd backend keys, we do this before step 4 to make it higher precedence than
+    //      the fallthrough kernel we registered to Autograd backend keys as fallback.
+    } else if (!catchAllKernel_.empty()) {
+      TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
+      return {catchAllKernel_.front(), "autograd catch all"};
+    }
+  }
+
+  // 3. Backend fallback
+  if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
 
-  // 3. Catch all
+  // 4. Catch all
   } else if (!catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
     return {catchAllKernel_.front(), "catch all"};
 
-  // 4. Default to error
+  // 5. Default to error
   } else {
     return {missingKernel_, "missing"};
   }
 }
 
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
-  dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
-  dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
+  for (auto k : c10::getRuntimeDispatchKeys(dispatch_key)) {
+    auto dispatch_ix = static_cast<uint8_t>(k);
+    dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, k);
+    dispatchKeyExtractor_.setOperatorHasFallthroughForKey(k, dispatchTable_[dispatch_ix].isFallthrough());
+  }
 }
 
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {
@@ -283,8 +318,9 @@ std::string OperatorEntry::dumpComputedTable() const {
 }
 
 // Inspect the "canonical" information in OperatorEntry.  This only prints out
-// *non-derived* information; i.e., what the source of truth says about the
-// operator.  This dumping function is appropriate for expect tests.
+// *non-derived* information including kernels registered to alias dispatch keys;
+// i.e., what the source of truth says about the operator.  This dumping function
+// is appropriate for expect tests.
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
@@ -298,10 +334,11 @@ std::string OperatorEntry::dumpState() const {
     oss << "schema: (none)\n";
   }
 
-  auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts) {
+  auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts, bool is_alias_key=false) {
     int64_t i = 0;
     for (const auto& jt : jts) {
       oss << k_desc
+          << (is_alias_key ? "[alias]" :  "")
           << (i > 0 ? " (inactive)" : "")
           << ": "
           << jt.debug << " :: "
@@ -312,11 +349,11 @@ std::string OperatorEntry::dumpState() const {
   };
 
   // Iterate over DispatchKey, not the flat hash map, so we have a stable order
-  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+  for (uint8_t i = 0; i <= static_cast<uint8_t>(DispatchKey::EndOfAliasKeys); i++) {
     auto k = static_cast<DispatchKey>(i);
     auto it = kernels_.find(k);
     if (it != kernels_.end()) {
-      print_kernel(toString(k), it->second);
+      print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
   print_kernel("catchall", catchAllKernel_);
