@@ -139,6 +139,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     TORCH_CHECK(
         false, "RRef pickling is only supported with the distributed package");
 #endif
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    const auto& qualified_class_name =
+        enum_holder->type()->qualifiedClassName();
+    pushGlobal(qualified_class_name.prefix(), qualified_class_name.name());
+    pushIValue(enum_holder->value());
+    push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
