@@ -1166,3 +1166,26 @@ TEST_F(TransformerTest, Transformer) {
 TEST_F(TransformerTest, Transformer_CUDA) {
   transformer_test_helper(true);
 }
+
+TEST_F(TransformerTest, TransformerArgsCorrectness) {
+  Transformer model(TransformerOptions()
+    .d_model(4)
+    .nhead(2)
+    .num_encoder_layers(2)
+    .num_decoder_layers(1)
+    .dim_feedforward(16)
+    .dropout(0.0)
+    .activation(torch::kReLU));
+
+  torch::Tensor src = torch::randn({2, 3, 4});
+  torch::Tensor tgt = torch::randn({3, 2, 4});
+
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have equal batch size");
+
+  tgt = torch::randn({2, 3, 3});
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have same feature size as d_model");
+
+  src = torch::randn({2, 3});
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have 3 dimensions");
+}
+

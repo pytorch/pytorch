@@ -19,7 +19,7 @@ TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
 
 void TransformerEncoderLayerImpl::reset() {
   // NOTE: reset() is for initializing the model only, calling reset() after the model is created
-  // will cause throwing exceptions. Call reset_parameter() if the created model needs a reset
+  // will throw exceptionss. Call reset_parameter() if the created model needs a reset
 
   self_attn = this->register_module("self_attn",
     MultiheadAttention(MultiheadAttentionOptions(
@@ -396,10 +396,10 @@ Tensor TransformerImpl::forward(
     "src and tgt should have 3 dimensions, but got ", src.dim(), " and ", tgt.dim());
 
   TORCH_CHECK(src.size(1) == tgt.size(1),
-    "src and tgt should have equal batch number (at dim 1), but got ", src.size(1), " and ", tgt.size(1));
+    "src and tgt should have equal batch size (at dim 1), but got ", src.size(1), " and ", tgt.size(1));
 
   TORCH_CHECK(src.size(2) == options.d_model() && tgt.size(2) == options.d_model(),
-    "src and tgt should have same feature number as d_model (at dim 2), but got ",
+    "src and tgt should have same feature size as d_model (at dim 2), but got ",
     src.size(2), " and ", tgt.size(2), " while d_model is ", options.d_model());
 
   Tensor memory = this->encoder.forward<Tensor>(src, src_mask, src_key_padding_mask);

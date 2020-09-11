@@ -23,7 +23,7 @@ namespace nn {
 /// model with corresponding parameters.
 ///
 /// See https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html to
-/// learn abouut the exact behavior of this transformer model
+/// learn about the exact behavior of this transformer model
 ///
 /// See the documentation for `torch::nn::Transformer` class to learn what
 /// constructor arguments are supported for this encoder layer model
@@ -105,7 +105,7 @@ class TORCH_API TransformerImpl : public Cloneable<TransformerImpl> {
     ///   2. This function requires the platform support IEEE754, since `-inf` is guaranteed to
     ///      be valid only when IEEE754 is supported. If the platform doesn't support IEEE754,
     ///      this function will fill the mask with the smallest float number instead of `-inf`,
-    ///      a one time warning will be pop up as well.
+    ///      a one time warning will pop up as well.
     static Tensor generate_square_subsequent_mask(int64_t sz);
 
   protected:
