@@ -277,6 +277,18 @@ them the same thing!)
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
+TODO: expand this section.
+
+Available backend options can be found at
+https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py#L970.
+In addition to backends above, we also support keyword `Math` which is an alias
+that maps to all backends. In other words, function registered to `Math` key
+should be a plain mathematical composition of other `at::` functions and works for any backend.
+
+If you add `dispatch` section to any API that didn't have it before, you **have to** move
+the old implementation to `Math` field so that it's still available for other backends to use.
+
+
 ### `device_guard`
 
 ```

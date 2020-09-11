@@ -370,7 +370,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_string}", "compound": "${compound}", "has_math_kernel": "${has_math_kernel}"}
 """)
 
 # TraceType templates
@@ -654,12 +654,12 @@ def gen_variable_type(out, aten_declarations, template_path):
             registration_declarations.append(
                 REGISTRATION_DECLARATION.substitute(declaration,
                                                     declaration_formals=declaration_formals,
-                                                    compound='false'))
+                                                    compound='False'))
         else:
             registration_declarations.append(
                 REGISTRATION_DECLARATION.substitute(declaration,
                                                     declaration_formals=declaration_formals,
-                                                    compound='true'))
+                                                    compound='True'))
 
     env = {
         'registration_declarations': registration_declarations,
