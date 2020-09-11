@@ -14,7 +14,8 @@ namespace jit {
 bool canRunWithAutograd(Node* node) {
   auto kind = node->kind();
   return kind != prim::FusionGroup && kind != prim::CudaFusionGroup &&
-      kind != prim::TensorExprGroup && (kind.is_aten() || kind.is_prim());
+      kind != prim::TypeCheck && kind != prim::TensorExprGroup &&
+      (kind.is_aten() || kind.is_prim());
 }
 
 namespace {
