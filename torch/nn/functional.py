@@ -3064,90 +3064,98 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                           "See the documentation of nn.Upsample for details.".format(mode))
             align_corners = False
 
-    scale_factor_len = input.dim() - 2
-    scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
-    # default value of recompute_scale_factor is False
-    if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
-        if isinstance(scale_factor, (list, tuple)):
-            _scale_factor_repeated = scale_factor
-        else:
-            _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
-        scale_factor_list = torch.jit.annotate(List[Optional[float]], [elem for elem in _scale_factor_repeated])  # noqa: C416
+    dim = input.dim() - 2  # Number of spatial dimensions.
 
-    # Give this variable a short name because it has to be repeated multiple times below.
-    sfl = scale_factor_list
-
-    dim = input.dim() - 2
-    if size is None and scale_factor is None:
-        raise ValueError('either size or scale_factor should be defined')
+    # Process size and scale_factor.  Validate that exactly one is set.
+    # Validate its length if it is a list, or expand it if it is a scalar.
+    # After this block, exactly one of output_size and scale_factors will
+    # be non-None, and it will be a list (or tuple).
     if size is not None and scale_factor is not None:
         raise ValueError('only one of size or scale_factor should be defined')
-    if scale_factor is not None:
+    elif size is not None:
+        assert scale_factor is None
+        scale_factors = None
+        if isinstance(size, (list, tuple)):
+            if len(size) != dim:
+                raise ValueError('size shape must match input shape. '
+                                 'Input is {}D, size is {}'.format(dim, len(size)))
+            output_size = size
+        else:
+            output_size = [size for _ in range(dim)]
+    elif scale_factor is not None:
+        assert size is None
+        output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError('scale_factor shape must match input shape. '
-                                 'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-
-    if size is not None:
-        if isinstance(size, (list, tuple)):
-            output_size = size
-        else:
-            output_size = [size for i in range(dim)]
-    else:
-        assert scale_factor is not None
-        if isinstance(scale_factor, (list, tuple)):
+                                 'Input is {}D, scale_factor is {}'.format(dim, len(scale_factor)))
             scale_factors = scale_factor
         else:
             scale_factors = [scale_factor for _ in range(dim)]
+    else:
+        raise ValueError('either size or scale_factor should be defined')
 
-        if recompute_scale_factor is None:
-            # only warn when the scales have floating values since
-            # the result for ints is the same with/without recompute_scale_factor
-
-            is_float_scale_factor = False
+    if recompute_scale_factor is None:
+        # only warn when the scales have floating values since
+        # the result for ints is the same with/without recompute_scale_factor
+        if scale_factors is not None:
             for scale in scale_factors:
-                is_float_scale_factor = math.floor(scale) != scale
-                if is_float_scale_factor:
+                if math.floor(scale) != scale:
+                    warnings.warn("The default behavior for interpolate/upsample with float scale_factor changed "
+                                  "in 1.6.0 to align with other frameworks/libraries, and now uses scale_factor directly, "
+                                  "instead of relying on the computed output size. "
+                                  "If you wish to restore the old behavior, please set recompute_scale_factor=True. "
+                                  "See the documentation of nn.Upsample for details. ")
                     break
+    elif recompute_scale_factor and size is not None:
+        raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
 
-            if is_float_scale_factor:
-                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                              "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-                              "See the documentation of nn.Upsample for details. ")
+    # "area" mode always requires an explicit size rather than scale factor.
+    # Re-use the recompute_scale_factor code path.
+    if mode == "area" and output_size is None:
+        recompute_scale_factor = True
 
+    if recompute_scale_factor is not None and recompute_scale_factor:
+        # We compute output_size here, then un-set scale_factors.
+        # The C++ code will recompute it based on the (integer) output size.
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
                            dtype=torch.float32)).float())) for i in range(dim)]
         else:
+            assert scale_factors is not None
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+        scale_factors = None
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, output_size, sfl[0])
+        return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, output_size, sfl[0], sfl[1])
+        return torch._C._nn.upsample_nearest2d(input, output_size, scale_factors)
     if input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, output_size, sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
+
     if input.dim() == 3 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool3d(input, output_size)
+
     if input.dim() == 3 and mode == 'linear':
         assert align_corners is not None
-        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, sfl[0])
+        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, sfl[0], sfl[1])
+        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == 'trilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
-        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, sfl[0], sfl[1])
+        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
