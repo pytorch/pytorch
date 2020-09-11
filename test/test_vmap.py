@@ -1549,6 +1549,25 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             return torch.stack([x, y])
         self._batched_grad_test(op, (x, y), {})
 
+    def test_select(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x[1], (x,), {})
+        self._batched_grad_test(lambda x: x.select(1, 2), (x,), {})
+        self._batched_grad_test(lambda x: x.select(-1, 0), (x,), {})
+
+    def test_slice(self, device):
+        x = torch.randn(2, 3, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x[0:1], (x,), {})
+        self._batched_grad_test(lambda x: x[:, 1:3], (x,), {})
+        self._batched_grad_test(lambda x: x[..., 1:3], (x,), {})
+
+    def test_diagonal(self, device):
+        x = torch.randn(4, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x.diagonal(1, 0, 1), (x,), {})
+
+        x = torch.randn(3, 4, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,), {})
+
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
