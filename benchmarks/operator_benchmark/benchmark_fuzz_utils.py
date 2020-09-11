@@ -2,7 +2,7 @@
 """
 import enum
 import hashlib
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 from torch.utils._benchmark.op_fuzzers.constants import Scale
 from torch.utils._benchmark.op_fuzzers import binary, convolution, matmul, unary
@@ -10,6 +10,7 @@ from torch.utils._benchmark.op_fuzzers import binary, convolution, matmul, unary
 import benchmark_utils
 
 
+CPU_MEDIUM_CUDA_LARGE = "cpu_medium_cuda_large"
 class Fuzzers(enum.Enum):
     UNARY = 0
     BINARY = 1
@@ -62,11 +63,39 @@ def make_fuzzed_config(
     scale=Scale.SMALL,
     n: int = 10,
     seed: Union[int, str] = 0,
-    fuzzer_kwargs: Optional[dict] = None,
+    fuzzer_kwargs: Optional[Union[dict, Tuple[dict]]] = None,
     cross_product_configs = None,
     tags=None,
-    checksum: Optional[int] = None
+    checksum: Optional[Union[int, Tuple[int]]] = None
 ):
+    if isinstance(scale, str):
+        cpu_cuda = ("cpu", "cuda")
+        cross_product_configs = (cross_product_configs or {}).copy()
+        if not isinstance(fuzzer_kwargs, tuple):
+            fuzzer_kwargs = (fuzzer_kwargs, fuzzer_kwargs)
+        assert scale == CPU_MEDIUM_CUDA_LARGE
+        assert checksum is None or isinstance(checksum, tuple) and len(checksum) == 2
+        assert len(fuzzer_kwargs) == 2
+        assert (
+            "device" not in cross_product_configs
+            or tuple(cross_product_configs.pop("device")) == cpu_cuda)
+        result = []
+        for device, checksum, fuzzer_kwargs in zip(cpu_cuda, checksum or (None, None), fuzzer_kwargs):
+            assert device in ("cpu", "cuda"), f"Invalid device: {device}"
+            device_scale = {"cpu": Scale.MEDIUM, "cuda": Scale.LARGE}[device]
+            cross_product_configs["device"] = [device]
+            result += make_fuzzed_config(
+                fuzzer,
+                device_scale,
+                n,
+                seed,
+                fuzzer_kwargs,
+                cross_product_configs,
+                tags,
+                checksum
+            )
+        return result
+
     fuzzer, attr_names = fuzzer_factory(fuzzer, scale, seed, fuzzer_kwargs)
     attrs = []
     for i in range(n):

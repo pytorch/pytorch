@@ -24,16 +24,15 @@ mm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
 
 mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.MATMUL,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed="AddMM",
     cross_product_configs={
-        "device": ["cpu", "cuda"],
         "trans_x": [True, False],
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=11136,
+    checksum=(11136, 17286),
 )
 
 def make_tensor(shape, device, transposed_layout=None):
@@ -58,8 +57,8 @@ class AddmmBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self):
         return torch.addmm(self.input_one, self.mat1, self.mat2)
 
-# op_bench.generate_pt_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
-# op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
+op_bench.generate_pt_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
+op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
 
 
 """Microbenchmarks for MatMul operator"""
@@ -77,8 +76,8 @@ class MatMulBenchmark(op_bench.TorchBenchmarkBase):
 
 # matmul will generally follow the same path as addmm, so a restricted set is
 # tested as a sanity check.
-# op_bench.generate_pt_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
-# op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
+op_bench.generate_pt_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
+op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
 
 
 """Mircobenchmark for addbmm operator."""
@@ -98,7 +97,7 @@ baddmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
 
 baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.BATCH_MATMUL,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed="BAddMM",
     cross_product_configs={
@@ -107,7 +106,7 @@ baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=4466,
+    checksum=(4466, 6554),
 )
 
 class AddbmmBenchmark(op_bench.TorchBenchmarkBase):

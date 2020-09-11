@@ -22,12 +22,11 @@ conv1d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
 
 conv1d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.CONV1D,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed="Conv1D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["long"],
-    checksum=2341,
+    checksum=(2341, 7590),
 )
 
 conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
@@ -43,13 +42,12 @@ conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
 
 conv2d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.CONV2D,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     fuzzer_kwargs={"groups": {1: 0.5, 2: 0.5}},
     seed="Conv2D",
-    cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["long"],
-    checksum=2289,
+    checksum=(2289, 5521),
 )
 
 
@@ -69,15 +67,15 @@ norm_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
 
 norm_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.UNARY,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed="Norm",
-    fuzzer_kwargs={"dim": {3: 0.5, 4: 0.5}, "pow_2_fraction": 0.8, "max_elements": 1024**2},
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=["short"],
-    checksum=4360,
+    fuzzer_kwargs=(
+        {"dim": {3: 0.5, 4: 0.5}, "pow_2_fraction": 0.8, "max_elements":   1 * 1024**2},
+        {"dim": {3: 0.5, 4: 0.5}, "pow_2_fraction": 0.8, "max_elements": 128 * 1024**2}
+    ),
+    tags=["long"],
+    checksum=(4360, 59127),
 )
 
 norm_fuzzed_configs = norm_fuzzed_configs_short + norm_fuzzed_configs_long

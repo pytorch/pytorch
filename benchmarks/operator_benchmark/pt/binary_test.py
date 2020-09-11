@@ -25,14 +25,11 @@ binary_short_float_configs = fuzz_utils.make_fuzzed_config(
 
 binary_long_float_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.BINARY,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed='Add',
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
     tags=['long'],
-    checksum=8505,
+    checksum=(8505, 11877560),
 )
 
 class BinaryFloatBenchmark(op_bench.TorchBenchmarkBase):
@@ -74,11 +71,10 @@ binary_short_int_configs = fuzz_utils.make_fuzzed_config(
 
 binary_long_int_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.BINARY,
-    fuzz_utils.Scale.MEDIUM,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
     n=10,
     seed="Add",
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
         'dtypes': [
             (torch.int32, torch.int32),
             (torch.int8, torch.int8),
@@ -86,7 +82,7 @@ binary_long_int_configs = fuzz_utils.make_fuzzed_config(
         ],
     },
     tags=["long"],
-    checksum=8505,
+    checksum=(8505, 11877560),
 )
 
 class BinaryIntBenchmark(op_bench.TorchBenchmarkBase):
