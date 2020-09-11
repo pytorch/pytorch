@@ -14669,7 +14669,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.hypot_(y),
                 lambda x, y: x.i0(),
                 lambda x, y: x.i0_(),
-                # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
+                lambda x, y: x.lerp(y, 0.5),
                 lambda x, y: x.log(),
                 lambda x, y: x.log_(),
                 lambda x, y: x.log10(),
@@ -18535,8 +18535,14 @@ else:
         with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
             torch.movedim(x, (0, 0), (0, 1))
 
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+            torch.movedim(x, (0, 1, 0), (0, 1, 2))
+
         with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
             torch.movedim(x, (0, 1), (1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+            torch.movedim(x, (0, 1, 2), (1, 0, 1))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.int64, torch.float, torch.complex128)
@@ -19213,6 +19219,12 @@ class TestViewOps(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Tensor must have a last dimension of size 2",
             lambda: torch.view_as_complex(x))
+
+        # zero dimension tensor
+        z = torch.tensor(2.0)
+        self.assertRaisesRegex(
+            RuntimeError, "Input tensor must have one or more dimensions",
+            lambda: torch.view_as_complex(z))
 
         y = x.reshape(0, 2)  # torch.Size([0, 2])
         res = torch.view_as_complex(y)
@@ -19906,7 +19918,7 @@ tensor_op_tests = [
     ('kthvalue', 'dim', _small_3d_unique, lambda t, d: [3, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('kthvalue', 'neg_dim', _small_3d_unique, lambda t, d: [3, -1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('lerp', '', _small_3d, lambda t, d: [_small_3d(t, d), 0.3],
-        1e-2, 1e-5, 1e-5, _float_types_no_half),
+        1e-2, 1e-5, 1e-5, _float_types),
     ('max', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('max', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('max', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -20279,19 +20291,7 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin'),
-                  _TorchMathTestMeta('asinh', reffn='arcsinh'),
-                  _TorchMathTestMeta('sinh'),
-                  _TorchMathTestMeta('acosh', reffn='arccosh'),
-                  _TorchMathTestMeta('tan'),
-                  _TorchMathTestMeta('atan', reffn='arctan'),
-                  _TorchMathTestMeta('atanh', reffn='arctanh'),
-                  _TorchMathTestMeta('tanh'),
-                  _TorchMathTestMeta('log'),
-                  _TorchMathTestMeta('log10'),
-                  _TorchMathTestMeta('log1p'),
-                  _TorchMathTestMeta('log2'),
-                  _TorchMathTestMeta('sqrt'),
+torch_op_tests = [_TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
