@@ -76,33 +76,33 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def _threaded_measurement_loop(self, hook, min_run_time: float, max_run_time: float, callback=None):
-        # hook should take times [list of float] and return (boolean can_stop_now, time_taken_last_measure)
+    def _threaded_measurement_loop(self, time_hook, stop_hook, min_run_time: float, max_run_time: float, callback=None):
         total_time = 0.0
         can_stop = False
         times = []
         with common.set_torch_threads(self._num_threads):
             while (total_time < min_run_time) or (not can_stop):
-                can_stop, time_spent = hook(times)
+                time_spent = time_hook()
                 times.append(time_spent)
                 total_time += time_spent
+                can_stop = stop_hook(times)
                 if callback:
                     callback(number, time_taken)
                 if max_run_time and total_time > max_run_time:
                     break
         return times
 
-    def adaptive_autorange(self, threshold=0.1, max_run_time=None, callback=None, min_run_time=0.1):
+    def adaptive_autorange(self, threshold=0.1, max_run_time=10, callback=None, min_run_time=0.01):
         number = self._estimate_block_size(min_run_time=0.05)
 
-        def loop(times):
-            time_taken = self._timer.timeit(number)
+        def time_hook():
+            return self._timer.timeit(number)
+        def stop_hook(times):
             if len(times) > 3:
                 measure = self._construct_measurement(number, times)
-                return measure.meets_confidence(), time_taken
-            return False, time_taken
-
-        times = self._threaded_measurement_loop(loop, min_run_time, max_run_time, callback=callback)
+                return measure.meets_confidence(threshold=threshold)
+            return False
+        times = self._threaded_measurement_loop(time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
         measure = self._construct_measurement(number, times)
         return measure
 
@@ -124,12 +124,12 @@ class Timer(object):
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
         number = self._estimate_block_size(min_run_time)
-        def loop(times):
-            time_taken = self._timer.timeit(number)
-            return True, time_taken
+        def time_hook():
+            return self._timer.timeit(number)
+        def stop_hook():
+            return True
 
-        times = self._threaded_measurement_loop(loop, min_run_time=min_run_time, max_run_time=None,
-            callback=callback)
+        times = self._threaded_measurement_loop(loop, min_run_time=min_run_time, max_run_time=None, callback=callback)
 
         return self._construct_measurement(number_per_run=number, times=times)
 
