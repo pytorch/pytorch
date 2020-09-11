@@ -6,7 +6,7 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification 
+# ---[ MSVC OpenMP modification
 if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()
@@ -298,6 +298,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
     add_dependencies(tensorpipe_agent torch c10d)
     if(USE_TENSORPIPE)
+      target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
       target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
       target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
       add_dependencies(tensorpipe_agent tensorpipe)

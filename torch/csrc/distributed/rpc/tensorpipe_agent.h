@@ -6,7 +6,10 @@
 #include <thread>
 
 #include <c10/core/thread_pool.h>
+#ifdef USE_CUDA
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#endif
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
@@ -42,6 +45,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using at::cuda::CUDAStream;
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -132,6 +136,75 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
+
+struct DevicesContext {
+
+  DevicesContext(const DevicesContext& other) = default;
+  DevicesContext(DevicesContext&& other) = default;
+
+  DevicesContext& operator=(const DevicesContext& rhs) = default;
+  DevicesContext& operator=(DevicesContext&& rhs) & = default;
+
+  void synchronize() {}
+
+#ifdef USE_CUDA
+
+  DevicesContext() : streams_([]() -> std::vector<CUDAStream> {
+    auto deviceNum = at::cuda::device_count();
+    std::vector<CUDAStream> streams;
+    streams.reserve(deviceNum);
+    for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
+      streams.emplace_back(at::cuda::getStreamFromPool(idx));
+    }
+    return streams;
+  }()) {}
+
+  inline const std::vector<CUDAStream>& getCUDAStreams() const {
+    return streams_;
+  }
+
+ private:
+  std::vector<CUDAStream> streams_;
+
+#endif
+};
+
+
+struct DevicesStateGuard {
+
+#ifdef USE_CUDA
+  DevicesStateGuard(const DevicesContext& ctx) {
+    const auto& streams = ctx.getCUDAStreams();
+    std::vector<CUDAStream> prevStreams_;
+    prevStreams_.reserve(streams.size());
+    for (const auto& stream: streams) {
+      prevStreams_.emplace_back(
+          at::cuda::getCurrentCUDAStream(stream.device_index()));
+      at::cuda::setCurrentCUDAStream(stream);
+    }
+  }
+
+  ~DevicesStateGuard() noexcept {
+    for (auto& stream : prevStreams_) {
+      at::cuda::setCurrentCUDAStream(std::move(stream));
+    }
+  }
+#else
+  DevicesStateGuard(DevicesContext /* unused */) {};
+#endif
+
+  DevicesStateGuard(const DevicesStateGuard& other) = delete;
+  DevicesStateGuard(DevicesStateGuard&& other) = delete;
+  DevicesStateGuard& operator=(const DevicesStateGuard& rhs) = delete;
+  DevicesStateGuard& operator=(DevicesStateGuard&& rhs) = delete;
+
+ private:
+#ifdef USE_CUDA
+  std::vector<CUDAStream> prevStreams_;
+#endif
+};
+
+
 // TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
@@ -198,9 +271,7 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&,
-                         Message&&,
-                         std::vector<at::cuda::CUDAStream>)>);
+      std::function<void(const tensorpipe::Error&, Message&&, DevicesContext&&)>);
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -221,7 +292,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<FutureMessage>& futureResponseMessage,
       uint64_t messageId,
-      const std::vector<at::cuda::CUDAStream>& streams);
+      DevicesContext&& ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(

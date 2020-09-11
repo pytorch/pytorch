@@ -162,6 +162,7 @@ endif()
 
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
+
     if(NOT MSVC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
       # Disable certain warnings for GCC-9.X

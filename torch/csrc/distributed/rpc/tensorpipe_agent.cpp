@@ -71,29 +71,6 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   }
 }
 
-std::vector<at::cuda::CUDAStream> getStreamsForTpMessage(
-    const tensorpipe::Message& tpMessage) {
-  std::vector<at::cuda::CUDAStream> streams;
-  for (auto& tensor : tpMessage.tensors) {
-    if (!tensor.metadata.empty()) {
-      streams.emplace_back(at::cuda::getStreamFromPool(
-          c10::DeviceIndex(std::stoi(tensor.metadata))));
-    }
-  }
-  return streams;
-}
-
-// use unique_ptrs as CUDAStreamGuard is not movable or copyable
-inline std::vector<std::unique_ptr<at::cuda::CUDAStreamGuard>> streamsToGuards(
-    const std::vector<at::cuda::CUDAStream> streams) {
-  std::vector<std::unique_ptr<at::cuda::CUDAStreamGuard>> guards;
-  guards.reserve(streams.size());
-  for (auto& stream : streams) {
-    guards.emplace_back(new at::cuda::CUDAStreamGuard(stream));
-  }
-  return guards;
-}
-
 } // namespace
 
 C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
@@ -430,17 +407,17 @@ void TensorPipeAgent::onListenerAccepted(
 
 void TensorPipeAgent::pipeRead(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::function<void(const tensorpipe::Error&,
-                       Message&&,
-                       std::vector<at::cuda::CUDAStream>)> fn) {
+    std::function<void(
+        const tensorpipe::Error&, Message&&, DevicesContext&&)> fn) {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
     // TODO: pass these streams to TensorPipe when it can accept streams
-    auto streams = getStreamsForTpMessage(tpMessage);
+    //auto streams = getStreamsForTpMessage(tpMessage);
+    DevicesContext ctx;
 
     if (error) {
-      fn(error, Message(), std::move(streams));
+      fn(error, Message(), std::move(ctx));
       return;
     }
 
@@ -451,12 +428,12 @@ void TensorPipeAgent::pipeRead(
         [tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
-         streams{std::move(streams)}](
+         ctx{std::move(ctx)}](
             const tensorpipe::Error& error,
             tensorpipe::Message tpMessage) mutable {
-          auto guards = streamsToGuards(streams);
+          DevicesStateGuard guard(ctx);
           if (error) {
-            fn(error, Message(), std::move(streams));
+            fn(error, Message(), std::move(ctx));
             return;
           }
 
@@ -465,7 +442,7 @@ void TensorPipeAgent::pipeRead(
           Message rpcMessage = tensorpipeDeserialize(
               std::move(tpMessage), std::move(*tpBuffers));
 
-          fn(error, std::move(rpcMessage), std::move(streams));
+          fn(error, std::move(rpcMessage), std::move(ctx));
         });
   });
 }
@@ -498,7 +475,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
     std::shared_ptr<FutureMessage>& futureResponseMessage,
     uint64_t messageId,
-    const std::vector<at::cuda::CUDAStream>& streams) {
+    DevicesContext&& ctx) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
                  << " won't send response to request #" << messageId << " to "
@@ -557,7 +534,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         std::move(responseMessage),
-        [this, pipe, messageId, streams{std::move(streams)}](
+        [this, pipe, messageId, ctx{std::move(ctx)}](
             const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -572,15 +549,17 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   << " done sending response to request #" << messageId
                   << " to " << pipe->getRemoteName();
 
+#ifdef USE_CUDA
           // use a dedicated thread to synchronize CUDA streams before
           // destructing them.
           // NB: when we add a dedicated stream pool later, this prevents
           // returning the stream to the pool too early.
-          threadPool_.run([streams{std::move(streams)}]() mutable {
-            for (auto& stream : streams) {
+          threadPool_.run([ctx = std::move(ctx)]() mutable {
+            for (auto& stream : ctx.getCUDAStreams()) {
               stream.synchronize();
             }
           });
+#endif
         });
   } else {
     pipeWrite(
@@ -609,7 +588,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       [this, pipe](
           const tensorpipe::Error& error,
           Message&& requestMessage,
-          std::vector<at::cuda::CUDAStream> streams) mutable {
+          DevicesContext&& ctx) mutable {
         if (error) {
           // FIXME This is not a correct way to check whether this error was
           // "intentionally" caused by the remote end shutting down. We should
@@ -643,9 +622,9 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          pipe,
                          messageId,
                          requestMessage{std::move(requestMessage)},
-                         streams{std::move(streams)}]() mutable {
+                         ctx{std::move(ctx)}]() mutable {
           // create guards again as this function runs on a different thread
-          auto guards = streamsToGuards(streams);
+          DevicesStateGuard guards(ctx);
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
@@ -662,7 +641,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           if (futureResponseMessage->completed()) {
             decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
-                pipe, futureResponseMessage, messageId, streams);
+                pipe, futureResponseMessage, messageId, std::move(ctx));
           } else {
             // Not complete yet
             increaseCallCount(serverActiveAsyncCalls_);
@@ -671,11 +650,11 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                  pipe,
                  futureResponseMessage,
                  messageId,
-                 streams{std::move(streams)}]() mutable {
+                 ctx{std::move(ctx)}]() mutable {
                   decreaseCallCount(serverActiveCalls_);
                   decreaseCallCount(serverActiveAsyncCalls_);
                   sendCompletedResponseMessage(
-                      pipe, futureResponseMessage, messageId, streams);
+                      pipe, futureResponseMessage, messageId, std::move(ctx));
                 });
           }
 
@@ -790,7 +769,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
             [this, &clientPipe](
                 const tensorpipe::Error& error,
                 Message&& responseMessage,
-                std::vector<at::cuda::CUDAStream> /* unused */) {
+                DevicesContext&& /* unused */) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
                     !rpcAgentRunning_.load()) {
