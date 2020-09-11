@@ -75,7 +75,7 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def _threaded_measurement_loop(self, time_hook, stop_hook, min_run_time: float, max_run_time: float, callback=None):
+    def _threaded_measurement_loop(self, number, time_hook, stop_hook, min_run_time: float, max_run_time: float, callback=None):
         total_time = 0.0
         can_stop = False
         times = []
@@ -102,7 +102,7 @@ class Timer(object):
                 measure = self._construct_measurement(number, times)
                 return measure.meets_confidence(threshold=threshold)
             return False
-        times = self._threaded_measurement_loop(time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
+        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
         measure = self._construct_measurement(number, times)
         return measure
 
@@ -128,8 +128,8 @@ class Timer(object):
         def time_hook():
             return self._timer.timeit(number)
 
-        def stop_hook():
+        def stop_hook(times):
             return True
 
-        times = self._threaded_measurement_loop(loop, min_run_time=min_run_time, max_run_time=None, callback=callback)
+        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time, max_run_time=None, callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
