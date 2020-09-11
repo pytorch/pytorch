@@ -149,8 +149,9 @@ struct DevicesContext {
 
   void synchronize() {}
 
-#ifdef USE_CUDA
-
+#ifndef USE_CUDA
+  DevicesContext() {}
+#else
   DevicesContext() : streams_([]() -> std::vector<CUDAStream> {
     auto deviceNum = at::cuda::device_count();
     std::vector<CUDAStream> streams;
