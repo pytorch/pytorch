@@ -106,7 +106,7 @@ void GpuLower::lower() {
       IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 
   // We now have the lowered expressions, store the final lowered Kernel IR
-  kernel_ = std::make_unique<Kernel>(indexed_loops);
+  kernel_ = std::make_unique<Kernel>(indexed_loops, preds);
 
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {

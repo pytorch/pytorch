@@ -10,16 +10,17 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-/*
- * Map from tensorview to bit set represnting <BIDx, BIDy, BIDz, TIDx, TIDy,
- * TIDz> If any dependency of TV had a parallelized reduction, we will track
- * it here. This will be used for predicate generation to prevent
- * parallelization on that axis. This is important if we have a reduction on
- * for example TIDx, as the reduced value is only valid on threadIdx.x == 0
- * therefore if we use that value later in the kernel we have that predicate.
- * If we follow a reduction parallelized on TIDx with a broadcast on TIDx we
- * no longer need the predicate and can reset the bit accordingly
- */
+//! Maps TensorViews to std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>>
+//!
+//! Map from tensorview to bit set represnting <BIDx, BIDy, BIDz, TIDx, TIDy,
+//! TIDz> If any dependency of TV had a parallelized reduction, we will track
+//! it here. This will be used for predicate generation to prevent
+//! parallelization on that axis. This is important if we have a reduction on
+//! for example TIDx, as the reduced value is only valid on threadIdx.x == 0
+//! therefore if we use that value later in the kernel we have that predicate.
+//! If we follow a reduction parallelized on TIDx with a broadcast on TIDx we
+//! no longer need the predicate and can reset the bit accordingly
+//!
 class TORCH_CUDA_API ThreadPredicateMap {
  public:
   using SourceMapType =

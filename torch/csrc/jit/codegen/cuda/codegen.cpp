@@ -2,8 +2,8 @@
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <sstream>
 #include <vector>
@@ -16,8 +16,10 @@ namespace codegen {
 namespace {
 
 class CudaKernelGenerator : private OptInConstDispatch {
+  static constexpr char* kTab = "  ";
+
  public:
-  static std::string generate(
+  static std::string generateKernelDefinition(
       const Kernel* kernel,
       const std::string& kernel_name) {
     CudaKernelGenerator codegen(kernel);
@@ -143,9 +145,29 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
   std::ostream& indent() {
     for (int i = 0; i < block_nest_level_; ++i) {
-      code_ << "  ";
+      code_ << kTab;
     }
     return code_;
+  }
+
+  std::string gen(const Statement* statement) {
+    std::stringstream tmp_code;
+    std::swap(tmp_code, code_);
+    handle(statement);
+    std::swap(tmp_code, code_);
+    return tmp_code.str();
+  }
+
+  void handle(const Statement* node) final {
+    OptInConstDispatch::handle(node);
+  }
+
+  void handle(const Expr* node) final {
+    OptInConstDispatch::handle(node);
+  }
+
+  void handle(const Val* node) final {
+    OptInConstDispatch::handle(node);
   }
 
   void handle(const kir::Bool* node) final {}
@@ -172,7 +194,37 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
   void handle(const kir::ReductionOp* node) final {}
 
-  void handle(const kir::BroadcastOp* node) final {}
+  void handle(const kir::BroadcastOp* node) final {
+    const ir_utils::ParallelTypeBitmap domains =
+        ir_utils::getParallelBroadcastDomains(
+            node->out(), kernel_->predicateMap());
+
+    const bool thread_x = domains.get(ParallelType::TIDx);
+    const bool thread_y = domains.get(ParallelType::TIDy);
+    const bool thread_z = domains.get(ParallelType::TIDz);
+    const bool block_x = domains.get(ParallelType::BIDx);
+    const bool block_y = domains.get(ParallelType::BIDy);
+    const bool block_z = domains.get(ParallelType::BIDz);
+
+    const bool grid_broadcast_needed = block_x || block_y || block_z;
+    const bool block_broadcast_needed = thread_x || thread_y || thread_z;
+
+    TORCH_INTERNAL_ASSERT(
+        !grid_broadcast_needed,
+        "Parallel broadcast across blocks not supported");
+
+    if (block_broadcast_needed) {
+      const auto d_type = node->out()->getDataType().value();
+      indent() << "broadcast::blockBroadcast<" << (thread_x ? "true" : "false")
+               << ", " << (thread_y ? "true" : "false") << ", "
+               << (thread_z ? "true" : "false") << ">(" << gen(node->out())
+               << ", " << gen(node->in()) << ", static_cast<" << d_type
+               << "*>(shared_mem));\n";
+    } else {
+      indent() << gen(node->out()) << "\n";
+      indent() << kTab << " = " << gen(node->in()) << ";\n";
+    }
+  }
 
   void handle(const kir::GridReduction* node) final {}
 
@@ -195,7 +247,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
 std::string generateCudaKernel(
     const Kernel* kernel,
     const std::string& kernel_name) {
-  return CudaKernelGenerator::generate(kernel, kernel_name);
+  return CudaKernelGenerator::generateKernelDefinition(kernel, kernel_name);
 }
 
 } // namespace codegen

@@ -677,49 +677,8 @@ void IrPrinter::handle(const BroadcastOp* bop) {
   os_ << bop->out() << " = broadcast( " << bop->in() << " )\n";
 }
 
-void IrPrinter::handle(const kir::BroadcastOp* bop) {
-  TORCH_CHECK(bop->out()->getValType() == ValType::TensorIndex);
-
-  const ir_utils::ParallelTypeBitmap domains =
-      ir_utils::getParallelBroadcastDomains(
-          bop->out(), getThreadPredicateMap());
-  const bool thread_x = domains.get(ParallelType::TIDx);
-  const bool thread_y = domains.get(ParallelType::TIDy);
-  const bool thread_z = domains.get(ParallelType::TIDz);
-  const bool block_x = domains.get(ParallelType::BIDx);
-  const bool block_y = domains.get(ParallelType::BIDy);
-  const bool block_z = domains.get(ParallelType::BIDz);
-
-  const bool grid_broadcast_needed = block_x || block_y || block_z;
-  const bool block_broadcast_needed = thread_x || thread_y || thread_z;
-
-  TORCH_INTERNAL_ASSERT(
-      !grid_broadcast_needed, "Parallel broadcast across blocks not supported");
-
-  if (block_broadcast_needed) {
-    auto d_type = bop->out()->getDataType().value();
-    indent();
-    os_ << "broadcast::blockBroadcast<";
-    os_ << (thread_x ? "true" : "false") << ", ";
-    os_ << (thread_y ? "true" : "false") << ", ";
-    os_ << (thread_z ? "true" : "false");
-    os_ << ">(";
-    handle(bop->out());
-    os_ << ", ";
-    handle(bop->in());
-    os_ << ", static_cast<" << d_type << "*>(shared_mem)";
-    os_ << ");\n";
-  } else {
-    indent();
-    handle(bop->out());
-    os_ << "\n";
-    indent_size_++;
-    indent();
-    os_ << " = ";
-    handle(bop->in());
-    indent_size_--;
-    os_ << ";\n";
-  }
+void IrPrinter::handle(const kir::BroadcastOp*) {
+  os_ << "kir::BroadcastOp";
 }
 
 void IrPrinter::handle(const kir::ForLoop* fl) {
@@ -784,7 +743,7 @@ void IrPrinter::handle(const kir::Allocate* a) {
     const auto tv = a->buffer()->as<kir::TensorView>();
     TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
     TORCH_INTERNAL_ASSERT(a->size() != nullptr);
-    switch (tv->getMemoryType()) {
+    switch (tv->memoryType()) {
       case MemoryType::Global:
         os_ << "// Allocate global tensor ";
         break;
@@ -799,7 +758,7 @@ void IrPrinter::handle(const kir::Allocate* a) {
     }
 
     // Dynamic Shared Memory
-    if (tv->getMemoryType() == MemoryType::Shared &&
+    if (tv->memoryType() == MemoryType::Shared &&
         !a->size()->isConstScalar()) {
       // Align Offset Position
       os_ << "offset = alignBufferSize(offset,";

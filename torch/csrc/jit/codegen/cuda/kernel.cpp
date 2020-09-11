@@ -74,7 +74,10 @@ class BuffersExtractor final : OptOutDispatch {
 } // namespace
 
 // TODO(kir): Kernel IR validation
-Kernel::Kernel(const std::vector<Expr*>& exprs) : exprs_(exprs) {
+Kernel::Kernel(
+    const std::vector<Expr*>& exprs,
+    const ThreadPredicateMap& predicate_map)
+    : exprs_(exprs), predicate_map_(predicate_map) {
   analyze();
 }
 

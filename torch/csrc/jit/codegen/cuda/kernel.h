@@ -3,6 +3,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <memory>
@@ -48,7 +49,9 @@ struct KernelSummary {
 //!
 class TORCH_CUDA_API Kernel final : public NonCopyable {
  public:
-  explicit Kernel(const std::vector<Expr*>& exprs);
+  Kernel(
+      const std::vector<Expr*>& exprs,
+      const ThreadPredicateMap& predicate_map);
 
   // Register input as an input of the kernel
   void addInput(Val* input) {
@@ -76,6 +79,10 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
     return summary_;
   }
 
+  const ThreadPredicateMap& predicateMap() const {
+    return predicate_map_;
+  }
+
  private:
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
@@ -90,6 +97,10 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
 
   // Summary of interesting kernel data
   KernelSummary summary_;
+
+  // Predicate map
+  // TODO(kir): consider a simpler, kernel IR based version
+  ThreadPredicateMap predicate_map_;
 };
 
 } // namespace fuser
