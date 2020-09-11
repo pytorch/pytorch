@@ -21,6 +21,10 @@ class _NormBase(Module):
     momentum: float
     affine: bool
     track_running_stats: bool
+    running_mean: Tensor
+    running_var: Tensor
+    num_batches_tracked: Tensor
+
     # WARNING: weight and bias purposely not defined here.
     # See https://github.com/pytorch/pytorch/issues/39670
 
