@@ -1,8 +1,11 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
+#include <sys/types.h>
+#include <torch/custom_class.h>
 
 namespace c10d {
+
 
 ProcessGroup::Work::~Work() {}
 
@@ -21,7 +24,7 @@ std::exception_ptr ProcessGroup::Work::exception() const {
   return exception_;
 }
 
-int ProcessGroup::Work::sourceRank() const {
+int64_t ProcessGroup::Work::sourceRank() const {
   throw std::runtime_error(
       "sourceRank() may only be called on work objects "
       "that correspond to a recv or recv-from-any call.");
@@ -88,7 +91,7 @@ ProcessGroup::~ProcessGroup() {}
 
 // This is introduced so that implementors of ProcessGroup would not need to
 // have this implmentation.
-std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {

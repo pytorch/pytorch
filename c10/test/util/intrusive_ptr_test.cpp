@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -1671,6 +1672,15 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+TEST(
+    WeakIntrusivePtrTest,
+    vector_insert_weak_intrusive) {
+  std::vector<weak_intrusive_ptr<SomeClass>> priorWorks;
+  std::vector<intrusive_ptr<SomeClass>> wips;
+  wips.push_back(make_intrusive<SomeClass>());
+  priorWorks.insert(priorWorks.end(), wips.begin(), wips.end());
+  EXPECT_EQ(priorWorks.size(), 1);
+}
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenNewInstanceIsValid) {

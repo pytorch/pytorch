@@ -32,6 +32,7 @@
 #endif
 
 #include <c10/util/StringUtil.h>
+#include <c10/util/intrusive_ptr.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
@@ -377,7 +378,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
 
-int ProcessGroupGloo::RecvWork::sourceRank() const {
+int64_t ProcessGroupGloo::RecvWork::sourceRank() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return srcRank_;
 }
@@ -608,11 +609,11 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     AsyncWork::execute(std::move(work));
     lock.lock();
-    workInProgress_[workerIndex] = nullptr;
+    workInProgress_[workerIndex].reset();
   }
 }
 
-void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
+void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
   lock.unlock();
@@ -727,7 +728,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -750,15 +751,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
-  std::shared_ptr<AsyncBroadcastWork> work;
+  c10::intrusive_ptr<AsyncBroadcastWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncBroadcastWork>(
+    work = c10::make_intrusive<AsyncBroadcastWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncBroadcastCUDAWork>(
+    work = c10::make_intrusive<AsyncBroadcastCUDAWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
 #endif
   } else {
@@ -1253,7 +1254,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1282,15 +1283,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
         "(allreduce of sparse tensors only works with ReduceOp.SUM)");
   }
 
-  std::shared_ptr<AsyncWork> work;
+  c10::intrusive_ptr<AsyncWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
     if (layout == c10::kStrided) {
-      work = std::make_shared<AsyncAllreduceWork>(
+      work = c10::make_intrusive<AsyncAllreduceWork>(
           std::move(context), inputs, opts.reduceOp, tag);
     } else if (layout == c10::kSparse) {
-      work = std::make_shared<AsyncSparseAllreduceWork>(
+      work = c10::make_intrusive<AsyncSparseAllreduceWork>(
           std::move(context), inputs, tag);
     } else {
       invalidArgument("unsupported layout");
@@ -1298,10 +1299,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     if (layout == c10::kStrided) {
-      work = std::make_shared<AsyncAllreduceCUDAWork>(
+      work = c10::make_intrusive<AsyncAllreduceCUDAWork>(
           std::move(context), inputs, opts.reduceOp, tag);
     } else if (layout == c10::kSparse) {
-      work = std::make_shared<AsyncSparseAllreduceCUDAWork>(
+      work = c10::make_intrusive<AsyncSparseAllreduceCUDAWork>(
           std::move(context), inputs, tag);
     } else {
       invalidArgument("unsupported layout");
@@ -1315,7 +1316,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1358,12 +1359,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
       invalidArgument("unsupported layout");
   }
 
-  std::shared_ptr<AsyncWork> work;
+  c10::intrusive_ptr<AsyncWork> work;
   const uint32_t tag = nextTag();
   std::shared_ptr<gloo::Context> context = getContext(tag);
   if (device.type() == c10::kCPU) {
     if (layout == c10::kStrided) {
-      work = std::make_shared<AsyncAllreduceCoalescedWork>(
+      work = c10::make_intrusive<AsyncAllreduceCoalescedWork>(
           std::move(context), tensors, opts.reduceOp, tag);
     } else {
       invalidArgument("unsupported layout");
@@ -1490,7 +1491,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1513,11 +1514,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
-  std::shared_ptr<AsyncReduceWork> work;
+  c10::intrusive_ptr<AsyncReduceWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncReduceWork>(
+    work = c10::make_intrusive<AsyncReduceWork>(
         std::move(context),
         inputs,
         opts.rootRank,
@@ -1526,7 +1527,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncReduceCUDAWork>(
+    work = c10::make_intrusive<AsyncReduceCUDAWork>(
         std::move(context),
         inputs,
         opts.rootRank,
@@ -1671,7 +1672,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -1720,15 +1721,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
-  std::shared_ptr<AsyncAllgatherWork> work;
+  c10::intrusive_ptr<AsyncAllgatherWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncAllgatherWork>(
+    work = c10::make_intrusive<AsyncAllgatherWork>(
         std::move(context), outputs, inputs, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncAllgatherCUDAWork>(
+    work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
         std::move(context), outputs, inputs, tag);
 #endif
   } else {
@@ -1802,7 +1803,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& output_lists,
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
@@ -1852,13 +1853,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
 
   auto tag = nextTag();
   auto context = getContext(tag);
-  auto work = std::make_shared<AsyncAllgatherCoalescedWork>(
+  auto work = c10::make_intrusive<AsyncAllgatherCoalescedWork>(
       std::move(context), output_lists, input_list, tag);
   enqueue(work);
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
@@ -2006,7 +2007,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
@@ -2052,15 +2053,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
-  std::shared_ptr<AsyncGatherWork> work;
+  c10::intrusive_ptr<AsyncGatherWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncGatherWork>(
+    work = c10::make_intrusive<AsyncGatherWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncGatherCUDAWork>(
+    work = c10::make_intrusive<AsyncGatherCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
 #endif
   } else {
@@ -2193,7 +2194,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
@@ -2238,15 +2239,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
       invalidArgument(c10::str("unsupported device type ", device.type()));
   }
 
-  std::shared_ptr<AsyncScatterWork> work;
+  c10::intrusive_ptr<AsyncScatterWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncScatterWork>(
+    work = c10::make_intrusive<AsyncScatterWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncScatterCUDAWork>(
+    work = c10::make_intrusive<AsyncScatterCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
 #endif
   } else {
@@ -2256,7 +2257,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
@@ -2390,7 +2391,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
@@ -2407,12 +2408,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
   assertDense(invalidArgument, {inputTensor});
 
   const auto& device = outputTensor.device();
-  std::shared_ptr<AsyncAlltoallWork> work;
+  c10::intrusive_ptr<AsyncAlltoallWork> work;
   auto tag = nextTag();
   auto context = getContext(tag);
 
   if (device.type() == at::kCPU) {
-    work = std::make_shared<AsyncAlltoallWork>(
+    work = c10::make_intrusive<AsyncAlltoallWork>(
         std::move(context),
         outputTensor,
         inputTensor,
@@ -2421,7 +2422,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
         tag);
 #ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
-    work = std::make_shared<AsyncAlltoallCUDAWork>(
+    work = c10::make_intrusive<AsyncAlltoallCUDAWork>(
         std::move(context),
         outputTensor,
         inputTensor,
@@ -2457,7 +2458,7 @@ uint32_t checkTag(int32_t tag) {
   return (uint32_t)tag;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
@@ -2473,10 +2474,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the send.
-  return std::make_shared<SendWork>(tensor, std::move(buf));
+  return c10::make_intrusive<SendWork>(tensor, std::move(buf));
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
@@ -2492,10 +2493,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
@@ -2520,7 +2521,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf));
+  return c10::make_intrusive<RecvWork>(tensor, std::move(buf));
 }
 
 namespace {
@@ -2529,12 +2530,12 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncBarrierWork(
       const std::shared_ptr<gloo::Context>& context,
-      std::vector<std::weak_ptr<AsyncWork>> priorWork,
+      std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
       : context(context), priorWork(std::move(priorWork)), tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<std::weak_ptr<AsyncWork>> priorWork;
+  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
   const uint32_t tag;
 
   void run() override {
@@ -2554,9 +2555,9 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
     const BarrierOptions& opts) {
-  std::vector<std::weak_ptr<AsyncWork>> priorWork;
+  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
 
   // Snapshot all in progress and pending work as weak_ptr.
   // When executing a barrier, we need to ensure that all prior work
@@ -2570,7 +2571,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
 
   auto tag = nextTag();
   auto context = getContext(tag);
-  auto work = std::make_shared<AsyncBarrierWork>(
+  auto work = c10::make_intrusive<AsyncBarrierWork>(
       std::move(context), std::move(priorWork), tag);
   enqueue(work);
   return work;

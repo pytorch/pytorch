@@ -40,7 +40,7 @@ class SignalTest {
     });
   }
 
-  std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
+  c10::intrusive_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     ::c10d::ProcessGroupGloo::Options options;
@@ -58,7 +58,7 @@ class SignalTest {
     };
 
     // Loop until an exception happens
-    std::shared_ptr<::c10d::ProcessGroup::Work> work;
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work;
     while (true) {
       work = pg.allreduce(tensors);
       try {
@@ -78,7 +78,7 @@ class SignalTest {
   Semaphore sem_;
 };
 
-std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
+c10::intrusive_ptr<::c10d::ProcessGroup::Work> testSignal(
     const std::string& path,
     int signal) {
   Fork fork;
@@ -102,7 +102,7 @@ class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
       Options options)
       : ProcessGroupGloo(store, rank, size, options) {}
 
-  std::shared_ptr<::c10d::ProcessGroup::Work> send(
+  c10::intrusive_ptr<::c10d::ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
@@ -195,7 +195,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   }
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
   }
@@ -245,7 +245,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       options.rootTensor = j;
 
       // Kick off work
-      std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+      std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
       for (auto i = 0; i < size; i++) {
         work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
       }
@@ -311,7 +311,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   };
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto rank = 0; rank < size; rank++) {
     work[rank] = tests[rank].getProcessGroup().alltoall_base(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
@@ -344,7 +344,7 @@ void testBarrier(const std::string& path) {
   auto tests = CollectiveTest::initialize(path, size);
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().barrier();
   }

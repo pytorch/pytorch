@@ -1,8 +1,11 @@
+#include <bits/stdint-intn.h>
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include "c10/util/intrusive_ptr.h"
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -50,6 +53,9 @@ std::vector<std::string> split(char separator, const std::string& string) {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -120,6 +126,7 @@ void _register_comm_hook(
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
 };
+
 
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
@@ -737,7 +744,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
     py::call_guard<py::gil_scoped_release>());
 #endif
 
-  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+//   py::class_<c10::intrusive_ptr<torch::CustomClassHolder>>(module, "Capsule");
+  py::class_<::c10d::ProcessGroup::Work, c10::intrusive_ptr<::c10d::ProcessGroup::Work>>(module, "Work")
+//   intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+//   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
@@ -882,6 +892,30 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   Py_RETURN_TRUE;
 }
+
+// TorchBind bindings
+static auto store_torchbind =
+  torch::class_<::c10d::Store>("dist_c10d", "Store");
+
+static auto fileStore_torchbind =
+  torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
+    .def(torch::init<std::string, int64_t>());
+
+// Torchbind the ProcessGroup to make it available in TorchScript
+static auto processGroupWork_torchbind =
+  torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
+    .def(torch::init<>())
+    .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+    .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
+    .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+    .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
+
+static auto processGroup_torchbind =
+  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
+//static auto processGroupGloo_torchbind =
+  //torch::class_<::c10d::ProcessGroupGloo>("dist_c10d", "ProcessGroupGloo")
+    //.def(torch::init<std::shared_ptr<::c10d::Store>>());
 
 } // namespace
 
