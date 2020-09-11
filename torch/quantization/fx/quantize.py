@@ -1,15 +1,4 @@
 import torch
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from torch.quantization.quantize import _remove_qconfig
-
-from torch.quantization.default_mappings import (
-    DEFAULT_QAT_MODULE_MAPPING,
-)
-
 from torch.fx import (
     GraphModule,
     Proxy,
@@ -20,6 +9,17 @@ from torch.fx.graph import (
     Node,
     map_arg,
 )
+
+from torch.quantization import (
+    propagate_qconfig_,
+    convert,
+)
+
+from ..quantization_mappings import (
+    get_qat_module_mappings,
+)
+
+from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
@@ -165,7 +165,7 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root):
-        convert(root, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=True, remove_qconfig=False)
+        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self, root, input_graph):
         def get_qconfig(module):
