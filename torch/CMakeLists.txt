@@ -302,6 +302,7 @@ add_custom_command(
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(
-  gen_version ALL
+  gen_torch_version ALL
   DEPENDS ${TORCH_SRC_DIR}/version.py
 )
+add_dependencies(torch_python gen_torch_version)
