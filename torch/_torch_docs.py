@@ -8928,9 +8928,8 @@ Returns:
 """.format(**factory_common_args))
 
 
-add_docstr(torch.kaiser_window,
-           """
-kaiser_window(window_length, beta, periodic=True, dtype=None, \
+add_docstr(torch.kaiser_window, """
+kaiser_window(window_length, beta, periodic=True, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Kaiser window function.
@@ -8943,31 +8942,36 @@ with
 .. math::
     -\frac{M-1}{2} \leq n \leq \frac{M-1}{2}
 
-where :math:`N` is the full window size.
-The input :attr:`window_length` is a positive integer controlling the
-returned window size. :attr:`periodic` flag determines whether the returned
-window trims off the last duplicate value from the symmetric window and is
+where :math:`M` is the full window size.
+
+If :attr:`periodic` is true, the :math:`M` in
+above formula is in fact :math:`\text{window\_length} + 1`. 
+This flag determines whether the returned window trims off 
+the last duplicate value from the symmetric window and is
 ready to be used as a periodic window with functions like
-:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
+:meth:`torch.stft`. Also, we always have
 ``torch.kaiser_window(L, B, periodic=True)`` equal to
 ``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+
 """ + r"""
-Arguments:
-    window_length (int): the size of returned window
-    periodic (bool, optional): If True, returns a window to be used as periodic
-        function. If False, return a symmetric window.
-    {dtype} Only floating point types are supported.
+Args:
+    window_length (int):  positive integer controlling the returned window size.
+    beta: shape parameter for the window
+    periodic (bool, optional): If True, returns a periodic window, for use in spectral analysis.
+        If False, returns a symmetric window, for use in filter design.
+
+Keyword args:
+    {dtype}
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
     {device}
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing samples from the window
 
 """.format(**factory_common_args))
 
