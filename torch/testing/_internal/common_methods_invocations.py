@@ -1172,6 +1172,14 @@ def method_tests():
         ('fft.irfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
         ('fft.hfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
         ('fft.ihfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.fftn', (S, S, S), NO_ARGS, '3d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.ifftn', (S, S, S), NO_ARGS, '3d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.rfftn', (S, S, S), NO_ARGS, '3d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.irfftn', (S, S, S), NO_ARGS, '3d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.fftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.ifftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.rfftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.irfftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):

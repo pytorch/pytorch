@@ -19,7 +19,11 @@ Functions
 
 .. autofunction:: fft
 .. autofunction:: ifft
+.. autofunction:: fftn
+.. autofunction:: ifftn
 .. autofunction:: rfft
 .. autofunction:: irfft
+.. autofunction:: rfftn
+.. autofunction:: irfftn
 .. autofunction:: hfft
 .. autofunction:: ihfft

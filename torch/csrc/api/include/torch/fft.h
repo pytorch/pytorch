@@ -35,6 +35,36 @@ inline Tensor ifft(const Tensor& self,
   return torch::fft_ifft(self, n, dim, norm);
 }
 
+/// Computes the N dimensional fast Fourier transform over given dimensions.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.fftn.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::fftn(t);
+/// ```
+inline Tensor fftn(const Tensor& self,
+                   c10::optional<IntArrayRef> s=c10::nullopt,
+                   c10::optional<IntArrayRef> dim=c10::nullopt,
+                   c10::optional<std::string> norm=c10::nullopt) {
+  return torch::fft_fftn(self, s, dim, norm);
+}
+
+/// Computes the N dimensional fast Fourier transform over given dimensions.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.ifftn.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::ifftn(t);
+/// ```
+inline Tensor ifftn(const Tensor& self,
+                   c10::optional<IntArrayRef> s=c10::nullopt,
+                   c10::optional<IntArrayRef> dim=c10::nullopt,
+                   c10::optional<std::string> norm=c10::nullopt) {
+  return torch::fft_ifftn(self, s, dim, norm);
+}
+
 /// Computes the 1 dimensional FFT of real input with onesided Hermitian output.
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.rfft.
 ///
@@ -67,6 +97,36 @@ inline Tensor irfft(const Tensor& self,
                     int64_t dim=-1,
                     c10::optional<std::string> norm=c10::nullopt) {
   return torch::fft_irfft(self, n, dim, norm);
+}
+
+/// Computes the N dimensional FFT of real input with onesided Hermitian output.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.rfftn
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kDouble);
+/// torch::fft::rfftn(t);
+/// ```
+inline Tensor rfftn(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    c10::optional<IntArrayRef> dim=c10::nullopt,
+                    c10::optional<std::string> norm=c10::nullopt) {
+  return torch::fft_rfftn(self, s, dim, norm);
+}
+
+/// Computes the inverse of torch.fft.rfftn.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.irfftn.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::irfftn(t);
+/// ```
+inline Tensor irfftn(const Tensor& self,
+                   c10::optional<IntArrayRef> s=c10::nullopt,
+                   c10::optional<IntArrayRef> dim=c10::nullopt,
+                   c10::optional<std::string> norm=c10::nullopt) {
+  return torch::fft_irfftn(self, s, dim, norm);
 }
 
 /// Computes the 1 dimensional FFT of a onesided Hermitian signal
