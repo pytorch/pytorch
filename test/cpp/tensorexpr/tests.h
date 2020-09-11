@@ -104,8 +104,6 @@ namespace jit {
   _(ATenmaxFloat)                           \
   _(ATenminInt)                             \
   _(ATenminFloat)                           \
-  _(ATen_sigmoid_backward)                  \
-  _(ATen_tanh_backward)                     \
   _(ATenreciprocal)                         \
   _(ATenreluInt)                            \
   _(ATenreluFloat)                          \
@@ -149,6 +147,7 @@ namespace jit {
   _(SimplifyAdds)                           \
   _(SimplifyMuls)                           \
   _(SimplifySubs)                           \
+  _(SimplifyDiv)                            \
   _(SimplifyMultiOp)                        \
   _(SimplifyManyOps)                        \
   _(SimplifyFactorization)                  \
@@ -245,6 +244,10 @@ namespace jit {
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
   _(FuserPass_3)                            \
+  _(FuserPass_0DimInput)                    \
+  _(FuserPass_UnfusibleDevice)              \
+  _(FuserPass_UnknownShapes)                \
+  _(FuserPass_Multidevice)                  \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -348,10 +351,10 @@ namespace jit {
   _(LLVMElemwiseLog10Float)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
-  _(LLVMElemwiseMaxNumFloat)               \
-  _(LLVMElemwiseMaxNumNaNFloat)            \
-  _(LLVMElemwiseMinNumFloat)               \
-  _(LLVMElemwiseMinNumNaNFloat)            \
+  _(LLVMElemwiseMaxFloat)                  \
+  _(LLVMElemwiseMaxNaNFloat)               \
+  _(LLVMElemwiseMinFloat)                  \
+  _(LLVMElemwiseMinNaNFloat)               \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
   _(LLVMStoreFloat)                        \
@@ -383,7 +386,9 @@ namespace jit {
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)                        \
-  _(CudaSigmoid)
+  _(CudaSigmoid)                           \
+  _(CudaHalfCast)                          \
+  _(CudaHalfSupport)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
