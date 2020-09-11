@@ -144,6 +144,7 @@ namespace c10 {
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
   _(prim, rpc_sync)                  \
+  _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
@@ -197,7 +198,7 @@ namespace c10 {
   _(aten, ge)                        \
   _(aten, ge_)                       \
   _(aten, greater_equal)             \
-  _(aten, greater_equal_)             \
+  _(aten, greater_equal_)            \
   _(aten, gt)                        \
   _(aten, gt_)                       \
   _(aten, greater)                   \
