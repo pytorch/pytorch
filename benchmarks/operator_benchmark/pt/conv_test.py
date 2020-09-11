@@ -85,7 +85,7 @@ conv3d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     n=10,
     seed="Conv3D",
     tags=["long"],
-    checksum=(1870, 5561),
+    checksum=(1870, 5276),
 )
 
 class Conv3dBenchmark(op_bench.TorchBenchmarkBase):

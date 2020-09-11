@@ -26,7 +26,7 @@ conv1d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     n=10,
     seed="Conv1D",
     tags=["long"],
-    checksum=(2461, 17802),
+    checksum=(2461, 16668),
 )
 
 conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
@@ -47,7 +47,7 @@ conv2d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzzer_kwargs={"groups": {1: 0.5, 2: 0.5}},
     seed="Conv2D",
     tags=["long"],
-    checksum=(1956, 7809),
+    checksum=(1956, 8465),
 )
 
 

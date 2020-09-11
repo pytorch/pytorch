@@ -15,8 +15,8 @@ BATCH_LIMITS = {
 ROOFLINE_WORK_LIMITS = {
     constants.Scale.SMALL: 1024 ** 2,
     constants.Scale.MEDIUM: 512 * 1024 ** 2,
-    constants.Scale.LARGE: 2 * 1024 ** 3,
-    constants.Scale.LARGER: 32 * 1024 ** 3,
+    constants.Scale.LARGE: 1024 ** 3,
+    constants.Scale.LARGER: 4 * 1024 ** 3,
 }
 WORK_LOWER_BOUNDS = {
     constants.Scale.SMALL: 0,
