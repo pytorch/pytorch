@@ -31,66 +31,6 @@ Method Module::get_method(const std::string& name) const {
   AT_ERROR("Method '", name, "' is not defined.");
 }
 
-c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  /* if the metadata dict doesn't contain "model_name", copy the metadata and
-  set the value of "model_name" as name() */
-  std::unordered_map<std::string, std::string> copied_metadata = metadata();
-  if (metadata().find("model_name") == metadata().end()) {
-    copied_metadata["model_name"] = name();
-  }
-  if (observer) {
-    observer->onEnterRunMethod(copied_metadata, method_name);
-  }
-
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  std::string name = copied_metadata["model_name"];
-  debug_info->setModelName(name);
-  debug_info->setMethodName(method_name);
-  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
-
-  auto m = find_method(method_name);
-  if (m == c10::nullopt) {
-    if (observer) {
-      std::string cancellation_reason =
-          "Method '" + method_name + "' is not defined";
-      observer->onCancelRunMethod(cancellation_reason);
-    }
-    AT_ERROR("Method '", method_name, "' is not defined.");
-  }
-  try {
-    m->run(stack);
-    c10::IValue result = stack.front();
-    if (observer) {
-      observer->onExitRunMethod();
-    }
-    return result;
-  } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailRunMethod(error.what());
-    }
-    TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailRunMethod(error.what());
-      }
-      TORCH_RETHROW(error);
-    }
-  }
-}
-
 c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
