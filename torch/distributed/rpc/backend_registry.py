@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import collections
 from datetime import timedelta
 import enum
-
 import torch
 import torch.distributed as dist
 
@@ -29,8 +28,10 @@ _backend_type_doc = """
 """
 
 # Create an enum type, `BackendType`, with empty members.
-BackendType = enum.Enum(value="BackendType", names={})
-BackendType.__repr__ = _backend_type_repr
+# Ignore the type error due to mypy bug #9079
+BackendType = enum.Enum(value="BackendType", names=dict()) # type: ignore
+# Ignore the type error due to mypy bug #2427
+BackendType.__repr__ = _backend_type_repr # type: ignore
 BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
@@ -74,8 +75,10 @@ def register_backend(
         },
         **existing_enum_dict
     )
-    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
-    BackendType.__repr__ = _backend_type_repr
+    # Ignore the type error due to mypy bug #9079
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict) # type: ignore
+    # Ignore the type error due to mypy bug #2427
+    BackendType.__repr__ = _backend_type_repr # type: ignore
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
@@ -102,7 +105,7 @@ def _process_group_construct_rpc_backend_options_handler(
     num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS,
     **kwargs
 ):
-    from . import ProcessGroupRpcBackendOptions
+    from torch._C._distributed_rpc import ProcessGroupRpcBackendOptions
 
     return ProcessGroupRpcBackendOptions(
         rpc_timeout=rpc_timeout,
@@ -135,7 +138,7 @@ def _init_process_group(store, rank, world_size):
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    from . import ProcessGroupAgent
+    from torch._C._distributed_rpc import ProcessGroupAgent
 
     group = _init_process_group(store, rank, world_size)
 
@@ -225,8 +228,8 @@ def _tensorpipe_check_device_maps(agent, device_maps):
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from . import TensorPipeRpcBackendOptions
-    from . import TensorPipeAgent
+    from torch._C._distributed_rpc import TensorPipeRpcBackendOptions
+    from torch._C._distributed_rpc import TensorPipeAgent
 
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))

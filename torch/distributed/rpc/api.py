@@ -8,7 +8,7 @@ from typing import Generic, TypeVar, Set, Any
 
 import torch
 
-from . import (
+from torch._C._distributed_rpc import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
@@ -518,7 +518,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             dst_worker_info.name,
         )
         RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key) # type: ignore[assignment]
 
     with ctx_manager as rf:
         args = args if args else ()
@@ -593,7 +593,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             dst_worker_info.name,
         )
         RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key) # type: ignore[assignment]
 
     with ctx_manager as rf:
         args = args if args else ()

@@ -5,7 +5,7 @@ import itertools
 import torch
 from torch.autograd.profiler import profile
 
-from . import (
+from torch._C._distributed_rpc import (
     _disable_server_process_global_profiler,
     _enable_server_process_global_profiler,
 )

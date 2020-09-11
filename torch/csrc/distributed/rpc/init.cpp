@@ -36,10 +36,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
-    throw python_error();
+    return nullptr;
   }
 
-  auto module = py::handle(rpc_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module)
+    return nullptr;
+  auto _C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = _C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(
