@@ -3955,7 +3955,7 @@ criterion_tests = [
     dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
-        target_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn((2, 3, 4, 5), requires_grad=True),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
                                       if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
@@ -4302,7 +4302,7 @@ criterion_tests = [
     dict(
         module_name='MSELoss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
@@ -5070,8 +5070,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         self._do_extra_tests(test_case, module, input, target)
 
     def _do_extra_tests(self, test_case, module, input, target):
-        test_case.assertFalse(target.requires_grad)
-
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
             inputs = (input,) + params
@@ -5084,14 +5082,13 @@ class CriterionTest(InputVariableMixin, TestBase):
             def apply_fn(input1, input2, *params):
                 return module(input1, input2, target)
 
-        # TODO: we don't pass `target` as part of inputs because we don't
-        # currently compute the gradient w.r.t. target for loss functions.
+        if target.requires_grad:
+            inputs = inputs + (target,)
+
         gradcheck(apply_fn, inputs)
 
-        if not self.check_gradgrad:
-            return
-
-        gradgradcheck(apply_fn, inputs)
+        if self.check_gradgrad:
+            gradgradcheck(apply_fn, inputs)
 
     def test_cuda(self, test_case, dtype=None, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
