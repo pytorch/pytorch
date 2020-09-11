@@ -517,6 +517,12 @@ def _set_training_mode(training_mode):
     global _training_mode
     _training_mode = training_mode
 
+_onnx_shape_inference = False
+def _set_onnx_shape_inference(onnx_shape_inference):
+    global _onnx_shape_inference
+    _onnx_shape_inference = onnx_shape_inference
+
+
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'

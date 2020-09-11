@@ -68,7 +68,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     auto futMessage = wp.lock();
     if (futMessage->hasError()) {
       c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
-      futPtr->setError(std::move(jitFutErr));
+      futPtr->setError(std::make_exception_ptr(jitFutErr));
     } else {
       futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
     }
