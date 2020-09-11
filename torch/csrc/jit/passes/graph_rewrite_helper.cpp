@@ -63,7 +63,7 @@ std::unordered_map<std::string, c10::IValue> getConvParams(
 void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   // TODO: remove constant prop in the pass
   ConstantPropagation(graph);
-  std::string convolution = R"(
+  std::string convolution_deprecated = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
@@ -71,24 +71,63 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
             %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
         return (%r) )";
 
-  std::string conv2d = R"(
+  std::string convolution = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
+        return (%r) )";
+
+  std::string conv2d_for_deprecated_conv = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
         %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
+  std::string conv2d = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
 
-  std::string conv1d = R"(
+  std::string conv2d_transpose_for_deprecated_conv = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool):
+        %r = aten::conv_transpose2d(%a, %w, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+  std::string conv2d_transpose = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %r = aten::conv_transpose2d(%a, %w, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string conv1d_for_deprecated_conv = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
         %r = aten::conv1d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
+  std::string conv1d = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %r = aten::conv1d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
 
-  std::string conv3d = R"(
+  std::string conv3d_for_deprecated_conv = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
+        %r = aten::conv3d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+  std::string conv3d = R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
         %r = aten::conv3d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
@@ -103,7 +142,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0);
@@ -118,12 +156,26 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0) &&
         (calc_value_map["output_padding"].toIntList()[1] == 0);
   };
+  auto filter_conv2d_transpose =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        auto calc_value_map = getConvParams(match, vmap);
+        if (calc_value_map["output_padding"].toIntList().size() != 2 ||
+            calc_value_map["stride"].toIntList().size() != 2 ||
+            calc_value_map["padding"].toIntList().size() != 2 ||
+            calc_value_map["dilation"].toIntList().size() != 2) {
+          return false;
+        }
+
+        return calc_value_map["transposed"].toBool() &&
+            !calc_value_map["deterministic"].toBool() &&
+            calc_value_map["cudnn_enabled"].toBool();
+      };
   auto filter_conv3d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
     auto calc_value_map = getConvParams(match, vmap);
@@ -134,7 +186,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0) &&
@@ -144,12 +195,24 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
 
   SubgraphRewriter rewriter_conv1d;
   rewriter_conv1d.RegisterRewritePattern(convolution, conv1d);
+  rewriter_conv1d.RegisterRewritePattern(
+      convolution_deprecated, conv1d_for_deprecated_conv);
   rewriter_conv1d.runOnGraph(graph, filter_conv1d);
   SubgraphRewriter rewriter_conv2d;
   rewriter_conv2d.RegisterRewritePattern(convolution, conv2d);
+  rewriter_conv2d.RegisterRewritePattern(
+      convolution_deprecated, conv2d_for_deprecated_conv);
   rewriter_conv2d.runOnGraph(graph, filter_conv2d);
+  SubgraphRewriter rewriter_conv2d_transpose;
+  rewriter_conv2d_transpose.RegisterRewritePattern(
+      convolution, conv2d_transpose);
+  rewriter_conv2d_transpose.RegisterRewritePattern(
+      convolution_deprecated, conv2d_transpose_for_deprecated_conv);
+  rewriter_conv2d_transpose.runOnGraph(graph, filter_conv2d_transpose);
   SubgraphRewriter rewriter_conv3d;
   rewriter_conv3d.RegisterRewritePattern(convolution, conv3d);
+  rewriter_conv3d.RegisterRewritePattern(
+      convolution_deprecated, conv3d_for_deprecated_conv);
   rewriter_conv3d.runOnGraph(graph, filter_conv3d);
 }
 

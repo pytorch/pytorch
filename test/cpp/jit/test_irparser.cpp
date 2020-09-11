@@ -338,6 +338,40 @@ graph(%a : Float(*, *, device=cpu),
   return (%a)
 )IR");
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    parseIR(
+        R"IR(
+graph():
+  %d : int[] = prim::Constant[value=[1,2,3]]()
+  return (%d)
+)IR",
+        &*graph);
+    Node* n = graph->outputs()[0]->node();
+    AT_ASSERT(n->kind() == prim::Constant);
+    AT_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
+    const auto& genericList = n->ival(attr::value).toList();
+    std::vector<int> int_vals;
+    for (const IValue& ival : genericList) {
+      int_vals.push_back(ival.toInt());
+    }
+    AT_ASSERT(int_vals.size() == 3);
+    AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%x : Float(10, *, 10)):
+  return (%x)
+)IR");
+    checkRoundtrip(
+        R"IR(
+graph(%x : Double(*, 200, *, requires_grad=1, device=cuda:1),
+      %b : Float(5, *, requires_grad=1),
+      %c : Long(*, 10, device=cpu)):
+  return (%x)
+)IR");
+  }
 }
 } // namespace jit
 } // namespace torch

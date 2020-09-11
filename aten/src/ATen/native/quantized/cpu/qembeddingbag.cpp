@@ -13,10 +13,14 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const c10::optional<at::Tensor>& offsets_in,
     bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights_,
     bool include_last_offset) {
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+  auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
   const auto indices_data = indices.data_ptr<int64_t>();
 
@@ -120,7 +124,9 @@ Tensor embedding_bag_byte_rowwise_offsets(
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.ndimension() == 2);
-  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "embedding_bag_byte_rowwise_offsets expects offsets to be set");
 
   auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
@@ -218,7 +224,9 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
 
   TORCH_CHECK(weight.ndimension() == 2);
   TORCH_CHECK(indices.ndimension() == 1);
@@ -403,7 +411,7 @@ class QEmbeddingBag final {
   static at::Tensor run(
       const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
       const Tensor& indices,
-      const Tensor& offsets,
+      const c10::optional<Tensor>& offsets,
       const bool /* scale_grad_by_freq */,
       const int64_t /* mode */,
       bool sparse,
@@ -420,9 +428,31 @@ class QEmbeddingBag final {
   }
 };
 
+template <int bit_rate>
+class QEmbedding final {
+ public:
+  static at::Tensor run(
+      const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
+      const Tensor& indices,
+      bool sparse) {
+    const auto offsets_size = indices.numel();
+    at::Tensor offsets = at::arange(0, offsets_size, at::kLong);
+    at::Tensor output;
+    if (bit_rate == 8) {
+      return packed_weight->embeddingbag_byte(
+          indices, offsets, sparse, c10::nullopt, false);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          "Currently only support 8-bit embedding quantization");
+    }
+    return output;
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   // Function that works on TorchBind packed weights.
   m.impl("embedding_bag_byte", TORCH_FN(QEmbeddingBag<8>::run));
+  m.impl("embedding_byte", TORCH_FN(QEmbedding<8>::run));
 
   // Functions that work on at::Tensor packed weight.
   m.impl(
