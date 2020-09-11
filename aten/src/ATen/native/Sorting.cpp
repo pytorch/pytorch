@@ -105,7 +105,6 @@ void quantile_impl(
 
   TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
-
   TORCH_CHECK(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
       "quantile() input tensor must be either float or double dtype");
@@ -159,11 +158,6 @@ void quantile_impl(
         "quantile() q values must be in the range [0, 1]");
   }
 
-  // Treat q as a 1D tensor for the following computations
-  if (q.dim() == 0) {
-    out_shape.insert(out_shape.begin(), q.numel());
-  }
-
   // Flatten input if no dim provided else move dim to reduce as last dimension.
   // Sort to efficiently query kth values.
   Tensor sorted;
@@ -173,6 +167,11 @@ void quantile_impl(
     sorted = std::get<0>(self.sort());
   } else {
     sorted = std::get<0>(self.unsqueeze(-1).transpose_(dim, -1).sort());
+  }
+
+  // Treat q as a 1D tensor for the following computations
+  if (q.dim() == 0) {
+    out_shape.insert(out_shape.begin(), q.numel());
   }
 
   // View input as reduced_size + size of dim to reduce
@@ -188,9 +187,9 @@ void quantile_impl(
 
   Tensor ranks;
   if (ignore_nan) {
-    // For nanquantile, compute ranks based on number of non-nan values since sort
-    // compares nans as largest value. If all values are nan, set rank to 0 so that
-    // the quantile computed will be nan.
+    // For nanquantile, compute ranks based on number of non-nan values since
+    // sort compares nans as largest value. If all values are nan, set rank to 0
+    // so that the quantile computed will be nan.
     ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
     ranks.masked_fill_(ranks == -1, 0);
   } else {
@@ -206,15 +205,20 @@ void quantile_impl(
   Tensor values_above = ignore_nan ? sorted.gather(-1, ranks_above)
                                    : sorted.index_select(-1, ranks_above);
 
-  // View out as reduced_size + q_size to match expected lerp out size
-  Tensor result = q.dim() == 0
-      ? out.unsqueeze(-1)
-      : out.unsqueeze(-1).transpose_(0, -1).squeeze_(0);
+  values_below.lerp_(values_above, weights);
 
-  at::lerp_out(result, values_below, values_above, weights);
+  if (q.dim() == 0) {
+    // If q is scalar, remove last dim to match out shape
+    values_below.squeeze_(-1);
+  } else {
+    // Move quantiles to first dim to match out shape
+    values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
+  }
+
+  out.copy_(values_below);
 
   if (!ignore_nan) {
-    // If there are nan values and nans are not ignored then 
+    // If there are nan values and nans are not ignored then
     // all quantiles should be nan
     out.masked_fill_(sorted.isnan().any(-1, false), NAN);
   }
@@ -318,7 +322,7 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ false);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -344,7 +348,7 @@ Tensor quantile(
     optional<int64_t> _dim,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ false);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -365,7 +369,7 @@ Tensor& nanquantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ true);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -391,7 +395,7 @@ Tensor nanquantile(
     optional<int64_t> _dim,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/ true);
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
   return out;
 }
 
