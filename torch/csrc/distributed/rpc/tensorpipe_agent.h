@@ -45,7 +45,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-using at::cuda::CUDAStream;
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -136,6 +135,9 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
+#ifdef USE_CUDA
+using at::cuda::CUDAStream;
+#endif
 
 struct DevicesContext {
 
