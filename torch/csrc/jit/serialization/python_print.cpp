@@ -230,7 +230,8 @@ struct PythonPrintImpl {
       return false;
 
     // subgraph may use this more than once, so disable inlining
-    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async)
+    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async ||
+        use.user->kind() == prim::rpc_sync)
       return false;
 
     // isinstance appearing in an if expression
