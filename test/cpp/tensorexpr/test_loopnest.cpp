@@ -1815,7 +1815,6 @@ void testNormalizeStartVariable() {
   //     A[x] = B[x];
   //     B[x] = x * 2;
   //   }
-  // Should not be modified.
 
   const int kTotalSize = 100;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
@@ -1836,9 +1835,9 @@ void testNormalizeStartVariable() {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-        # CHECK: for (int x = y; x < 100; x++) {
-        # CHECK:   A[x] = B[x];
-        # CHECK:   B[x] = 2 * x;
+        # CHECK: for (int x = 0; x < 100 - y; x++) {
+        # CHECK:   A[y + x] = B[y + x];
+        # CHECK:   B[y + x] = 2 * (y + x);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }

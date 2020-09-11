@@ -11,7 +11,7 @@ from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
-from .._jit_internal import boolean_dispatch, List, Optional, _overload
+from .._jit_internal import boolean_dispatch, List, Optional, _overload, Tuple
 from ..overrides import has_torch_function, handle_torch_function
 
 
@@ -1111,8 +1111,7 @@ In-place version of :func:`~threshold`.
 """)
 
 
-def relu(input, inplace=False):
-    # type: (Tensor, bool) -> Tensor
+def relu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
@@ -1135,8 +1134,7 @@ In-place version of :func:`~relu`.
 """)
 
 
-def glu(input, dim=-1):
-    # type: (Tensor, int) -> Tensor
+def glu(input: Tensor, dim: int = -1) -> Tensor:
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1162,8 +1160,7 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    # type: (Tensor, float, float, bool) -> Tensor
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -1732,8 +1729,7 @@ def silu(input, inplace=False):
         return torch._C._nn.silu_(input)
     return torch._C._nn.silu(input)
 
-def hardswish(input, inplace=False):
-    # type: (Tensor, bool) -> Tensor
+def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
     `Searching for MobileNetV3`_.
@@ -2575,25 +2571,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
-    if target.requires_grad:
-        d = lambd(input, target)
-        if reduction == 'none':
-            return d
-        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-
-
-def _smooth_l1_loss(input, target, delta=1.):
-    # type: (Tensor, Tensor, float) -> Tensor
+def _smooth_l1_loss(input, target):
+    # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
+    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -2613,7 +2598,8 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
-        ret = _smooth_l1_loss(input, target, delta=delta)
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
+        ret = _smooth_l1_loss(input, target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
@@ -2644,6 +2630,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = torch.abs(input - target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2675,6 +2662,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = (input - target) ** 2
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -3842,54 +3830,203 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
-    """
-    Arguments
-        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
-        :param padding: (tuple): m-elem tuple where m is the degree of convolution
-    Returns
-        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
-                 H + 2 * padding[1]], W + 2 * padding[2]))`
-    """
+    """Circularly pads tensor.
 
-    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
-    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+    Tensor values at the beginning are used to pad the end, and values at the
+    end are used to pad the beginning. For example, consider a single dimension
+    with values [0, 1, 2, 3]. With circular padding of (1, 1) it would be
+    padded to [3, 0, 1, 2, 3, 0], and with padding (1, 2) it would be padded to
+    [3, 0, 1, 2, 3, 0, 1]. If negative padding is applied then the ends of the
+    tensor get removed. With circular padding of (-1, -1) the previous example
+    would become [1, 2]. Circular padding of (-1, 1) would produce
+    [1, 2, 3, 1].
 
+    The first and second dimensions of the tensor are not padded.
+
+    Args:
+        input: Tensor with shape :math:`(N, C, D[, H, W])`.
+        padding: Tuple containing the number of elements to pad each side of
+            the tensor. The length of padding must be twice the number of
+            paddable dimensions. For example, the length of padding should be 4
+            for a tensor of shape :math:`(N, C, H, W)`, and the length should
+            be 6 for a tensor of shape :math:`(N, C, D, H, W)`.
+
+    Examples::
+
+        >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
+        >>> # Example 1
+        >>> padding = (1, 1, 1, 1)
+        >>> y = F.pad(x, padding, mode='circular')
+        >>> print(y)
+        tensor([[[[5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0]]]])
+        >>> print(y.shape)
+        torch.Size([1, 1, 4, 5])
+        >>> # Example 2
+        >>> padding = (1, 1, 2, 2)
+        >>> z = F.pad(x, padding, mode='circular')
+        >>> print(z)
+        tensor([[[[2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3]]]])
+        >>> print(z.shape)
+        torch.Size([1, 1, 6, 5])
+    """
+    in_shape = input.shape
+    paddable_shape = in_shape[2:]
+    ndim = len(paddable_shape)
+
+    for idx, size in enumerate(paddable_shape):
+        # Only supports wrapping around once
+        assert padding[-(idx * 2 + 1)] <= size, \
+            "Padding value causes wrapping around more than once."
+        assert padding[-(idx * 2 + 2)] <= size, \
+            "Padding value causes wrapping around more than once."
+        # Negative padding should not result in negative sizes
+        assert padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size >= 0, \
+            "Negative padding value is resulting in an empty dimension."
+
+    # Get shape of padded tensor
+    out_shape = in_shape[:2]
+    for idx, size in enumerate(paddable_shape):
+        out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
+
+    out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout,
+                      device=input.device)
+
+    # Put original array in padded array
+    if ndim == 1:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
+    elif ndim == 2:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1]
+    elif ndim == 3:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        out_w0 = max(padding[-6], 0)
+        out_w1 = out_shape[4] - max(padding[-5], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        in_w0 = max(-padding[-6], 0)
+        in_w1 = in_shape[4] - max(-padding[-5], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
+
+    # The following steps first pad the beginning of the tensor (left side),
+    # and then pad the end of the tensor (right side).
+    # Note: Corners will be written more than once when ndim > 1.
+
+    # Only in cases where padding values are > 0 are when additional copying
+    # is required.
+
+    # Pad first dimension (depth)
+    if padding[-2] > 0:
+        i0 = out_shape[2] - padding[-2] - max(padding[-1], 0)
+        i1 = out_shape[2] - max(padding[-1], 0)
+        o0 = 0
+        o1 = padding[-2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
+    if padding[-1] > 0:
+        i0 = max(padding[-2], 0)
+        i1 = max(padding[-2], 0) + padding[-1]
+        o0 = out_shape[2] - padding[-1]
+        o1 = out_shape[2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
+
+    # Pad second dimension (height)
     if len(padding) > 2:
-        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
-        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+        if padding[-4] > 0:
+            i0 = out_shape[3] - padding[-4] - max(padding[-3], 0)
+            i1 = out_shape[3] - max(padding[-3], 0)
+            o0 = 0
+            o1 = padding[-4]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
+        if padding[-3] > 0:
+            i0 = max(padding[-4], 0)
+            i1 = max(padding[-4], 0) + padding[-3]
+            o0 = out_shape[3] - padding[-3]
+            o1 = out_shape[3]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
 
+    # Pad third dimension (width)
     if len(padding) > 4:
-        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
-        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+        if padding[-6] > 0:
+            i0 = out_shape[4] - padding[-6] - max(padding[-5], 0)
+            i1 = out_shape[4] - max(padding[-5], 0)
+            o0 = 0
+            o1 = padding[-6]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
+        if padding[-5] > 0:
+            i0 = max(padding[-6], 0)
+            i1 = max(padding[-6], 0) + padding[-5]
+            o0 = out_shape[4] - padding[-5]
+            o1 = out_shape[4]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
 
-    return input
+    return out
 
 
-def multi_head_attention_forward(query,                           # type: Tensor
-                                 key,                             # type: Tensor
-                                 value,                           # type: Tensor
-                                 embed_dim_to_check,              # type: int
-                                 num_heads,                       # type: int
-                                 in_proj_weight,                  # type: Tensor
-                                 in_proj_bias,                    # type: Tensor
-                                 bias_k,                          # type: Optional[Tensor]
-                                 bias_v,                          # type: Optional[Tensor]
-                                 add_zero_attn,                   # type: bool
-                                 dropout_p,                       # type: float
-                                 out_proj_weight,                 # type: Tensor
-                                 out_proj_bias,                   # type: Tensor
-                                 training=True,                   # type: bool
-                                 key_padding_mask=None,           # type: Optional[Tensor]
-                                 need_weights=True,               # type: bool
-                                 attn_mask=None,                  # type: Optional[Tensor]
-                                 use_separate_proj_weight=False,  # type: bool
-                                 q_proj_weight=None,              # type: Optional[Tensor]
-                                 k_proj_weight=None,              # type: Optional[Tensor]
-                                 v_proj_weight=None,              # type: Optional[Tensor]
-                                 static_k=None,                   # type: Optional[Tensor]
-                                 static_v=None                    # type: Optional[Tensor]
-                                 ):
-    # type: (...) -> Tuple[Tensor, Optional[Tensor]]
+def multi_head_attention_forward(query: Tensor,
+                                 key: Tensor,
+                                 value: Tensor,
+                                 embed_dim_to_check: int,
+                                 num_heads: int,
+                                 in_proj_weight: Tensor,
+                                 in_proj_bias: Tensor,
+                                 bias_k: Optional[Tensor],
+                                 bias_v: Optional[Tensor],
+                                 add_zero_attn: bool,
+                                 dropout_p: float,
+                                 out_proj_weight: Tensor,
+                                 out_proj_bias: Tensor,
+                                 training: bool = True,
+                                 key_padding_mask: Optional[Tensor] = None,
+                                 need_weights: bool = True,
+                                 attn_mask: Optional[Tensor] = None,
+                                 use_separate_proj_weight: bool = False,
+                                 q_proj_weight: Optional[Tensor] = None,
+                                 k_proj_weight: Optional[Tensor] = None,
+                                 v_proj_weight: Optional[Tensor] = None,
+                                 static_k: Optional[Tensor] = None,
+                                 static_v: Optional[Tensor] = None
+                                 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
