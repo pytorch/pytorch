@@ -390,6 +390,10 @@ class FunctionInliner : public IRMutator {
 
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
+      if (v->nparams() != buf->ndim()) {
+        throw malformed_input(
+            "Buffer indexed access is inconsistent with its rank", v);
+      }
       for (size_t i = 0; i < buf->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
         const Expr* func_caller_param = v->param(i);
