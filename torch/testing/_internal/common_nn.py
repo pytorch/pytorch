@@ -3617,9 +3617,9 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
 
 def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
     abs_diff = (input - target).abs()
-    ge_one_mask = (abs_diff >= beta).type_as(abs_diff)
-    lt_one_mask = (abs_diff < beta).type_as(abs_diff)
-    output = ge_one_mask * (abs_diff - 0.5 * beta) + lt_one_mask * 0.5 * (abs_diff ** 2) / beta
+    ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
+    lt_beta_mask = (abs_diff < beta).type_as(abs_diff)
+    output = ge_beta_mask * (abs_diff - 0.5 * beta) + lt_beta_mask * 0.5 * (abs_diff ** 2) / beta
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -4119,8 +4119,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_size=(5, 10),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -4361,8 +4361,8 @@ criterion_tests = [
         input_size=(),
         target_size=(),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
         desc='scalar',
     ),
     dict(
