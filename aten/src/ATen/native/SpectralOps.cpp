@@ -60,8 +60,9 @@ Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
   return (cur_type == new_type) ? t : t.to(new_type);
 }
 
-// Convert numpy-compatible normalization mode string into internal normalization mode enum
-// Numpy modes change meaning between the FFT and IFFT, so the transform direction must also be given.
+// Convert NumPy compatible normalization mode string to enum values
+// NOTE: NumPy's normalization modes have direction-specific meanings. For example,
+// "forward" translates to `by_n` for a forward transform and `none` for backward.
 fft_norm_mode norm_from_string(c10::optional<std::string> norm, bool forward) {
   if (!norm || *norm == "backward") {
     return forward ? fft_norm_mode::none : fft_norm_mode::by_n;
@@ -78,8 +79,8 @@ fft_norm_mode norm_from_string(c10::optional<std::string> norm, bool forward) {
   TORCH_CHECK(false, "Invalid normalization mode: \"", *norm, "\"")
 }
 
-// Fixes the shape of x such that x.size(dims[i]) == sizes[i]
-// Either by zero-padding, or by slicing x starting from 0
+// Fixes the shape of x such that x.size(dims[i]) == sizes[i],
+// either by zero-padding, or by slicing x starting from 0.
 Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   TORCH_INTERNAL_ASSERT(dims.size() == sizes.size());
   bool must_copy = false;
@@ -101,7 +102,7 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
     }
   }
 
-  // Only call pad if needed, otherwise pad will clone the entire tensor
+  // Only call pad if necessary since pad copies the entire tensor
   return must_copy ? at::constant_pad_nd(x, pad_amount) : x;
 }
 
@@ -159,7 +160,7 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
   const auto norm = norm_from_string(norm_str, forward);
   auto out = _fft(input, /*signal_ndim=*/1, /*complex_input=*/false,
                   /*complex_output=*/true, /*inverse=*/false,
-                  /*signal_sizes=*/{}, /*normalization=*/norm,
+                  /*signal_sizes=*/{n}, /*normalization=*/norm,
                   /*onesided=*/onesided);
   out = at::view_as_complex(out);
   if (must_transpose) {
@@ -355,8 +356,8 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
 }
 
 // Wrapper to preserve the historic signature of _fft_with_size
-// This is only used for torch-script back-compat and the new signature with
-// normalization modes should be used in all other cases
+// NOTE: This is only used for torchscript backwards compatibility and the new
+// signature with normalization modes should be used in all other cases
 Tensor _fft_with_size(const Tensor& input, int64_t signal_ndim,
                       bool complex_input, bool complex_output,
                       bool inverse, IntArrayRef checked_signal_sizes,

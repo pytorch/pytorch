@@ -25,7 +25,7 @@ Note:
 Args:
     input (Tensor): the input tensor
     n (int, optional): Signal length. If given, the input will either be zero-padded
-        or trimmed to this length before taking the FFT.
+        or trimmed to this length before computing the FFT.
     dim (int, optional): The dimension along which to take the one dimensional FFT.
     norm (str, optional): Normalization mode. Between the forward and backward
         transforms (:func:`~torch.fft.fft` and :func:`~torch.fft.ifft`) a total
@@ -60,7 +60,7 @@ Computes the one dimensional inverse discrete Fourier transform of :attr:`input`
 Args:
     input (Tensor): the input tensor
     n (int, optional): Signal length. If given, the input will either be zero-padded
-        or trimmed to this length before taking the IFFT.
+        or trimmed to this length before computing the IFFT.
     dim (int, optional): The dimension along which to take the one dimensional IFFT.
     norm (str, optional): Normalization mode. Between the forward and backward
         transforms (:func:`~torch.fft.fft` and :func:`~torch.fft.ifft`) a total
@@ -84,7 +84,7 @@ Example:
 rfft = _add_docstr(_fft.fft_rfft, r"""
 rfft(input, n=None, dim=-1, norm=None) -> Tensor
 
-Computes the one dimensional discrete Fourier transform of real :attr:`input`.
+Computes the one dimensional Fourier transform of real-valued :attr:`input`.
 
 The FFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])`` so
 the output contains only the positive frequencies below the Nyquist frequency.
@@ -93,7 +93,7 @@ To compute the full output, use :func:`~torch.fft.fft`
 Args:
     input (Tensor): the real input tensor
     n (int, optional): Signal length. If given, the input will either be zero-padded
-        or trimmed to this length before taking the real FFT.
+        or trimmed to this length before computing the real FFT.
     dim (int, optional): The dimension along which to take the one dimensional real FFT.
     norm (str, optional): Normalization mode. Between the forward and backward
         transforms (:func:`~torch.fft.rfft` and :func:`~torch.fft.irfft`) a total
@@ -121,8 +121,8 @@ Example:
     tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
 
     Notice that the symmetric element ``T[-1] == T[1].conj()`` is omitted.
-    At the Nyquist frequency ``T[-2] == T[2].conj() == T[2]`` is given but must
-    always be purely real.
+    At the Nyquist frequency ``T[-2] == T[2]`` is it's own symmetric pair,
+    and therefore must always be real-valued.
 """)
 
 irfft = _add_docstr(_fft.fft_irfft, r"""
@@ -130,16 +130,16 @@ irfft(input, n=None, dim=-1, norm=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.rfft`.
 
-:attr:`input` is a one-sided Hermitian signal in the Fourier domain, as
-produced by :func:`~torch.fft.rfft`. By the Hermitian property, the time-domain
-signal will be purely real.
+:attr:`input` is interpreted as a one-sided Hermitian signal in the Fourier
+domain, as produced by :func:`~torch.fft.rfft`. By the Hermitian property, the
+time-domain signal will be real-valued.
 
 Note:
-    Some input frequencies must be purely real to satisfy the Hermitian
+    Some input frequencies must be real-valued to satisfy the Hermitian
     property. In these cases the imaginary component will be ignored.
 
 Note:
-    The correct interpretation of the hermitian input depends on the length of
+    The correct interpretation of the Hermitian input depends on the length of
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
@@ -149,7 +149,7 @@ Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
     n (int, optional): Output signal length. This determines the length of the
         output signal. If given, the input will either be zero-padded or trimmed to this
-        length before taking the real IFFT.
+        length before computing the real IFFT.
         Defaults to even output: ``n=2*(input.size(dim) - 1)``.
     dim (int, optional): The dimension along which to take the one dimensional real IFFT.
     norm (str, optional): Normalization mode. Between the forward and backward
@@ -191,13 +191,24 @@ hfft(input, n=None, dim=-1, norm=None) -> Tensor
 Computes the one dimensional discrete Fourier transform of a Hermitian
 symmetric :attr:`input` signal.
 
-Because the signal is Hermitian in the time-domain, the result will be real in
-the frequency domain. Note that some input frequencies must be purely real to
-satisfy the Hermitian property. In these cases the imaginary component will be
-ignored.
+Note:
+
+    :func:`~torch.fft.hfft`/:func:`~torch.fft.ihfft` are analogous to
+    :func:`~torch.fft.rfft`/:func:`~torch.fft.irfft`. The real FFT expects
+    a real signal in the time-domain and gives a Hermitian symmetry in the
+    frequency-domain. The Hermitian FFT is the opposite; Hermitian symmetric in
+    the time-domain and real-valued in the frequency-domain. For this reason,
+    special care needs to be taken with the length argument :attr:`n`, in the
+    same way as with :func:`~torch.fft.irfft`.
 
 Note:
-    The correct interpretation of the hermitian input depends on the length of
+    Because the signal is Hermitian in the time-domain, the result will be real
+    in the frequency domain. Note that some input frequencies must be
+    real-valued to satisfy the Hermitian property. In these cases the imaginary
+    component will be ignored.
+
+Note:
+    The correct interpretation of the Hermitian input depends on the length of
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
@@ -207,7 +218,7 @@ Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
     n (int, optional): Output signal length. This determines the length of the
         real output. If given, the input will either be zero-padded or trimmed to this
-        length before taking the Hermitian FFT.
+        length before computing the Hermitian FFT.
         Defaults to even output: ``n=2*(input.size(dim) - 1)``.
     dim (int, optional): The dimension along which to take the one dimensional Hermitian FFT.
     norm (str, optional): Normalization mode. Between the forward and backward
@@ -223,8 +234,8 @@ Args:
 
 Example:
 
-    Taking a frequency signal that's purely real and bringing it into the time
-    domain gives Hermitian symmetric output:
+    Taking a real-valued frequency signal and bringing it into the time domain
+    gives Hermitian symmetric output:
 
     >>> import torch.fft
     >>> t = torch.arange(5)
@@ -252,16 +263,17 @@ Example:
 ihfft = _add_docstr(_fft.fft_ihfft, r"""
 ihfft(input, n=None, dim=-1, norm=None) -> Tensor
 
-Computes the inverse one dimensional Fourier transform of a real signal.
+Computes the inverse of :attr:`~torch.fft.hfft`.
 
-The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])`` so
-the output contains only the positive frequencies below the Nyquist frequency.
-To compute the full output, use :func:`~torch.fft.ifft`.
+:attr:`input` must be a real-valued signal, interpreted in the Fourier domain.
+The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])`` so the
+output contains only the positive frequencies below the Nyquist frequency. To
+compute the full output, use :func:`~torch.fft.ifft`.
 
 Args:
     input (Tensor): the real input tensor
     n (int, optional): Signal length. If given, the input will either be zero-padded
-        or trimmed to this length before taking the Hermitian IFFT.
+        or trimmed to this length before computing the Hermitian IFFT.
     dim (int, optional): The dimension along which to take the one dimensional Hermitian IFFT.
     norm (str, optional): Normalization mode. Between the forward and backward
         transforms (:func:`~torch.fft.hfft` and :func:`~torch.fft.ihfft`) a total

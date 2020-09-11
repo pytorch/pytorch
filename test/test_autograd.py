@@ -4688,7 +4688,7 @@ def add_test(
                     torch_fn = getattr_qualified(torch, name)
                     if torch_fn is not None and name not in EXCLUDE_FUNCTIONAL:
                         def fn(*inputs):
-                            output = getattr_qualified(torch, name)(*inputs, **kwargs)
+                            output = torch_fn(*inputs, **kwargs)
                             return output_process_fn(output)
 
                         f_args_variable = (self_variable,) + args_variable
