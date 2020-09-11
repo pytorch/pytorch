@@ -561,7 +561,7 @@ def gen_pyi(declarations_path, out):
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
         'contiguous': ['def contiguous(self) -> Tensor: ...'],
-        'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
+        'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
