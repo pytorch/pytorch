@@ -296,6 +296,27 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    def test_remove_qconfig(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.avg_pool = torch.nn.AvgPool2d(1)
+
+            def forward(self, x):
+                return self.avg_pool(x)
+
+        m = M().eval()
+        m = symbolic_trace(m)
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_static_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_static_fx(m)
+        m(data)
+        for name, module in m.named_modules():
+            self.assertFalse(hasattr(module, 'qconfig'),
+                             'qconfig is not removed for ' + name)
+
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
