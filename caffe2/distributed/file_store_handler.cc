@@ -123,7 +123,7 @@ int64_t FileStoreHandler::add(
 }
 
 int64_t FileStoreHandler::getNumKeys() {
-  CHECK(false) << "add not implemented for FileStoreHandler";
+  CHECK(false) << "getNumKeys not implemented for FileStoreHandler";
   return 0;
 }
 
