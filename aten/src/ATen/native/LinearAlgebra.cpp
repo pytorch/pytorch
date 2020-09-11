@@ -593,6 +593,8 @@ Tensor matmul(
   auto has_out = out_opt.has_value();
   Tensor out = out_opt.value_or(Tensor());
 
+  std::cout << "matmul\n";
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {

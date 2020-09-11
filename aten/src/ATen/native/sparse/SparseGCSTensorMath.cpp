@@ -17,7 +17,7 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
-Tensor& add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
