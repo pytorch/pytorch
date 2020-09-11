@@ -402,7 +402,10 @@ namespace jit {
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
-  _(CudaPrioritizeDependents)
+  _(CudaPrioritizeDependents)              \
+  _(CudaMaskBlockDim)                      \
+  _(CudaMaskThreadDim)
+// _(CudaMaskBlockAndThreadDim)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
