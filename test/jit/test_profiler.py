@@ -93,7 +93,7 @@ class TestProfiler(JitTestCase):
         y = torch.ones([1], requires_grad=True)
         broadcast_f(x, y)
         b = broadcast_f(x, y)
-        b.backward(torch.ones([2, 2], dtype=torch.float))
+        b.backward(torch.ones([2, 2], dtype=torch.float), retain_graph=True)
         b.backward(torch.ones([2, 2], dtype=torch.float))
         # warmup_backward(b, torch.ones([2, 2], dtype=torch.float))
         g = torch.jit.last_executed_optimized_graph()
@@ -145,3 +145,18 @@ class TestProfiler(JitTestCase):
         foo(2, 3)
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_not("TensorExpr").run(g)
+
+    def test_fallback_graph_not_specialized(self):
+        @torch.jit.script
+        def foo(a, b):
+            c = a * b
+            d = c * b
+            e = d * b
+            return d + e
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+        foo(x, y)
+        foo(x, y)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("CallFunction").check_next("Tensor = prim::TupleUnpack").run(g)
