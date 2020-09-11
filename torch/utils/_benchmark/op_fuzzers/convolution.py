@@ -30,9 +30,9 @@ SIZE_LIMITS = {
 }
 ROOFLINE_WORK_LIMITS = {
     constants.Scale.SMALL: 1024 ** 2,
-    constants.Scale.MEDIUM: 512 * 1024 ** 2,
-    constants.Scale.LARGE: 1024 ** 3,
-    constants.Scale.LARGER: 4 * 1024 ** 3,
+    constants.Scale.MEDIUM: 64 * 1024 ** 2,
+    constants.Scale.LARGE: 256 * 1024 ** 2,
+    constants.Scale.LARGER: 512 * 1024 ** 2,
 }
 
 
@@ -88,7 +88,6 @@ class ConvFuzzer(Fuzzer):
             for i in size:
                 work *= params[i]
             work *= params[KERNEL_SIZE] ** (dim - 2)
-            work /= params[STRIDE] ** (dim - 2)
             work /= params.get(GROUPS, 1)
             return work <= ROOFLINE_WORK_LIMITS[scale]
 
