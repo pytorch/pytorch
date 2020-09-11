@@ -212,7 +212,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
       prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
       prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
-      prim::tolist,        prim::rpc_async,     prim::rpc_sync};
+      prim::tolist,        prim::rpc_async,     prim::rpc_sync,
+      prim::rpc_remote};
 
   // WARNING: by adding a value to this set, you are asserting that your
   // primitive is only ever added during optimization and does not need
@@ -308,6 +309,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::tolist,
       prim::rpc_async,
       prim::rpc_sync,
+      prim::rpc_remote,
       prim::Enter,
       prim::Exit,
       prim::FallbackGraph,

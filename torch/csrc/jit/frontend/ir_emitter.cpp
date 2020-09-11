@@ -2708,7 +2708,8 @@ struct to_ir {
         return std::make_shared<SimpleValue>(expr);
       }
       case prim::rpc_async:
-      case prim::rpc_sync: {
+      case prim::rpc_sync:
+      case prim::rpc_remote: {
         return emitRpcExpr(apply, form);
       }
       case prim::unchecked_cast: {
@@ -3103,6 +3104,9 @@ struct to_ir {
     } else if (rpc_op == prim::rpc_sync) {
       // rpc_sync returns the functionSchema's return type
       output_type = returns[0].type();
+    } else if (rpc_op == prim::rpc_remote) {
+      // rpc_remote returns RRefType of the functionSchema's return type
+      output_type = RRefType::create(returns[0].type());
     } else {
       throw ErrorReport(apply)
           << rpc_op.toDisplayString() << " is not supported in TorchScript!'";

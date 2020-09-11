@@ -484,6 +484,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeWait(node);
     case prim::rpc_async:
     case prim::rpc_sync:
+    case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);

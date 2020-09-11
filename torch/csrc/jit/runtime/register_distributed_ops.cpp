@@ -156,6 +156,17 @@ void prepare_and_call_rpc_op(
       drop(stack, num_inputs);
       stack->emplace_back(std::move(res));
     }
+  } else if (rpc_op == "rpc_remote") {
+    auto rrefPtr = dist_rpc::remoteTorchscript(
+        dstWorkerNameStr,
+        qualifiedName,
+        functionSchema,
+        userCallableStack,
+        rpcTimeout);
+    // Push output to the stack.
+    drop(stack, num_inputs);
+    stack->emplace_back(
+        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rrefPtr));
   } else {
     throw std::runtime_error(
         c10::str(rpc_op, "() is not supported in TorchScript!'"));
@@ -243,6 +254,15 @@ RegisterOperators reg_rpc_ops(
            int num_inputs = node->inputs().size();
            return [num_inputs](Stack* stack) {
              prepare_and_call_rpc_op(stack, num_inputs, "rpc_sync");
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::rpc_remote,
+         [](const Node* node) -> Operation {
+           int num_inputs = node->inputs().size();
+           return [num_inputs](Stack* stack) {
+             prepare_and_call_rpc_op(stack, num_inputs, "rpc_remote");
            };
          },
          aliasAnalysisSpecialCase()),
