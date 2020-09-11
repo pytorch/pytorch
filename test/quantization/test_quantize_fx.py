@@ -283,9 +283,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = symbolic_trace(m)
         qconfig_dict = {'': default_qconfig, 'conv2': None}
         m = prepare_static_fx(m, qconfig_dict)
-        m(torch.randn(1, 1, 1, 1))
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
         m = convert_static_fx(m)
-        m(torch.randn(1, 1, 4, 4))
+        m(data)
         # first conv is quantized, second conv is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
