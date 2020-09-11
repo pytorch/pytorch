@@ -16,6 +16,40 @@
 namespace at { namespace native {
 
 using namespace at::sparse;
+    
+Tensor& addmm_out_sparse_gcs_dense_cpu(
+    Tensor& result,
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return result;
+}
+
+ Tensor addmm_sparse_gcs_dense_cpu(
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return b_self;
+  // return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+}
+
+SparseTensor& _sparse_gcs_mm_out(
+  SparseTensor& result,
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  Tensor t = at::zeros({}, dense.options());
+  return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
+}
 
 Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto commonDtype = at::result_type(self, other);
@@ -23,7 +57,6 @@ Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha);  // redispatch!
 }
-  
 
 Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!

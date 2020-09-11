@@ -79,13 +79,15 @@ class TestSparseGCS(TestCase):
         ro = [0]
         co = []
         values = []
+        
         for i in range(max(col_value)+1):
             cv = col_value.get(i, [])
             ro.append(ro[-1] + len(cv))
             cv.sort()
-            c, v = zip(*cv)
-            co.extend(c)
-            values.extend(v)
+            if len(cv) != 0:
+                c, v = zip(*cv)
+                co.extend(c)
+                values.extend(v)
 
         # print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
         return torch.sparse_gcs_tensor(torch.tensor(ro), torch.tensor(co), torch.tensor(values),
@@ -99,6 +101,7 @@ class TestSparseGCS(TestCase):
         for f in fills:
             dense[f] = fill_value
         dense = dense.reshape(shape)
+        print(dense.shape)
 
         return self.make_sparse_gcs(dense, None, fill_value)
     

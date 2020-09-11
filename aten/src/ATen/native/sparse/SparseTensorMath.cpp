@@ -393,6 +393,7 @@ Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
   TORCH_CHECK(vec.size(-1) == self.size(-1),
               "mv: expected self.size(-1) == vec.size(-1)");
 
+  std::cout << "mv_sparse \n";
   auto result = self.matmul(vec.unsqueeze(-1));
 
   return result.squeeze(-1);
@@ -728,6 +729,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
+  std::cout << "mul_out_sparse_cpu \n";
   // Check if we can find matching indices, and if so, write an
   // entry to the result indices vector.  Returns true if matching
   // indices were found.
@@ -798,6 +800,9 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
+
+
+  std::cout << "a: " << cast_alpha << " b: " << cast_beta << std::endl;
   if (cast_beta == 0) {
     r.zero_();
   } else if (cast_beta == 1) {
@@ -805,6 +810,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
       r.copy_(t);
     }
   } else {
+    std::cout << "mul_out\n";
     at::mul_out(r, t, scalar_to_tensor(beta));
   }
 
@@ -878,6 +884,8 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
   LongTensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
+
+  std::cout << "s_addmm_out_sparse_dense_cpu\n";
 
   AT_DISPATCH_ALL_TYPES(
       values.scalar_type(), "addmm_sparse_dense", [&] {
@@ -1538,6 +1546,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
 
   int64_t num_matrices = self_coalesced.size(0);
 
+  std::cout << "bmm_out sparse cpu\n";
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0_accessor[0];
@@ -1577,6 +1586,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
           LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
           Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
 
           s_addmm_out_sparse_dense_worker<scalar_t>(
             sparse_nnz,
