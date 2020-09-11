@@ -120,7 +120,6 @@ inline Tensor new_qtensor(
       allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
-  std::cout << "Storage nbytes " << storage->nbytes() << std::endl;
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::DispatchKeySet(tensorDispatchKey), dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);

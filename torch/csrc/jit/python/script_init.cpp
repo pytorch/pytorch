@@ -1067,7 +1067,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method(method_name, stack);
+            return m.get_method(method_name)(stack);
           },
           py::arg("method_name"),
           py::arg("input_tuple"))
@@ -1078,7 +1078,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method("forward", stack);
+            return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));
 
