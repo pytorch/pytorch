@@ -87,7 +87,7 @@ class Timer(object):
                 total_time += time_spent
                 can_stop = stop_hook(times)
                 if callback:
-                    callback(number, time_taken)
+                    callback(number, time_spent)
                 if max_run_time and total_time > max_run_time:
                     break
         return times
