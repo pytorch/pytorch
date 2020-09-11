@@ -433,7 +433,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
-        script_module.__dict__[name] = wrapped_script_method  # type: ignore
+        script_module.__dict__[name] = wrapped_script_method
 
 
     # Make module properties available on the Python ScriptModule class.
@@ -443,7 +443,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Setter is optional, so it may not exist.
         setter_name = property_stub.def_.setter_name()
         fset = cpp_module._get_method(setter_name.name) if setter_name else None
-        script_module.__dict__[property_name] = property(property_name, fget, fset)
+        script_module.__dict__[property_name] = property(property_name, fget, fset)  # type: ignore
 
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers
