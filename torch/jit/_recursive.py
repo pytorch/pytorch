@@ -433,7 +433,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
-        script_module.__dict__[name] = wrapped_script_method
+        script_module.__dict__[name] = wrapped_script_method  # type: ignore
 
 
     # Make module properties available on the Python ScriptModule class.
