@@ -2,7 +2,6 @@ import torch
 from torch.types import _TensorOrTensors
 from torch._six import container_abcs, istuple
 import torch.testing
-from torch.overrides import is_tensor_like
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional
@@ -18,12 +17,12 @@ def zero_gradients(x):
 
 
 def make_jacobian(input, num_out):
-    if is_tensor_like(input):
+    if isinstance(input, torch.Tensor):
         if not input.is_floating_point() and not input.is_complex():
             return None
         if not input.requires_grad:
             return None
-        return input.new_zeros((input.nelement(), num_out), dtype=input.dtype, layout=torch.strided)
+        return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
     elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
@@ -35,7 +34,7 @@ def make_jacobian(input, num_out):
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if is_tensor_like(x):
+    if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x
     elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
@@ -254,13 +253,13 @@ def gradcheck(
         return False
 
     tupled_inputs = _as_tuple(inputs)
-    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
+    if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
-        if is_tensor_like(inp) and inp.requires_grad:
+        if isinstance(inp, torch.Tensor) and inp.requires_grad:
             if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                 warnings.warn(
                     'The {}th input requires gradient and '
