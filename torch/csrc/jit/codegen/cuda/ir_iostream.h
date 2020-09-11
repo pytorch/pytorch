@@ -4,7 +4,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <iostream>
 

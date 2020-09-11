@@ -1,3 +1,4 @@
+
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -5,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 namespace torch {
 namespace jit {

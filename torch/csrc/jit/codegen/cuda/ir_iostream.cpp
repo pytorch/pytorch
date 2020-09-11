@@ -1,10 +1,8 @@
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-
-#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -422,85 +420,6 @@ void IrPrinter::handle(const Merge* m) {
   handle(m->out());
   os_ << "\n";
 }
-
-#if 0
-
-namespace {
-
-class ReductionOps : OptOutDispatch {
- public:
-  std::set<std::pair<BinaryOpType, DataType>> rops;
-  void handle(ReductionOp* rop) override {
-    rops.emplace(std::pair<BinaryOpType, DataType>{
-        rop->getReductionOpType(), rop->in()->getDataType().value()});
-  }
-
-  using OptOutDispatch::handle;
-
-  static std::set<std::pair<BinaryOpType, DataType>> get(Fusion* fusion) {
-    ReductionOps ROPs;
-    for (auto expr : fusion->exprs(true)) {
-      ROPs.handle(expr);
-    }
-    return ROPs.rops;
-  }
-};
-
-} // namespace
-
-
-void IrPrinter::printReductionOps(Fusion* fusion) {
-  FusionGuard fg(fusion);
-
-  // TODO(kir): we shouldn't be creating new nodes during printing
-  auto a = new NamedScalar("a", DataType::Null);
-  auto b = new NamedScalar("b", DataType::Null);
-  for (auto rop_pair : ReductionOps::get(fusion)) {
-    auto op_type = rop_pair.first;
-    auto d_type = rop_pair.second;
-
-    indent();
-    os_ << "__device__ void reduction_" << op_type << "_" << d_type << "("
-        << d_type << "& a, " << d_type << " b) {\n";
-    indent_size_++;
-    handle(new BinaryOp(op_type, a, a, b));
-    indent_size_--;
-    indent();
-    os_ << "}\n";
-  }
-}
-
-void IrPrinter::printKernel(
-    const std::vector<Expr*>& exprs,
-    const std::string& kernel_name,
-    const std::vector<Val*>& global_buffers,
-    bool hasDynamicSmem) {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  if (exprs.empty())
-    return;
-  TORCH_INTERNAL_ASSERT(
-      exprs[0]->fusion() == FusionGuard::getCurFusion(),
-      "Incorrect fusion set during printKernel.");
-
-  printReductionOps(fusion);
-  printHeader(fusion, kernel_name, global_buffers, hasDynamicSmem);
-
-  for (auto* expr : exprs) {
-    handle(expr);
-  }
-
-  os_ << "}\n";
-}
-
-const ThreadPredicateMap& IrPrinter::getThreadPredicateMap() {
-  if (thread_predicates_ == nullptr) {
-    Fusion* fusion = FusionGuard::getCurFusion();
-    thread_predicates_ = std::make_unique<ThreadPredicateMap>(fusion);
-  }
-  return *thread_predicates_;
-}
-
-#endif
 
 std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
   IrPrinter p(os);
