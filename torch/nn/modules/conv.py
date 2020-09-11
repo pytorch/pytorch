@@ -581,7 +581,7 @@ class _ConvTransposeNd(_ConvNd):
 
     # dilation being an optional parameter is for backwards
     # compatibility
-    def _output_padding(self, input, output_size, stride, padding, kernel_size, dilation = None):
+    def _output_padding(self, input, output_size, stride, padding, kernel_size, dilation=None):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int], Optional[List[int]]) -> List[int]
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
