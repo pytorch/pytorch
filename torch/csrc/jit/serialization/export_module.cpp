@@ -129,8 +129,8 @@ void pushScopeInfo(
       sc = sc->push(Symbol::scope("UNKNOWN_INSTANCE(UNKNOWN_TYPE)"));
     } else {
       std::string name;
-      for (size_t i = 0; i < module_names_with_types.size(); ++i) {
-        name += module_names_with_types[i] + ".";
+      for (const auto& module_info: module_names_with_types) {
+        name += module_info + ".";
       }
       name += fn_name;
       sc = sc->push(Symbol::scope(name));
