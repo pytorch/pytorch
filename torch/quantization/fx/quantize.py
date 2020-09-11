@@ -1,13 +1,4 @@
 import torch
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from ..quantization_mappings import (
-    get_qat_module_mappings,
-)
-
 from torch.fx import (
     GraphModule,
     Proxy,
@@ -18,6 +9,17 @@ from torch.fx.graph import (
     Node,
     map_arg,
 )
+
+from torch.quantization import (
+    propagate_qconfig_,
+    convert,
+)
+
+from ..quantization_mappings import (
+    get_qat_module_mappings,
+)
+
+from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
@@ -483,6 +485,7 @@ class Quantizer:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
+        _remove_qconfig(model)
         model = GraphModule(model, self.quantized_graph)
         return model
 
