@@ -34,9 +34,10 @@ class TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu)
       : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
   Module() = default;
+  Method get_method(const std::string& method_name) const;
   c10::IValue run_method(const std::string& method_name, Stack stack);
   c10::IValue forward(std::vector<c10::IValue> inputs) {
-    return run_method("forward", std::move(inputs));
+    return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
   std::string name() {
