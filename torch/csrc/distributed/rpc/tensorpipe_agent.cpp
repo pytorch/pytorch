@@ -7,7 +7,6 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
