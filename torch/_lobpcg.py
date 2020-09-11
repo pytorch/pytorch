@@ -275,9 +275,9 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
             n, iK, niter, tol, largest, method, tracker,
             ortho_iparams, ortho_fparams, ortho_bparams
         )
-        #D, U = torch.symeig(A, eigenvectors=True, upper=True)
-        #D = D[..., -k:]
-        #U = U[..., :, -k:]
+        # D, U = torch.symeig(A, eigenvectors=True, upper=True)
+        # D = D[..., -k:]
+        # U = U[..., :, -k:]
 
         D = D.contiguous()
         U = U.contiguous()
@@ -331,7 +331,10 @@ def lobpcg2(A,                   # type: Tensor
     # The symmetrization is important for first-order optimization method,
     # so that (A - alpha * A_grad) is still a symmetric matrix.
     A_sym = (A + A.transpose(-2, -1)) / 2
-    return LOBPCGAutogradFunction.apply(A_sym, k, B, X, n, iK, niter, tol, largest, method, tracker, ortho_iparams, ortho_fparams, ortho_bparams)
+    return LOBPCGAutogradFunction.apply(
+        A_sym, k, B, X, n, iK, niter, tol, largest,
+        method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
+    )
 
 
 def lobpcg(A,                   # type: Tensor
