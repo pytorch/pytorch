@@ -144,7 +144,7 @@ option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in develo
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
+option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -626,7 +626,7 @@ endif()
 
 
 # Add code coverage flags to supported compilers
-if(CODE_COVERAGE)
+if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS  " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS  " --coverage -fprofile-abs-path")
