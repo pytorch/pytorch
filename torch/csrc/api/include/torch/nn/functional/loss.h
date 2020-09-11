@@ -107,22 +107,13 @@ inline Tensor mse_loss(
                "This will likely lead to incorrect results due to broadcasting. ",
                "Please ensure they have the same size.");
   }
-  torch::Tensor ret;
-  if (target.requires_grad()) {
-    ret = torch::pow(input - target, 2);
-    if (!c10::get_if<enumtype::kNone>(&reduction)) {
-      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
-    }
-  } else {
-    std::vector<torch::Tensor> broadcast_tensors = torch::broadcast_tensors({input, target});
-    auto expanded_input = broadcast_tensors[0];
-    auto expanded_target = broadcast_tensors[1];
-    ret = torch::mse_loss(
-      expanded_input,
-      expanded_target,
-      enumtype::reduction_get_enum(reduction));
-  }
-  return ret;
+  std::vector<torch::Tensor> broadcast_tensors = torch::broadcast_tensors({input, target});
+  auto expanded_input = broadcast_tensors[0];
+  auto expanded_target = broadcast_tensors[1];
+  return torch::mse_loss(
+    expanded_input,
+    expanded_target,
+    enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
