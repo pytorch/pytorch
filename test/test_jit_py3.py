@@ -558,7 +558,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_module_properties(self):
         class ModuleWithProperties(torch.nn.Module):
-            __properties__ = ["attr"]
+            __ignored_properties__ = ["ignored_attr"]
 
             def __init__(self, a: int):
                 super().__init__()
@@ -584,8 +584,6 @@ class TestScriptPy3(JitTestCase):
                     self.a = 0
 
         class ModuleWithNoSetter(torch.nn.Module):
-            __properties__ = ["attr"]
-
             def __init__(self, a: int):
                 super().__init__()
                 self.a = a
