@@ -797,6 +797,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
+    outputs_ = inputs;
   }
 
   template <typename T>
@@ -811,6 +812,18 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
+
+
+  std::vector<at::Tensor> result() override {
+    TORCH_CHECK(
+        isCompleted(),
+        "Work needs to be completed before calling result(). "
+        "Should call wait() before result().");
+    return outputs_;
+  }
+
+ protected:
+  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -1001,7 +1014,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
-  std::vector<at::Tensor> result() const override {
+  std::vector<at::Tensor> result() override {
     return outputs;
   }
 
@@ -1158,6 +1171,8 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    outputs_ = inputs;
   }
 
   void synchronize() override {
