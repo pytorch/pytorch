@@ -162,6 +162,9 @@ def GetBlobsOrder(meta_net_def):
 def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
     meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
 
+def SetAOTConfig(meta_net_def, aot_config):
+    meta_net_def.aotConfig.CopyFrom(aot_config)
+
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:
         if arg.name == arg_name:
