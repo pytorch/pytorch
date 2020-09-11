@@ -16,6 +16,50 @@
 namespace at { namespace native {
 
 using namespace at::sparse;
+Tensor& s_addmm_out_sparse_gcs_dense_cpu(
+    Tensor& r,
+    const Tensor& t,
+    const SparseTensor& sparse_,
+    const Tensor& dense,
+    Scalar beta,
+    Scalar alpha) {
+  // TODO: This error message seems awfully opaque
+  AT_ASSERT(!t.is_cuda());
+  TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+
+  TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
+  TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");
+  TORCH_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
+
+  // ixj * jxk = ixk
+  int64_t dim_i = sparse_.size(0);
+  int64_t dim_j = sparse_.size(1);
+  int64_t dim_k = dense.size(1);
+
+  TORCH_CHECK(dense.size(0) == dim_j,
+              "addmm: Argument #3 (dense): Expected dim 0 size ", dim_j, ", got ", dense.size(0));
+  TORCH_CHECK(t.size(0) == dim_i,
+              "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", t.size(0));
+  TORCH_CHECK(t.size(1) == dim_k,
+              "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
+
+  r.resize_({dim_i, dim_k});
+
+  // TODO: why does that nnz == 0 condition exist in the COO code?
+
+  LongTensor indices = sparse_.indices();
+  LongTensor pointers = sparse_.pointers();
+  Tensor values      = sparse_.values();
+
+  AT_DISPATCH_ALL_TYPES(
+  values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+                                                    // hello
+  });
+
+  return r;
+}
     
 Tensor& addmm_out_sparse_gcs_dense_cpu(
     Tensor& result,
@@ -26,20 +70,18 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar alpha) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return result;
+  return s_addmm_out_sparse_gcs_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
 }
 
  Tensor addmm_sparse_gcs_dense_cpu(
     const Tensor& self,
-    const SparseTensor& mat1,
-    const Tensor& mat2,
+    const SparseTensor& sparse,
+    const Tensor& dense,
     Scalar beta,
-    Scalar alpha
-) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return b_self;
-  // return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+    Scalar alpha) {
+   Tensor r = at::empty({0}, self.options());
+   s_addmm_out_sparse_gcs_dense_cpu(r, self, sparse, dense, beta, alpha);
+   return r;
 }
 
 SparseTensor& _sparse_gcs_mm_out(
