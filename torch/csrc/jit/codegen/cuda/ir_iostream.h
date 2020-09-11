@@ -56,7 +56,6 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const kir::TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -76,6 +75,7 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
   void handle(const kir::Int*) override;
   void handle(const kir::NamedScalar*) override;
 
+  void handle(const kir::TensorIndex*) override;
   void handle(const kir::IterDomain*) override;
   void handle(const kir::TensorDomain*) override;
   void handle(const kir::TensorView*) override;

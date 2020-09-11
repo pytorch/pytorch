@@ -170,21 +170,58 @@ class CudaKernelGenerator : private OptInConstDispatch {
     OptInConstDispatch::handle(node);
   }
 
-  void handle(const kir::Bool* node) final {}
+  void handle(const kir::Bool* node) final {
 
-  void handle(const kir::Float* node) final {}
+  }
 
-  void handle(const kir::Half* node) final {}
+  void handle(const kir::Float* node) final {
 
-  void handle(const kir::Int* node) final {}
+  }
 
-  void handle(const kir::NamedScalar* node) final {}
+  void handle(const kir::Half* node) final {
 
-  void handle(const kir::IterDomain* node) final {}
+  }
 
-  void handle(const kir::TensorDomain* node) final {}
+  void handle(const kir::Int* node) final {
 
-  void handle(const kir::TensorView* node) final {}
+  }
+
+  void handle(const kir::NamedScalar* node) final {
+    code_ << node->name();
+  }
+
+  void handle(const kir::TensorIndex* node) final {
+    code_ << "T" << node->view()->name() << "[";
+
+    bool first = true;
+    for (auto* ind : node->indices()) {
+      if (!ind->isZeroInt()) {
+        if (!first) {
+          code_ << " + ";
+        }
+        code_ << gen(ind);
+        first = false;
+      }
+    }
+
+    if (first) {
+      code_ << "0";
+    }
+
+    code_ << "]";
+  }
+
+  void handle(const kir::IterDomain* node) final {
+    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  }
+
+  void handle(const kir::TensorDomain* node) final {
+    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  }
+
+  void handle(const kir::TensorView* node) final {
+    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  }
 
   void handle(const kir::UnaryOp* node) final {}
 

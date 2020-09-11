@@ -106,31 +106,6 @@ void IrPrinter::handle(const IterDomain* id) {
     os_ << "rf";
 }
 
-void IrPrinter::handle(const kir::TensorIndex* ti) {
-  os_ << "T" << ti->view()->name();
-  std::vector<Val*> non_zero_inds;
-  for (auto* ind : ti->indices()) {
-    if (!ind->isZeroInt()) {
-      non_zero_inds.push_back(ind);
-    }
-  }
-
-  if (non_zero_inds.size() == 0) {
-    os_ << "[ 0 ]";
-    return;
-  }
-
-  os_ << "[ ";
-  bool first = true;
-  for (auto* ind : non_zero_inds) {
-    if (!first)
-      os_ << " + ";
-    print_inline(ind);
-    first = false;
-  }
-  os_ << " ]";
-}
-
 void IrPrinter::handle(const Bool* b) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
     os_ << "( ";
@@ -265,33 +240,24 @@ void IrPrinter::handle(const kir::Int* i) {
   }
 }
 
-void IrPrinter::handle(const kir::NamedScalar* i) {
-  os_ << i->name();
+void IrPrinter::handle(const kir::NamedScalar*) {
+  os_ << "kir::NamedScalar";
 }
 
-void IrPrinter::handle(const kir::IterDomain* id) {
-  os_ << id->getIterType();
-  os_ << id->getParallelType();
-  os_ << id->name();
-  os_ << "{";
-  if (!id->start()->isZeroInt()) {
-    print_inline(id->start());
-    os_ << " : ";
-  }
-  print_inline(id->extent());
-  os_ << "}";
-  if (id->isRFactorProduct())
-    os_ << "rf";
+void IrPrinter::handle(const kir::TensorIndex*) {
+  os_ << "kir::TensorIndex";
+}
+
+void IrPrinter::handle(const kir::IterDomain*) {
+  os_ << "kir::IterDomain";
 }
 
 void IrPrinter::handle(const kir::TensorDomain*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
+  os_ << "kir::TensorDomain";
 }
 
-void IrPrinter::handle(const kir::TensorView* tv) {
-  // This should never be reachable, but the current codebase assumes
-  // kir::TensorView can be printable for debugging messages.
-  os_ << "KT" << tv->name();
+void IrPrinter::handle(const kir::TensorView*) {
+  os_ << "kir::TensorView";
 }
 
 static bool isTV(const Val* val) {
