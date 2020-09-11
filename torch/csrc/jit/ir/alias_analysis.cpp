@@ -483,6 +483,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case aten::wait:
       return analyzeWait(node);
     case prim::rpc_async:
+    case prim::rpc_sync:
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
