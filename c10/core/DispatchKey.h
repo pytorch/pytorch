@@ -274,6 +274,10 @@ enum class DispatchKey : uint8_t {
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
 
+  // Define an alias key to represent end of alias dispatch keys.
+  // If you add new alias keys after Autograd, please also update it here.
+  EndOfAliasKeys = Autograd, //
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used
@@ -316,6 +320,7 @@ C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+C10_API DispatchKey getBackendKeyFromAutograd(DispatchKey t);
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
