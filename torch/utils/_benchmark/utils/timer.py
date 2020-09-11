@@ -130,7 +130,7 @@ class Timer(object):
 
         def stop_hook(times):
             return True
-
-        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time, 
-                                                max_run_time=None, callback=callback)
+        # Time out after 1 week
+        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time,
+                                                max_run_time=604800.0, callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
