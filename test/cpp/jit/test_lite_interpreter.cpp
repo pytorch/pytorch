@@ -669,7 +669,7 @@ static auto reg =
         .def_pickle(
             // __getattr__
             [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
-            self) -> int64_t { return 0; },
+                   self) -> int64_t { return 0; },
             // __setattr__
             [](int64_t state) {
               return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
