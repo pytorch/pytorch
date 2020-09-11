@@ -550,7 +550,7 @@ def method_tests():
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
         # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
-        # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
+        ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
