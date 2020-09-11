@@ -4,6 +4,8 @@ from torch.quantization import (
     convert,
 )
 
+from torch.quantization.quantize import _remove_qconfig
+
 from torch.quantization.default_mappings import (
     DEFAULT_QAT_MODULE_MAPPING,
 )
@@ -483,6 +485,7 @@ class Quantizer:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
+        _remove_qconfig(model)
         model = GraphModule(model, self.quantized_graph)
         return model
 
