@@ -1188,4 +1188,3 @@ TEST_F(TransformerTest, TransformerArgsCorrectness) {
   src = torch::randn({2, 3});
   ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have 3 dimensions");
 }
-
