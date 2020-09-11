@@ -192,7 +192,7 @@ bool RequestCallbackNoPython::processScriptRemoteCallOp(
     } catch (const std::exception& e) {
       // Don't throw in this call, but rather transfer the exception
       // to the rref.
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       postProcessing();
       return true;
     }
@@ -321,7 +321,8 @@ void RequestCallbackNoPython::processRpc(
         whenValueSet->addCallback(
             [responseFuture, messageId, rref, whenValueSet]() {
               if (whenValueSet->hasError()) {
-                responseFuture->setError(whenValueSet->error()->what());
+                responseFuture->setError(
+                    whenValueSet->tryRetrieveErrorMessage());
                 return;
               }
               try {
@@ -455,16 +456,15 @@ void RequestCallbackNoPython::processRpc(
           autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback(
-          [responseFuture, messageId](const FutureMessage& execFuture) {
-            if (!execFuture.hasError()) {
-              Message m = std::move(PropagateGradientsResp()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(*(execFuture.error()));
-            }
-          });
+      execFuture->addCallback([responseFuture, messageId, execFuture]() {
+        if (!execFuture->hasError()) {
+          Message m = std::move(PropagateGradientsResp()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } else {
+          responseFuture->setError(execFuture->tryRetrieveErrorMessage());
+        }
+      });
       return;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {

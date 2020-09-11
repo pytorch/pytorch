@@ -9,8 +9,11 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
@@ -215,6 +218,45 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
 void testCudaTestVectorAdd02() {
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
+}
+
+void testCudaHalfCast() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, a(i));
+  });
+
+  LoopNest l({b});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> bData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  float* bDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(bData, 2.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
 }
 
 void testCudaDynamicShape2D() {
@@ -862,6 +904,140 @@ void testCudaLocalMemReduce_1() {
 
   cudaFree(a_dev);
   cudaFree(b_dev);
+}
+
+void testCudaHalfSupport() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, ExprHandle(2.0f) * a(i));
+  });
+
+  Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+  });
+
+  Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, c->call(i));
+  });
+
+  LoopNest l({b, c, d});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b, c, d});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> cData(4, 0.0f);
+  std::vector<at::Half> dData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* bDev = nullptr;
+  at::Half* cDev = nullptr;
+  at::Half* dDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = aData.size() * sizeof(aData[0]);
+  auto cSize = cData.size() * sizeof(float);
+  auto dSize = dData.size() * sizeof(dData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMalloc(&cDev, cSize);
+  cudaMalloc(&dDev, dSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(cDev, cData.data(), cSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(dDev, dData.data(), dSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev, cDev, dDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(cData.data(), cDev, cSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(dData.data(), dDev, dSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(cData, 46.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+  cudaFree(cDev);
+  cudaFree(dDev);
+}
+
+void testCudaPrioritizeDependents() {
+  KernelScope kernel_scope;
+  Buffer a("a", kFloat, {10});
+  Buffer b("b", kFloat, {12});
+  Buffer c("c", kFloat, {12});
+
+  LoopOptions block_idx_opt;
+  block_idx_opt.set_gpu_block_index(0);
+
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  /*
+   * for (int i = 0; i < 12; ++i) {
+   *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
+   * }
+   */
+  ExprHandle load_a = Load::make(a, {i}, 1);
+  ExprHandle load_b = Load::make(b, {i}, 1);
+  ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
+  ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
+
+  For* loop = For::make(
+      i, 0, 12, Block::make({Store::make(c, {i}, ite, 1)}), block_idx_opt);
+
+  CudaCodeGen cuda_cg(loop, a, b, c);
+
+  PaddedBuffer<float> a_v(10, "a_v");
+  PaddedBuffer<float> b_v(12, "b_v");
+  PaddedBuffer<float> c_v(12, "c_v");
+  PaddedBuffer<float> c_ref(12, "c_ref");
+
+  for (int i = 0; i < 10; ++i) {
+    a_v(i) = i * 100;
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  for (int i = 10; i < 12; ++i) {
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  float* a_dev = nullptr;
+  float* b_dev = nullptr;
+  float* c_dev = nullptr;
+  cudaMalloc(&a_dev, 10 * sizeof(float));
+  cudaMalloc(&b_dev, 12 * sizeof(float));
+  cudaMalloc(&c_dev, 12 * sizeof(float));
+
+  cudaMemcpy(a_dev, a_v.data(), 10 * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), 12 * sizeof(float), cudaMemcpyHostToDevice);
+
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev, c_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  for (int i = 0; i < 12; ++i) {
+    if (i < 10) {
+      c_ref(i) = i + i * 100;
+    } else {
+      c_ref(i) = i;
+    }
+  }
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
 }
 
 } // namespace jit

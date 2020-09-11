@@ -81,7 +81,7 @@ int64_t RedisStoreHandler::getNumKeys() {
   return 0;
 }
 
-void RedisStoreHandler::deleteKey() {
+void RedisStoreHandler::deleteKey(const std::string& key) {
   CHECK(false) << "deleteKey not implemented for FileStoreHandler";
 }
 
