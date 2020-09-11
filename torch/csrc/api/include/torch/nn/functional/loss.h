@@ -324,18 +324,8 @@ inline Tensor smooth_l1_loss(
                   "Please ensure they have the same size.");
   }
 
-  Tensor ret;
-
-  if (target.requires_grad()) {
-    ret = _smooth_l1_loss(input, target);
-    if (!c10::get_if<enumtype::kNone>(&reduction)) {
-      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
-    }
-  } else {
-    std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
-  }
-  return ret;
+  std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
+  return torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
