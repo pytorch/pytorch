@@ -10538,15 +10538,19 @@ a")
             a = torch.rand([3, 4])
             return a + 1.0 - a
 
-        fn = self.checkScript(test_rand, ())
-        out = fn()
-        self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
+        with enable_profiling_mode_for_profiling_tests():
+            with num_profiled_runs(1):
+                out = test_rand()
+                graph_str = torch.jit.last_executed_optimized_graph()
+                self.assertEqual(out.dtype, torch.double)
+                #FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)")
+                FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
+                        .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
 
-        # this only works because TE sets types on values
-        # otherwise we would erase all prim::profile nodes
-        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
-                   .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
+            fn = self.checkScript(test_rand, ())
+            out = fn()
+            self.assertEqual(out.dtype, torch.double)
 
         @torch.jit.script
         def randint():
