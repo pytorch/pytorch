@@ -694,6 +694,9 @@ class Wrapper:
     def __add__(self, other):
         return self.__torch_function__(torch.add, (Wrapper,), (self, other))
 
+    def __mul__(self, other):
+        return self.__torch_function__(torch.mul, (Wrapper,), (self, other))
+
     def __sub__(self, other):
         return self.__torch_function__(torch.sub, (Wrapper,), (self, other))
 

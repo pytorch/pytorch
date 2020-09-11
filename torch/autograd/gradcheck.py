@@ -83,8 +83,12 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
             r = (outb - outa) / (2 * eps)
             return r.detach().reshape(-1)
 
+        # for details on the algorithm used here, refer:
+        # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
+        # s = fn(z) where z = x for real valued input
+        # and z = x + yj for complex valued input
         ds_dx = compute_gradient(eps)
-        if x.is_complex():
+        if x.is_complex():  # C -> C, C -> R
             ds_dy = compute_gradient(eps * 1j)
             # conjugate wirtinger derivative
             conj_w_d = 0.5 * (ds_dx + ds_dy * 1j)
@@ -100,7 +104,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
             # equals to real value of the result obtained from the generic formula for
             # C -> C functions used above.
             d[d_idx] = torch.real(dL_dz_conj)
-        else:
+        else:   # R -> R
             d[d_idx] = ds_dx * grad_out
 
     # TODO: compare structure
