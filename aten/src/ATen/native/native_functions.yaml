@@ -1141,6 +1141,11 @@
     CPU: cummin_helper_cpu
     CUDA: cummin_helper_cuda
 
+- func: cummaxmin_backward(Tensor grad, Tensor input, Tensor indices, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1151,6 +1156,11 @@
   variants: function, method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod_backward(Tensor grad, Tensor input, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -1196,6 +1206,11 @@
 
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
+
+- func: diagonal_backward(Tensor grad, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -2730,6 +2745,12 @@
   dispatch:
     CPU: gelu_backward_cpu
     CUDA: gelu_backward_cuda
+
+- func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: nn
+  device_guard: False
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   use_c10_dispatcher: full
@@ -4890,6 +4911,11 @@
   use_c10_dispatcher: full
   variants: method, function
 
+- func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
@@ -4932,6 +4958,11 @@
   dispatch:
     CPU: legacy::cpu::_th_trace
     CUDA: trace_cuda
+
+- func: trace_backward(Tensor grad, int[] sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5234,6 +5265,11 @@
     CPU: legacy::cpu::_th_take
     CUDA: legacy::cuda::_th_take
 
+- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: index_select_out_cpu_
@@ -5269,6 +5305,11 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+
+- func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
