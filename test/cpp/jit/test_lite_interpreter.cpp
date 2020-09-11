@@ -63,7 +63,7 @@ void testLiteInterpreterAdd() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("add_it", bcinputs);
+    res = bc.get_method("add_it")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -95,7 +95,7 @@ void testLiteInterpreterConv() {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.run_method("forward", inputs);
+    res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -119,7 +119,7 @@ void testLiteInterpreterInline() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("foo3", inputs);
+  auto output = bc.get_method("foo3")(inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
@@ -137,7 +137,7 @@ void testLiteInterpreterTuple() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
@@ -155,7 +155,7 @@ void testLiteInterpreterDict() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
@@ -173,7 +173,7 @@ void testLiteInterpreterPrimOverload() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
   */
 }
@@ -196,7 +196,7 @@ void testLiteInterpreterPrim() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resi = res.toInt();
@@ -231,7 +231,7 @@ void testLiteInterpreterWrongMethodName() {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
+  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
 }
 
 void testLiteInterpreterSetState() {
@@ -262,7 +262,7 @@ void testLiteInterpreterSetState() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -296,7 +296,7 @@ void testLiteInterpreterBuiltinFunction() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
-      bc.run_method("forward", std::vector<IValue>{torch::zeros({3, 4})});
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
@@ -585,7 +585,7 @@ void testLiteInterpreterEval() {
   bc.eval();
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.run_method("forward", inputs);
+    res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
