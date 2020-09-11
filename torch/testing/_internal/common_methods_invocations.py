@@ -67,7 +67,7 @@ class OpInfo(object):
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
-            assert isinstance(dtype_list, _dispatch_dtypes)
+            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
 
