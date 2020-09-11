@@ -1,6 +1,5 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
-from typing import Optional
 import timeit
 from typing import List, Optional
 
