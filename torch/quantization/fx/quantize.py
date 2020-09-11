@@ -470,7 +470,7 @@ class Quantizer:
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
-        self.quantized_graph.output(load_non_quantized(model.graph.result))
+        self.quantized_graph.output(map_arg(model.graph.result, load_non_quantized))
 
         to_be_removed = []
         for name, _ in model.named_modules():
