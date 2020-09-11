@@ -20,6 +20,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
+#include <stack>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,111 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
+std::string getModuleTypeName(const Module& module, const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
+}
+
+// This function will handle the Sequential case by checking
+// which module our current submodule belongs to.
+void addModulePtr(
+    std::vector<Module>& module_vec,
+    std::vector<std::string>& module_names_with_types,
+    const std::string& instance_name,
+    const std::string& type_name) {
+  for (size_t i = module_vec.size() - 1; i >= 0; --i) {
+    if (module_vec[i].hasattr(instance_name) && module_vec[i].attr(instance_name).isModule()) {
+      auto new_module = module_vec[i].attr(instance_name).toModule();
+      module_vec.resize(i + 1);
+      module_vec.emplace_back(std::move(new_module));
+      module_names_with_types.resize(i + 1);
+      module_names_with_types.push_back(instance_name + "(" + type_name + ")");
+      break;
+    }
+  }
+}
+
+void pushScopeInfo(
+    Node* node,
+    const Module& module,
+    const std::string& root_scope_string) {
+  ScopePtr sc = c10::make_intrusive<Scope>();
+  if (!node->callstack()) {
+    sc = sc->push(Symbol::scope(root_scope_string + ".forward"));
+
+  } else {
+    std::vector<Module> module_vec;
+    std::vector<std::string> module_names_with_types;
+    std::string fn_name;
+    module_vec.push_back(module);
+    module_names_with_types.push_back(root_scope_string);
+    auto callstack_ptr = *(node->callstack());
+    const auto& vec = callstack_ptr->vec_with_module_info();
+
+    for (size_t i = 0; i < vec.size(); ++i) {
+      const auto& tup = vec[i];
+      const auto opt_module_instance_info = std::get<2>(tup);
+
+      if (opt_module_instance_info) {
+        const auto& module_instance_info = opt_module_instance_info.value();
+        if (module_instance_info.class_type()) {
+          const auto& instance_name = module_instance_info.instance_name();
+          const auto& class_type = module_instance_info.class_type();
+          auto type_name = class_type->name()->qualifiedName();
+          type_name = type_name.substr(type_name.find_last_of(".") + 1);
+          addModulePtr(module_vec, module_names_with_types, instance_name, type_name);
+          if (i == vec.size() - 1) {
+            fn_name = std::get<0>(tup)->name();
+          }
+
+        } else {
+          module_vec.clear();
+          break;
+        }
+      } else {
+        module_vec.clear();
+        break;
+      }
+    }
+
+    if (module_vec.empty()) {
+      sc = sc->push(Symbol::scope("UNKNOWN_INSTANCE(UNKNOWN_TYPE)"));
+    } else {
+      std::string name;
+      for (size_t i = 0; i < module_names_with_types.size(); ++i) {
+        name += module_names_with_types[i] + ".";
+      }
+      name += fn_name;
+      sc = sc->push(Symbol::scope(name));
+    }
+  }
+
+  node->setScope(sc);
+}
+
+void reconstructScopes(
+    std::shared_ptr<Graph> graph,
+    const Module& module,
+    const std::string& root_scope_string) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* node : block->nodes()) {
+      pushScopeInfo(node, module, root_scope_string);
+      std::cout << "Scope: " << node->scopeName() << std::endl;
+      for (Block* subblock : node->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+}
+
 std::string getModulePath(Node* node) {
   std::string modulePath = node->scopeName();
   size_t end = modulePath.size();
@@ -78,7 +184,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
   if (save_mobile_debug_info) {
-    ReconstructScopes(module, *graph, "top");
+    std::string root_scope_string = getModuleTypeName(module, "top");
+    reconstructScopes(graph, module, root_scope_string);
   }
 
   torch::jit::Code code(graph, func.name());
