@@ -148,7 +148,8 @@ static void ReplaceAddWithConcat(Block* b) {
         concat_node->insertBefore(*it);
         concat_node->addInput(it->input(0));
         concat_node->addInput(it->input(1));
-        concat_node->outputs()[0]->setType(TensorType::fromNumberType(std::move(elem)));
+        concat_node->outputs()[0]->setType(
+            TensorType::fromNumberType(std::move(elem)));
         it->replaceAllUsesWith(concat_node);
         it->removeAllInputs();
         it.destroyCurrent();
