@@ -22,6 +22,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -901,6 +902,52 @@ class DistributedTest:
         def test_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
+
+        @skip_if_no_gpu
+        @require_backend({"gloo", "nccl"})
+        def test_all_reduce_result_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            for src in group:
+                if rank == src:
+                    tensor = _build_tensor(src + 1, 2)
+                else:
+                    tensor = _build_tensor(src + 1, 10)
+                tensor = tensor.cuda(rank_to_GPU[rank][0])
+
+                opts = AllreduceOptions()
+                opts.reduceOp = dist.ReduceOp.SUM
+
+                if group_id == GroupMember.WORLD:
+                    work = _get_default_group().allreduce([tensor], opts)
+                else:
+                    work = group_id.allreduce([tensor], opts)
+
+
+                if BACKEND == "gloo":
+                    # Calling result right the work is finished should throw exception.
+                    # Here we have a race condition, we may not assume the work is not
+                    # finished by the time we run next lines.
+                    try:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "Work needs to be completed before calling result"):
+                            work.result()
+                    except AssertionError:
+                        # Exception was not raised, ensure is_completed()
+                        self.assertTrue(work.is_completed())
+
+                    work.wait()
+                    result = work.result()
+                else:
+                    # In case of NCCL we should be able to retrieve pointer to the result
+                    # even before work is finished.
+                    result = work.result()
+                    work.wait()
+
+                expected_value = 2 + (10 * (len(group) - 1))
+                self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
+            self._barrier()
 
         # ALL REDUCE
         def _test_all_reduce_helper(

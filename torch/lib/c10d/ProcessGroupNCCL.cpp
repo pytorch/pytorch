@@ -903,6 +903,10 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 }
 
+std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
+  return *outputs_;
+}
+
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
   TORCH_INTERNAL_ASSERT(
