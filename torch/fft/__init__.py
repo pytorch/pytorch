@@ -36,7 +36,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (no normalization).
 
 Example:
 
@@ -71,7 +71,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (normalize by ``1/n``).
 
 Example:
 
@@ -112,7 +112,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (no normalization).
 
 Example:
 
@@ -149,7 +149,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (normalize by ``1/n``).
 
 Example:
 
@@ -188,7 +188,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (no normalization).
 
 Example:
 
@@ -245,7 +245,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (normalize by ``1/n``).
 
 Example:
 
@@ -296,7 +296,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (no normalization).
 
 Example:
 
@@ -361,7 +361,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (normalize by ``1/n``).
 
 Example:
 
@@ -431,7 +431,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (no normalization).
 
 Example:
 
@@ -464,12 +464,13 @@ Example:
 ihfft = _add_docstr(_fft.fft_ihfft, r"""
 ihfft(input, n=None, dim=-1, norm=None) -> Tensor
 
-Computes the inverse of :attr:`~torch.fft.hfft`.
+Computes the inverse of :func:`~torch.fft.hfft`.
 
 :attr:`input` must be a real-valued signal, interpreted in the Fourier domain.
-The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])`` so the
-output contains only the positive frequencies below the Nyquist frequency. To
-compute the full output, use :func:`~torch.fft.ifft`.
+The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])``.
+:func:`~torch.fft.ihfft` represents this in the onesided form where only the
+positive frequencies below the Nyquist frequency are included. To compute the
+full output, use :func:`~torch.fft.ifft`.
 
 Args:
     input (Tensor): the real input tensor
@@ -485,7 +486,7 @@ Args:
         * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
         * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
 
-        Default is ``"backward"``.
+        Default is ``"backward"`` (normalize by ``1/n``).
 
 Example:
 

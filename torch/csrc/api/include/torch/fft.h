@@ -90,7 +90,7 @@ inline Tensor rfft(const Tensor& self,
 /// ```
 /// auto T = torch::randn(128 / 2 + 1, torch::kComplexDouble);
 /// auto t = torch::fft::irfft(t, /*n=*/128);
-/// assert(!t.is_complex() && T.numel() == 128);
+/// assert(t.is_floating_point() && T.numel() == 128);
 /// ```
 inline Tensor irfft(const Tensor& self,
                     c10::optional<int64_t> n=c10::nullopt,
