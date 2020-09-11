@@ -13,3 +13,4 @@ comment:
     - "master"
 fixes:
   - "/opt/conda/lib/python3.8/site-packages/::project/"
+  - "C:/Users/circleci/project/build/win_tmp/build/::project/"

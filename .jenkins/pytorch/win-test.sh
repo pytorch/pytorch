@@ -12,8 +12,12 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
+export PYTORCH_COLLECT_COVERAGE=1
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
+export PROJECT_DIR="${PWD}"
+export TEST_DIR="${PWD}/test"
+export TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
 export PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 
@@ -59,3 +63,9 @@ run_tests() {
 }
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
+
+if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
+  cd $PROJECT_DIR
+  python -mpip install codecov
+  python -mcodecov
+fi
