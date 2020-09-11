@@ -11,8 +11,9 @@ import subprocess
 import sys
 import textwrap
 import threading
-import traceback
 import time
+import traceback
+import typing
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +21,7 @@ OP_BENCHMARK_ROOT = os.path.split(os.path.split(ROOT)[0])[0]
 
 HEAD = "head"
 VERSIONS = (HEAD, "1.6", "1.5", "1.4", "1.3")
+OLD_VERSIONS = ("1.4", "1.3")  # Some failures are expected.
 ENV_TEMPLATE = "historic_microbenchmark_{version}"
 
 EXCLUDE = [
@@ -158,6 +160,8 @@ def launch_subtask(t: Task):
         )
         if not result.returncode:
             published_result = (t, result.stdout.decode("utf-8"))
+        elif t.version in OLD_VERSIONS:
+            print(f"Run failed: {t}")
         else:
             stdout = result.stdout.decode("utf-8")
             stderr = result.stderr.decode("utf-8")
@@ -204,9 +208,9 @@ def parse_output():
             results[-1].append(data)
 
     if not results:
-        print("Failed to extract data:")
-        print(t)
-        print(stdout)
+        print(f"Failed to extract data: {t}")
+        if t.version not in OLD_VERSIONS:
+            print(stdout)
 
     return t, results
 
@@ -260,7 +264,7 @@ def run():
                 Task(v, test, 2, "cpu", "short"),
                 Task(v, test, 2, "cpu", "long"),
             ])
-            if v not in ("1.3", "1.4"):
+            if v not in OLD_VERSIONS:
                 gpu_tasks.append(Task(v, test, 2, "cuda", "all"))
 
     print("Beginning run:")
