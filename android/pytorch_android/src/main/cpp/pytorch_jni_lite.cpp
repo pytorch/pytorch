@@ -92,7 +92,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
         LiteJITCallGuard guard;
-        return module_.run_method(methodName, inputs);
+        return module_.get_method(methodName)(inputs);
       }();
       return JIValue::newJIValueFromAtIValue(output);
     }

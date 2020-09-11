@@ -456,16 +456,15 @@ void RequestCallbackNoPython::processRpc(
           autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback(
-          [responseFuture, messageId](const FutureMessage& execFuture) {
-            if (!execFuture.hasError()) {
-              Message m = std::move(PropagateGradientsResp()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(*(execFuture.error()));
-            }
-          });
+      execFuture->addCallback([responseFuture, messageId, execFuture]() {
+        if (!execFuture->hasError()) {
+          Message m = std::move(PropagateGradientsResp()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } else {
+          responseFuture->setError(execFuture->tryRetrieveErrorMessage());
+        }
+      });
       return;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {

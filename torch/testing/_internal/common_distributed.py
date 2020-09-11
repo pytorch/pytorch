@@ -266,6 +266,8 @@ class MultiProcessTestCase(TestCase):
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        global TEST_SKIPS
+        self.old_test_skips = TEST_SKIPS.copy()
 
     def tearDown(self):
         super().tearDown()
@@ -321,41 +323,45 @@ class MultiProcessTestCase(TestCase):
         timeout = get_timeout(self.id())
         start_time = time.time()
         subprocess_error = False
-        while True:
-            # check to see if any subprocess exited with an error early.
-            for (i, p) in enumerate(self.processes):
-                # This is the exit code processes exit with if they
-                # encountered an exception.
-                if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                    print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
-                    active_children = torch.multiprocessing.active_children()
-                    for ac in active_children:
-                        ac.terminate()
-                    subprocess_error = True
+        try:
+            while True:
+                # check to see if any subprocess exited with an error early.
+                for (i, p) in enumerate(self.processes):
+                    # This is the exit code processes exit with if they
+                    # encountered an exception.
+                    if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
+                        print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
+                        active_children = torch.multiprocessing.active_children()
+                        for ac in active_children:
+                            ac.terminate()
+                        subprocess_error = True
+                        break
+                if subprocess_error:
                     break
-            if subprocess_error:
-                break
-            # All processes have joined cleanly if they all a valid exitcode
-            if all([p.exitcode is not None for p in self.processes]):
-                break
-            # Check if we should time out the test. If so, we terminate each process.
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                print(
-                    "Timing out after {} seconds and killing subprocesses.".format(
-                        timeout
+                # All processes have joined cleanly if they all a valid exitcode
+                if all([p.exitcode is not None for p in self.processes]):
+                    break
+                # Check if we should time out the test. If so, we terminate each process.
+                elapsed = time.time() - start_time
+                if elapsed > timeout:
+                    print(
+                        "Timing out after {} seconds and killing subprocesses.".format(
+                            timeout
+                        )
                     )
-                )
-                for p in self.processes:
-                    p.terminate()
-                break
-            # Sleep to avoid excessive busy polling.
-            time.sleep(0.1)
-        elapsed_time = time.time() - start_time
-        if fn in self.skip_return_code_checks:
-            self._check_no_test_errors(elapsed_time)
-        else:
-            self._check_return_codes(elapsed_time)
+                    for p in self.processes:
+                        p.terminate()
+                    break
+                # Sleep to avoid excessive busy polling.
+                time.sleep(0.1)
+            elapsed_time = time.time() - start_time
+            if fn in self.skip_return_code_checks:
+                self._check_no_test_errors(elapsed_time)
+            else:
+                self._check_return_codes(elapsed_time)
+        finally:
+            global TEST_SKIPS
+            TEST_SKIPS = self.old_test_skips
 
     def _check_no_test_errors(self, elapsed_time):
         """
