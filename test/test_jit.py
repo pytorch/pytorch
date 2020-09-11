@@ -10541,16 +10541,16 @@ a")
         # Testing shape analysis correctly setting type
         with enable_profiling_mode_for_profiling_tests():
             with num_profiled_runs(1):
-                out = test_rand()
+                fn = torch.jit.script(test_rand)
+                out = fn()
                 graph_str = torch.jit.last_executed_optimized_graph()
                 self.assertEqual(out.dtype, torch.double)
-                #FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)")
                 FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
-                        .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
+                           .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(graph_str)
 
-            fn = self.checkScript(test_rand, ())
-            out = fn()
-            self.assertEqual(out.dtype, torch.double)
+            # fn = self.checkScript(test_rand, ())
+            # out = fn()
+            # self.assertEqual(out.dtype, torch.double)
 
         @torch.jit.script
         def randint():
@@ -10563,7 +10563,7 @@ a")
                 out = randint()
                 graph_str = torch.jit.last_executed_optimized_graph()
                 self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)")
+                FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)").run(graph_str)
 
 
     def test_erase_number_types(self):
