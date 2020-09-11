@@ -254,7 +254,8 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
-      throw ErrorReport(loc) << "Expected integer literal for index. "
+      throw ErrorReport(loc)
+          << "Expected integer literal for index. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "
           << "Enumeration is supported, e.g. 'for index, v in enumerate(self): ...'";
     }
