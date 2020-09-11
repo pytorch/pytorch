@@ -190,6 +190,7 @@ namespace jit {
   _(RegisterizerNoInitializer)              \
   _(RegisterizerLoadThenStore)              \
   _(RegisterizerParallelized)               \
+  _(RegisterizerConditions)                 \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -247,6 +248,7 @@ namespace jit {
   _(FuserPass_0DimInput)                    \
   _(FuserPass_UnfusibleDevice)              \
   _(FuserPass_UnknownShapes)                \
+  _(FuserPass_Multidevice)                  \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -387,7 +389,8 @@ namespace jit {
   _(CudaTestRand01)                        \
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
-  _(CudaHalfSupport)
+  _(CudaHalfSupport)                       \
+  _(CudaPrioritizeDependents)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
