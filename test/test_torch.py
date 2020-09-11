@@ -18535,8 +18535,14 @@ else:
         with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
             torch.movedim(x, (0, 0), (0, 1))
 
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+            torch.movedim(x, (0, 1, 0), (0, 1, 2))
+
         with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
             torch.movedim(x, (0, 1), (1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+            torch.movedim(x, (0, 1, 2), (1, 0, 1))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.int64, torch.float, torch.complex128)
