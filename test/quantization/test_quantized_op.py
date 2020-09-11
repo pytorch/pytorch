@@ -19,6 +19,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines
