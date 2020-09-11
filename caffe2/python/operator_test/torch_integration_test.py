@@ -959,6 +959,21 @@ class TorchIntegration(hu.HypothesisTestCase):
             ),
         )
 
+    def test_pack_segments(self):
+        s = torch.rand(3, 3, 3)
+        lengths = torch.tensor([2, 1])
+        packed_tensor, _ = torch.ops._caffe2.PackSegments(
+            lengths,
+            s,
+        )
+        self.assertEqual(packed_tensor.numpy().shape, (2, 2, 3, 3))
+        unpacked_tensor = torch.ops._caffe2.UnpackSegments(
+            lengths,
+            packed_tensor,
+        )
+        torch.testing.assert_allclose(s, unpacked_tensor)
+
+
 
 if __name__ == '__main__':
     unittest.main()
