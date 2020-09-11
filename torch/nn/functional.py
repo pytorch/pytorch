@@ -2597,15 +2597,9 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
                       stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = _smooth_l1_loss(input, target)
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-    return ret
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
