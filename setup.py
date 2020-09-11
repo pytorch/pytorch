@@ -192,7 +192,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import subprocess
 import shutil
 import os
 import json
@@ -203,6 +202,7 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
+from tools.generate_torch_version import get_torch_version
 
 ################################################################################
 # Parameters parsed from environment
@@ -276,22 +276,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = open('version.txt', 'r').read().strip()
-sha = 'Unknown'
-
-try:
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-except Exception:
-    pass
-
-if os.getenv('PYTORCH_BUILD_VERSION'):
-    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
-    build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
-    version = os.getenv('PYTORCH_BUILD_VERSION')
-    if build_number > 1:
-        version += '.post' + str(build_number)
-elif sha != 'Unknown':
-    version += '+' + sha[:7]
+version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
 cmake = CMake()
@@ -329,18 +314,6 @@ def build_deps():
                  rerun_cmake=RERUN_CMAKE,
                  cmake_only=CMAKE_ONLY,
                  cmake=cmake)
-
-    version_path = os.path.join(cwd, 'torch', 'version.py')
-    with open(version_path, 'w') as f:
-        f.write("__version__ = '{}'\n".format(version))
-        # NB: This is not 100% accurate, because you could have built the
-        # library code with DEBUG, but csrc without DEBUG (in which case
-        # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(build_type.is_debug())))
-        cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
-        f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
-        f.write("git_version = {}\n".format(repr(sha)))
-        f.write("hip = {}\n".format(repr(cmake_cache_vars['HIP_VERSION'])))
 
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
