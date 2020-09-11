@@ -461,7 +461,7 @@ __global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, func_
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+void scan_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
   int64_t size = self.numel();
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -521,7 +521,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   Tensor result_ = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    scan_thrust_or_cub<scalar_t>(self_, result_, init, binary_op);
+    scan_cub<scalar_t>(self_, result_, init, binary_op);
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
   } else {
