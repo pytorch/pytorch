@@ -8058,7 +8058,7 @@ class TestTorchDeviceType(TestCase):
 
         def test(name, args=()):
             torch_method = getattr(torch, name + '_window')
-            for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
                     res = torch_method(size, *args, periodic=periodic, device=device)
                     # NB: scipy always returns a float32 result
