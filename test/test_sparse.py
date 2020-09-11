@@ -2459,6 +2459,7 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
+    @skipIfRocm
     def test_softmax(self):
         import torch.nn.functional as F
 
