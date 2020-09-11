@@ -76,16 +76,16 @@ conv3d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     seed="Conv3D",
     cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["short"],
-    checksum=872,
+    checksum=476,
 )
 
 conv3d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.CONV3D,
-    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGER,
     n=10,
     seed="Conv3D",
     tags=["long"],
-    checksum=(1915, 2938),
+    checksum=(1870, 5561),
 )
 
 class Conv3dBenchmark(op_bench.TorchBenchmarkBase):

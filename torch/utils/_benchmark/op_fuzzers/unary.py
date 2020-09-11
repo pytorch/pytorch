@@ -15,12 +15,12 @@ class UnaryOpFuzzer(Fuzzer):
         scale=constants.Scale.LARGE,
         dim=None,
         pow_2_fraction=0.2,
-        max_elements=32 * 1024 ** 2,
     ):
         assert scale in (
             constants.Scale.SMALL,
             constants.Scale.MEDIUM,
             constants.Scale.LARGE,
+            constants.Scale.LARGER,
         )
         if dim is None:
             dim = {1: 0.3, 2: 0.4, 3: 0.3}
@@ -101,8 +101,8 @@ class UnaryOpFuzzer(Fuzzer):
                     size=tuple(f"k{i}" for i in range(maxdim)),
                     steps=tuple(f"x_step_{i}" for i in range(maxdim)),
                     probability_contiguous=0.75,
-                    min_elements=constants.MIN_ELEMENTS[scale],
-                    max_elements=max_elements,
+                    min_elements=constants.POINTWISE_MIN_ELEMENTS[scale],
+                    max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     max_allocation_bytes=2 * 1024 ** 3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,

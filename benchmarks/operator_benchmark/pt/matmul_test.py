@@ -19,12 +19,12 @@ mm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [False],
     },
     tags=["short"],
-    checksum=5944,
+    checksum=1650,
 )
 
 mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.MATMUL,
-    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGER,
     n=10,
     seed="AddMM",
     cross_product_configs={
@@ -32,7 +32,7 @@ mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=(11136, 17286),
+    checksum=(11136, 23196369),
 )
 
 def make_tensor(shape, device, transposed_layout=None):
@@ -92,12 +92,12 @@ baddmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [False],
     },
     tags=["short"],
-    checksum=1685,
+    checksum=1213,
 )
 
 baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.BATCH_MATMUL,
-    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGER,
     n=10,
     seed="BAddMM",
     cross_product_configs={
@@ -106,7 +106,7 @@ baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=(4466, 6554),
+    checksum=(4197, 17103845),
 )
 
 class AddbmmBenchmark(op_bench.TorchBenchmarkBase):

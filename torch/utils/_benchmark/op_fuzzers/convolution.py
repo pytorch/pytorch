@@ -13,17 +13,26 @@ GROUPS = "groups"
 BATCH_LIMITS = {
     constants.Scale.SMALL: 8,
     constants.Scale.MEDIUM: 256,
-    constants.Scale.LARGE: 4096,
+    constants.Scale.LARGE: 1024,
+    constants.Scale.LARGER: 4096,
 }
 CHANNEL_LIMITS = {
     constants.Scale.SMALL: 8,
     constants.Scale.MEDIUM: 256,
-    constants.Scale.LARGE: 2048,
+    constants.Scale.LARGE: 1024,
+    constants.Scale.LARGER: 2048,
 }
 SIZE_LIMITS = {
     constants.Scale.SMALL: 64,
     constants.Scale.MEDIUM: 256,
     constants.Scale.LARGE: 512,
+    constants.Scale.LARGER: 2048,
+}
+ROOFLINE_WORK_LIMITS = {
+    constants.Scale.SMALL: 1024 ** 2,
+    constants.Scale.MEDIUM: 512 * 1024 ** 2,
+    constants.Scale.LARGE: 2 * 1024 ** 3,
+    constants.Scale.LARGER: 32 * 1024 ** 3,
 }
 
 
@@ -43,7 +52,7 @@ def mixed_distribution(name, minval, maxval, distribution=None):
 
 class ConvFuzzer(Fuzzer):
     def __init__(self, seed, dtype=torch.float32, cuda=False, scale=constants.Scale.LARGE, dim=4, groups=None):
-        assert scale in (constants.Scale.SMALL, constants.Scale.MEDIUM, constants.Scale.LARGE)
+        assert scale in (constants.Scale.SMALL, constants.Scale.MEDIUM, constants.Scale.LARGE, constants.Scale.LARGER)
         assert dim in (3, 4, 5), "Only Conv1/2/3D are supported."
 
         l_params = mixed_distribution("L", 4, SIZE_LIMITS[scale])
@@ -74,6 +83,15 @@ class ConvFuzzer(Fuzzer):
                 kernel_size <= params.get(k, kernel_size)
                 for k in ("L", "D", "H", "W"))
 
+        def work_constraint(params):
+            work = params[C_OUT]
+            for i in size:
+                work *= params[i]
+            work *= params[KERNEL_SIZE] ** (dim - 2)
+            work /= params[STRIDE] ** (dim - 2)
+            work /= params.get(GROUPS, 1)
+            return work <= ROOFLINE_WORK_LIMITS[scale]
+
         super().__init__(
             parameters=[
                 # Batch Size
@@ -97,16 +115,22 @@ class ConvFuzzer(Fuzzer):
                     name="x",
                     size=size,
                     probability_contiguous=1,
-                    max_elements=1024 ** 2,
+                    max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     dtype=dtype,
                     cuda=False,
                 ),
             ],
             constraints=[
+                # Ensure all dims are >= kernel_size
                 kernel_size_constraint,
+
+                # Ensure groups divides channels
                 lambda params: not (
                     params["C"] % params.get(GROUPS, 1) or
-                    params[C_OUT] % params.get(GROUPS, 1))
+                    params[C_OUT] % params.get(GROUPS, 1)),
+
+                # Limit compute based on scale
+                work_constraint,
             ],
             seed=seed,
         )

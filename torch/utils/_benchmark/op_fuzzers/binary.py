@@ -20,6 +20,7 @@ class BinaryOpFuzzer(Fuzzer):
             constants.Scale.SMALL,
             constants.Scale.MEDIUM,
             constants.Scale.LARGE,
+            constants.Scale.LARGER,
         )
         super().__init__(
             parameters=[
@@ -102,8 +103,8 @@ class BinaryOpFuzzer(Fuzzer):
                     size=("k0", "k1", "k2"),
                     steps=("x_step_0", "x_step_1", "x_step_2"),
                     probability_contiguous=0.75,
-                    min_elements=constants.MIN_ELEMENTS[scale],
-                    max_elements=32 * 1024 ** 2,
+                    min_elements=constants.POINTWISE_MIN_ELEMENTS[scale],
+                    max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     max_allocation_bytes=2 * 1024 ** 3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,

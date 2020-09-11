@@ -34,17 +34,17 @@ unary_ops_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     seed="UnaryOps",
     cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["short"],
-    checksum=1109,
+    checksum=548,
 )
 
 unary_ops_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.UNARY,
-    fuzz_utils.CPU_MEDIUM_CUDA_LARGE,
+    fuzz_utils.CPU_MEDIUM_CUDA_LARGER,
     n=10,
     seed="UnaryOps",
     cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["long"],
-    checksum=(7803, 17654490),
+    checksum=(3596, 81118319),
 )
 
 no_grad_ops = ('argsort', 'clone', 'unique', 'uniform_')

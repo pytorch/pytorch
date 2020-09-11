@@ -46,7 +46,7 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
             X, scale=self.scale, zero_point=self.zero_point, dtype=torch.quint8
         )
         # Convert the tensor to NHWC format
-        W = torch.randn(OC, X_SIZE[1] // G, KERNEL_SIZE, KERNEL_SIZE, dtype=torch.float32)
+        W = torch.randn(C_OUT, X_SIZE[1] // G, KERNEL_SIZE, KERNEL_SIZE, dtype=torch.float32)
         self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
