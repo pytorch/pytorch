@@ -1337,6 +1337,13 @@ class TripletMarginWithDistanceLoss(_Loss):
     >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
+    >>>
+    >>> # Custom Distance Function (Lambda)
+    >>> triplet_loss = \
+    >>>     nn.TripletMarginWithDistanceLoss(
+    >>>         distance_function=lambda x, y: 1.0 - F.cosine_similarity(x, y))
+    >>> output = triplet_loss(anchor, positive, negative)
+    >>> output.backward()
 
     Reference:
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:

@@ -12176,7 +12176,8 @@ class TestNNDeviceType(NNTestCase):
         def cosine_distance(x, y):
             return 1.0 - F.cosine_similarity(x, y)
 
-        distance_functions = (pairwise_distance, cosine_distance)
+        distance_functions = (pairwise_distance, cosine_distance,
+                              lambda x, y: 1.0 - F.cosine_similarity(x, y))
 
         reductions = ('mean', 'none', 'sum')
         margins = (1.0, 1.5, 0.5)
