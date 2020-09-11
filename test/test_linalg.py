@@ -1,6 +1,7 @@
 import torch
 import unittest
 import itertools
+import warnings
 from math import inf, nan, isnan
 
 from torch.testing._internal.common_utils import \
@@ -135,12 +136,12 @@ class TestLinalg(TestCase):
         test_cases = [
             # input size, p settings, dim
             ((S, ), ord_vector, None),
-            ((S, ), ord_vector, (0, )),
-            ((S, S, S), ord_vector, (0, )),
-            ((S, S, S), ord_vector, (1, )),
-            ((S, S, S), ord_vector, (2, )),
-            ((S, S, S), ord_vector, (-1, )),
-            ((S, S, S), ord_vector, (-2, )),
+            ((S, ), ord_vector, 0),
+            ((S, S, S), ord_vector, 0),
+            ((S, S, S), ord_vector, 1),
+            ((S, S, S), ord_vector, 2),
+            ((S, S, S), ord_vector, -1),
+            ((S, S, S), ord_vector, -2),
         ]
         L = 1_000_000
         if dtype == torch.double:
@@ -299,8 +300,8 @@ class TestLinalg(TestCase):
             ((S, ), ['nuc'], None, RuntimeError, r'order "nuc" can only be used if either len\(dim\) == 2'),
             ((S, S), [3.5], None, RuntimeError, r'Order 3.5 not supported for matrix norm'),
             ((S, S), [0], None, RuntimeError, r'Order 0 not supported for matrix norm'),
-            ((S, S), ['nuc'], (0, ), RuntimeError, r'order "nuc" can only be used if either len\(dim\) == 2'),
-            ((S, S), ['fro'], (0, ), RuntimeError, r'order "fro" can only be used if either len\(dim\) == 2'),
+            ((S, S), ['nuc'], 0, RuntimeError, r'order "nuc" can only be used if either len\(dim\) == 2'),
+            ((S, S), ['fro'], 0, RuntimeError, r'order "fro" can only be used if either len\(dim\) == 2'),
             ((S, S), ['nuc'], (0, 0), RuntimeError, r'duplicate or invalid dimensions'),
             ((S, S), ['fro', 0], (0, 0), RuntimeError, r'Expected dims to be different'),
             ((S, S), ['fro', 'nuc', 0], (0, 4), IndexError, r'Dimension out of range'),
@@ -397,13 +398,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.linalg.norm(x, ord)
 
-    # Make sure that linalg.norm raises an error if dim is an integer
-    # TODO: When integer dims are supported in norm, remove this test
-    def test_norm_dim_int_error(self, device):
-        input = torch.randn(10, device=device)
-        with self.assertRaisesRegex(TypeError, r'linalg_norm\(\) received an invalid combination of arguments'):
-            torch.linalg.norm(input, dim=0)
-
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     @skipCUDAIfNoMagma
@@ -480,10 +474,10 @@ class TestLinalg(TestCase):
         test_cases = [
             # input size, p settings that cause error, dim
             ((0, ), [inf, -inf], None),
-            ((0, S), [inf, -inf], (0,)),
-            ((0, S), [], (1,)),
-            ((S, 0), [], (0,)),
-            ((S, 0), [inf, -inf], (1,)),
+            ((0, S), [inf, -inf], 0),
+            ((0, S), [], 1),
+            ((S, 0), [], 0),
+            ((S, 0), [inf, -inf], 1),
         ]
         for keepdim in [True, False]:
             for input_size, error_ords, dim in test_cases:
@@ -533,6 +527,46 @@ class TestLinalg(TestCase):
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_matrix:
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
+
+    def test_norm_deprecated(self, device):
+        expected_message = (
+            r'torch.norm is deprecated and may be removed in a future PyTorch release. '
+            r'Use torch.linalg.norm instead.')
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for func in [torch.norm, torch.functional.norm]:
+                func(torch.rand(10, device=device))
+        self.assertEqual(len(w), 2)
+        for wi in w:
+            self.assertEqual(str(wi.message), expected_message)
+
+    def test_norm_fastpaths(self, device):
+        x = torch.randn(3, 5, device=device)
+
+        # slow path
+        result = torch.linalg.norm(x, 4.5, 1)
+        expected = torch.pow(x.abs().pow(4.5).sum(1), 1.0 / 4.5)
+        self.assertEqual(result, expected)
+
+        # fast 0-norm
+        result = torch.linalg.norm(x, 0, 1)
+        expected = (x != 0).type_as(x).sum(1)
+        self.assertEqual(result, expected)
+
+        # fast 1-norm
+        result = torch.linalg.norm(x, 1, 1)
+        expected = x.abs().sum(1)
+        self.assertEqual(result, expected)
+
+        # fast 2-norm
+        result = torch.linalg.norm(x, 2, 1)
+        expected = torch.sqrt(x.pow(2).sum(1))
+        self.assertEqual(result, expected)
+
+        # fast 3-norm
+        result = torch.linalg.norm(x, 3, 1)
+        expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
+        self.assertEqual(result, expected)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

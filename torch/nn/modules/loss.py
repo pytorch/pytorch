@@ -1259,7 +1259,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     between the anchor and positive examples ("positive distance") and the
     anchor and negative examples ("negative distance").
 
-    The unreduced loss (i.e., with `reduction` set to `'none'`)
+    The unreduced loss (i.e., with :attr:`reduction` set to ``'none'``)
     can be described as:
 
     .. math::
@@ -1267,7 +1267,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         l_i = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
-    quantifying the relationship between two tensors, referred to as `distance_function`;
+    quantifying the closeness of two tensors, referred to as :attr:`distance_function`;
     and :math:`margin` is a non-negative margin between the positive and negative
     distances that is required for the loss to be 0.  The input tensors have :math:`N`
     elements each and can be of any shape that the distance function can handle.
@@ -1289,14 +1289,8 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     Args:
         distance_function (callable, optional): A nonnegative, real-valued function that
-            quantifies the relationship between two tensors. If not specified,
+            quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
-        is_similarity_function (bool, optional): Whether `distance_function` represents a
-            similarity metric, i.e., larger values mean closer tensors. Otherwise, it is a distance
-            metric, i.e., smaller values mean closer tensors. If True, computes the difference of
-            distances as :math:`d(a_i, n_i) - d(a_i, p_i)` so that larger loss values occur
-            when the negative example is more similar to the anchor than the positive example
-            is. Default: ``False``
         margin (float, optional): A non-negative margin representing the minimum difference
             between the positive and negative distances required for the loss to be 0. Larger
             margins penalize cases where the negative examples are not distant enough from the
@@ -1314,9 +1308,9 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` represents any number of additional dimensions
-            as supported by the distance function.
+          as supported by the distance function.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-            otherwise.
+          otherwise.
 
     Examples::
 
@@ -1330,20 +1324,17 @@ class TripletMarginWithDistanceLoss(_Loss):
     >>> negative = embedding(negative_ids)
     >>>
     >>> # Built-in Distance Function
-    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=nn.PairwiseDistance())
+    >>> triplet_loss = \
+    >>>     nn.TripletMarginWithDistanceLoss(distance_function=nn.PairwiseDistance())
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
-    >>> # Built-in Similarity Function
-    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=nn.CosineSimilarity(), is_similarity_function=True)
-    >>> output = triplet_loss(anchor, positive, negative)
-    >>> output.backward()
-    >>>
-    >>> # User-defined Distance Function
+    >>> # Custom Distance Function
     >>> def l_infinity(x1, x2):
     >>>     return torch.max(torch.abs(x1 - x2), dim=1).values
     >>>
-    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
+    >>> triplet_loss = \
+    >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
 
@@ -1351,23 +1342,20 @@ class TripletMarginWithDistanceLoss(_Loss):
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
-    __constants__ = ['is_similarity_function', 'margin', 'swap', 'reduction']
-    is_similarity_function: bool
+    __constants__ = ['margin', 'swap', 'reduction']
     margin: float
     swap: bool
 
-    def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, is_similarity_function: bool = False,
+    def __init__(self, *, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
         super(TripletMarginWithDistanceLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
         self.distance_function = distance_function if distance_function is not None else PairwiseDistance()
-        self.is_similarity_function = is_similarity_function
         self.margin = margin
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
         return F.triplet_margin_with_distance_loss(anchor, positive, negative,
                                                    distance_function=self.distance_function,
-                                                   is_similarity_function=self.is_similarity_function,
                                                    margin=self.margin, swap=self.swap, reduction=self.reduction)
 
 

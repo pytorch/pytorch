@@ -86,11 +86,11 @@ void index_select_add<float>(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset) {
   int64_t ddim = src.size(1);
-  auto* src_data = src.data_ptr<float>();
   auto* select_indices_data = select_indices.data_ptr<int64_t>();
   auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
+    auto* src_data = src.contiguous().data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
@@ -148,6 +148,7 @@ void index_select_add<float>(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
+    auto* src_data = src.data_ptr<float>();
     auto* add_indices_data = add_indices.data_ptr<int64_t>();
     auto src_stride0 = src.stride(0);
     auto src_stride1 = src.stride(1);
@@ -214,10 +215,10 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
   auto* select_indices_data = select_indices.data_ptr<int64_t>();
-  auto* src_data = src.data_ptr<float>();
   auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
+    auto* src_data = src.contiguous().data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
@@ -275,6 +276,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
+    auto* src_data = src.data_ptr<float>();
     auto* add_indices_data = add_indices.data_ptr<int64_t>();
     auto src_stride0 = src.stride(0);
     auto src_stride1 = src.stride(1);
