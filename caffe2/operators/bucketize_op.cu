@@ -52,3 +52,9 @@ bool BucketizeOp<CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(Bucketize, BucketizeOp<CUDAContext>);
 } // namespace caffe2
+
+using BucketizeCUDA = caffe2::BucketizeOp<caffe2::CUDAContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    Bucketize,
+    BucketizeCUDA);

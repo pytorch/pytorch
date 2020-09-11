@@ -123,7 +123,11 @@ class TestVmapAPI(TestCase):
     def test_unsupported_op_err_msg(self):
         # Unsupported view op
         tensor = torch.randn(2, 3)
-        with self.assertRaisesRegex(RuntimeError, "doesn't work on in-place or view ops"):
+        msg = (
+            "Batching rule not implemented for aten::as_strided; the "
+            "fallback path doesn't work on in-place or view ops"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
             vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
 
         # The fallback doesn't support TensorList
