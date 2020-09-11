@@ -1,5 +1,6 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
+from typing import Optional
 import timeit
 from typing import List, Optional
 
@@ -75,7 +76,8 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def _threaded_measurement_loop(self, number, time_hook, stop_hook, min_run_time: float, max_run_time: float, callback=None):
+    def _threaded_measurement_loop(self, number, time_hook, stop_hook, min_run_time: float,
+                                   max_run_time: Optional[float] = None, callback=None):
         total_time = 0.0
         can_stop = False
         times = []
@@ -130,7 +132,6 @@ class Timer(object):
 
         def stop_hook(times):
             return True
-        # Time out after 1 week
         times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time,
-                                                max_run_time=604800.0, callback=callback)
+                                                callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
