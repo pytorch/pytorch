@@ -1,6 +1,5 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
-import time
 import timeit
 from typing import List, Optional
 
@@ -97,6 +96,7 @@ class Timer(object):
 
         def time_hook():
             return self._timer.timeit(number)
+
         def stop_hook(times):
             if len(times) > 3:
                 measure = self._construct_measurement(number, times)
@@ -124,12 +124,13 @@ class Timer(object):
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
         number = self._estimate_block_size(min_run_time)
+
         def time_hook():
             return self._timer.timeit(number)
+
         def stop_hook():
             return True
 
         times = self._threaded_measurement_loop(loop, min_run_time=min_run_time, max_run_time=None, callback=callback)
 
-        return self._construct_measurement(number_per_run=number, times=times)
-
+        return self._construct_measurement(number_per_run=number, times=times
