@@ -964,6 +964,82 @@ void testCudaHalfSupport() {
   cudaFree(dDev);
 }
 
+void testCudaPrioritizeDependents() {
+  KernelScope kernel_scope;
+  Buffer a("a", kFloat, {10});
+  Buffer b("b", kFloat, {12});
+  Buffer c("c", kFloat, {12});
+
+  LoopOptions block_idx_opt;
+  block_idx_opt.set_gpu_block_index(0);
+
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  /*
+   * for (int i = 0; i < 12; ++i) {
+   *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
+   * }
+   */
+  ExprHandle load_a = Load::make(a, {i}, 1);
+  ExprHandle load_b = Load::make(b, {i}, 1);
+  ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
+  ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
+
+  For* loop = For::make(
+      i, 0, 12, Block::make({Store::make(c, {i}, ite, 1)}), block_idx_opt);
+
+  CudaCodeGen cuda_cg(loop, a, b, c);
+
+  PaddedBuffer<float> a_v(10, "a_v");
+  PaddedBuffer<float> b_v(12, "b_v");
+  PaddedBuffer<float> c_v(12, "c_v");
+  PaddedBuffer<float> c_ref(12, "c_ref");
+
+  for (int i = 0; i < 10; ++i) {
+    a_v(i) = i * 100;
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  for (int i = 10; i < 12; ++i) {
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  float* a_dev = nullptr;
+  float* b_dev = nullptr;
+  float* c_dev = nullptr;
+  cudaMalloc(&a_dev, 10 * sizeof(float));
+  cudaMalloc(&b_dev, 12 * sizeof(float));
+  cudaMalloc(&c_dev, 12 * sizeof(float));
+
+  cudaMemcpy(a_dev, a_v.data(), 10 * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), 12 * sizeof(float), cudaMemcpyHostToDevice);
+
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev, c_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  for (int i = 0; i < 12; ++i) {
+    if (i < 10) {
+      c_ref(i) = i + i * 100;
+    } else {
+      c_ref(i) = i;
+    }
+  }
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+}
+
 } // namespace jit
 } // namespace torch
 
