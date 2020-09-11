@@ -4,10 +4,6 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
 #include <cub/device/device_scan.cuh>
 
 
