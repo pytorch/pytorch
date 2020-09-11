@@ -11,6 +11,7 @@ import platform
 import re
 import gc
 import types
+import math
 from functools import partial
 import inspect
 import io
@@ -36,7 +37,9 @@ import errno
 from typing import cast, Any, Iterable, Optional
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
+from torch.testing import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
+     floating_types_and, integral_types, complex_types)
 
 import torch
 import torch.cuda
@@ -1283,7 +1286,7 @@ class TestCase(expecttest.TestCase):
                 raise RuntimeError(
                     ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -1350,10 +1353,10 @@ def download_file(url, binary=True):
         with open(path, 'wb' if binary else 'w') as f:
             f.write(data)
         return path
-    except error.URLError:
+    except error.URLError as e:
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
-        raise unittest.SkipTest(msg)
+        raise unittest.SkipTest(msg) from e
 
 
 def find_free_port():
@@ -1414,8 +1417,57 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix generation
+# Methods for matrix and tensor generation
+
 # Used in test_autograd.py and test_torch.py
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
+                low, high, requires_grad: bool = False) -> torch.Tensor:
+    """Returns a tensor of the specified size on the given device and dtype.
+       The tensors values are between -9 and 9, inclusive, for most dtypes,
+       unless low (high) is not None in which case the values are between
+       max(-9, low) and min(9, high).
+       For unsigned types the values are between 0 and 9, and for complex
+       dtypes the real and imaginary parts are each between -9 and 9,
+       independently."""
+
+    assert low is None or low < 9, "low value too high!"
+    assert high is None or high > -9, "high value too low!"
+
+    if dtype is torch.bool:
+        return torch.randint(0, 2, size, device=device, dtype=dtype)
+
+    if dtype is torch.uint8:
+        low = math.floor(0 if low is None else max(low, 0))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in integral_types():
+        low = math.floor(-9 if low is None else max(low, -9))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in floating_types_and(torch.half, torch.bfloat16):
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        # Windows doesn't support torch.rand(bfloat16) on CUDA
+        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+        else:
+            t = torch.rand(size, device=device, dtype=dtype) * span + low
+        t.requires_grad = requires_grad
+        return t
+    else:
+        assert dtype in complex_types()
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        c = torch.complex(real, imag)
+        c.requires_grad = requires_grad
+        return c
+
+
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
     result[0, 1] = 0
