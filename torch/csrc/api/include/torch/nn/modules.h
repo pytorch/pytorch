@@ -32,3 +32,4 @@
 #include <torch/nn/modules/normalization.h>
 #include <torch/nn/modules/transformerlayer.h>
 #include <torch/nn/modules/transformercoder.h>
+#include <torch/nn/modules/transformer.h>

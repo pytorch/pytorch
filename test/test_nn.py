@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
+    module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
@@ -633,6 +633,11 @@ class TestNN(NNTestCase):
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
+
+        # Force set to None.
+        module.zero_grad(set_to_none=True)
+        self.assertIsNone(module.weight.grad)
+
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -3092,9 +3097,18 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
 
         inputs = torch.randn(1, 2, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # Assert assertion errors are raised for invalid circular padding values
+        inputs = torch.randn(1, 1, 4, requires_grad=True)
+        # Should raise error when trying to wrap around more than once
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
+        # Should raise error when negative padding results in negative output shape
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
 
         # assert that relfection padding errors when pad >= input size
         expected_err_msg = r"Padding size should be less than the corresponding input dimension"
@@ -8739,7 +8753,7 @@ for test_params in module_tests + new_module_tests:
 
         add_test(test, decorator)
 
-for test_params in criterion_tests + new_criterion_tests:
+for test_params in criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = CriterionTest(**test_params)
@@ -11184,6 +11198,31 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_EmbeddingBag(device, 'sum', True, dtype, test_backward=test_backward)
         self._test_EmbeddingBag(device, 'mean', True, dtype, test_backward=test_backward)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_embedding_bag_non_contiguous_weight(self, device, dtype):
+        weight_tensor = torch.randn(3, 4, dtype=dtype, device=device)
+
+        weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
+        weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
+
+        index = torch.tensor([0, 1, 2], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        for mode in ['sum', 'mean', 'max']:
+            output_non_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_non_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+            output_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+        self.assertEqual(output_non_contig, output_contig)
 
 
     @onlyCUDA
