@@ -266,6 +266,8 @@ class MultiProcessTestCase(TestCase):
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        global TEST_SKIPS
+        self.old_test_skips = TEST_SKIPS.copy()
 
     def tearDown(self):
         super().tearDown()
@@ -285,7 +287,6 @@ class MultiProcessTestCase(TestCase):
         test_skips_manager = Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
-        self.old_test_skips = TEST_SKIPS.copy()
         test_skips.update(TEST_SKIPS)
         TEST_SKIPS = test_skips
 
