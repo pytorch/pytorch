@@ -1641,6 +1641,7 @@
   use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: native_group_norm
+    Math: math_group_norm
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int N, int C, int HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full

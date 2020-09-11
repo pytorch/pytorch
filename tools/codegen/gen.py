@@ -290,7 +290,7 @@ def compute_type_method(
             assert returns_type == dispatcher.returns_type(f.func.returns)
             dispatcher_args = dispatcher.arguments(f.func)
             dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
-            if dispatch is None:
+            if dispatch is None or dispatch == 'Math':
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -811,6 +811,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
+        ('has_math_kernel', f.dispatch is not None and 'Math' in f.dispatch),
     ])
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1016,16 +1017,30 @@ def main() -> None:
         del fm
 
     cpu_fm.write('TypeDefault.h', lambda: {
-        'type_method_declarations': list(mapMaybe(
+        'type_method_declarations':
+        list(mapMaybe(
             compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('Math', target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
+
     })
     cpu_fm.write('TypeDefault.cpp', lambda: {
-        'type_method_definitions': list(mapMaybe(
+        'type_method_definitions':
+        list(mapMaybe(
             compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
-        'function_registrations': list(mapMaybe(
+
+        'function_registrations':
+        list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('Math', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)) if not options.per_op_registration else [],
     })
     cpu_fm.write('Functions.h', lambda: {
