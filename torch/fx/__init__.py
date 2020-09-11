@@ -86,7 +86,7 @@ Because this code is valid PyTorch code, the resulting `GraphModule` can be used
 '''
 
 from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, DefaultDelegate
+from .symbolic_trace import symbolic_trace, Tracer
 from .graph import Graph, map_arg
 from .node import Node
 from .proxy import Proxy

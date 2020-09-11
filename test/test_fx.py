@@ -4,7 +4,7 @@ import operator
 import numbers
 import pickle
 import copy
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
@@ -108,7 +108,7 @@ class TestFX(JitTestCase):
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
-        class NoMutableCallDelegate(DefaultDelegate):
+        class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
@@ -125,7 +125,7 @@ class TestFX(JitTestCase):
         m = MyInplaceMod()
 
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m)
 
         # Test free function
         class MyInplaceMod2(torch.nn.Module):
@@ -134,7 +134,7 @@ class TestFX(JitTestCase):
                 return x
         m2 = MyInplaceMod2()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m2, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m2)
 
         # Test symbolic node as an arg
         class MyInplaceMod3(torch.nn.Module):
@@ -144,12 +144,12 @@ class TestFX(JitTestCase):
                 return x
         m3 = MyInplaceMod3()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m3, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m3)
 
     def test_leaf_module(self):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
-        class NoLeafModulesDelegate(DefaultDelegate):
+        class NoLeafModulesTracer(Tracer):
             def is_leaf_module(self, m):
                 return False
 
@@ -162,7 +162,7 @@ class TestFX(JitTestCase):
                 return self.relu(x)
 
         mrm = MyReluMod()
-        sym = symbolic_trace(mrm, delegate_class=NoLeafModulesDelegate)
+        sym = NoLeafModulesTracer().trace(mrm)
         for node in sym.graph.nodes:
             self.assertNotEqual(node.op, 'call_module')
 
@@ -318,7 +318,7 @@ class TestFX(JitTestCase):
             # 3) Returns the speficied return value
 
             # FIXME: The following code could be greatly simplified by symbolic_trace'ing
-            # the wrapper with a Delegate that considers the Wrapper instance a root
+            # the wrapper with a Tracer that considers the Wrapper instance a root
             # module, however, I can't get `__call__` exposed on TorchBind classes
             # without it messing up Python `hasattr` for some reason. More digging
             # into CPython's implementation of hasattr is probably in order...
@@ -374,7 +374,7 @@ class TestFX(JitTestCase):
             self.assertTrue(node.name != "getattr")
 
     def test_node_tagging(self):
-        class TaggingDelegate(DefaultDelegate):
+        class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
@@ -386,7 +386,7 @@ class TestFX(JitTestCase):
                 return a + b
 
         m = M()
-        g = symbolic_trace(m, TaggingDelegate).graph
+        g = TaggingTracer().trace(m).graph
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
@@ -512,6 +512,22 @@ class TestFX(JitTestCase):
         for s in ['args', 'kwargs', 'uses']:
             assert s in stringed
 
+    def test_graph_fns(self):
+        g = Graph()
+        a = g.placeholder('a')
+        b = g.call_module('linear', (a,))
+        c = g.get_param('bias')
+        d = g.call_method('add', (b, c))
+        e = g.call_function(torch.sin, (d,))
+        g.output(e)
+        mod = torch.nn.Module()
+        mod.linear = torch.nn.Linear(3, 4)
+        mod.bias = torch.rand(4)
+        gm = GraphModule(mod, g)
+        input = torch.rand(3) 
+        r = gm(input)
+        ref = torch.sin(mod.linear(input) + mod.bias)
+        self.assertEqual(r, ref) 
 
 if __name__ == '__main__':
     run_tests()

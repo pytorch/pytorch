@@ -5,7 +5,6 @@ rely on it for anything!**
 from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
-from torch.fx.symbolic_trace import DelegateBase
 import sys
 import torch
 from torch.nn.utils import fuse_conv_bn_weights
@@ -245,7 +244,6 @@ class Quantizer:
 
     def quantize(self):
         self.quantized_graph = Graph()
-        self.delegate = DelegateBase(self.quantized_graph)
 
         env = {}
         quant_env = {}
