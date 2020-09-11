@@ -14,7 +14,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
 
-    tensor_lists.emplace_back(std::move(tensors.vec()));
+    tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
@@ -28,7 +28,7 @@ void foreach_binary_op_(TensorList tensors, Scalar scalar) {
     check_foreach_api_restrictions(tensors);
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
-    tensor_lists.emplace_back(std::move(tensors.vec()));
+    tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
         multi_tensor_apply<1>(tensor_lists, BinaryOpScalarFunctor_<scalar_t, Op>(), scalar.to<scalar_t>());
