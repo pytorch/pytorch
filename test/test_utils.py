@@ -628,13 +628,6 @@ class TestBenchmarkUtils(TestCase):
         blocked_medium = timer.blocked_autorange(min_run_time=0.1)
         self.assertLess(small.median, medium.median)
         self.assertLess(small.median, blocked_medium.median)
-        timer = benchmark_utils.Timer(
-            stmt="torch.sum(torch.ones((5000,5000)))",
-        )
-        large = timer.adaptive_autorange(min_run_time=0.1)
-        self.assertFalse(large.has_warnings)
-        self.assertLess(medium.median, large.median)
-        self.assertLess(blocked_medium.median, large.median)
 
     def test_compare(self):
         compare = benchmark_utils.Compare([
