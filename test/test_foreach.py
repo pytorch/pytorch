@@ -4,15 +4,25 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 
 class TestForeach(TestCase):
-    bin_ops = [
+    foreach_bin_ops = [
         torch._foreach_add,
-        torch._foreach_add_,
         torch._foreach_sub,
-        torch._foreach_sub_,
         torch._foreach_mul,
-        torch._foreach_mul_,
         torch._foreach_div,
+    ]
+
+    foreach_bin_ops_ = [
+        torch._foreach_add_,
+        torch._foreach_sub_,
+        torch._foreach_mul_,
         torch._foreach_div_,
+    ]
+
+    torch_bin_ops = [
+        torch.add,
+        torch.sub,
+        torch.mul,
+        torch.div,
     ]
 
     def _get_test_data(self, device, dtype, N):
@@ -71,6 +81,7 @@ class TestForeach(TestCase):
             expected = [e.to(torch.bool) for e in expected]
         self.assertEqual(tensors1, expected)
 
+    '''
     #
     # Unary ops
     #
@@ -232,9 +243,91 @@ class TestForeach(TestCase):
         tensors = [torch.tensor([1.1], dtype=torch.float, device=device), 
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
-
+    '''
     #
-    # Ops with list
+    # Ops with scalar list
+    #
+
+    #def test_bin_op_scalarlist_error_cases(self, device):
+        # empty scalar list
+        # less and more elements in scalar list
+        # different dtypes of scalars 
+        # different dtype of scalars and tensors
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_foo(self, device, dtype):
+        if dtype == torch.bool:
+            # see separate test for bool dtype
+            return
+
+        if dtype in [torch.complex32, torch.complex64, torch.complex128] and device == 'cuda:0':
+            return
+
+        tensors = self._get_test_data(device, dtype, 3)
+        int_scalars = [1, 2, 3]
+        float_scalars = [1.1, 2.2, 3.3]
+        complex_scalars = [3 + 5j, 3 + 5j, 3 + 5j]
+        bool_scalars = [True, False, True]
+        scalar_lists = [int_scalars, float_scalars, complex_scalars, bool_scalars]
+
+        res = torch._foreach_add(tensors, int_scalars)
+        exp = [torch.add(t, s) for t,s in zip(tensors, int_scalars)]
+        self.assertEqual(res, exp)
+
+        res = torch._foreach_sub(tensors, int_scalars)
+        exp = [torch.sub(t, s) for t,s in zip(tensors, int_scalars)]
+        self.assertEqual(res, exp)
+        
+        res = torch._foreach_mul(tensors, int_scalars)
+        exp = [torch.mul(t, s) for t,s in zip(tensors, int_scalars)]
+        self.assertEqual(res, exp)
+
+        print(tensors)
+        print(int_scalars)
+        
+        exp = [torch.div(t, s) for t,s in zip(tensors, int_scalars)]
+        res = torch._foreach_div_(tensors, int_scalars)
+        
+        self.assertEqual(tensors, exp)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def atest_bin_op_int_scalarlist(self, device, dtype):
+        tensors = self._get_test_data(device, dtype, 3)
+        int_scalars = [1, 2, 3]
+        float_scalars = [1.1, 2.2, 3.3]
+        complex_scalars = [3 + 5j, 3 + 5j, 3 + 5j]
+        bool_scalars = [True, False, True]
+        scalar_lists = [int_scalars, float_scalars, complex_scalars, bool_scalars]
+
+        for scalars in scalar_lists:
+            for f_op, f_op_, torch_op in zip(self.foreach_bin_ops, self.foreach_bin_ops_, self.torch_bin_ops):
+                if dtype == torch.bool:
+                    # see separate test for bool dtype
+                    return
+
+                if dtype in [torch.complex32, torch.complex64, torch.complex128] and device == 'cuda:0':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexDouble'"):
+                        f_op(tensors, scalars)
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for 'ComplexDouble'"):
+                        f_op_(tensors, scalars)
+
+                expected = [torch_op(t, s) for t, s in zip(tensors, scalars)]
+                print("\n\n")
+                print(dtype)
+                print(device)
+                print(scalars)
+                print(tensors)
+                print(f_op)
+                res = f_op(tensors, scalars)
+                f_op_(tensors, scalars)
+
+                self.assertEqual(expected, res)
+                self.assertEqual(tensors, res)
+
+
+    '''
+    #
+    # Ops with tensor list
     #
     def test_add_list_error_cases(self, device):
         tensors1 = []
@@ -248,9 +341,9 @@ class TestForeach(TestCase):
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Scalar list must have at least one scalar."):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Scalar list must have at least one scalar."):
             torch._foreach_add_(tensors1, tensors2)
 
         # Lists have different amount of tensors
@@ -372,7 +465,8 @@ class TestForeach(TestCase):
         res = torch._foreach_add([tensor1], [tensor2])
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
-
+    
+    '''
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':

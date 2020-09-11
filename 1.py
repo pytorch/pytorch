@@ -16,3 +16,12 @@ torch._foreach_add_(a, [1, 2, 3])
 
 torch._foreach_add_(b, [1, 2, 3])
 print("\nresB = ", b)
+
+
+b = [torch.ones(1, 1, dtype=torch.float, device='cuda') for _ in range(3)]
+res = torch._foreach_add(b, [1.1, 2.1, 3.1])
+print("\nresB = ", res)
+
+torch._foreach_add_(b, [1.1, 2.1, 3.1])
+print("\nresB = ", b)
+

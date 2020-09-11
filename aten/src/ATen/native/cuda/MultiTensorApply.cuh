@@ -8,9 +8,9 @@ namespace at { namespace native {
 
 namespace {
 
-static constexpr int64_t kILP = 1;
+static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
-static constexpr int64_t kBlockSize = 1;
+static constexpr int64_t kBlockSize = 512;
 
 template<typename T>
 __device__ __forceinline__ bool is_aligned(T* p){
@@ -26,6 +26,7 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
 
 template<int n> struct TensorListMetadata
 {
@@ -36,11 +37,11 @@ template<int n> struct TensorListMetadata
 };
 
 
-template<int n> struct TensorListScalarListMetadata
+template<int n, typename T> struct TensorListScalarListMetadata
 {
-  void* addresses[n][depth_to_max_tensors[n-1]];
-  int sizes[depth_to_max_tensors[n-1]];
-  int scalar_vals[n];
+  void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
+  int sizes[depth_to_max_tensors_scalarlist[n-1]];
+  T scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
@@ -57,7 +58,7 @@ multi_tensor_apply_kernel(
   callable(kChunkSize, tensorListMeta, args...); 
 }
 
-template<int depth, typename T, typename... ArgTypes>
+template<int depth, typename T2, typename T, typename... ArgTypes>
 void multi_tensor_apply2(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::ScalarList scalars,
@@ -67,20 +68,14 @@ void multi_tensor_apply2(
         const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
 
         size_t n_tensors = tensor_lists[0].size();
-        TensorListScalarListMetadata<depth> tensorListMeta;
+        TensorListScalarListMetadata<depth, T2> tensorListMeta;
 
         int loc_block_info = 0;
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
-            
-            
-            
-            tensorListMeta.scalar_vals[t] = scalars[t].to<int>();
-            printf ("Decimals: %i ", tensorListMeta.scalar_vals[t]);
-            printf ("Decimals: %d ", tensorListMeta.scalar_vals[t]);
-            
-            
-            
+
+            tensorListMeta.scalar_vals[t] = scalars[t].to<T2>();
+
             tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();

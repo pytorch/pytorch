@@ -31,6 +31,19 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   }
 }
 
+void check_foreach_api_restrictions(TensorList tensors, ScalarList scalars) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(scalars.size() > 0, "Scalar list must have at least one scalar.");
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor lists must have the same number of elements as scalar list, got ", tensors.size(), " and ", scalars.size());
+
+  auto expected_dtype = tensors[0].dtype();
+
+  for (int i = 0; i < tensors.size(); i++) {
+    TORCH_CHECK(tensors[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
+    //TORCH_CHECK(scalars[i].type() == expected_dtype, "All scalars in the scalar list must have the same dtype as correcponding tensor. Expected ", expected_dtype, ", got ", scalars[i].type());
+  }
+}
+
 // To go via 'fast' path, several conditions must be satisfied
 // - All tensors must be on the same device
 // - All tensors must have strided layout
