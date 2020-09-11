@@ -4530,6 +4530,11 @@ median(input) -> Tensor
 
 Returns the median value of all elements in the :attr:`input` tensor.
 
+.. note::
+    For even-sized inputs, the smaller of the two middle elements in the sorted
+    order is returned. If the mean of the two middle elements is required, use
+    :func:`torch.quantile` with ``q=0.5`` instead.
+
 .. warning::
     This function produces deterministic (sub)gradients unlike ``median(dim=0)``
 
