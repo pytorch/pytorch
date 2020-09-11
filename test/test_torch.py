@@ -20279,19 +20279,7 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin'),
-                  _TorchMathTestMeta('asinh', reffn='arcsinh'),
-                  _TorchMathTestMeta('sinh'),
-                  _TorchMathTestMeta('acosh', reffn='arccosh'),
-                  _TorchMathTestMeta('tan'),
-                  _TorchMathTestMeta('atan', reffn='arctan'),
-                  _TorchMathTestMeta('atanh', reffn='arctanh'),
-                  _TorchMathTestMeta('tanh'),
-                  _TorchMathTestMeta('log'),
-                  _TorchMathTestMeta('log10'),
-                  _TorchMathTestMeta('log1p'),
-                  _TorchMathTestMeta('log2'),
-                  _TorchMathTestMeta('sqrt'),
+torch_op_tests = [_TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
