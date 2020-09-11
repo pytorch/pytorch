@@ -5067,23 +5067,18 @@ class CriterionTest(InputVariableMixin, TestBase):
             return
 
         test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
-        self._do_extra_tests(test_case, module, input, target)
 
-    def _do_extra_tests(self, test_case, module, input, target):
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
-            inputs = (input,) + params
+            inputs = (input,) + params + (target,)
 
-            def apply_fn(input, *params):
+            def apply_fn(input, target, *params):
                 return module(input, target)
         else:
-            inputs = input + params
+            inputs = input + params + (target,)
 
-            def apply_fn(input1, input2, *params):
+            def apply_fn(input1, input2, target, *params):
                 return module(input1, input2, target)
-
-        if target.requires_grad:
-            inputs = inputs + (target,)
 
         gradcheck(apply_fn, inputs)
 
