@@ -43,7 +43,6 @@
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#include <thrust/system/cuda/execution_policy.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 
@@ -77,7 +76,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t nvalues,
     scalar_t* mx_rows,
     PackedTensorAccessor<scalar_t, 2> input_values_acc,
-    PackedTensorAccessor<scalar_t, 2> ouput_values_acc) {
+    PackedTensorAccessor<scalar_t, 2> output_values_acc) {
   /*
     See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
@@ -102,7 +101,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
       for (int64_t p = 0; p < pool_indices_size; p++) {
         auto i = pool_indices[p];
         auto values_row = input_values_acc[i];
-        auto out_values_row = ouput_values_acc[i];
+        auto out_values_row = output_values_acc[i];
 
         auto v = c10::cuda::compat::exp(values_row[j] - mx_row[j]);
         if (!LogSoftMax) {
@@ -113,7 +112,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
       for (int64_t p = 0; p < pool_indices_size; p++) {
         auto i = pool_indices[p];
         auto values_row = input_values_acc[i];
-        auto out_values_row = ouput_values_acc[i];
+        auto out_values_row = output_values_acc[i];
         
         if (LogSoftMax) {
           out_values_row[j] = values_row[j] - mx_row[j] - c10::cuda::compat::log(exp_sums);
@@ -134,7 +133,6 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     int64_t* pool_offsets,
     int64_t nvalues,
     int64_t grad_nnz,
-    scalar_t* exp_sums_rows,
     int64_t* grad_offsets,
     int64_t* out_offsets,
     int64_t* lower_bound_values,
@@ -159,50 +157,47 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     int64_t* pool_indices = sorted_pool_indices + offset;
     int64_t pool_indices_size = pool_sizes[index];
 
-    scalar_t* tmp_row = exp_sums_rows + index * nvalues;
+    for (int64_t k = 0; k < nvalues; k++) {
+      scalar_t tmp_row{0};
 
-    /* Compute tmp = - sum_j output_j * grad_j */
-    for (int64_t p = 0; p < pool_indices_size; p++) {
-      auto i = pool_indices[p];
-      auto out_values_row = out_values_accessor[i];
-      auto values_row = values_accessor[i];
-      auto j = lower_bound_values[i];
-      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-        auto grad_values_row = grad_values_accessor[j];
-        for (int64_t k = 0; k < nvalues; k++) {
+      /* Compute tmp = - sum_j output_j * grad_j */
+      for (int64_t p = 0; p < pool_indices_size; p++) {
+        auto i = pool_indices[p];
+        auto out_values_row = out_values_accessor[i];
+        auto j = lower_bound_values[i];
+
+        /* Update `tmp_row` accumulator only when limits and pools are valid */
+        if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+          auto grad_values_row = grad_values_accessor[j];
           if (LogSoftMax) {
-            tmp_row[k] -= grad_values_row[k];
+            tmp_row -= grad_values_row[k];
           } else {
-            tmp_row[k] -= out_values_row[k] * grad_values_row[k];
+            tmp_row -= out_values_row[k] * grad_values_row[k];
           }
         }
       }
-    }
-    /* Compute grad_input = output * (grad + tmp)*/
-    for (int64_t p = 0; p < pool_indices_size; p++) {
-      auto i = pool_indices[p];
-      auto out_values_row = out_values_accessor[i];
-      auto values_row = values_accessor[i];
-      auto j = lower_bound_values[i];
 
-      if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
-        auto grad_values_row = grad_values_accessor[j];
-        for (int64_t k = 0; k < nvalues; k++) {
+      /* Compute grad_input = output * (grad + tmp)*/
+      for (int64_t p = 0; p < pool_indices_size; p++) {
+        auto i = pool_indices[p];
+        auto out_values_row = out_values_accessor[i];
+        auto values_row = values_accessor[i];
+        auto j = lower_bound_values[i];
+        if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+          auto grad_values_row = grad_values_accessor[j];
           if (LogSoftMax) {
             values_row[k] = grad_values_row[k] +
-                c10::cuda::compat::exp(out_values_row[k]) * tmp_row[k];
+                c10::cuda::compat::exp(out_values_row[k]) * tmp_row;
           } else {
             values_row[k] =
-                out_values_row[k] * (grad_values_row[k] + tmp_row[k]);
-          }
-        }
-      } else {
-        for (int64_t k = 0; k < nvalues; k++) {
+                out_values_row[k] * (grad_values_row[k] + tmp_row);
+          } 
+        } else {
           if (LogSoftMax) {
             values_row[k] =
-                c10::cuda::compat::exp(out_values_row[k]) * tmp_row[k];
+                c10::cuda::compat::exp(out_values_row[k]) * tmp_row;
           } else {
-            values_row[k] = out_values_row[k] * tmp_row[k];
+            values_row[k] = out_values_row[k] * tmp_row;
           }
         }
       }
@@ -285,7 +280,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto nnz = indices.size(1);
-  auto offsets  = get_offsets(indices, sizes, dim);
+  auto offsets = get_offsets(indices, sizes, dim);
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
 
   auto sorted_indices = at::empty({nnz}, indices.options());
@@ -468,12 +463,13 @@ void cuda_sparse_coo_softmax_backward(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
+
+  /* when dim >= sparse_dim the dense backward is used */ 
   if (dim >= sparse_dim) {
     auto host_out_offsets =
         out_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
     auto host_grad_offsets =
         grad_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
-    ;
     auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
     auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
     for (int64_t i = 0; i < out_nnz; i++) {
@@ -483,6 +479,11 @@ void cuda_sparse_coo_softmax_backward(
           grad_offsets_accessor + grad_offsets.size(0),
           out_offsets_accessor[i]);
       auto j = low - grad_offsets_accessor;
+
+      /* 
+        Compute output using dense backward only when limits and pools are valid 
+        If this check is false then a sparse tensor with full of zeros is returned 
+      */ 
       if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
         if (LogSoftMax) {
           auto r = log_softmax_backward_cuda(
@@ -533,15 +534,6 @@ void cuda_sparse_coo_softmax_backward(
 
   auto pool_size = pool_offsets.size(0);
 
-  auto exp_sums_rows = at::empty({nvalues * pool_size}, values.options());
-  thrust::device_ptr<scalar_t> exp_sums_rows_thrust_ptr(
-      exp_sums_rows.data_ptr<scalar_t>());
-  thrust::fill(
-      policy,
-      exp_sums_rows_thrust_ptr,
-      exp_sums_rows_thrust_ptr + pool_size * nvalues,
-      scalar_t(0));
-
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
@@ -553,7 +545,6 @@ void cuda_sparse_coo_softmax_backward(
           pool_offsets.data_ptr<int64_t>(),
           nvalues,
           grad_nnz,
-          exp_sums_rows.data_ptr<scalar_t>(),
           grad_offsets.data_ptr<int64_t>(),
           out_offsets.data_ptr<int64_t>(),
           lower_bound_values.data_ptr<int64_t>(),
