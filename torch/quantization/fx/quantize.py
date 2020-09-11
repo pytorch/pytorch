@@ -429,20 +429,25 @@ class Quantizer:
         for node in model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
-                result = obj.convert(self, node, load_arg)
-                quantized = True
-                # Need to get correct quantized/non-quantized state for the output of CopyNode
-                if isinstance(obj, CopyNode):
-                    assert node.op in [
-                        'call_module',
-                        'call_function',
-                        'call_method'], \
-                        'CopyNode of type ' + node.op + ' is not handled'
-                    quantized = is_quantized(node.args[0])
-
-                # output of dynamic quantization is not quantized
-                if self.is_dynamic_quant:
+                if qconfig is None:
+                    result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
+                else:
+                    result = obj.convert(self, node, load_arg)
+                    # Need to get correct quantized/non-quantized state for the output of CopyNode
+                    if isinstance(obj, CopyNode):
+                        assert node.op in [
+                            'call_module',
+                            'call_function',
+                            'call_method'], \
+                            'CopyNode of type ' + node.op + ' is not handled'
+                        quantized = is_quantized(node.args[0])
+                    else:
+                        quantized = True
+
+                    # output of dynamic quantization is not quantized
+                    if self.is_dynamic_quant:
+                        quantized = False
 
                 if quantized:
                     quant_env[node.name] = result
