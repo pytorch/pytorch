@@ -19,7 +19,7 @@ mm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [False],
     },
     tags=["short"],
-    checksum=1650,
+    checksum=1990,
 )
 
 mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
@@ -32,7 +32,7 @@ mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=(11136, 30246571),
+    checksum=(10292, 770155),
 )
 
 def make_tensor(shape, device, transposed_layout=None):
@@ -92,7 +92,7 @@ baddmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [False],
     },
     tags=["short"],
-    checksum=1213,
+    checksum=1113,
 )
 
 baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
@@ -106,7 +106,7 @@ baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
         "trans_y": [True, False],
     },
     tags=["long"],
-    checksum=(4197, 16841683),
+    checksum=(4523, 17654899),
 )
 
 class AddbmmBenchmark(op_bench.TorchBenchmarkBase):

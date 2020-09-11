@@ -9,7 +9,6 @@ def remove_cuda(config_list):
     cuda_config = {'device': 'cuda'}
     return [config for config in config_list if cuda_config not in config]
 
-
 conv1d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.CONV1D,
     fuzz_utils.Scale.SMALL,
@@ -17,7 +16,7 @@ conv1d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     seed="Conv1D",
     cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["short"],
-    checksum=570,
+    checksum=549,
 )
 
 conv1d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
@@ -26,11 +25,8 @@ conv1d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     n=10,
     seed="Conv1D",
     tags=["long"],
-    checksum=(2341, 9275),
+    checksum=(2896, 6083),
 )
-
-for i in conv1d_fuzzed_configs_long:
-    print(i)
 
 conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     fuzz_utils.Fuzzers.CONV2D,
@@ -40,7 +36,7 @@ conv2d_fuzzed_configs_short = fuzz_utils.make_fuzzed_config(
     seed="Conv2D",
     cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["short"],
-    checksum=517,
+    checksum=562,
 )
 
 conv2d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
@@ -50,7 +46,7 @@ conv2d_fuzzed_configs_long = fuzz_utils.make_fuzzed_config(
     fuzzer_kwargs={"groups": {1: 0.5, 2: 0.5}},
     seed="Conv2D",
     tags=["long"],
-    checksum=(1803, 6358),
+    checksum=(1420, 4234),
 )
 
 

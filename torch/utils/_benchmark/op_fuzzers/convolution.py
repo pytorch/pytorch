@@ -10,23 +10,29 @@ STRIDE = "stride"
 C_OUT = "C_out"
 GROUPS = "groups"
 
+LOWER_BOUNDS = {
+    constants.Scale.SMALL: 1,
+    constants.Scale.MEDIUM: 1,
+    constants.Scale.LARGE: 4,
+    constants.Scale.LARGER: 8,
+}
 BATCH_LIMITS = {
     constants.Scale.SMALL: 8,
     constants.Scale.MEDIUM: 256,
-    constants.Scale.LARGE: 1024,
-    constants.Scale.LARGER: 4096,
+    constants.Scale.LARGE: 512,
+    constants.Scale.LARGER: 512,
 }
 CHANNEL_LIMITS = {
     constants.Scale.SMALL: 8,
     constants.Scale.MEDIUM: 256,
-    constants.Scale.LARGE: 1024,
-    constants.Scale.LARGER: 2048,
+    constants.Scale.LARGE: 512,
+    constants.Scale.LARGER: 1024,
 }
 SIZE_LIMITS = {
     constants.Scale.SMALL: 64,
     constants.Scale.MEDIUM: 256,
     constants.Scale.LARGE: 512,
-    constants.Scale.LARGER: 2048,
+    constants.Scale.LARGER: 1024,
 }
 ROOFLINE_WORK_LIMITS = {
     constants.Scale.SMALL: 1024 ** 2,
@@ -36,7 +42,7 @@ ROOFLINE_WORK_LIMITS = {
 }
 
 
-def mixed_distribution(name, minval, maxval, distribution=None):
+def mixed_distribution(name, minval, maxval, distribution=None, **kwargs):
     k_any, k_pow_2 = f"{name}_any", f"{name}_pow_2"
     distribution = distribution or {k_any: 0.5, k_pow_2: 0.5}
     assert k_any in distribution and k_pow_2 in distribution
@@ -46,7 +52,7 @@ def mixed_distribution(name, minval, maxval, distribution=None):
         FuzzedParameter(name=name, distribution={
             ParameterAlias(k) if isinstance(k, str) else k: v
             for k, v in distribution.items()
-        })
+        }, **kwargs)
     ]
 
 
@@ -55,17 +61,21 @@ class ConvFuzzer(Fuzzer):
         assert scale in (constants.Scale.SMALL, constants.Scale.MEDIUM, constants.Scale.LARGE, constants.Scale.LARGER)
         assert dim in (3, 4, 5), "Only Conv1/2/3D are supported."
 
-        l_params = mixed_distribution("L", 4, SIZE_LIMITS[scale])
+        size_max = SIZE_LIMITS[scale]
+        size_min = max(4, LOWER_BOUNDS[scale])
+        kernel_distribution = {1: 0.25, 3: 0.25, 5: 0.25, 7: 0.25}
+
+        l_params = mixed_distribution("L", size_min, size_max)
         hw_params = (
-            mixed_distribution("H", 4, SIZE_LIMITS[scale]) +
+            mixed_distribution("H", size_min, size_max) +
 
             # Square images are particularly common, so half the time Width
             # simply mirrors height.
             mixed_distribution(
-                "W", 4, SIZE_LIMITS[scale],
+                "W", size_min, size_max,
                 {"H": 0.5, "W_any": 0.25, "W_pow_2": 0.25})
         )
-        dhw_params = mixed_distribution("D", 4, SIZE_LIMITS[scale]) + hw_params
+        dhw_params = mixed_distribution("D", size_min, size_max) + hw_params
 
         if dim == 3:
             size = ("N", "C", "L")
@@ -76,6 +86,10 @@ class ConvFuzzer(Fuzzer):
         if dim == 5:
             size = ("N", "C", "D", "H", "W")
             spatial_params = dhw_params
+
+            # Have to limit sizes to prevent prohibitively large tasks.
+            size_max = int(size_max ** (2 / 3))
+            kernel_distribution = {1: 0.5, 3: 0.5}
 
         def kernel_size_constraint(params):
             kernel_size = params["kernel_size"]
@@ -94,18 +108,18 @@ class ConvFuzzer(Fuzzer):
         super().__init__(
             parameters=[
                 # Batch Size
-                mixed_distribution("N", 2, BATCH_LIMITS[scale], {
+                mixed_distribution("N", LOWER_BOUNDS[scale], BATCH_LIMITS[scale], {
                     1: 0.1,  # Batch 1 inference is a particularly important use case.
                     "N_any": 0.45,
                     "N_pow_2": 0.45,
-                }),
+                }, strict=True),
 
                 # L, HW, or DHW for Conv1/2/3d respectively.
                 spatial_params,
 
-                mixed_distribution("C", 1, CHANNEL_LIMITS[scale]),
-                mixed_distribution(C_OUT, 1, CHANNEL_LIMITS[scale]),
-                FuzzedParameter(KERNEL_SIZE, distribution={1: 0.25, 3: 0.25, 5: 0.25, 7: 0.25}, strict=True),
+                mixed_distribution("C", LOWER_BOUNDS[scale], CHANNEL_LIMITS[scale]),
+                mixed_distribution(C_OUT, LOWER_BOUNDS[scale], CHANNEL_LIMITS[scale]),
+                FuzzedParameter(KERNEL_SIZE, distribution=kernel_distribution, strict=True),
                 FuzzedParameter(STRIDE, distribution={1: 0.9, 2: 0.05, 3: 0.05}),
                 [FuzzedParameter(GROUPS, distribution=groups, strict=True)] if groups else [],
             ],
@@ -116,7 +130,7 @@ class ConvFuzzer(Fuzzer):
                     probability_contiguous=1,
                     max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     dtype=dtype,
-                    cuda=False,
+                    cuda=cuda,
                 ),
             ],
             constraints=[

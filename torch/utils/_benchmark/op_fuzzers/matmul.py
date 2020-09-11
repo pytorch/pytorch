@@ -60,7 +60,11 @@ class MatMulFuzzer(Fuzzer):
             parameters=[
                 batch_params,
                 [
-                    FuzzedParameter(name=f"K{i}_any", minval=1, maxval=2048, distribution="loguniform")
+                    FuzzedParameter(
+                        name=f"K{i}_any",
+                        minval=constants.MIN_DIM_SIZE,
+                        maxval=constants.MAX_DIM_SIZE[scale],
+                        distribution="loguniform")
                     for i in range(3)
                 ],
                 [
@@ -100,7 +104,7 @@ class MatMulFuzzer(Fuzzer):
                     probability_contiguous=1,
                     max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     dtype=dtype,
-                    cuda=False,
+                    cuda=cuda,
                 ),
                 FuzzedTensor(
                     name="y",
@@ -108,7 +112,7 @@ class MatMulFuzzer(Fuzzer):
                     probability_contiguous=1,
                     max_elements=constants.POINTWISE_MAX_ELEMENTS[scale],
                     dtype=dtype,
-                    cuda=False,
+                    cuda=cuda,
                 ),
             ],
             constraints=[
