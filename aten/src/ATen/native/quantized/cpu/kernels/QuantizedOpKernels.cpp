@@ -2716,6 +2716,54 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
       });
 }
 
+void quantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    float scale,
+    float zero_point) {
+  check_tensor_memory_format(rtensor, qtensor);
+  const float* const rdata = rtensor.data_ptr<float>();
+  uint8_t* qdata = reinterpret_cast<uint8_t*>(qtensor.data_ptr<at::quint4x2>());
+  // TODO: get bitrate from dispatch based on dtype
+  auto numel = rtensor.numel();
+  auto BIT_RATE = 4;
+  const auto ELEM_PER_BYTE = 8 / BIT_RATE;
+
+  for (int i = 0; i < numel; ++i) {
+    float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+    int64_t qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
+    qvalue = std::max(0, std::min(qvalue, (1 << BIT_RATE) - 1));
+    // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
+    // and index 1 is packed in the upper 4-bits.
+    if (i % ELEM_PER_BYTE == 0) {
+    qdata[i / ELEM_PER_BYTE] = static_cast<uint8_t>(qvalue);
+    } else {
+      qdata[i / ELEM_PER_BYTE] |= static_cast<uint8_t>(qvalue << ((i % ELEM_PER_BYTE) * BIT_RATE));
+    }
+  }
+}
+
+void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    float scale,
+    float zero_point) {
+  check_tensor_memory_format(rtensor, qtensor);
+  auto rdata = rtensor.data_ptr<float>();
+  const uint8_t* qdata = reinterpret_cast<uint8_t*>(qtensor.data_ptr<at::quint4x2>());
+  // TODO: get bitrate from dispatch based on dtype
+  auto numel = rtensor.numel();
+  auto BIT_RATE = 4;
+  const auto ELEM_PER_BYTE = 8 / BIT_RATE;
+
+  for (int i = 0; i < numel; ++i) {
+    std::uint8_t qvalue = qdata[i / ELEM_PER_BYTE];
+    qvalue >>= (i % ELEM_PER_BYTE) * BIT_RATE;
+    qvalue &= (1 << BIT_RATE) - 1;
+    rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
+  }
+}
+
 } // namespace
 
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
@@ -2773,6 +2821,13 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(
+    quantize_tensor_per_tensor_affine_sub_byte_stub,
+    &quantize_tensor_per_tensor_affine_sub_byte_cpu);
+REGISTER_DISPATCH(
+    dequantize_tensor_per_tensor_affine_sub_byte_stub,
+    &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
+
 
 } // namespace native
 } // namespace at
