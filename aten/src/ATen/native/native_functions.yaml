@@ -1138,6 +1138,11 @@
     CPU: cummin_helper_cpu
     CUDA: cummin_helper_cuda
 
+- func: cummaxmin_backward(Tensor grad, Tensor input, Tensor indices, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1148,6 +1153,11 @@
   variants: function, method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod_backward(Tensor grad, Tensor input, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
