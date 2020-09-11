@@ -78,7 +78,6 @@ at::Tensor sum_tensorlist(at::TensorList tl);
 at::Tensor repeat_backward(at::Tensor grad, int64_t input_dims, at::IntArrayRef repeats);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
-at::Tensor trace_backward(const at::Tensor & grad, at::IntArrayRef sizes);
 at::Tensor var_backward(const at::Tensor & grad, const at::Tensor & self, bool unbiased);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 at::Tensor std_backward(const at::Tensor & result, const at::Tensor & grad, const at::Tensor & self, bool unbiased);

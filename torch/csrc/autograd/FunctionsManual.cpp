@@ -742,17 +742,6 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
-Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
-  if (sizes.size() != 2) {
-    throw std::runtime_error("expected matrix input");
-  }
-
-  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
-  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
-  grad_input.index_fill_(0, indices, grad);
-  return grad_input.view(sizes);
-}
-
 Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }

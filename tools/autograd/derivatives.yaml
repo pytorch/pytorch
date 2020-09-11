@@ -667,10 +667,7 @@
   mask: non_differentiable
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
-# normally broadcasting is handled implicitly, but here, because we call an inplace
-# function as an optimization and the LHS doesn't broadcast for inplace functions,
-# we need to explicitly broadcast.
-  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes())), at::MemoryFormat::Preserve).masked_scatter_(mask, grad)
+  self: masked_select_backward(grad, self, mask)
   mask: non_differentiable
 
 - name: matrix_exp(Tensor self) -> Tensor
@@ -1030,7 +1027,7 @@
   self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: zeros_like(self).put_(index, grad, true)
+  self: take_backward(grad, self, index)
   index: non_differentiable
 
 - name: tan(Tensor self) -> Tensor
