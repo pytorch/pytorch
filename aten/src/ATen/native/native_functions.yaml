@@ -1204,6 +1204,11 @@
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
 
+- func: diagonal_backward(Tensor grad, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
@@ -2737,6 +2742,12 @@
   dispatch:
     CPU: gelu_backward_cpu
     CUDA: gelu_backward_cuda
+
+- func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: nn
+  device_guard: False
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   use_c10_dispatcher: full
@@ -4871,6 +4882,11 @@
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+
+- func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 

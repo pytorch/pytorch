@@ -1797,6 +1797,28 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
+Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+  auto ndimension = input_sizes.size();
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
+
+  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
+    return grad.diag(diagonal);
+  }
+
+  // Input was a matrix but was not square
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(diagonal);
+  diag.copy_(grad);
+  return grad_input;
+}
+
+Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
               src, " dims ) should contain the same number of dims as destination (", dst, " dims)");

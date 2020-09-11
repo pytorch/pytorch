@@ -768,15 +768,6 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 
-Tensor infinitely_differentiable_gelu_backward(
-    const Tensor& grad,
-    const Tensor& self) {
-  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
-}
-
 Tensor infinitely_differentiable_silu_backward(
     const Tensor& grad_output,
     const Tensor& input) {
@@ -938,28 +929,6 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
   return (r * grad).sum();
-}
-
-Tensor diag_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
-  }
-
-  // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
-}
-
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(offset, dim1, dim2);
-  diag.copy_(grad);
-  return grad_input;
 }
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
