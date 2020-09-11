@@ -277,7 +277,6 @@ Tensor empty_like(
 
   TensorOptions options = self.options().merge_in(options_);
 
-  // Avoid adding optional_memory_format to options_ because it can be invalid for non-strided tensors.
   if (options.layout() == kSparse && self.is_sparse()) {
     if (optional_memory_format.has_value()) {
       TORCH_CHECK(
