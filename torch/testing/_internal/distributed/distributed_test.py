@@ -9,7 +9,7 @@ import sys
 import time
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from io import StringIO
@@ -2917,6 +2917,7 @@ class DistributedTest:
             model = test_case.model
             inp = test_case.inp
             rank = self.rank
+            sync_interval = test_case.sync_interval
             # Ensure all outsanding GPU work is comlete so this test runs independently.
             torch.cuda.synchronize()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
@@ -2931,17 +2932,24 @@ class DistributedTest:
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
             with net.join():
-                for _ in range(num_iters):
-                    if isinstance(inp, tuple):
-                        loss = net(*inp).sum()
+                for i in range(num_iters):
+                    # Use model.no_sync() to disable grad synchronization every
+                    # sync_interval.
+                    if i % sync_interval != 0:
+                        context = net.no_sync()
                     else:
-                        loss = net(inp).sum()
-                    loss.backward()
-                    self._model_step(net)
-                    # Ensure completion of GPU kernels (including allreduce). If the
-                    # join API is not properly implemented, then this should hang
-                    # since the allreduce will hang.
-                    torch.cuda.synchronize(device=rank)
+                        context = suppress()
+                    with context:
+                        if isinstance(inp, tuple):
+                            loss = net(*inp).sum()
+                        else:
+                            loss = net(inp).sum()
+                        loss.backward()
+                        self._model_step(net)
+                        # Ensure completion of GPU kernels (including allreduce). If the
+                        # join API is not properly implemented, then this should hang
+                        # since the allreduce will hang.
+                        torch.cuda.synchronize(device=rank)
 
             # Ensure completion of all GPU kernels.
             torch.cuda.synchronize(device=rank)
@@ -2968,6 +2976,7 @@ class DistributedTest:
                 name: str
                 model: nn.Module
                 inp: Union[torch.tensor, tuple]
+                sync_interval: int
 
             dim = 1000
             batch = 1
@@ -3007,29 +3016,36 @@ class DistributedTest:
             models_to_test = [
                 # Network with batchnorm
                 DDPUnevenTestInput(
-                    name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2, device=rank)
+                    name="batch_norm_net",
+                    model=bn_net,
+                    inp=torch.ones(batch, 2, device=rank),
+                    sync_interval=1
                 ),
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
                     inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    sync_interval=1,
                 ),
                 DDPUnevenTestInput(
                     name="small_model",
                     model=small_model,
                     inp=torch.ones(batch, dim, device=rank),
+                    sync_interval=1,
                 ),
                 # Unused parameter test where rank that does not join early has unused params
                 DDPUnevenTestInput(
                     name="unjoined_rank_with_unused_params_model",
                     model=unjoined_rank_with_unused_params_model,
                     inp=(torch.ones(batch, 2, device=rank), rank),
+                    sync_interval=1,
                 ),
                 # Unused parameter test where rank that does join early has unused params
                 DDPUnevenTestInput(
                     name="joined_rank_with_unused_params_model",
                     model=joined_rank_with_unused_params_model,
                     inp=(torch.ones(batch, 2, device=rank), rank),
+                    sync_interval=1,
                 ),
             ]
 
@@ -3041,8 +3057,23 @@ class DistributedTest:
                         name="resnet_model",
                         model=resnet_model,
                         inp=torch.ones(1, 3, 1000, 1000),
+                        sync_interval=1,
                     )
                 )
+
+            # Test with no_sync every 2, 3, 4, ... iterations.
+            models_with_sync = []
+            for i, test_input in enumerate(models_to_test):
+                models_with_sync.append(
+                    DDPUnevenTestInput(
+                        name=test_input.name,
+                        model=test_input.model,
+                        inp=test_input.inp,
+                        sync_interval=i + 2,
+                    )
+                )
+
+            models_to_test.extend(models_with_sync)
 
             # 0 iteration tests for when one process does not train model at all, so
             # we must shadow the broadcast calls made when rebuilding buckets.
@@ -3084,7 +3115,9 @@ class DistributedTest:
             ):
                 if self.rank == 0:
                     print(
-                        f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
+                        f"""Running test: {test_case.name} sync interval
+                        {test_case.sync_interval} with iteration mapping
+                        {iteration_mapping}"""
                     )
                 self._run_uneven_inputs_test(
                     test_case,
