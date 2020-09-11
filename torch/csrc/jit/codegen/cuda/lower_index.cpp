@@ -45,9 +45,9 @@ void IndexLowering::handle(kir::IfThenElse* ite) {
   auto new_ite = new kir::IfThenElse(ite->cond(), {}, {}, prev_scope_expr);
   pushBack(new_ite);
   active_scope_expr = new_ite;
-  active_scope = &new_ite->body();
+  active_scope = &new_ite->thenBody();
 
-  for (auto expr : ite->body().exprs()) {
+  for (auto expr : ite->thenBody().exprs()) {
     OptInDispatch::handle(expr);
   }
 

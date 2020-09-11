@@ -40,7 +40,7 @@ class BuffersExtractor final : OptOutDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->body().exprs()) {
+    for (auto expr : ite->thenBody().exprs()) {
       OptOutDispatch::handle(expr);
     }
     for (auto expr : ite->elseBody().exprs()) {

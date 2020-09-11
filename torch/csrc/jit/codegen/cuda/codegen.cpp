@@ -137,10 +137,10 @@ class CudaKernelGenerator : private OptInConstDispatch {
     ++block_nest_level_;
   }
 
-  void endBlock() {
+  void endBlock(const char* sep = "\n") {
     --block_nest_level_;
     TORCH_CHECK(block_nest_level_ >= 0);
-    code_ << "}\n";
+    code_ << "}" << sep;
   }
 
   std::ostream& indent() {
@@ -171,19 +171,40 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::Bool* node) final {
-
+    if (auto def = node->getOrigin()) {
+      code_ << "(" << gen(def) << ")";
+    } else {
+      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
+      code_ << *node->value();
+    }
   }
 
   void handle(const kir::Float* node) final {
-
+    if (auto def = node->getOrigin()) {
+      code_ << "(" << gen(def) << ")";
+    } else {
+      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
+      const int digits = std::numeric_limits<Float::ScalarType>::max_digits10;
+      code_ << std::setprecision(digits) << *node->value();
+    }
   }
 
   void handle(const kir::Half* node) final {
-
+    if (auto def = node->getOrigin()) {
+      code_ << "(" << gen(def) << ")";
+    } else {
+      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
+      code_ << "__float2half(" << *node->value() << ")";
+    }
   }
 
   void handle(const kir::Int* node) final {
-
+    if (auto def = node->getOrigin()) {
+      code_ << "(" << gen(def) << ")";
+    } else {
+      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
+      code_ << *node->value();
+    }
   }
 
   void handle(const kir::NamedScalar* node) final {
@@ -223,13 +244,58 @@ class CudaKernelGenerator : private OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(!"Unreachable");
   }
 
-  void handle(const kir::UnaryOp* node) final {}
+  void handle(const kir::UnaryOp* node) final {
+    if (auto op = inline_op_str(node->getUnaryOpType())) {
+      code_ << *op << gen(node->in());
+    } else {
+      if (node->getUnaryOpType() == UnaryOpType::Cast) {
+        const auto cast_str =
+            cast_func_str({node->in()->getDataType().value(),
+                           node->out()->getDataType().value()});
+        code_ << cast_str.value();
+      } else {
+        code_ << node->getUnaryOpType();
+      }
 
-  void handle(const kir::BinaryOp* node) final {}
+      code_ << "(";
+      if (node->getUnaryOpType() == UnaryOpType::RandLike) {
+        code_ << "rnd";
+      } else {
+        code_ << gen(node->in());
+      }
+      code_ << ")";
+    }
+  }
 
-  void handle(const kir::TernaryOp* node) final {}
+  std::string genBinaryOp(
+      BinaryOpType op_type,
+      const std::string& lhs,
+      const std::string& rhs) {
+    std::stringstream expr;
+    if (auto op = inline_op_str(op_type)) {
+      expr << lhs << " " << *op << " " << rhs;
+    } else {
+      expr << op_type << "(" << lhs << ", " << rhs << ")";
+    }
+    return expr.str();
+  }
 
-  void handle(const kir::ReductionOp* node) final {}
+  void handle(const kir::BinaryOp* node) final {
+    code_ << genBinaryOp(
+        node->getBinaryOpType(), gen(node->lhs()), gen(node->rhs()));
+  }
+
+  void handle(const kir::TernaryOp* node) final {
+    code_ << node->getTernaryOpType() << "(" << gen(node->in1()) << ", "
+          << gen(node->in2()) << ", " << gen(node->in3()) << ")";
+  }
+
+  std::string genReductionOp(BinaryOpType op_type, DataType data_type) {
+    std::stringstream lambda;
+    lambda << "[](" << data_type << "&a, " << data_type << "b) "
+           << "{ a = " << genBinaryOp(op_type, "a", "b") << "; }";
+    return lambda.str();
+  }
 
   void handle(const kir::BroadcastOp* node) final {
     const ir_utils::ParallelTypeBitmap domains =
@@ -251,11 +317,11 @@ class CudaKernelGenerator : private OptInConstDispatch {
         "Parallel broadcast across blocks not supported");
 
     if (block_broadcast_needed) {
-      const auto d_type = node->out()->getDataType().value();
+      const auto data_type = node->out()->getDataType().value();
       indent() << "broadcast::blockBroadcast<" << (thread_x ? "true" : "false")
                << ", " << (thread_y ? "true" : "false") << ", "
                << (thread_z ? "true" : "false") << ">(" << gen(node->out())
-               << ", " << gen(node->in()) << ", static_cast<" << d_type
+               << ", " << gen(node->in()) << ", static_cast<" << data_type
                << "*>(shared_mem));\n";
     } else {
       indent() << gen(node->out()) << "\n";
@@ -263,11 +329,142 @@ class CudaKernelGenerator : private OptInConstDispatch {
     }
   }
 
-  void handle(const kir::GridReduction* node) final {}
+  void handle(const kir::ReductionOp* node) final {
+    TORCH_CHECK(node->out()->getValType() == ValType::TensorIndex);
 
-  void handle(const kir::ForLoop* node) final {}
+    const auto out = node->out()->as<kir::TensorIndex>();
+    const auto domain = out->view()->domain();
 
-  void handle(const kir::IfThenElse* node) final {}
+    const bool has_block_reduce = domain->hasBlockReduction();
+    const bool has_grid_reduce = domain->hasGridReduction();
+
+    if (!has_block_reduce && !has_grid_reduce) {
+      const auto gen_out = gen(out);
+      const auto op_type = node->getReductionOpType();
+      indent() << gen_out << " = "
+               << genBinaryOp(op_type, gen_out, gen(node->in())) << ";\n";
+      return;
+    }
+
+    const auto par_domains = node->getParallelReductionDomains();
+    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
+    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
+    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+
+    const auto data_type = node->out()->getDataType().value();
+    const auto op_type = node->getReductionOpType();
+
+    const std::string block_result = "block_result";
+
+    if (has_block_reduce) {
+      if (has_grid_reduce) {
+        indent() << data_type << " " << block_result << ";\n";
+      }
+      indent() << "blockReduce< " << (tidx ? "true" : "false") << ", "
+               << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
+               << " >"
+               << "(";
+      if (has_grid_reduce) {
+        code_ << block_result;
+      } else {
+        code_ << gen(node->out());
+      }
+      code_ << ", " << gen(node->in()) << ", "
+            << genReductionOp(op_type, data_type) << ", threadIdx, blockDim"
+            << ", static_cast<" << data_type << "*>(shared_mem)"
+            << ");\n";
+    }
+  }
+
+  void handle(const kir::GridReduction* node) final {
+    const auto rop = node->reduction_op();
+    TORCH_INTERNAL_ASSERT(rop->out()->getValType() == ValType::TensorIndex);
+
+    const auto out = rop->out()->as<kir::TensorIndex>();
+    const auto domain = out->view()->domain();
+    TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
+
+    const auto par_domains = rop->getParallelReductionDomains();
+    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
+    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
+    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+    const bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
+    const bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
+    const bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
+
+    const auto data_type = rop->out()->getDataType().value();
+    const auto op_type = rop->getReductionOpType();
+
+    TORCH_INTERNAL_ASSERT(
+        node->reduction_buffer()->buffer()->getValType().value() ==
+        ValType::KirTensorView);
+    TORCH_INTERNAL_ASSERT(
+        node->sync_buffer()->buffer()->getValType().value() ==
+        ValType::KirTensorView);
+    const auto work_buffer =
+        node->reduction_buffer()->buffer()->as<kir::TensorView>();
+    const auto sync_buffer =
+        node->sync_buffer()->buffer()->as<kir::TensorView>();
+        
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid reduction.
+    indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
+             << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
+             << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false")
+             << ", " << (!tidx ? "true" : "false") << ", "
+             << (!tidy ? "true" : "false") << ", " << (!tidz ? "true" : "false")
+             << " >(" << gen(rop->out()) << ", ";
+    if (domain->hasBlockReduction()) {
+      code_ << "block_result";
+    } else {
+      code_ << gen(rop->in());
+    }
+    code_ << ", " << genReductionOp(op_type, data_type) << ", &T"
+          << work_buffer->name() << "[0]"
+          << ", T" << sync_buffer->name() << ", static_cast<" << data_type
+          << "*>(shared_mem)"
+          << ");\n";
+  }
+
+  void handle(const kir::Scope& scope) {
+    for (auto expr : scope.exprs()) {
+      handle(expr);
+    }
+  }
+
+  void handle(const kir::ForLoop* node) final {
+    if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast()) {
+      handle(node->body());
+      return;
+    }
+
+    const auto gen_index = gen(node->index());
+    const auto gen_start = gen(node->iter_domain()->start());
+    const auto gen_extent = gen(node->iter_domain()->extent());
+    indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
+             << gen_index << " < " << gen_extent << "; ++" << gen_index << ") ";
+
+    startBlock();
+    handle(node->body());
+    endBlock();
+  }
+
+  void handle(const kir::IfThenElse* node) final {
+    indent() << "if (" << gen(node->cond()) << ") ";
+
+    // "then" block
+    startBlock();
+    handle(node->thenBody());
+
+    // "else" block (optional)
+    if (node->hasElse()) {
+      endBlock(" else ");
+      startBlock();
+      handle(node->elseBody());
+    }
+
+    endBlock();
+  }
 
   void handle(const kir::Allocate* node) final {}
 

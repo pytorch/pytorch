@@ -587,7 +587,7 @@ class TORCH_CUDA_API ForLoop : public Expr {
     return body_;
   }
 
-  const Scope& constBody() const {
+  const Scope& body() const {
     return body_;
   }
 
@@ -612,7 +612,7 @@ class TORCH_CUDA_API IfThenElse : public Expr {
  public:
   explicit IfThenElse(
       Bool* cond,
-      const std::vector<Expr*>& if_body = {},
+      const std::vector<Expr*>& then_body = {},
       const std::vector<Expr*>& else_body = {},
       Expr* parent_scope = nullptr);
 
@@ -620,19 +620,18 @@ class TORCH_CUDA_API IfThenElse : public Expr {
     return cond_;
   }
 
-  const Scope& constBody() const {
-    return body_;
+  Scope& thenBody() {
+    return then_body_;
   }
-
-  const Scope& constElseBody() const {
-    return else_body_;
-  }
-
-  Scope& body() {
-    return body_;
+  const Scope& thenBody() const {
+    return then_body_;
   }
 
   Scope& elseBody() {
+    return else_body_;
+  }
+
+  const Scope& elseBody() const {
     return else_body_;
   }
 
@@ -648,7 +647,7 @@ class TORCH_CUDA_API IfThenElse : public Expr {
 
  private:
   Bool* const cond_ = nullptr;
-  Scope body_;
+  Scope then_body_;
   Scope else_body_;
   Expr* parent_scope_ = nullptr;
 };

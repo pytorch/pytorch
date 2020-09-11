@@ -49,7 +49,7 @@ class scopePushBack : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    ite->body().push_back(expr_);
+    ite->thenBody().push_back(expr_);
   }
 
   void handle(Expr* expr) final {
@@ -77,7 +77,7 @@ class scopeInsertBefore : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    ite->body().insert_before(ref_, expr_);
+    ite->thenBody().insert_before(ref_, expr_);
   }
 
   void handle(Expr* expr) final {
@@ -108,7 +108,7 @@ class ExprInScope : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    if (ite->body().contains(expr_)) {
+    if (ite->thenBody().contains(expr_)) {
       contains_ = true;
     }
   }
@@ -224,7 +224,7 @@ class ReplaceExprsInScope : public OptOutDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    handleScope(ite->body());
+    handleScope(ite->thenBody());
     handleScope(ite->elseBody());
   }
 
@@ -247,7 +247,7 @@ class FirstInnerMostScope : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->body().exprs()) {
+    for (auto expr : ite->thenBody().exprs()) {
       if (ir_utils::isScope(expr)) {
         active_scope = expr;
         return;

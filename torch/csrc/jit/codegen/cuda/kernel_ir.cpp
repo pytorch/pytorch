@@ -343,15 +343,16 @@ void ForLoop::setParentScope(Expr* scope) {
 
 IfThenElse::IfThenElse(
     Bool* cond,
-    const std::vector<Expr*>& if_body,
+    const std::vector<Expr*>& then_body,
     const std::vector<Expr*>& else_body,
     Expr* parent_scope)
     : Expr(ExprType::IfThenElse), cond_{cond}, parent_scope_(parent_scope) {
   addInput(cond);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 
-  for (auto* expr : if_body)
-    body_.push_back(expr);
+  for (auto* expr : then_body)
+    then_body_.push_back(expr);
+    
   for (auto* expr : else_body)
     else_body_.push_back(expr);
 }
