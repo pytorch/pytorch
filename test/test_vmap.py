@@ -1398,6 +1398,13 @@ def differentiable(args):
     return tuple(arg for arg in as_tuple(args)
                  if isinstance(arg, torch.Tensor) and arg.requires_grad)
 
+def _get_rand_no_zeros(*args, **kwargs):
+    requires_grad = kwargs.get('requires_grad', False)
+    kwargs_without_requires_grad = kwargs.copy()
+    kwargs_without_requires_grad['requires_grad'] = False
+    result = torch.rand(*args, **kwargs_without_requires_grad)
+    return result.clamp_min_(0.1).requires_grad_(requires_grad)
+
 class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -1457,7 +1464,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     def _test_arithmetic(self, op, device, test_grad_grad=True):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        y = torch.rand(2, 3, device=device).clamp_min_(0.1).requires_grad_()
+        y = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         scalar = 3.14
         self._batched_grad_test(op, (x, y), {})
         self._batched_grad_test(op, (scalar, y), {})
@@ -1495,12 +1502,12 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_grad_test(Tensor.lgamma, (x,), {})
 
     def test_log(self, device):
-        x = torch.rand(2, 3, device=device).clamp_min_(0.1).requires_grad_(True)
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log, (x,), {})
         self._batched_grad_grad_test(torch.log, (x,), {})
 
     def test_logsumexp(self, device):
-        x = torch.rand(2, 3, device=device).clamp_min_(0.1).requires_grad_(True)
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
 
         def op(x):
             return torch.logsumexp(x, -1)
@@ -1509,7 +1516,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_grad_test(op, (x,), {})
 
     def test_log1p(self, device):
-        x = torch.rand(2, 3, device=device).clamp_min_(0.1).requires_grad_(True)
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
 

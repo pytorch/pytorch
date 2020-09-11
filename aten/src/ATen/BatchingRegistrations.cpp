@@ -19,7 +19,7 @@ namespace at {
 // NOTE: [When should I add a batching rule?]
 // When you are adding a new operator, you'll need to add a batching rule so
 // that vmap can work efficiently with said operator. If you do not, we'll attempt
-// to generate a slow fallback for the batching rule (this is not yet implemented).
+// to generate a slow fallback for the batching rule.
 
 // NOTE: [How to write batching rules?]
 // The signature of a batching rule should look like exactly like the C++ signature
