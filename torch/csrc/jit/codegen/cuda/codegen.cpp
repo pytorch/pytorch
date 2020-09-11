@@ -61,15 +61,16 @@ class CudaKernelGenerator : private OptInConstDispatch {
     // Generate parameter declarations
     for (Val* val : params) {
       switch (val->getValType().value()) {
-        case ValType::KirTensorView:
+        case ValType::KirTensorView: {
           // TODO(kir): review this
+          const auto tv = val->as<kir::TensorView>();
           code_ << "Tensor<" << val->getDataType().value() << ", "
-                << TensorDomain::noReductions(val->as<kir::TensorView>()
-                                                  ->fuserTv()
-                                                  ->getMaybeRFactorDomain())
+                << TensorDomain::noReductions(
+                       tv->fuserTv()->getMaybeRFactorDomain())
                        .size()
-                << "> T" << val->name();
+                << "> " << gen(tv);
           break;
+        }
         case ValType::KirScalar:
           code_ << val->getDataType().value() << " " << val;
           break;
@@ -158,6 +159,12 @@ class CudaKernelGenerator : private OptInConstDispatch {
     return tmp_code.str();
   }
 
+  std::string gen(const kir::TensorView* tv) {
+    std::stringstream tv_name;
+    tv_name << "T" << tv->name();
+    return tv_name.str();
+  }
+
   void handle(const Statement* node) final {
     OptInConstDispatch::handle(node);
   }
@@ -201,8 +208,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
   void handle(const kir::Int* node) final {
     if (auto def = node->getOrigin()) {
       code_ << "(" << gen(def) << ")";
+    } else if (node->isSymbolic()) {
+      code_ << "i" << node->name();
     } else {
-      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
       code_ << *node->value();
     }
   }
@@ -212,7 +220,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::TensorIndex* node) final {
-    code_ << "T" << node->view()->name() << "[";
+    code_ << gen(node->view()) << "[";
 
     bool first = true;
     for (auto* ind : node->indices()) {
@@ -405,7 +413,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
         node->reduction_buffer()->buffer()->as<kir::TensorView>();
     const auto sync_buffer =
         node->sync_buffer()->buffer()->as<kir::TensorView>();
-        
+
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
@@ -419,9 +427,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
     } else {
       code_ << gen(rop->in());
     }
-    code_ << ", " << genReductionOp(op_type, data_type) << ", &T"
-          << work_buffer->name() << "[0]"
-          << ", T" << sync_buffer->name() << ", static_cast<" << data_type
+    code_ << ", " << genReductionOp(op_type, data_type) << ", &"
+          << gen(work_buffer) << "[0]"
+          << ", " << gen(sync_buffer) << ", static_cast<" << data_type
           << "*>(shared_mem)"
           << ");\n";
   }
@@ -466,9 +474,50 @@ class CudaKernelGenerator : private OptInConstDispatch {
     endBlock();
   }
 
-  void handle(const kir::Allocate* node) final {}
+  void handle(const kir::Allocate* node) final {
+    if (node->buffer()->getValType().value() != ValType::KirTensorView) {
+      indent() << node->buffer_type() << " " << gen(node->buffer()) << ";\n";
+      return;
+    }
 
-  void handle(const kir::Sync* node) final {}
+    const auto tv = node->buffer()->as<kir::TensorView>();
+    TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
+    TORCH_INTERNAL_ASSERT(node->size() != nullptr);
+
+    switch (tv->memoryType()) {
+      case MemoryType::Global:
+        indent() << "// Allocate global tensor " << gen(tv) << "\n";
+        break;
+      case MemoryType::Shared:
+        if (node->size()->isConstScalar()) {
+          // Static shared memory
+          indent() << "__shared__ " << node->buffer_type() << " " << gen(tv)
+                   << "[" << gen(node->size()) << "];\n";
+        } else {
+          // Align Offset Position
+          indent() << "offset = alignBufferSize(offset,"
+                   << dataTypeSize(node->buffer_type()) << ");\n";
+          // Shared Memory Pointer
+          indent() << node->buffer_type() << "* " << gen(tv)
+                   << " = reinterpret_cast<" << node->buffer_type() << "*>"
+                   << "(array + offset);\n";
+          // Increment Offset Position
+          indent() << "offset += (" << gen(node->size()) << " * sizeof("
+                   << node->buffer_type() << "));\n";
+        }
+        break;
+      case MemoryType::Local:
+        indent() << node->buffer_type() << " " << gen(tv) << "["
+                 << gen(node->size()) << "];\n";
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
+    }
+  }
+
+  void handle(const kir::Sync* node) final {
+    indent() << "__syncthreads();\n";
+  }
 
  private:
   std::stringstream code_;

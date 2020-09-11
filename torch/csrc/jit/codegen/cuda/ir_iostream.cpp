@@ -396,62 +396,11 @@ void IrPrinter::handle(const kir::IfThenElse* ite) {
 }
 
 void IrPrinter::handle(const kir::Allocate* a) {
-  indent();
-  if (a->buffer()->getValType().value() == ValType::KirTensorView) {
-    const auto tv = a->buffer()->as<kir::TensorView>();
-    TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
-    TORCH_INTERNAL_ASSERT(a->size() != nullptr);
-    switch (tv->memoryType()) {
-      case MemoryType::Global:
-        os_ << "// Allocate global tensor ";
-        break;
-      case MemoryType::Shared:
-        if (a->size()->isConstScalar()) {
-          // Static Shared Memory
-          os_ << "__shared__ ";
-        }
-        break;
-      case MemoryType::Local:
-        break;
-    }
-
-    // Dynamic Shared Memory
-    if (tv->memoryType() == MemoryType::Shared &&
-        !a->size()->isConstScalar()) {
-      // Align Offset Position
-      os_ << "offset = alignBufferSize(offset,";
-      os_ << dataTypeSize(a->buffer_type());
-      os_ << ");\n";
-      // Shared Memory Pointer
-      indent();
-      os_ << a->buffer_type() << "* ";
-      os_ << "T" << tv->name();
-      os_ << " = reinterpret_cast<" << a->buffer_type() << "*>";
-      os_ << "(array + offset);\n";
-      // Increment Offset Position
-      indent();
-      os_ << "offset += (";
-      print_inline(a->size());
-      os_ << " * sizeof(";
-      os_ << a->buffer_type();
-      os_ << "));\n";
-    } else {
-      os_ << a->buffer_type();
-      os_ << " T" << tv->name() << "[";
-      print_inline(a->size());
-      os_ << "];\n";
-    }
-
-  } else {
-    os_ << a->buffer_type() << " ";
-    handle(a->buffer());
-    os_ << ";\n";
-  }
+  os_ << "kir::Allocate";
 }
 
 void IrPrinter::handle(const kir::Sync* a) {
-  indent();
-  os_ << "__syncthreads();\n";
+  os_ << "kir::Sync";
 }
 
 void IrPrinter::handle(const Split* s) {
