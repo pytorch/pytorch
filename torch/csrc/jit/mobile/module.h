@@ -1,6 +1,7 @@
 #pragma once
 //#include <ATen/core/function_schema.h>
 #include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/method.h>
 
 namespace torch {
 namespace jit {
@@ -33,11 +34,11 @@ class TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu)
       : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
   Module() = default;
-  c10::IValue run_method(const std::string& method_name, Stack stack);
+  Method get_method(const std::string& method_name) const;
   c10::IValue forward(std::vector<c10::IValue> inputs) {
-    return run_method("forward", std::move(inputs));
+    return get_method("forward")(std::move(inputs));
   }
-  Function* find_method(const std::string& basename) const;
+  c10::optional<Method> find_method(const std::string& basename) const;
   std::string name() {
     return object_->name();
   }

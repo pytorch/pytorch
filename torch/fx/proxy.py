@@ -58,10 +58,16 @@ class Proxy:
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))  # type: ignore
-        self._no_control_flow()
+        if inst.opname == 'CALL_FUNCTION_EX':
+            self._no_arg_unpack()
+        else:
+            self._no_control_flow()
 
     def _no_control_flow(self) -> NoReturn:
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
+
+    def _no_arg_unpack(self) -> NoReturn:
+        raise TraceError('Proxy object cannot be unpacked as function argument')
 
     def __bool__(self) -> NoReturn:
         self._no_control_flow()
