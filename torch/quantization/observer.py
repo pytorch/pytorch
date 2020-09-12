@@ -399,25 +399,6 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_val'] = self.min_val
-        destination[prefix + 'max_val'] = self.max_val
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-
-        local_state = ['min_val', 'max_val']
-        for name in local_state:
-            key = prefix + name
-            if key in state_dict:
-                val = state_dict[key]
-                setattr(self, name, val)
-            elif strict:
-                missing_keys.append(key)
-        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                          missing_keys, unexpected_keys, error_msgs)
-
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -648,11 +629,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_vals'] = self.min_vals
-        destination[prefix + 'max_vals'] = self.max_vals
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         local_state = ['min_vals', 'max_vals']
@@ -660,7 +636,14 @@ class PerChannelMinMaxObserver(_ObserverBase):
             key = prefix + name
             if key in state_dict:
                 val = state_dict[key]
-                setattr(self, name, val)
+                # Custom handling to allow loading min_vals or max_vals
+                # of size N into uninitialized buffers of size 0. The
+                # buffers are resized here, and the values are copied in
+                # the default state_dict loading code of the parent.
+                if name == 'min_vals':
+                    self.min_vals.resize_(val.shape)
+                else:
+                    self.max_vals.resize_(val.shape)
             elif strict:
                 missing_keys.append(key)
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,

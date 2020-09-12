@@ -50,8 +50,8 @@ function(caffe2_print_configuration_summary)
 
   message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
-  message(STATUS "  CODE_COVERAGE         : ${CODE_COVERAGE}")
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
+  message(STATUS "  USE_CPP_CODE_COVERAGE : ${USE_CPP_CODE_COVERAGE}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
     message(STATUS "    CUDA static link    : ${CAFFE2_STATIC_LINK_CUDA}")
