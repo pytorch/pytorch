@@ -330,9 +330,12 @@ def lobpcg2(A,                   # type: Tensor
     # so that `A_grad` becomes symmetric.
     # The symmetrization is important for first-order optimization method,
     # so that (A - alpha * A_grad) is still a symmetric matrix.
+    # Same holds for `B`.
     A_sym = (A + A.transpose(-2, -1)) / 2
+    B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+
     return LOBPCGAutogradFunction.apply(
-        A_sym, k, B, X, n, iK, niter, tol, largest,
+        A_sym, k, B_sym, X, n, iK, niter, tol, largest,
         method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
     )
 

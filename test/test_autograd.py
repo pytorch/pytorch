@@ -2516,7 +2516,8 @@ class TestAutograd(TestCase):
                 X = X.expand(X_shape)
 
             D, U = torch.lobpcg2(A=A, k=k, B=B, X=X, niter=-1)
-            # LOBPCG uses a random eigenspace approximation
+
+            # LOBPCG uses a random initial eigenspace approximation
             # if parameter `X` is not provided.
             # This may cause a non-deterministic behavior
             # when it comes to the sign of an eigenvector
@@ -2537,6 +2538,12 @@ class TestAutograd(TestCase):
 
             gradcheck(lambda A: func(k, A, largest), A, eps=1e-5)
             # gradgradcheck(lambda A: func(k, A), A)
+
+            # check whether A.grad is symmetric
+            A = A.detach().clone().requires_grad_(True)
+            D, U = func(k, A, largest)
+            (D.sum() + U.sum()).backward()
+            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
 
         for largest in [True, False]:
             run_symeig_test(1, (6, 6), largest=largest)
