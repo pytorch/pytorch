@@ -173,6 +173,36 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   });
 }
 
+void nan_to_num_kernel_cuda(
+    TensorIterator& iter,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  if (c10::isIntegralType(iter.dtype(), true)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "nan_to_num_cuda", [&]() {
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t { return a; });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
+      scalar_t nan_replacement = nan.value_or(0.);
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? scalar_t{pos_inf.value()}
+          : std::numeric_limits<scalar_t>::max();
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? scalar_t{neg_inf.value()}
+          : std::numeric_limits<scalar_t>::lowest();
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return std::isfinite(a)
+            ? a
+            : (::isnan(a) ? nan_replacement
+                          : (a == std::numeric_limits<scalar_t>::infinity()
+                                 ? pos_inf_replacement
+                                 : neg_inf_replacement));
+      });
+    });
+  }
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
@@ -186,6 +216,7 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 
 } // namespace native
 } // namespace at

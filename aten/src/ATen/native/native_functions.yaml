@@ -1814,6 +1814,16 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
 
+- func: nan_to_num(Tensor self, float? nan=None, float? pos_inf=None, float? neg_inf=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num_(Tensor(a!) self, float? nan=None, float? pos_inf=None, float? neg_inf=None) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num.out(Tensor self, float? nan=None, float? pos_inf=None, float? neg_inf=None, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn

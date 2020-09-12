@@ -360,6 +360,37 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   }
 }
 
+static void nan_to_num_kernel(
+    TensorIterator& iter,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  if (c10::isIntegralType(iter.dtype(), true)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "nan_to_num_cuda", [&]() {
+      cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return a; });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "nan_to_num", [&]() {
+      scalar_t nan_replacement = scalar_t{nan.value_or(0.)};
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? scalar_t{pos_inf.value()}
+          : std::numeric_limits<scalar_t>::max();
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? scalar_t{neg_inf.value()}
+          : std::numeric_limits<scalar_t>::lowest();
+
+      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return std::isfinite(a)
+            ? a
+            : (::isnan(a) ? nan_replacement
+                          : (a == std::numeric_limits<scalar_t>::infinity()
+                                 ? pos_inf_replacement
+                                 : neg_inf_replacement));
+      });
+    });
+  }
+}
+
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
@@ -615,6 +646,7 @@ REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
