@@ -635,6 +635,13 @@ def is_tuple(ann):
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann):
+    if ann is List:
+        raise RuntimeError(
+            "Attempted to use List without a "
+            "contained type. Please add a contained type, e.g. "
+            "List[int]"
+        )
+
     if not hasattr(ann, '__module__'):
         return False
     return ann.__module__ == 'typing' and \
