@@ -9,7 +9,7 @@ import sys
 import time
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from io import StringIO
@@ -22,6 +22,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -901,6 +902,52 @@ class DistributedTest:
         def test_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
+
+        @skip_if_no_gpu
+        @require_backend({"gloo", "nccl"})
+        def test_all_reduce_result_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            for src in group:
+                if rank == src:
+                    tensor = _build_tensor(src + 1, 2)
+                else:
+                    tensor = _build_tensor(src + 1, 10)
+                tensor = tensor.cuda(rank_to_GPU[rank][0])
+
+                opts = AllreduceOptions()
+                opts.reduceOp = dist.ReduceOp.SUM
+
+                if group_id == GroupMember.WORLD:
+                    work = _get_default_group().allreduce([tensor], opts)
+                else:
+                    work = group_id.allreduce([tensor], opts)
+
+
+                if BACKEND == "gloo":
+                    # Calling result right the work is finished should throw exception.
+                    # Here we have a race condition, we may not assume the work is not
+                    # finished by the time we run next lines.
+                    try:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "Work needs to be completed before calling result"):
+                            work.result()
+                    except AssertionError:
+                        # Exception was not raised, ensure is_completed()
+                        self.assertTrue(work.is_completed())
+
+                    work.wait()
+                    result = work.result()
+                else:
+                    # In case of NCCL we should be able to retrieve pointer to the result
+                    # even before work is finished.
+                    result = work.result()
+                    work.wait()
+
+                expected_value = 2 + (10 * (len(group) - 1))
+                self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
+            self._barrier()
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -2870,6 +2917,7 @@ class DistributedTest:
             model = test_case.model
             inp = test_case.inp
             rank = self.rank
+            sync_interval = test_case.sync_interval
             # Ensure all outsanding GPU work is comlete so this test runs independently.
             torch.cuda.synchronize()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
@@ -2884,17 +2932,24 @@ class DistributedTest:
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
             with net.join():
-                for _ in range(num_iters):
-                    if isinstance(inp, tuple):
-                        loss = net(*inp).sum()
+                for i in range(num_iters):
+                    # Use model.no_sync() to disable grad synchronization every
+                    # sync_interval.
+                    if i % sync_interval != 0:
+                        context = net.no_sync()
                     else:
-                        loss = net(inp).sum()
-                    loss.backward()
-                    self._model_step(net)
-                    # Ensure completion of GPU kernels (including allreduce). If the
-                    # join API is not properly implemented, then this should hang
-                    # since the allreduce will hang.
-                    torch.cuda.synchronize(device=rank)
+                        context = suppress()
+                    with context:
+                        if isinstance(inp, tuple):
+                            loss = net(*inp).sum()
+                        else:
+                            loss = net(inp).sum()
+                        loss.backward()
+                        self._model_step(net)
+                        # Ensure completion of GPU kernels (including allreduce). If the
+                        # join API is not properly implemented, then this should hang
+                        # since the allreduce will hang.
+                        torch.cuda.synchronize(device=rank)
 
             # Ensure completion of all GPU kernels.
             torch.cuda.synchronize(device=rank)
@@ -2921,6 +2976,7 @@ class DistributedTest:
                 name: str
                 model: nn.Module
                 inp: Union[torch.tensor, tuple]
+                sync_interval: int
 
             dim = 1000
             batch = 1
@@ -2960,29 +3016,36 @@ class DistributedTest:
             models_to_test = [
                 # Network with batchnorm
                 DDPUnevenTestInput(
-                    name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2, device=rank)
+                    name="batch_norm_net",
+                    model=bn_net,
+                    inp=torch.ones(batch, 2, device=rank),
+                    sync_interval=1
                 ),
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
                     inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    sync_interval=1,
                 ),
                 DDPUnevenTestInput(
                     name="small_model",
                     model=small_model,
                     inp=torch.ones(batch, dim, device=rank),
+                    sync_interval=1,
                 ),
                 # Unused parameter test where rank that does not join early has unused params
                 DDPUnevenTestInput(
                     name="unjoined_rank_with_unused_params_model",
                     model=unjoined_rank_with_unused_params_model,
                     inp=(torch.ones(batch, 2, device=rank), rank),
+                    sync_interval=1,
                 ),
                 # Unused parameter test where rank that does join early has unused params
                 DDPUnevenTestInput(
                     name="joined_rank_with_unused_params_model",
                     model=joined_rank_with_unused_params_model,
                     inp=(torch.ones(batch, 2, device=rank), rank),
+                    sync_interval=1,
                 ),
             ]
 
@@ -2994,8 +3057,23 @@ class DistributedTest:
                         name="resnet_model",
                         model=resnet_model,
                         inp=torch.ones(1, 3, 1000, 1000),
+                        sync_interval=1,
                     )
                 )
+
+            # Test with no_sync every 2, 3, 4, ... iterations.
+            models_with_sync = []
+            for i, test_input in enumerate(models_to_test):
+                models_with_sync.append(
+                    DDPUnevenTestInput(
+                        name=test_input.name,
+                        model=test_input.model,
+                        inp=test_input.inp,
+                        sync_interval=i + 2,
+                    )
+                )
+
+            models_to_test.extend(models_with_sync)
 
             # 0 iteration tests for when one process does not train model at all, so
             # we must shadow the broadcast calls made when rebuilding buckets.
@@ -3037,7 +3115,9 @@ class DistributedTest:
             ):
                 if self.rank == 0:
                     print(
-                        f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
+                        f"""Running test: {test_case.name} sync interval
+                        {test_case.sync_interval} with iteration mapping
+                        {iteration_mapping}"""
                     )
                 self._run_uneven_inputs_test(
                     test_case,
