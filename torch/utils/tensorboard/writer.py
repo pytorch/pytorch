@@ -830,7 +830,7 @@ class SummaryWriter(object):
             metadata, label_img, fs, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
-        from google.protobuf import text_format
+        from google.protobuf import text_format  # type: ignore
         config_pbtxt = text_format.MessageToString(self._projector_config)
         write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
 

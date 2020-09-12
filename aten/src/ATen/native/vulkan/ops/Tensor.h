@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class vTensor final {
+class C10_EXPORT vTensor final {
  public:
   vTensor();
   vTensor(
@@ -73,24 +73,41 @@ class vTensor final {
     Access
   */
 
-  struct Access final {
-    typedef uint8_t Flags;
-
-    enum Type : Flags {
-      Read = 1u << 0u,
-      Write = 1u << 1u,
-    };
-  };
+  typedef api::Resource::Memory::Access Access;
 
   /*
     Future
   */
 
-  class Future final {
+  template<
+      typename Pointer,
+      typename Enable = void>
+  class Future;
+
+  template<typename Pointer>
+  class Future<
+      Pointer,
+      details::is_pointer<Pointer>> final {
    public:
+    explicit Future(const vTensor* tensor);
+    Future(const Future&) = delete;
+    Future& operator=(const Future&) = delete;
+    Future(Future&&);
+    Future& operator=(Future&&);
+    template<typename T, typename = details::is_convertible<T, Pointer>>
+    Future(Future<T>&&);
+    template<typename T, typename = details::is_convertible<T, Pointer>>
+    Future& operator=(Future<T>&&);
+    ~Future();
+
+    api::Resource::Memory::Data<Pointer> wait();
 
    private:
-    VkFence fence_;
+    template<typename P, typename E>
+    friend class Future;
+
+   private:
+    const vTensor* tensor_;
   };
 
   /*
@@ -99,13 +116,14 @@ class vTensor final {
 
   template<
       typename Type,
-      typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
-  api::Resource::Memory::Data<Pointer> host() const;
+      typename Pointer = Access::Pointer<Type, Access::Read>>
+  Future<Pointer> host() const;
 
   template<
       typename Type,
-      typename Pointer = std::add_pointer_t<Type>>
-  api::Resource::Memory::Data<Pointer> host(Access::Flags access);
+      Access::Flags kAccess,
+      typename Pointer = Access::Pointer<Type, kAccess>>
+  Future<Pointer> host();
 
   /*
     Device access - these functions can be expensive.
@@ -139,13 +157,66 @@ void verify(const TensorOptions& options);
 // Impl
 //
 
-template<typename Type, typename Pointer>
-api::Resource::Memory::Data<Pointer> vTensor::host() const {
+template<typename Pointer>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::Future(
+    const vTensor* const tensor)
+  : tensor_(tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      tensor_,
+      "Invalid Vulkan tensor!");
 }
 
-template<typename Type, typename Pointer>
-api::Resource::Memory::Data<Pointer> vTensor::host(
-    const Access::Flags access) {
+template<typename Pointer>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::Future(
+    Future&& future)
+  : tensor_(std::move(future.tensor_)) {
+  future.tensor_ = nullptr;
+}
+
+template<typename Pointer>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>&
+vTensor::Future<Pointer, details::is_pointer<Pointer>>::operator=(
+    Future&& future) {
+  tensor_ = std::move(future.tensor_);
+  future.tensor_ = nullptr;
+  return *this;
+}
+
+template<typename Pointer>
+template<typename T, typename>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::Future(
+    Future<T>&& future)
+  : tensor_(std::move(future.tensor_)) {
+  future.tensor_ = nullptr;
+}
+
+template<typename Pointer>
+template<typename T, typename>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>&
+vTensor::Future<Pointer, details::is_pointer<Pointer>>::operator=(
+    Future<T>&& future) {
+  tensor_ = std::move(future.tensor_);
+  future.tensor_ = nullptr;
+  return *this;
+}
+
+template<typename Pointer>
+inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::~Future() {
+  if (tensor_) {
+    // tensor->upload_eagerly();
+  }
+}
+
+template<typename, typename Pointer>
+inline vTensor::Future<Pointer> vTensor::host() const {
+  Future<void*> host(const vTensor*, Access::Flags);
+  return host(this, Access::Read);
+}
+
+template<typename, vTensor::Access::Flags kAccess, typename Pointer>
+inline vTensor::Future<Pointer> vTensor::host() {
+  Future<void*> host(const vTensor*, Access::Flags);
+  return host(this, kAccess);
 }
 
 } // namespace ops
