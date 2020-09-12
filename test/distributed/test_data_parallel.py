@@ -796,7 +796,7 @@ class TestDataParallel(TestCase):
                 r"nn\.ParameterList is being used with DataParallel but this"):
             model(input)
 
-        module = MyMod(torch.nn.ParameterDict({0: p1, 1: p2})).cuda()
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
