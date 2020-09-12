@@ -15,6 +15,8 @@ from torch.quantization import (
     fuse_fx,
     prepare_fx,
     convert_fx,
+    prepare_static_fx,
+    convert_static_fx,
     quantize_static_fx,
     quantize_dynamic_fx,
 )
@@ -243,6 +245,27 @@ class TestQuantizeFx(QuantizationTestCase):
         non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
         inplace_res = inplace_model(self.img_data_2d[0][0])
         self.assertEqual(non_inplace_res, inplace_res)
+
+    @skipIfNoFBGEMM
+    def test_dict_output(self):
+        """ Make sure quantization runs for models with dictionary output
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return {"output": self.conv(x["input"])}
+
+        dict_input = {"input": torch.randn(1, 1, 1, 1)}
+        m = symbolic_trace(M()).eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_static_fx(m, qconfig_dict)
+        m(dict_input)
+        m = convert_static_fx(m)
+        m(dict_input)
+
 
 
 class TestQuantizeFxOps(QuantizationTestCase):

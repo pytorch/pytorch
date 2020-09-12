@@ -1,10 +1,11 @@
 import time
 import io
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.futures import Future
 from torch import Tensor
 from torch.autograd.profiler import record_function
 from torch.distributed.rpc import RRef
@@ -134,7 +135,6 @@ def no_arg():
 def one_arg(value):
     return value + 1
 
-
 @torch.jit.script
 def script_add_ones(x):
     return torch.add(x, torch.ones(1))
@@ -143,6 +143,16 @@ def script_add_ones(x):
 def script_add_ones_with_record_function(x, block: str):
     with record_function(block):
         return torch.add(x, torch.ones(1))
+
+
+@torch.jit.script
+def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Future[Any]:
+    t: Tensor = torch.ones(1)
+    with record_function(block) as rf:
+        fut = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
+        fut = rf._call_end_callbacks_on_future(fut)
+    return fut
+
 
 
 @torch.jit.script
@@ -1126,6 +1136,40 @@ class JitRpcTest(
             ][0]
             remote_add_profiled_name = f"{profiled_name}#remote_op: aten::add"
             self.assertEqual(remote_add.name, remote_add_profiled_name)
+
+    @dist_init
+    def test_record_function_on_caller_rpc_async(self):
+        if self.rank == 0:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker_name = worker_name(dst_rank)
+            block_scope = "foo"
+            with torch.autograd.profiler.profile() as prof:
+                fut = record_function_on_caller_rpc_async(dst_worker_name, block_scope)
+                fut.wait()
+
+            # Ensure record_function event is profiled.
+            function_events = prof.function_events
+            record_function_scope_event = [
+                event for event in function_events if event.name == block_scope
+            ]
+            self.assertEqual(1, len(record_function_scope_event))
+            record_function_scope_event = record_function_scope_event[0]
+            # Ensure RPC future is profiled.
+            expected_key = _build_rpc_profiling_key(
+                RPCExecMode.ASYNC_JIT,
+                torch._jit_internal._qualified_name(script_add_ones),
+                worker_name(self.rank),
+                dst_worker_name,
+            )
+            jit_rpc_event = [
+                event for event in function_events if event.name == expected_key
+            ]
+            self.assertEqual(1, len(jit_rpc_event))
+            jit_rpc_event = jit_rpc_event[0]
+            self.assertTrue(
+                record_function_scope_event.cpu_time_total
+                > jit_rpc_event.cpu_time_total
+            )
 
     @dist_init
     def test_rpc_torchscript_record_function(self):
