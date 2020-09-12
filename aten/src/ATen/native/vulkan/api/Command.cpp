@@ -102,6 +102,13 @@ void Command::Buffer::bind(
 void Command::Buffer::dispatch() {
 }
 
+Command::Pool::Pool(const GPU& gpu)
+  : cache(Factory(gpu)),
+    primary(
+        gpu.device,
+        cache.retrieve({gpu.adapter->compute_queue_family_index})) {
+}
+
 Command::Pool::Factory::Factory(const GPU& gpu)
   : device_(gpu.device) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

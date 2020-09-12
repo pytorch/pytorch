@@ -88,12 +88,7 @@ struct Command final {
       VkCommandPool command_pool_;
     } primary /* [thread_count] */;
 
-    explicit Pool(const GPU& gpu)
-      : cache(Factory(gpu)),
-        primary(
-            gpu.device,
-            cache.retrieve({gpu.adapter->compute_queue_family_index})) {
-    }
+    explicit Pool(const GPU& gpu);
   } pool;
 
   explicit Command(const GPU& gpu)
