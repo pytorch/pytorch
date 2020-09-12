@@ -2,7 +2,7 @@ import torch
 import unittest
 import math
 from contextlib import contextmanager
-from itertools import product, chain
+from itertools import product
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
@@ -53,8 +53,8 @@ class TestFFT(TestCase):
         norm_modes = ((None, "forward", "backward", "ortho")
                       if LooseVersion(np.__version__) >= '1.20.0'
                       else (None, "ortho"))
-        test_args = list(chain(
-            product(
+        test_args = [
+            *product(
                 # input
                 (torch.randn(67, device=device, dtype=dtype),
                  torch.randn(80, device=device, dtype=dtype),
@@ -68,12 +68,13 @@ class TestFFT(TestCase):
                 norm_modes
             ),
             # Test transforming middle dimensions of multi-dim tensor
-            product(
+            *product(
                 (torch.randn(4, 5, 6, 7, device=device, dtype=dtype),),
                 (None,),
                 (1, 2, -2,),
                 norm_modes
-            )))
+            )
+        ]
 
 
         fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
@@ -115,7 +116,7 @@ class TestFFT(TestCase):
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
         # Test that round trip through ifft(fft(x)) is the identity
-        test_args = product(
+        test_args = list(product(
             # input
             (torch.randn(67, device=device, dtype=dtype),
              torch.randn(80, device=device, dtype=dtype),
@@ -125,7 +126,7 @@ class TestFFT(TestCase):
             (-1, 0),
             # norm
             (None, "forward", "backward", "ortho")
-        )
+        ))
 
         fft_functions = [(torch.fft.fft, torch.fft.ifft)]
         # Real-only functions
@@ -232,7 +233,7 @@ class TestFFT(TestCase):
     @skipCUDAIfRocm
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double
     def test_fft_backward(self, device, dtype):
-        test_args = product(
+        test_args = list(product(
             # input
             (torch.randn(67, device=device, dtype=dtype),
              torch.randn(9, 6, 3, device=device, dtype=dtype)),
@@ -242,7 +243,7 @@ class TestFFT(TestCase):
             (-1, 0),
             # norm
             (None, "forward", "backward", "ortho")
-        )
+        ))
 
         fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
         # Real-only functions
@@ -254,11 +255,17 @@ class TestFFT(TestCase):
 
             for iargs in test_args:
                 args = list(iargs)
-                input = args[0].clone().detach_().requires_grad_()
+                input = args[0]
                 args = args[1:]
 
-                self.assertTrue(torch.autograd.gradcheck(
-                    lambda x: torch_fn(x, *args), (input,)))
+                if dtype.is_complex:
+                    test_fn = lambda x: torch_fn(torch.view_as_complex(x), *args)
+                    input = torch.view_as_real(input).detach().requires_grad_()
+                else:
+                    test_fn = lambda x: torch_fn(x, *args)
+                    input = input.detach().requires_grad_()
+
+                self.assertTrue(torch.autograd.gradcheck(test_fn, (input,)))
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
