@@ -23,6 +23,7 @@ class TestWith(JitTestCase):
     """
     A suite of tests for with statements.
     """
+
     def test_with_as(self):
         """
         Check that with statements that use the 'as' keyword to bind expressions
