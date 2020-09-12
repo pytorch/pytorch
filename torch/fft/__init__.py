@@ -27,14 +27,17 @@ Args:
     n (int, optional): Signal length. If given, the input will either be zero-padded
         or trimmed to this length before computing the FFT.
     dim (int, optional): The dimension along which to take the one dimensional FFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.fft` and :func:`~torch.fft.ifft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.fft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the FFT orthonormal)
+
+        Calling the backward transform (:func:`~torch.fft.ifft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ifft`
+        the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -62,14 +65,17 @@ Args:
     n (int, optional): Signal length. If given, the input will either be zero-padded
         or trimmed to this length before computing the IFFT.
     dim (int, optional): The dimension along which to take the one dimensional IFFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.fft` and :func:`~torch.fft.ifft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.ifft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the IFFT orthonormal)
+
+        Calling the forward transform (:func:`~torch.fft.fft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ifft`
+        the exact inverse.
 
         Default is ``"backward"`` (normalize by ``1/n``).
 
@@ -103,14 +109,18 @@ Args:
         before computing the FFT.
     dim (Tuple[int], optional): Dimensions to be Fourier transformed.
         Default: all dimensions.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.fftn` and :func:`~torch.fft.ifftn`) a total
-        normalization factor of ``1/n`` is applied, where ``n = prod(s)``.
-        The mode determines where this normalization is applied:
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.fftn`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the FFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical FFT size.
+        Calling the backward transform (:func:`~torch.fft.ifftn`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ifftn`
+        the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -140,14 +150,18 @@ Args:
         before computing the IFFT.
     dim (Tuple[int], optional): Dimensions to be inverse Fourier transformed.
         Default: all dimensions.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.fftn` and :func:`~torch.fft.ifftn`) a total
-        normalization factor of ``1/n`` is applied, where ``n = prod(s)``.
-        The mode determines where this normalization is applied:
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.ifftn`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the IFFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical IFFT size.
+        Calling the forward transform (:func:`~torch.fft.fftn`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ifftn`
+        the exact inverse.
 
         Default is ``"backward"`` (normalize by ``1/n``).
 
@@ -179,14 +193,17 @@ Args:
     n (int, optional): Signal length. If given, the input will either be zero-padded
         or trimmed to this length before computing the real FFT.
     dim (int, optional): The dimension along which to take the one dimensional real FFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.rfft` and :func:`~torch.fft.irfft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.rfft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the FFT orthonormal)
+
+        Calling the backward transform (:func:`~torch.fft.irfft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfft`
+        the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -216,11 +233,13 @@ Computes the inverse of :func:`~torch.fft.rfft`.
 
 :attr:`input` is interpreted as a one-sided Hermitian signal in the Fourier
 domain, as produced by :func:`~torch.fft.rfft`. By the Hermitian property, the
-time-domain signal will be real-valued.
+output will be real-valued.
 
 Note:
     Some input frequencies must be real-valued to satisfy the Hermitian
     property. In these cases the imaginary component will be ignored.
+    For example, any imaginary component in the zero-frequency term cannot
+    be represented in a real output and so will always be ignored.
 
 Note:
     The correct interpretation of the Hermitian input depends on the length of
@@ -236,14 +255,17 @@ Args:
         length before computing the real IFFT.
         Defaults to even output: ``n=2*(input.size(dim) - 1)``.
     dim (int, optional): The dimension along which to take the one dimensional real IFFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.rfft` and :func:`~torch.fft.irfft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.irfft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real IFFT orthonormal)
+
+        Calling the forward transform (:func:`~torch.fft.rfft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfft`
+        the exact inverse.
 
         Default is ``"backward"`` (normalize by ``1/n``).
 
@@ -287,14 +309,18 @@ Args:
         before computing the real FFT.
     dim (Tuple[int], optional): Dimensions to be Fourier transformed.
         Default: all dimensions.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.rfftn` and :func:`~torch.fft.irfftn`) a
-        total normalization factor of ``1/n`` is applied, where ``n = prod(s)``.
-        The mode determines where this normalization is applied:
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.rfftn`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real FFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical FFT size.
+        Calling the backward transform (:func:`~torch.fft.irfftn`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfftn`
+        the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -329,11 +355,13 @@ Computes the inverse of :func:`~torch.fft.rfftn`.
 
 :attr:`input` is interpreted as a one-sided Hermitian signal in the Fourier
 domain, as produced by :func:`~torch.fft.rfftn`. By the Hermitian property, the
-time-domain signal will be real-valued.
+output will be real-valued.
 
 Note:
     Some input frequencies must be real-valued to satisfy the Hermitian
     property. In these cases the imaginary component will be ignored.
+    For example, any imaginary component in the zero-frequency term cannot
+    be represented in a real output and so will always be ignored.
 
 Note:
     The correct interpretation of the Hermitian input depends on the length of
@@ -352,14 +380,18 @@ Args:
     dim (Tuple[int], optional): Dimensions to be inverse Fourier transformed.
         The last dimension must be the half-Hermitian compressed dimension.
         Default: all dimensions.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.rfftn` and :func:`~torch.fft.irfftn`) a
-        total normalization factor of ``1/n`` is applied, where ``n = prod(s)``.
-        The mode determines where this normalization is applied:
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.irfftn`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real IFFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical IFFT size.
+        Calling the forward transform (:func:`~torch.fft.fftn`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfftn`
+        the exact inverse.
 
         Default is ``"backward"`` (normalize by ``1/n``).
 
@@ -403,10 +435,12 @@ Note:
     same way as with :func:`~torch.fft.irfft`.
 
 Note:
-    Because the signal is Hermitian in the time-domain, the result will be real
-    in the frequency domain. Note that some input frequencies must be
+    Because the signal is Hermitian in the time-domain, the result will be
+    real in the frequency domain. Note that some input frequencies must be
     real-valued to satisfy the Hermitian property. In these cases the imaginary
-    component will be ignored.
+    component will be ignored. For example, any imaginary component in
+    ``input[0]`` would result in one or more complex frequency terms which
+    cannot be represented in a real output and so will always be ignored.
 
 Note:
     The correct interpretation of the Hermitian input depends on the length of
@@ -422,14 +456,17 @@ Args:
         length before computing the Hermitian FFT.
         Defaults to even output: ``n=2*(input.size(dim) - 1)``.
     dim (int, optional): The dimension along which to take the one dimensional Hermitian FFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.hfft` and :func:`~torch.fft.ihfft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.hfft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the Hermitian FFT orthonormal)
+
+        Calling the backward transform (:func:`~torch.fft.ihfft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ihfft`
+        the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -477,14 +514,17 @@ Args:
     n (int, optional): Signal length. If given, the input will either be zero-padded
         or trimmed to this length before computing the Hermitian IFFT.
     dim (int, optional): The dimension along which to take the one dimensional Hermitian IFFT.
-    norm (str, optional): Normalization mode. Between the forward and backward
-        transforms (:func:`~torch.fft.hfft` and :func:`~torch.fft.ihfft`) a total
-        normalization factor of ``1/n`` is applied. The mode determines where
-        this normalization is applied:
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.ihfft`), these correspond to:
 
-        * ``"forward"`` - the forward transform is normalized by ``1/n``, backward is unnormalized.
-        * ``"backward"`` - the backward transform is normalized by ``1/n``, forward is unnormalized.
-        * ``"ortho"`` - both transforms are normalized by ``1/sqrt(n)`` (making it orthonormal).
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the IFFT orthonormal)
+
+        Calling the forward transform (:func:`~torch.fft.hfft`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ihfft`
+        the exact inverse.
 
         Default is ``"backward"`` (normalize by ``1/n``).
 
