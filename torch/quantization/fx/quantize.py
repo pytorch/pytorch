@@ -467,9 +467,12 @@ class Quantizer:
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
                     if observer_module.dtype == torch.float16:
-                        # since all activations are not quantized for
+                        # activations are not quantized for
                         # fp16 dynamic quantization
-                        # env[node.name] = env[prev_node.name]
+                        # copy the activaiton_post_process node here
+                        # since we may need it when we insert prepack
+                        # op for weight of linear, this will be removed
+                        # later in a separate pass
                         env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
                         continue
                     if prev_node.name in quant_env:
@@ -487,7 +490,7 @@ class Quantizer:
         self.quantized_graph.output(map_arg(model.graph.result, load_non_quantized))
 
         # remove activation post process
-        act_post_process_removed = Graph()
+        act_post_process_removed_graph = Graph()
         env = {}
 
         def load_arg(a):
@@ -498,11 +501,8 @@ class Quantizer:
                     # remove activation post process
                     env[node.name] = env[node.args[0].name]
             else:
-                env[node.name] = act_post_process_removed.node_copy(node, load_arg)
-        act_post_process_removed.output(map_arg(self.quantized_graph.result, load_arg))
-
-        self.quantized_graph = act_post_process_removed
-
+                env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
+        act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
         to_be_removed = []
         for name, _ in model.named_modules():
@@ -511,7 +511,7 @@ class Quantizer:
         for n in to_be_removed:
             delattr(model, n)
         _remove_qconfig(model)
-        model = GraphModule(model, self.quantized_graph)
+        model = GraphModule(model, act_post_process_removed_graph)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the graph module

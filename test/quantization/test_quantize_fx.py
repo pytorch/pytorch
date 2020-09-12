@@ -181,6 +181,7 @@ class TestQuantizeFx(QuantizationTestCase):
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
 
+    @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
         class Linear(torch.nn.Module):
             def __init__(self, weight):
