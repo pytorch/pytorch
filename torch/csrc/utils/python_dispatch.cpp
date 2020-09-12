@@ -31,6 +31,7 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"cuda", c10::DispatchKey::CUDA},
     {"xla", c10::DispatchKey::XLA},
     {"autograd", c10::DispatchKey::Autograd},
+    {"autogradcpu", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);
@@ -156,6 +157,15 @@ void initDispatchBindings(PyObject* module) {
       return "";
     } else {
       return op->dumpState();
+    }
+  });
+
+  m.def("_dispatch_dump_table", [](const char* name) -> std::string {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    if (!op) {
+      return "";
+    } else {
+      return op->dumpComputedTable();
     }
   });
 

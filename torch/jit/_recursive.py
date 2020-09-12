@@ -4,6 +4,7 @@ import collections
 import textwrap
 import functools
 import warnings
+from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_def
@@ -74,7 +75,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
-def infer_concrete_type_builder(nn_module):
+def infer_concrete_type_builder(nn_module, share_types=True):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
     ConcreteModuleType doesn't have a JIT type associated with it yet, it
@@ -135,7 +136,7 @@ def infer_concrete_type_builder(nn_module):
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
-            sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
+            sub_concrete_type = get_module_concrete_type(item, share_types)
         concrete_type_builder.add_module(name, sub_concrete_type)
 
         added_names.add(name)
@@ -250,6 +251,9 @@ def infer_concrete_type_builder(nn_module):
     return concrete_type_builder
 
 class ConcreteTypeStore(object):
+    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
+    methods_compiled: Set[torch._C.ConcreteModuleType]
+
     def __init__(self):
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
@@ -261,11 +265,6 @@ class ConcreteTypeStore(object):
         Infer a ConcreteType from this `nn.Module` instance. Underlying JIT
         types are re-used if possible.
         """
-        assert isinstance(nn_module, Module)
-        if isinstance(nn_module, torch.jit.ScriptModule) and \
-                hasattr(nn_module, "_concrete_type"):
-            return nn_module._concrete_type
-
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -291,6 +290,36 @@ def create_methods_from_stubs(concrete_type, stubs):
     defaults = [get_default_args(m.original_method) for m in stubs]
     concrete_type._create_methods(defs, rcbs, defaults)
 
+def get_module_concrete_type(nn_module, share_types=True):
+    """
+    Gets a concrete type for nn_modules. If share_types is True, the concrete
+    type is fetched from concrete_type_store. If it is False, a new concrete type
+    is created without first searching concrete_type_store.
+
+    Arguments:
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
+        share_types = Whether to share underlying JIT types between modules (if possible).
+
+    Returns:
+        A concrete type for nn_module.
+    """
+    assert isinstance(nn_module, Module)
+    if isinstance(nn_module, torch.jit.ScriptModule) and \
+            hasattr(nn_module, "_concrete_type"):
+        return nn_module._concrete_type
+
+    if share_types:
+        # Look into the store of cached JIT types
+        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
+    else:
+        # Get a concrete type directly, without trying to re-use an existing JIT
+        # type from the type store.
+        concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
+        concrete_type_builder.set_poisoned()
+        concrete_type = concrete_type_builder.build()
+
+    return concrete_type
+
 def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
@@ -305,15 +334,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
-    if share_types:
-        # Look into the store of cached JIT types
-        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
-    else:
-        # Get a concrete type directly, without trying to re-use an existing JIT
-        # type from the type store.
-        concrete_type_builder = infer_concrete_type_builder(nn_module)
-        concrete_type_builder.set_poisoned()
-        concrete_type = concrete_type_builder.build()
+    concrete_type = get_module_concrete_type(nn_module, share_types)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -407,12 +428,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
-        script_method = functools.wraps(stub.original_method)(script_method)
+        wrapped_script_method = functools.wraps(stub.original_method)(script_method)  # type: ignore
 
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
-        script_module.__dict__[name] = script_method
+        script_module.__dict__[name] = wrapped_script_method
 
 
     # copy over python methods to script module if they aren't defined on the script module
@@ -464,7 +485,7 @@ def get_overload_annotations(mod):
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
-    overload_name_mappings = {}
+    overload_name_mappings: Dict[str, List[str]] = {}
     for orig_fn, overloads in overload_info.items():
         original_name = orig_fn.__name__
         if original_name not in overload_name_mappings:
@@ -505,7 +526,7 @@ def infer_methods_to_compile(nn_module):
     """
     check_module_initialized(nn_module)
 
-    methods = []
+    methods: List[str] = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
         module_forward = get_function_from_type(torch.nn.Module, "forward")
@@ -535,7 +556,7 @@ def infer_methods_to_compile(nn_module):
 
     # Unique the methods. We don't want to use a set to store the methods because it
     # introduces non-determinism to compile order.
-    uniquer = set()
+    uniquer: Set[str] = set()
     uniqued_methods = []
     for name in filtered_methods:
         if name in uniquer:
@@ -642,7 +663,7 @@ def lazy_bind(concrete_type, unbound_method):
         return method(*args)
 
     # make the lazy binding method "look like" the original method
-    lazy_binding_method.original_fn = unbound_method
+    lazy_binding_method.original_fn = unbound_method  # type: ignore
     lazy_binding_method.__name__ = unbound_method.__name__
     torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
 
