@@ -320,6 +320,7 @@ C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+C10_API DispatchKey getBackendKeyFromAutograd(DispatchKey t);
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
