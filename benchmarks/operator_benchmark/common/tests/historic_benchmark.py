@@ -222,9 +222,9 @@ def parse_output():
         assert all(i["metric"] == "latency" for i in r)
         key = (t.num_cores, t.device, run_type)
         times = tuple(float(ri["value"]) * {"ms": 1e-3}[ri["unit"]] for ri in r)
-        structured_results.append((key, times))
+        parsed_results.append((key, times))
 
-    return structured_results
+    return parsed_results
 
 
 def run():
