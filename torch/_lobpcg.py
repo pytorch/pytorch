@@ -328,7 +328,7 @@ def lobpcg2(A,                   # type: Tensor
     # While it is expected that `A` is symmetric,
     # the `A_grad` might be not. Therefore we perform the trick below,
     # so that `A_grad` becomes symmetric.
-    # The symmetrization is important for first-order optimization method,
+    # The symmetrization is important for first-order optimization methods,
     # so that (A - alpha * A_grad) is still a symmetric matrix.
     # Same holds for `B`.
     A_sym = (A + A.transpose(-2, -1)) / 2
