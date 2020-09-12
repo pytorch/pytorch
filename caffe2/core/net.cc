@@ -97,6 +97,12 @@ bool NetBase::RunAsync() {
   return DoRunAsync();
 }
 
+void NetBase::Cancel() {
+  for (auto& op : GetOperators()) {
+    op->Cancel();
+  }
+}
+
 namespace {
 const std::string kSimpleNet = "simple";
 

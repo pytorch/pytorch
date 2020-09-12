@@ -2597,15 +2597,9 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
                       stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = _smooth_l1_loss(input, target)
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-    return ret
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
@@ -2629,15 +2623,10 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
                       stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = torch.abs(input - target)
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-    return ret
+
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
@@ -2661,15 +2650,9 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
                       stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = (input - target) ** 2
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-    return ret
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
@@ -3075,90 +3058,98 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                           "See the documentation of nn.Upsample for details.".format(mode))
             align_corners = False
 
-    scale_factor_len = input.dim() - 2
-    scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
-    # default value of recompute_scale_factor is False
-    if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
-        if isinstance(scale_factor, (list, tuple)):
-            _scale_factor_repeated = scale_factor
-        else:
-            _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
-        scale_factor_list = torch.jit.annotate(List[Optional[float]], [elem for elem in _scale_factor_repeated])  # noqa: C416
+    dim = input.dim() - 2  # Number of spatial dimensions.
 
-    # Give this variable a short name because it has to be repeated multiple times below.
-    sfl = scale_factor_list
-
-    dim = input.dim() - 2
-    if size is None and scale_factor is None:
-        raise ValueError('either size or scale_factor should be defined')
+    # Process size and scale_factor.  Validate that exactly one is set.
+    # Validate its length if it is a list, or expand it if it is a scalar.
+    # After this block, exactly one of output_size and scale_factors will
+    # be non-None, and it will be a list (or tuple).
     if size is not None and scale_factor is not None:
         raise ValueError('only one of size or scale_factor should be defined')
-    if scale_factor is not None:
+    elif size is not None:
+        assert scale_factor is None
+        scale_factors = None
+        if isinstance(size, (list, tuple)):
+            if len(size) != dim:
+                raise ValueError('size shape must match input shape. '
+                                 'Input is {}D, size is {}'.format(dim, len(size)))
+            output_size = size
+        else:
+            output_size = [size for _ in range(dim)]
+    elif scale_factor is not None:
+        assert size is None
+        output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
                 raise ValueError('scale_factor shape must match input shape. '
-                                 'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-
-    if size is not None:
-        if isinstance(size, (list, tuple)):
-            output_size = size
-        else:
-            output_size = [size for i in range(dim)]
-    else:
-        assert scale_factor is not None
-        if isinstance(scale_factor, (list, tuple)):
+                                 'Input is {}D, scale_factor is {}'.format(dim, len(scale_factor)))
             scale_factors = scale_factor
         else:
             scale_factors = [scale_factor for _ in range(dim)]
+    else:
+        raise ValueError('either size or scale_factor should be defined')
 
-        if recompute_scale_factor is None:
-            # only warn when the scales have floating values since
-            # the result for ints is the same with/without recompute_scale_factor
-
-            is_float_scale_factor = False
+    if recompute_scale_factor is None:
+        # only warn when the scales have floating values since
+        # the result for ints is the same with/without recompute_scale_factor
+        if scale_factors is not None:
             for scale in scale_factors:
-                is_float_scale_factor = math.floor(scale) != scale
-                if is_float_scale_factor:
+                if math.floor(scale) != scale:
+                    warnings.warn("The default behavior for interpolate/upsample with float scale_factor changed "
+                                  "in 1.6.0 to align with other frameworks/libraries, and now uses scale_factor directly, "
+                                  "instead of relying on the computed output size. "
+                                  "If you wish to restore the old behavior, please set recompute_scale_factor=True. "
+                                  "See the documentation of nn.Upsample for details. ")
                     break
+    elif recompute_scale_factor and size is not None:
+        raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
 
-            if is_float_scale_factor:
-                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                              "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-                              "See the documentation of nn.Upsample for details. ")
+    # "area" mode always requires an explicit size rather than scale factor.
+    # Re-use the recompute_scale_factor code path.
+    if mode == "area" and output_size is None:
+        recompute_scale_factor = True
 
+    if recompute_scale_factor is not None and recompute_scale_factor:
+        # We compute output_size here, then un-set scale_factors.
+        # The C++ code will recompute it based on the (integer) output size.
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
                            dtype=torch.float32)).float())) for i in range(dim)]
         else:
+            assert scale_factors is not None
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+        scale_factors = None
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, output_size, sfl[0])
+        return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, output_size, sfl[0], sfl[1])
+        return torch._C._nn.upsample_nearest2d(input, output_size, scale_factors)
     if input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, output_size, sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
+
     if input.dim() == 3 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == 'area':
+        assert output_size is not None
         return adaptive_avg_pool3d(input, output_size)
+
     if input.dim() == 3 and mode == 'linear':
         assert align_corners is not None
-        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, sfl[0])
+        return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, sfl[0], sfl[1])
+        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == 'trilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, sfl[0], sfl[1], sfl[2])
+        return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
-        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, sfl[0], sfl[1])
+        return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
@@ -3830,27 +3821,177 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
-    """
-    Arguments
-        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
-        :param padding: (tuple): m-elem tuple where m is the degree of convolution
-    Returns
-        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
-                 H + 2 * padding[1]], W + 2 * padding[2]))`
-    """
+    """Circularly pads tensor.
 
-    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
-    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+    Tensor values at the beginning are used to pad the end, and values at the
+    end are used to pad the beginning. For example, consider a single dimension
+    with values [0, 1, 2, 3]. With circular padding of (1, 1) it would be
+    padded to [3, 0, 1, 2, 3, 0], and with padding (1, 2) it would be padded to
+    [3, 0, 1, 2, 3, 0, 1]. If negative padding is applied then the ends of the
+    tensor get removed. With circular padding of (-1, -1) the previous example
+    would become [1, 2]. Circular padding of (-1, 1) would produce
+    [1, 2, 3, 1].
 
+    The first and second dimensions of the tensor are not padded.
+
+    Args:
+        input: Tensor with shape :math:`(N, C, D[, H, W])`.
+        padding: Tuple containing the number of elements to pad each side of
+            the tensor. The length of padding must be twice the number of
+            paddable dimensions. For example, the length of padding should be 4
+            for a tensor of shape :math:`(N, C, H, W)`, and the length should
+            be 6 for a tensor of shape :math:`(N, C, D, H, W)`.
+
+    Examples::
+
+        >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
+        >>> # Example 1
+        >>> padding = (1, 1, 1, 1)
+        >>> y = F.pad(x, padding, mode='circular')
+        >>> print(y)
+        tensor([[[[5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0]]]])
+        >>> print(y.shape)
+        torch.Size([1, 1, 4, 5])
+        >>> # Example 2
+        >>> padding = (1, 1, 2, 2)
+        >>> z = F.pad(x, padding, mode='circular')
+        >>> print(z)
+        tensor([[[[2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3]]]])
+        >>> print(z.shape)
+        torch.Size([1, 1, 6, 5])
+    """
+    in_shape = input.shape
+    paddable_shape = in_shape[2:]
+    ndim = len(paddable_shape)
+
+    for idx, size in enumerate(paddable_shape):
+        # Only supports wrapping around once
+        assert padding[-(idx * 2 + 1)] <= size, \
+            "Padding value causes wrapping around more than once."
+        assert padding[-(idx * 2 + 2)] <= size, \
+            "Padding value causes wrapping around more than once."
+        # Negative padding should not result in negative sizes
+        assert padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size >= 0, \
+            "Negative padding value is resulting in an empty dimension."
+
+    # Get shape of padded tensor
+    out_shape = in_shape[:2]
+    for idx, size in enumerate(paddable_shape):
+        out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
+
+    out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout,
+                      device=input.device)
+
+    # Put original array in padded array
+    if ndim == 1:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
+    elif ndim == 2:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1]
+    elif ndim == 3:
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        out_w0 = max(padding[-6], 0)
+        out_w1 = out_shape[4] - max(padding[-5], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        in_w0 = max(-padding[-6], 0)
+        in_w1 = in_shape[4] - max(-padding[-5], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
+
+    # The following steps first pad the beginning of the tensor (left side),
+    # and then pad the end of the tensor (right side).
+    # Note: Corners will be written more than once when ndim > 1.
+
+    # Only in cases where padding values are > 0 are when additional copying
+    # is required.
+
+    # Pad first dimension (depth)
+    if padding[-2] > 0:
+        i0 = out_shape[2] - padding[-2] - max(padding[-1], 0)
+        i1 = out_shape[2] - max(padding[-1], 0)
+        o0 = 0
+        o1 = padding[-2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
+    if padding[-1] > 0:
+        i0 = max(padding[-2], 0)
+        i1 = max(padding[-2], 0) + padding[-1]
+        o0 = out_shape[2] - padding[-1]
+        o1 = out_shape[2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
+
+    # Pad second dimension (height)
     if len(padding) > 2:
-        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
-        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+        if padding[-4] > 0:
+            i0 = out_shape[3] - padding[-4] - max(padding[-3], 0)
+            i1 = out_shape[3] - max(padding[-3], 0)
+            o0 = 0
+            o1 = padding[-4]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
+        if padding[-3] > 0:
+            i0 = max(padding[-4], 0)
+            i1 = max(padding[-4], 0) + padding[-3]
+            o0 = out_shape[3] - padding[-3]
+            o1 = out_shape[3]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
 
+    # Pad third dimension (width)
     if len(padding) > 4:
-        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
-        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+        if padding[-6] > 0:
+            i0 = out_shape[4] - padding[-6] - max(padding[-5], 0)
+            i1 = out_shape[4] - max(padding[-5], 0)
+            o0 = 0
+            o1 = padding[-6]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
+        if padding[-5] > 0:
+            i0 = max(padding[-6], 0)
+            i1 = max(padding[-6], 0) + padding[-5]
+            o0 = out_shape[4] - padding[-5]
+            o1 = out_shape[4]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
 
-    return input
+    return out
 
 
 def multi_head_attention_forward(query: Tensor,
