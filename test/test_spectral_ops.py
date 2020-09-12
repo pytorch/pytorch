@@ -2,7 +2,7 @@ import torch
 import unittest
 import math
 from contextlib import contextmanager
-from itertools import product, chain
+from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
