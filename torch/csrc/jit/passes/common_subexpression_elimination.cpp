@@ -28,6 +28,14 @@ void EliminateCommonSubexpression(
       GRAPH_DEBUG("Node was skipped due to its non determinism:\n", *node);
       continue;
     }
+    if (node->kind() == prim::profile) {
+      // Profile nodes should be kept close to their uses in case they are to
+      // be extracted into a subgraph (e.g., an autodiff subgraph).  Since
+      // profile nodes exist only during the first few runs, there's no
+      // recurring performance penalty.
+      GRAPH_DEBUG("Node was skipped because it is a prim::profile:\n", *node);
+      continue;
+    }
     if (aliasDb.hasWriters(node)) {
       GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
       // Do NOT have enough information to do CSE on these nodes.
