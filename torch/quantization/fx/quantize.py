@@ -498,8 +498,8 @@ class Quantizer:
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
                node.target.split('.')[-1].startswith('activation_post_process_'):
-                    # remove activation post process
-                    env[node.name] = env[node.args[0].name]
+                # remove activation post process
+                env[node.name] = env[node.args[0].name]
             else:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
