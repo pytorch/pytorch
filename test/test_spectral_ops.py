@@ -258,6 +258,8 @@ class TestFFT(TestCase):
                 input = args[0]
                 args = args[1:]
 
+                # Workaround for gradcheck's poor support for complex input
+                # Use real input instead and put view_as_complex into the graph
                 if dtype.is_complex:
                     test_fn = lambda x: torch_fn(torch.view_as_complex(x), *args)
                     input = torch.view_as_real(input).detach().requires_grad_()
