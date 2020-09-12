@@ -51,7 +51,7 @@ api::Resource::Buffer maybe_allocate_staging(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (context->adapter().has_unified_memory()) {
+  if (context->gpu().adapter->has_unified_memory()) {
     return api::Resource::Buffer{};
   }
 
@@ -71,7 +71,7 @@ api::Resource::Buffer allocate_buffer(
     usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
   }
 
-  if (!context->adapter().has_unified_memory()) {
+  if (!context->gpu().adapter->has_unified_memory()) {
     usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
 
@@ -171,6 +171,30 @@ api::Resource::Image maybe_allocate_image(
   return allocate_image(context, sizes, options);
 }
 
+void copy_staging_to_buffer(
+    api::Command::Buffer command_buffer,
+    const api::Resource::Buffer staging,
+    const api::Resource::Buffer buffer) {
+}
+
+void copy_buffer_to_staging(
+    api::Command::Buffer command_buffer,
+    const api::Resource::Buffer buffer,
+    const api::Resource::Buffer staging) {
+}
+
+void copy_buffer_to_image(
+    api::Command::Buffer command_buffer,
+    const api::Resource::Buffer buffer,
+    const api::Resource::Image image) {
+}
+
+void copy_image_to_buffer(
+    api::Command::Buffer command_buffer,
+    const api::Resource::Image image,
+    const api::Resource::Buffer buffer) {
+}
+
 } // namespace
 
 vTensor::vTensor()
@@ -195,16 +219,23 @@ vTensor::vTensor(
 }
 
 VkBuffer vTensor::buffer() const {
-  if (dirty_.image) {
-    //
+  if (dirty_.staging || dirty_.image) {
+    api::Command::Buffer command_buffer =
+        context_->command().pool.primary.allocate();
 
-    dirty_.image = 0u;
-  }
-
-  if (dirty_.staging) {
-    //
-
-    dirty_.staging = 0u;
+    command_buffer.begin();
+    {
+      if (dirty_.staging) {
+        copy_staging_to_buffer(command_buffer, staging_, buffer_);
+        dirty_.staging = 0u;
+      }
+      else if (dirty_.image) {
+        copy_image_to_buffer(command_buffer, image_, buffer_);
+        dirty_.image = 0u;
+      }
+    }
+    command_buffer.end();
+    command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
   return buffer_.handle;
@@ -221,10 +252,25 @@ VkBuffer vTensor::buffer(const Access::Flags access) {
 }
 
 VkImage vTensor::image() const {
-  if (dirty_.buffer) {
-    //
+  if (dirty_.staging || dirty_.buffer) {
+    api::Command::Buffer command_buffer =
+        context_->command().pool.primary.allocate();
 
-    dirty_.buffer = 0u;
+    command_buffer.begin();
+    {
+      if (dirty_.staging) {
+        copy_staging_to_buffer(command_buffer, staging_, buffer_);
+        dirty_.buffer = 1u;
+        dirty_.staging = 0u;
+      }
+
+      if (dirty_.buffer) {
+        copy_buffer_to_image(command_buffer, buffer_, image_);
+        dirty_.buffer = 0u;
+      }
+    }
+    command_buffer.end();
+    command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
   return image_.handle;

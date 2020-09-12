@@ -102,6 +102,35 @@ void Command::Buffer::bind(
 void Command::Buffer::dispatch() {
 }
 
+void Command::Buffer::submit(
+    const VkQueue queue,
+    const VkFence fence) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      queue,
+      "Invalid Vulkan queue!");
+
+  const VkSubmitInfo submit_info{
+    VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    nullptr,
+    0u,
+    nullptr,
+    nullptr,
+    1u,
+    &command_buffer_,
+    0u,
+    nullptr,
+  };
+
+  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence));
+}
+
+Command::Pool::Pool(const GPU& gpu)
+  : cache(Factory(gpu)),
+    primary(
+        gpu.device,
+        cache.retrieve({gpu.adapter->compute_queue_family_index})) {
+}
+
 Command::Pool::Factory::Factory(const GPU& gpu)
   : device_(gpu.device) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
