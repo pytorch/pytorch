@@ -196,6 +196,7 @@ def parse_output():
     t, stdout = RESULT_QUEUE.get(timeout=3600)
     if t is None:
         return None, None
+
     results = []
     for l in stdout.splitlines():
         if l.startswith("# Benchmarking PyTorch"):
@@ -212,32 +213,18 @@ def parse_output():
         if t.version not in OLD_VERSIONS:
             print(stdout)
 
-    return t, results
+    parsed_results = []
+    for r in results:
+        types = {i["type"] for i in r}
+        assert len(types) == 1
+        run_type = types.pop()
 
+        assert all(i["metric"] == "latency" for i in r)
+        key = (t.num_cores, t.device, run_type)
+        times = tuple(float(ri["value"]) * {"ms": 1e-3}[ri["unit"]] for ri in r)
+        structured_results.append((key, times))
 
-def process(results):
-    structured_results = collections.defaultdict(list)
-    for t, r in results:
-        if t is None:
-            continue
-
-        for ri in r:
-            types = {i["type"] for i in ri}
-            assert len(types) == 1
-            run_type = types.pop()
-
-            assert all(i["metric"] == "latency" for i in ri)
-
-            times = tuple(float(j["value"]) * {"ms": 1e-3}[j["unit"]] for j in ri)
-            key = (t.num_cores, t.device, run_type)
-            structured_results[key].append((t.version, times))
-
-    sorted_results = {}
-    for k in sorted(structured_results.keys()):
-        v = sorted(structured_results[k])
-        sorted_results[k] = v
-
-    return sorted_results
+    return structured_results
 
 
 def run():
@@ -275,13 +262,6 @@ def run():
     time.sleep(0.5)
     cpu_work = cpu_pool.map_async(launch_subtask, cpu_tasks, 1)
 
-    results = []
-    def snapshot():
-        print("\nSnapshotting results.")
-        parsed_results = process(results)
-        with open("/tmp/microbenchmarks_parsed.pkl", "wb") as f:
-            pickle.dump(parsed_results, f)
-
     with open("/tmp/microbenchmarks.pkl", "wb") as f:
         pass
 
@@ -290,14 +270,8 @@ def run():
         ri = parse_output()
         with open("/tmp/microbenchmarks.pkl", "ab") as f:
             pickle.dump(ri, f)
-        results.append(ri)
         print(f"\r{i} / {n_tasks}", end="")
-
-        if not (i % int(n_tasks / 10)):
-            snapshot()
-
     print("")
-    snapshot()
 
 
 def main():
