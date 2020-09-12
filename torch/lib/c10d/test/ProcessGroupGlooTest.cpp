@@ -468,7 +468,7 @@ TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   TemporaryFile file;
   auto work = testSignal(file.path, SIGSTOP);
   EXPECT_FALSE(work->isSuccess());
-  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+  EXPECT_THROW(std::rethrow_exception(*work->exception()), std::exception);
 }
 
 TEST(ProcessGroupGlooTest, testSIGKILLException) {
@@ -483,7 +483,7 @@ TEST(ProcessGroupGlooTest, testSIGKILLException) {
   TemporaryFile file;
   auto work = testSignal(file.path, SIGKILL);
   EXPECT_FALSE(work->isSuccess());
-  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+  EXPECT_THROW(std::rethrow_exception(*work->exception()), std::exception);
 }
 
 TEST(ProcessGroupGlooTest, testAllReduceCPU) {

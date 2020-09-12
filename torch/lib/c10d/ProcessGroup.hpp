@@ -17,6 +17,11 @@ constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
 
+class ProcessGroupExceptionPtr : public torch::CustomClassHolder, public std::exception_ptr {
+public:
+ ProcessGroupExceptionPtr(std::exception_ptr e) : std::exception_ptr(e) {};
+};
+
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
 //
@@ -51,7 +56,7 @@ class ProcessGroup : public torch::CustomClassHolder{
     virtual bool isSuccess() const;
 
     // Returns exception if isSuccess() returned false.
-    virtual std::exception_ptr exception() const;
+    virtual c10::intrusive_ptr<ProcessGroupExceptionPtr> exception() const;
 
     // Returns source rank if this objects represents a recv-from-any.
     virtual int64_t sourceRank() const;

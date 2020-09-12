@@ -19,9 +19,9 @@ bool ProcessGroup::Work::isSuccess() const {
   return !exception_;
 }
 
-std::exception_ptr ProcessGroup::Work::exception() const {
+c10::intrusive_ptr<ProcessGroupExceptionPtr> ProcessGroup::Work::exception() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return exception_;
+  return c10::make_intrusive<ProcessGroupExceptionPtr>(exception_);
 }
 
 int64_t ProcessGroup::Work::sourceRank() const {

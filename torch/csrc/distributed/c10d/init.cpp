@@ -908,6 +908,8 @@ static auto processGroupWork_torchbind =
     .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
     .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
     .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+    .def("exception", &::c10d::ProcessGroup::Work::exception)
+    .def("result", &::c10d::ProcessGroup::Work::result)
     .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
 
 static auto processGroup_torchbind =

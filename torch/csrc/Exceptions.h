@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/detail/FunctionTraits.h>
 
 static inline void PyErr_SetString(PyObject* type, const std::string& message) {
