@@ -763,5 +763,55 @@ void testRegisterizerParallelized() {
       "Registerization must occur after parallelism flattening");
 }
 
+void testRegisterizerConditions() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {5}, kInt));
+  VarHandle x("x", kInt);
+  Stmt* stmt = Block::make({For::make(
+      x,
+      0,
+      10,
+      Block::make({
+          Cond::make(
+              CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+              Store::make(
+                  a,
+                  {x},
+                  IfThenElse::make(
+                      CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+                      Add::make(Load::make(a, {x}, 1), x),
+                      Add::make(Load::make(a, {x - 5}, 1), x)),
+                  1),
+              Store::make(
+                  a,
+                  {x - 5},
+                  IfThenElse::make(
+                      CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+                      Add::make(Load::make(a, {x}, 1), x),
+                      Add::make(Load::make(a, {x - 5}, 1), x)),
+                  1)),
+      }))});
+
+  std::ostringstream before;
+  before << *stmt;
+
+  /* for (int x = 0; x < 10; x++) {
+   *   if (x<5 ? 1 : 0) {
+   *     A[x] = IfThenElse(x<5 ? 1 : 0, (A[x]) + x, (A[x - 5]) + x);
+   *   } else {
+   *     A[x - 5] = IfThenElse(x<5 ? 1 : 0, (A[x]) + x, (A[x - 5]) + x);
+   *   }
+   * }
+   */
+
+  // No change.
+  registerize(stmt);
+
+  std::ostringstream after;
+  after << *stmt;
+
+  ASSERT_EQ(before.str(), after.str());
+}
+
 } // namespace jit
 } // namespace torch

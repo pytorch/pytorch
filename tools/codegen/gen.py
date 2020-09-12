@@ -1035,11 +1035,11 @@ def main() -> None:
             compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
-        'function_registrations':
-        list(mapMaybe(
+        'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
-            native_functions)) +
-        list(mapMaybe(
+            native_functions)) if not options.per_op_registration else [],
+
+        'math_function_registrations': list(mapMaybe(
             compute_type_method('Math', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)) if not options.per_op_registration else [],
     })
