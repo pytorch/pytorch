@@ -64,7 +64,6 @@ struct TensorpipeWriteBuffers {
   std::unique_ptr<MessageType> type;
   std::unique_ptr<int64_t> id;
   std::vector<char> payload;
-  std::vector<c10::DeviceIndex> deviceIndices;
   std::vector<char> pickle;
   // This contains the original tensors and the clones of the sparse tensors.
   std::vector<torch::Tensor> tensors;
@@ -80,7 +79,6 @@ struct TensorpipeReadBuffers {
   std::unique_ptr<MessageType> type;
   std::unique_ptr<int64_t> id;
   std::vector<char> payload;
-  std::vector<c10::DeviceIndex> deviceIndices;
   std::vector<char> pickle;
   std::vector<c10::DataPtr> tensors;
 };
