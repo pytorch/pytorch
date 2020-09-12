@@ -627,6 +627,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertFalse(medium.has_warnings)
         blocked_medium = timer.blocked_autorange(min_run_time=0.1)
         self.assertLess(small.median, medium.median)
+        # This acts as a control to compare to a different way to measure the same value.
         self.assertLess(small.median, blocked_medium.median)
 
     def test_compare(self):
