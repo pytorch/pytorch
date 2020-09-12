@@ -760,10 +760,7 @@ class SmoothL1Loss(_Loss):
     element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
-    SmoothL1Loss is based on a Huber loss with a delta term equal to 1. Other
-    variants of the Huber loss can also be used (i.e. with different deltas).
-    Deltas close to 0 aproach Mean Absolute Error (MAE/L1) while deltas close
-    to infinity approach Mean Square Error (MSE/L2).
+    Also known as the Huber loss:
 
     .. math::
         \text{loss}(x, y) = \frac{1}{n} \sum_{i} z_{i}
@@ -773,13 +770,12 @@ class SmoothL1Loss(_Loss):
     .. math::
         z_{i} =
         \begin{cases}
-        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < \delta \\
-        \delta * |x_i - y_i| - 0.5 * \delta ** 2, & \text{otherwise }
+        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
+        |x_i - y_i| - 0.5, & \text{otherwise }
         \end{cases}
 
     :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
     the sum operation still operates over all the elements, and divides by :math:`n`.
-    For Smooth L1 loss, `\delta=1`.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -799,9 +795,6 @@ class SmoothL1Loss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        delta (float, optional): Specifies the hyperparameter delta to be used. The value determines
-            how large the errors need to be to use L1. Errors smaller than delta are minimized with
-            L2. Parameter is ignored for negative/zero values. Default = 1.
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means, any number of additional
@@ -813,12 +806,11 @@ class SmoothL1Loss(_Loss):
     """
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', delta=1.) -> None:
+    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
-        self.delta = delta if delta > 0 else 1.
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.smooth_l1_loss(input, target, reduction=self.reduction, delta=self.delta)
+        return F.smooth_l1_loss(input, target, reduction=self.reduction)
 
 
 class SoftMarginLoss(_Loss):

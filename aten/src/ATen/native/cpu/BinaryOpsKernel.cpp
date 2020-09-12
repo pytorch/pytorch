@@ -318,14 +318,14 @@ void rshift_kernel(TensorIterator& iter) {
 
 void lt_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "lt_cpu", [&]() {
       cpu_kernel(iter,
        [](scalar_t a, scalar_t b) -> bool {
          return a < b;
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "lt_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "lt_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -448,23 +448,23 @@ void ne_kernel(TensorIterator& iter) {
   }
 }
 
-void max_elementwise_kernel(TensorIterator& iter) {
+void maximum_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
         return a || b;
       });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_lementwise_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "max_elementwise_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "maximum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          if (_isnan<scalar_t>(a) || _isnan<scalar_t>(b)) {
+          if (a != a || b != b) {
             return std::numeric_limits<scalar_t>::quiet_NaN();
           } else {
             return std::max(a, b);
@@ -475,23 +475,23 @@ void max_elementwise_kernel(TensorIterator& iter) {
   }
 }
 
-void min_elementwise_kernel(TensorIterator& iter) {
+void minimum_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
         return a && b;
       });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "min_elementwise_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "minimum_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          if (_isnan<scalar_t>(a) || _isnan<scalar_t>(b)) {
+          if (a != a || b != b) {
             return std::numeric_limits<scalar_t>::quiet_NaN();
           } else {
             return std::min(a, b);
@@ -764,6 +764,14 @@ void nextafter_kernel(TensorIterator& iter) {
   });
 }
 
+void heaviside_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "heaviside_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        return a == 0 ? b : static_cast<scalar_t>(a > 0);
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -787,8 +795,8 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
-REGISTER_DISPATCH(max_elementwise_stub, &max_elementwise_kernel);
-REGISTER_DISPATCH(min_elementwise_stub, &min_elementwise_kernel);
+REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
+REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
@@ -802,6 +810,7 @@ REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 
 } // namespace native
 } // namespace at

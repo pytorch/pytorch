@@ -11,6 +11,9 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
+template<typename scalar_t>
+scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
 }
@@ -54,7 +57,9 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     "size mismatch, get ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
 
   if (mat.numel() == 0) {
-    if (beta.toDouble() == 0.0) {
+    // By definition, when beta==0, values in self should be ignored. nans and infs
+    // should not propagate
+    if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
       at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
@@ -91,9 +96,7 @@ Tensor mv(const Tensor &self, const Tensor &vec) {
   return native::mv_out(result, self, vec);
 }
 
-Tensor dot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
+inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
       "1D tensors expected, but got ",
@@ -114,16 +117,42 @@ Tensor dot(const Tensor &self, const Tensor &other){
       "inconsistent tensor size, expected tensor [",
       self.numel(),
       "] and src [",
-      other.numel(), "] to have the same number of elements, but got ",
-      self.numel(), " and ",
+      other.numel(),
+      "] to have the same number of elements, but got ",
+      self.numel(),
+      " and ",
       other.numel(),
       " elements respectively");
+}
+
+Tensor dot(const Tensor &self, const Tensor &other){
+  at::NoNamesGuard guard;
+
+  dot_check(self, other);
 
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
+}
+
+Tensor vdot(const Tensor &self, const Tensor &other){
+  at::NoNamesGuard guard;
+
+  // Dispatch to `dot` for real dtypes.
+  if (!self.is_complex()){
+    return at::dot(self, other);
+  }
+
+  // For complex dtypes.
+  dot_check(self, other);
+  return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
+    Tensor result = at::empty({}, self.options());
+    result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
+    return result;
+  });
+
 }
 
 }}  // namespace at::native
