@@ -3,10 +3,15 @@ import os
 import time
 from typing import Any, Dict, List, Set, Tuple
 
-from ..util.setting import JSON_FOLDER_BASE_DIR, TestList, TestPlatform, TestStatusType
+from ..util.setting import (
+    JSON_FOLDER_BASE_DIR,
+    CompilerType,
+    TestList,
+    TestPlatform,
+    TestStatusType,
+)
 from ..util.utils import (
-    check_compiler_type,
-    get_cov_type,
+    detect_compiler_type,
     print_error,
     print_time,
     related_to_test_list,
@@ -14,7 +19,11 @@ from ..util.utils import (
 from .parser.coverage_record import CoverageRecord
 from .parser.gcov_coverage_parser import GcovCoverageParser
 from .parser.llvm_coverage_parser import LlvmCoverageParser
-from .print_report import file_oriented_report, line_oriented_report
+from .print_report import (
+    file_oriented_report,
+    html_oriented_report,
+    line_oriented_report,
+)
 
 
 # coverage_records: Dict[str, LineInfo] = dict()
@@ -93,7 +102,7 @@ def get_json_obj(json_file: str) -> Tuple[Any, int]:
     return None, 2
 
 
-def parse_json(json_file: str) -> List[CoverageRecord]:
+def parse_json(json_file: str, platform: TestPlatform) -> List[CoverageRecord]:
     print("start parse:", json_file)
     json_obj, read_status = get_json_obj(json_file)
     if read_status == 0:
@@ -105,13 +114,14 @@ def parse_json(json_file: str) -> List[CoverageRecord]:
         raise RuntimeError(
             "Fail to do code coverage! Fail to load json file: ", json_file
         )
-    cov_type = get_cov_type()
-    check_compiler_type(cov_type)
+
+    cov_type = detect_compiler_type(platform)
+
     coverage_records: List[CoverageRecord] = []
-    if cov_type == "CLANG":
+    if cov_type == CompilerType.CLANG:
         coverage_records = LlvmCoverageParser(json_obj).parse("fbcode")
         # print(coverage_records)
-    elif cov_type == "GCC":
+    elif cov_type == CompilerType.GCC:
         coverage_records = GcovCoverageParser(json_obj).parse()
 
     return coverage_records
@@ -126,13 +136,14 @@ def parse_jsons(
         for file_name in file_list:
             if file_name.endswith(".json"):
                 # if compiler is clang, we only analyze related json / when compiler is gcc, we analyze all jsons
-                if get_cov_type() == "CLANG" and not related_to_test_list(
+                cov_type = detect_compiler_type(platform)
+                if cov_type == CompilerType.CLANG and not related_to_test_list(
                     file_name, test_list
                 ):
                     continue
                 json_file = os.path.join(path, file_name)
                 try:
-                    coverage_records = parse_json(json_file)
+                    coverage_records = parse_json(json_file, platform)
                 except RuntimeError:
                     print_error("Fail to load json file: ", json_file)
                     continue
@@ -179,26 +190,27 @@ def summarize_jsons(
     interested_folders: List[str],
     coverage_only: List[str],
     platform: TestPlatform,
-    program_start_time: float,
 ) -> None:
     start_time = time.time()
-    parse_jsons(test_list, interested_folders, platform)
-    update_set()
-    line_oriented_report(
-        test_list,
-        tests_type,
-        interested_folders,
-        coverage_only,
-        covered_lines,
-        uncovered_lines,
-    )
-    file_oriented_report(
-        test_list,
-        tests_type,
-        interested_folders,
-        coverage_only,
-        program_start_time,
-        covered_lines,
-        uncovered_lines,
-    )
+    if detect_compiler_type(platform) == CompilerType.GCC:
+        html_oriented_report()
+    else:
+        parse_jsons(test_list, interested_folders, platform)
+        update_set()
+        line_oriented_report(
+            test_list,
+            tests_type,
+            interested_folders,
+            coverage_only,
+            covered_lines,
+            uncovered_lines,
+        )
+        file_oriented_report(
+            test_list,
+            tests_type,
+            interested_folders,
+            coverage_only,
+            covered_lines,
+            uncovered_lines,
+        )
     print_time("summary jsons take time: ", start_time)

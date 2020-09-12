@@ -244,7 +244,9 @@ private:
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
   ) const;
   // This function re-establishes the invariant that dispatchTable
-  // contains the front element from the kernels list for a given dispatch key.
+  // contains the front element from the kernels list for a given runtime dispatch key.
+  void updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
+  // Like above, but also handles alias dispatch keys.
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
