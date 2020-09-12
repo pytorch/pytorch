@@ -1529,16 +1529,16 @@ class TestDict(JitTestCase):
         def annotated_fn(input: Dict) -> Any:
             return input
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(fn_with_comment)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(annotated_fn)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(fn_with_comment)
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(annotated_fn)

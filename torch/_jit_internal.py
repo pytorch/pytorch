@@ -642,18 +642,18 @@ def is_list(ann):
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann):
+    if ann is Dict:
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+
     if not hasattr(ann, '__module__'):
         return False
-    origin = getattr(ann, '__origin__', None)
-    orig_bases = getattr(ann, '__orig_bases__', None)
-    origin_is_dict = origin is Dict or origin is dict
-    try:
-        orig_bases_has_dict = dict in orig_bases or Dict in orig_bases
-    except Exception as _:
-        orig_bases_has_dict = False
-
     return ann.__module__ == 'typing' and \
-        (origin_is_dict or orig_bases_has_dict)
+        (getattr(ann, '__origin__', None) is Dict or
+            getattr(ann, '__origin__', None) is dict)
 
 def is_optional(ann):
     # Optional[T] is just shorthand for Union[T, None], so check for both
