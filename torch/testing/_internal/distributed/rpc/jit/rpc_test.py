@@ -5,7 +5,6 @@ from typing import Dict, List, Tuple, Any
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.futures import Future
 from torch import Tensor
 from torch.autograd.profiler import record_function
 from torch.distributed.rpc import RRef
