@@ -371,18 +371,18 @@ static void nan_to_num_kernel(
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "nan_to_num", [&]() {
-      scalar_t nan_replacement = scalar_t{nan.value_or(0.)};
+      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
       scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? scalar_t{pos_inf.value()}
+          ? static_cast<scalar_t>(pos_inf.value())
           : std::numeric_limits<scalar_t>::max();
       scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? scalar_t{neg_inf.value()}
+          ? static_cast<scalar_t>(neg_inf.value())
           : std::numeric_limits<scalar_t>::lowest();
 
       cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        return std::isfinite(a)
+        return at::_isfinite(a)
             ? a
-            : (::isnan(a) ? nan_replacement
+            : (at::_isnan(a) ? nan_replacement
                           : (a == std::numeric_limits<scalar_t>::infinity()
                                  ? pos_inf_replacement
                                  : neg_inf_replacement));
