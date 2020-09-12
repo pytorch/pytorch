@@ -20,12 +20,13 @@ void broadcast_coalesced(
 // mappings as well.
 class GradBucket {
  public:
-  explicit GradBucket(std::vector<at::Tensor> tensors);
+  explicit GradBucket(std::vector<at::Tensor> tensors) :
+    tensors_(std::move(tensors)) {}
   // Each tensor in the list that getTensors returns refers to the replica on
   // each device. There will be multiple replicas only in the case of single
   // process multiple device mode. In the single process single device mode,
   // this list would consist of only a single tensor.
-  const std::vector<at::Tensor>& getTensors() const;
+  const std::vector<at::Tensor>& getTensors() const { return tensors_; }
 
  private:
   std::vector<at::Tensor> tensors_;
