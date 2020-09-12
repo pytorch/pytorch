@@ -449,6 +449,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
    .. automethod:: not_equal

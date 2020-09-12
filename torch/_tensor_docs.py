@@ -2308,6 +2308,18 @@ ndimension() -> int
 Alias for :meth:`~Tensor.dim()`
 """)
 
+add_docstr_all('nan_to_num', r"""
+nan_to_num(nan=0.0, pos_inf=None, neg_inf=None) -> Tensor
+
+See :func:`torch.nan_to_num`.
+""")
+
+add_docstr_all('nan_to_num_', r"""
+nan_to_num_(nan=0.0, pos_inf=None, neg_inf=None) -> Tensor
+
+In-place version of :meth:`~Tensor.nan_to_num`.
+""")
+
 add_docstr_all('ne', r"""
 ne(other) -> Tensor
 
