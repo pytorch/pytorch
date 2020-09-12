@@ -1575,8 +1575,12 @@ EXCLUDE_GRADCHECK = {
 EXCLUDE_GRADGRADCHECK = {
     'fft.fft',
     'fft.ifft',
+    'fft.fftn',
+    'fft.ifftn',
     'fft.rfft',
     'fft.irfft',
+    'fft.rfftn',
+    'fft.irfftn',
     'fft.hfft',
     'fft.ihfft',
 }
