@@ -4164,3 +4164,5 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
+        rpc.shutdown()
