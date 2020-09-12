@@ -1118,7 +1118,12 @@ class JitRpcTest(
             ]
             self.assertEqual(len(rpc_async_jit_event), 1)
             rpc_async_jit_event = rpc_async_jit_event[0]
-            profiled_name = f"rpc_async_jit#{qual_name}({worker_name(self.rank)} -> {dst_worker_name})"
+            profiled_name = _build_rpc_profiling_key(
+                RPCExecMode.ASYNC_JIT,
+                qual_name,
+                worker_name(self.rank),
+                dst_worker_name,
+            )
             self.assertEqual(profiled_name, rpc_async_jit_event.name)
             remote_events = [event for event in function_events if event.is_remote]
             # All remote events should have taken place on dst_rank
