@@ -16,6 +16,7 @@
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(GatherRangesOp);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LengthsGatherOp);
 
 namespace caffe2 {
 
@@ -330,7 +331,7 @@ class SumOp : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, int32_t, int64_t>>::call(
+    return DispatchHelper<TensorTypes<float, double, int32_t, int64_t>>::call(
         this, Input(0));
   }
 };

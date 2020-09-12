@@ -5,7 +5,11 @@ from .qconfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
 from .stubs import *
+from .quant_type import *
 from .quantize_jit import *
+from .quantize_fx import *
+from .quantization_mappings import *
+from .fuser_method_mappings import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -20,8 +24,23 @@ _all__ = [
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
     'prepare', 'convert', 'prepare_qat',
-    # Top level API for graph mode quantization
+    # Top level API for graph mode quantization on TorchScript
     'quantize_jit', 'quantize_dynamic_jit',
+    # Top level API for graph mode quantization on GraphModule(torch.fx)
+    'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
+    'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
+    'QuantType',  # quantization type
+    # custom module APIs
+    'register_static_quant_module_mapping',
+    'get_static_quant_module_mappings', 'get_static_quant_module_class',
+    'register_dynamic_quant_module_mapping',
+    'get_dynamic_quant_module_mappings',
+    'register_qat_module_mapping',
+    'get_qat_module_mappings',
+    'get_qconfig_propagation_list',
+    'get_compare_output_module_list',
+    'register_quantized_operator_mapping', 'get_quantized_operator',
+    'register_fuser_method', 'get_fuser_method',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',

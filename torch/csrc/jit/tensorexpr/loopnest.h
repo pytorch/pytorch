@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -36,6 +37,10 @@ class TORCH_API LoopNest {
   void computeInline(Stmt* s);
   void computeInlineWithRandom(Stmt* s);
   void prepareForCodegen();
+  // LoopOptions are propagated to tail.
+  void sliceHead(For* f, int factor, For** head, For** tail);
+  // LoopOptions are propagated to head.
+  void sliceTail(For* f, int factor, For** head, For** tail);
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
   void reorderAxis(For* a, For* b);
@@ -44,6 +49,9 @@ class TORCH_API LoopNest {
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
+  void setBufferMap(
+      For* f,
+      const std::unordered_map<std::string, const Buf*>& map);
 
   // Insert a temporary computation of statement S in the scope of loop AT.
   // S is assumed to be a Store or a Block containing a Store. Along with the

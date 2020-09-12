@@ -38,6 +38,7 @@ EXTRA_ANALYZER_FLAGS=$@
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
+rm -rf "${BUILD_ROOT}"
 mkdir -p "${BUILD_ROOT}"
 mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
@@ -62,7 +63,6 @@ build_torch_mobile() {
 
   BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
-    -DUSE_STATIC_DISPATCH=OFF \
     ${MOBILE_BUILD_FLAGS}
 }
 

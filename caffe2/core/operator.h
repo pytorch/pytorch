@@ -206,7 +206,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         ival.isTensor(),
         "Input(int, DeviceType) is only available for IValues that store Tensors");
     auto t = ival.toTensor();
-    if (!t.is_contiguous()){
+    if (!t.is_contiguous()) {
       t = t.contiguous();
     }
     Tensor tensor = caffe2::Tensor(std::move(t));
@@ -483,6 +483,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void CancelAsyncCallback() {}
+
+  virtual void Cancel() {}
 
   // RunAsync, if implemented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
