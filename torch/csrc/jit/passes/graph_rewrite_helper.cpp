@@ -40,14 +40,6 @@ std::unordered_map<std::string, c10::IValue> getConvParams(
   const auto& match_vmap = match.values_map;
   auto transposed_value = getIValue("transposed", match_vmap, vmap).value();
   calc_values["transposed"] = transposed_value;
-  auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value();
-  calc_values["benchmark"] = benchmark_value;
-  auto deterministic_value =
-      getIValue("deterministic", match_vmap, vmap).value();
-  calc_values["deterministic"] = deterministic_value;
-  auto cudnn_enabled_value =
-      getIValue("cudnn_enabled", match_vmap, vmap).value();
-  calc_values["cudnn_enabled"] = cudnn_enabled_value;
   auto output_padding_value =
       getIValue("output_padding", match_vmap, vmap).value();
   calc_values["output_padding"] = output_padding_value;
@@ -98,7 +90,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
           %deterministic:bool, %cudnn_enabled:bool):
         %r = aten::conv1d(%a, %w, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
-
   std::string conv1d = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -150,10 +141,7 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         calc_value_map["dilation"].toIntList().size() != 1) {
       return false;
     }
-    return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["deterministic"].toBool() &&
-        calc_value_map["cudnn_enabled"].toBool() &&
-        (calc_value_map["output_padding"].toIntList()[0] == 0);
+    return !calc_value_map["transposed"].toBool();
   };
   auto filter_conv2d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
@@ -164,11 +152,7 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         calc_value_map["dilation"].toIntList().size() != 2) {
       return false;
     }
-    return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["deterministic"].toBool() &&
-        calc_value_map["cudnn_enabled"].toBool() &&
-        (calc_value_map["output_padding"].toIntList()[0] == 0) &&
-        (calc_value_map["output_padding"].toIntList()[1] == 0);
+    return !calc_value_map["transposed"].toBool();
   };
   auto filter_conv3d = [](const Match& match,
                           const std::unordered_map<std::string, Value*>& vmap) {
@@ -179,12 +163,7 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         calc_value_map["dilation"].toIntList().size() != 3) {
       return false;
     }
-    return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["deterministic"].toBool() &&
-        calc_value_map["cudnn_enabled"].toBool() &&
-        (calc_value_map["output_padding"].toIntList()[0] == 0) &&
-        (calc_value_map["output_padding"].toIntList()[1] == 0) &&
-        (calc_value_map["output_padding"].toIntList()[2] == 0);
+    return !calc_value_map["transposed"].toBool();
   };
   auto filter_conv_transpose1d = [](
       const Match& match, const std::unordered_map<std::string, Value*>& vmap) {
@@ -195,9 +174,7 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         calc_value_map["dilation"].toIntList().size() != 1) {
       return false;
     }
-    return calc_value_map["transposed"].toBool() &&
-          !calc_value_map["deterministic"].toBool() &&
-          calc_value_map["cudnn_enabled"].toBool() ;
+    return calc_value_map["transposed"].toBool();
   };
   auto filter_conv_transpose2d = [](
       const Match& match, const std::unordered_map<std::string, Value*>& vmap) {
@@ -208,9 +185,7 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         calc_value_map["dilation"].toIntList().size() != 2) {
       return false;
     }
-    return calc_value_map["transposed"].toBool() &&
-        !calc_value_map["deterministic"].toBool() &&
-        calc_value_map["cudnn_enabled"].toBool();
+    return calc_value_map["transposed"].toBool();
   };
 
   SubgraphRewriter rewriter_conv1d;
