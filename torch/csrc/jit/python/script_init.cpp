@@ -1014,7 +1014,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             return pp.str();
@@ -1023,7 +1023,7 @@ void initJitScriptBindings(PyObject* module) {
           "code_with_constants",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
@@ -1177,7 +1177,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](const StrongFunctionPtr& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
 
             PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
@@ -1222,14 +1222,14 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Method& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
-        std::vector<c10::NamedTypePtr> deps;
+        PrintDepsTable deps;
         PythonPrint pp(constants, deps);
         pp.printMethod(self.function());
         std::map<std::string, at::IValue> consts;
