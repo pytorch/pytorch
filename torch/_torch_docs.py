@@ -3648,10 +3648,15 @@ add_docstr(torch.linspace, r"""
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start: to :attr:`end`, inclusive. That is, the value are:
+spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
 .. math::
-    (\text{start}, \text{start} + \frac{\text{end} - \text{start}}{\text{steps}}, \ldots, \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}}, \text{end})
+    (\text{start},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \ldots,
+    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{end})
+""" + """
 
 .. warning::
     Not providing a value for :attr:`steps` is deprecated. For backwards
@@ -3966,11 +3971,16 @@ logspace(start, end, steps, base=10.0, *, \
 """ + r"""
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start`: to :attr:`end`, inclusive, on a logarithmic scale.
+spaced from :attr:`start` to :attr:`end`, inclusive, on a logarithmic scale.
 That is, the values are:
 
 .. math::
-    (\text{base}^{\text{start}}, \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})}, \ldots, \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})}, \text{base}^{\text{end}})
+    (\text{base}^{\text{start}},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \ldots,
+    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{\text{end}})
+""" + """
 
 .. warning::
     Not providing a value for :attr:`steps` is deprecated. For backwards
