@@ -16577,12 +16577,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_complex_dtypes()))
-    def test_exp2_invalid_dtypes(self, device, dtype):
-        x = torch.ones((2, ), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-            torch.exp2(x)
-
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):
