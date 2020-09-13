@@ -1,10 +1,10 @@
 # CMake file to replace the string contents in ONNX, Caffe, and Caffe2 proto.
 # Usage example:
-#   cmake -DFILENAME=caffe2.pb.h -DSYSTEM_PROTOBUF=OFF -P ProtoBufPatch.cmake
+#   cmake -DFILENAME=caffe2.pb.h -DLOCAL_PROTOBUF=ON -P ProtoBufPatch.cmake
 
 file(READ ${FILENAME} content)
 
-if(NOT SYSTEM_PROTOBUF)
+if(LOCAL_PROTOBUF)
   # protobuf-3.6.0 pattern
   string(
     REPLACE
