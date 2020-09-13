@@ -4523,6 +4523,27 @@ for shape in [(1,), ()]:
         test(inp, torch.float, torch.double)
         test(inp, torch.double, torch.float)
 
+    def test_nan_to_num(self):
+        a = torch.randn(3, 3, 3, 3)
+        with torch.no_grad():
+            a[torch.randn_like(a) < 0.2] = float('nan')
+            a[torch.randn_like(a) < 0.2] = float('inf')
+            a[torch.randn_like(a) < 0.2] = -float('inf')
+
+        a.requires_grad = True
+
+        gradcheck(lambda x: x.nan_to_num(), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, pos_inf=2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, pos_inf=2.0, neg_inf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(pos_inf=2.0, neg_inf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(neg_inf=-2.0), a)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod

@@ -2639,6 +2639,14 @@ bool any_variable_defined(variable_list& variables) {
   return false;
 }
 
+at::Tensor nan_to_num_backward(const at::Tensor& grad, const at::Tensor& self) {
+  auto nan_mask = at::isnan(self);
+  auto pos_inf_mask = at::isposinf(self);
+  auto neg_inf_mask = at::isneginf(self);
+  auto mask = ~(nan_mask | pos_inf_mask | neg_inf_mask);
+  return grad * mask;
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
