@@ -50,6 +50,7 @@ class Measurement:
         self.num_threads = num_threads
         self.stmt = stmt
         self.metadata = metadata
+        self._has_cache_warning = False
 
         # Derived attributes
         self._sorted_times = sorted([t / number_per_run for t in times])
@@ -78,6 +79,17 @@ class Measurement:
 
     def meets_confidence(self, threshold=_IQR_WARN_THRESHOLD):
         return self._iqr / self._median < threshold
+
+    def add_cache_warning(self, message: str):
+        self._has_cache_warning = True
+        self.warnings.append(
+            r" WARNING: {}\n           {}\n".format(
+                'Runtime is impacted by caching effects.', message)
+        )
+
+    @property
+    def has_cache_warning(self) -> bool:
+        return self._has_cache_warning
 
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
@@ -256,6 +268,16 @@ def merge_measurements(measurements: List[Measurement]):
         merge_group(*(key + (group,)))
         for key, group in grouped_measurements.items()
     ]
+
+class CPUCacheClear:
+    def __init__(self, cache_size_mb=2):
+        self.cache_size_mb = cache_size_mb
+        self.num_64bit_words = int((cache_size_mb * 1000 * 1000 * 1000) / 8)  # 8 bytes per 64 bits
+        self.array = np.ones(self.num_64bit_words, dtype=np.int64)
+
+    def clear_cpu_cache(self):
+        np.sum(self.array)
+
 
 
 @contextlib.contextmanager

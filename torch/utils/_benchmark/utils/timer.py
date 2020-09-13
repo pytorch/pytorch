@@ -8,6 +8,9 @@ import torch
 from torch.utils._benchmark.utils import common
 
 
+_CACHE_SENSIVITY_RATIO = 1.5
+_CACHE_SENSIVITY_MIN_SECONDS = 0.0000005
+
 __all__ = ["Timer"]
 
 
@@ -107,21 +110,44 @@ class Timer(object):
         measure = self._construct_measurement(number, times)
         return measure
 
-    def _estimate_block_size(self, min_run_time):
+    def _measure_uncached_runtime(self):
+        cache_clear = common.CPUCacheClear(cache_size_mb=cache_size_mb)
+        cache_clear.clear_cpu_cache()
+        populate_timer = timeit.Timer('sum(range(2)); torch.tanh(torch.tensor([1.1]))',
+                                      globals={'torch': torch})
+        populate_timer.timeit(1)
+        return self._timer.timeit(1)
+
+    def _calculate_cache_sensitivity(self, cached_runtime, uncached_runtime):
+        if cached_runtime <= _CACHE_SENSIVITY_MIN_SECONDS:
+            return False, None
+        speedup = uncached_runtime / cached_runtime
+        return speedup >= _CACHE_SENSIVITY_RATIO, speedup
+
+    def _estimate_block_size(self, min_run_time, check_cache_sensitivity=True):
+        cache_sensitivity = None
+
+        overhead = np.median([self._timer.timeit(0) for _ in range(5)])
+        cache_sensitivity = None
+        uncached_time = None
+        if check_cache_sensitivity:
+            uncached_time = self._measure_uncached_runtime()
+
+        number = 1
         with common.set_torch_threads(self._num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
-            overhead = np.median([self._timer.timeit(0) for _ in range(5)])
-            number = 1
             while True:
                 time_taken = self._timer.timeit(number)
+                if check_cache_sensitivity:
+                    cache_sensitivity = uncached_time / (time_taken / number)
                 relative_overhead = overhead / time_taken
                 if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
                     break
                 if time_taken > min_run_time:
                     break
                 number *= 10
-        return number
+        return number, cache_sensitivity
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
         number = self._estimate_block_size(min_run_time)
