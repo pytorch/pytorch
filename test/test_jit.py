@@ -6852,15 +6852,59 @@ a")
                         foo(i, j)
 
     # Testing bitwise shorthand aug assignment
-    def test_bool_augassign(self):
-        @torch.jit.script
-        def func(a : bool, b : bool):
+    def test_bool_augassign_bitwise_or(self):
+        def func(a: bool, b: bool) -> bool:
             a |= b
             return a
-        self.assertEqual(func(True, False), True | False)
-        self.assertEqual(func(True, True), True | True)
-        self.assertEqual(func(False, False), False | False)
-        self.assertEqual(func(False, True), False | True)
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_and(self):
+          def func(a: bool, b: bool) -> bool:
+              a &= b
+              return a
+
+          self.checkScript(func, (True, False), optimize=True)
+          self.checkScript(func, (True, True), optimize=True)
+          self.checkScript(func, (False, False), optimize=True)
+          self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_xor(self):
+        def func(a: bool, b: bool) -> bool:
+            a ^= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_number_augassign_bitwise_lshift(self):
+        def func():
+            z = 8
+            z <<= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_rshift(self):
+        def func():
+            z = 8
+            z >>= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_pow(self):
+        def func():
+            z = 8
+            z **= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
 
     def test_number_augassign(self):
         def func():
