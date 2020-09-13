@@ -68,34 +68,39 @@ def make_env(version):
     assert not result.returncode
 
     if version == HEAD:
-        cmd = (
-            f"cd {ROOT} && cd $(git rev-parse --show-toplevel) "
-            f"&& source activate {env_name} && python setup.py clean && "
-            "python setup.py install"
-        )
-        print("Building PyTorch:")
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert not result.returncode
+        install_cmd = "conda install -y -c pytorch-nightly pytorch"
     else:
-        print(f"Installing pytorch=={version} and patching benchmark utilities.")
-        cmd = (
-            f"source activate {env_name} && conda install -y -c pytorch pytorch=={version} && "
-            f"cd {OP_BENCHMARK_ROOT}/pt_extension && python setup.py install &&"
-            "cp -r $(git rev-parse --show-toplevel)/torch/utils/_benchmark "
-            "$(python -c 'import torch;import os;print(os.path.dirname(os.path.abspath(torch.__file__)))')/utils/"
-        )
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert not result.returncode
+        install_cmd = f"conda install -y -c pytorch pytorch=={version}"
+
+    # if version == HEAD:
+    #     cmd = (
+    #         f"cd {ROOT} && cd $(git rev-parse --show-toplevel) "
+    #         f"&& source activate {env_name} && python setup.py clean && "
+    #         "python setup.py install"
+    #     )
+    #     print("Building PyTorch:")
+    #     result = subprocess.run(
+    #         cmd,
+    #         shell=True,
+    #         stdout=subprocess.PIPE,
+    #         stderr=subprocess.PIPE,
+    #     )
+    #     assert not result.returncode
+    # else:
+    print(f"Installing pytorch=={version} and patching benchmark utilities.")
+    cmd = (
+        f"source activate {env_name} && {install_cmd} && "
+        f"cd {OP_BENCHMARK_ROOT}/pt_extension && python setup.py install &&"
+        "cp -r $(git rev-parse --show-toplevel)/torch/utils/_benchmark "
+        "$(python -c 'import torch;import os;print(os.path.dirname(os.path.abspath(torch.__file__)))')/utils/"
+    )
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert not result.returncode
 
 
 def count_benchmarks(test: str):
