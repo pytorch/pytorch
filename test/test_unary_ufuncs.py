@@ -31,23 +31,33 @@ if TEST_NUMPY:
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
 
-# Functions tested here (in alphabetical order):
+# Functions currently tested here (in alphabetical order):
+# abs
+# acos
 # acosh
 # asin
 # asinh
 # atan
 # atanh
+# ceil
 # cos
 # cosh
+# erf
+# erfc
+# floor
 # log
 # log10
 # log1p
 # log2
 # neg
+# round
+# rsqrt
 # sin
 # sinh
+# sqrt
 # tan
 # tanh
+# trunc
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
@@ -220,16 +230,16 @@ class TestUnaryUfuncs(TestCase):
                                                                             result.item()))
 
     # Tests that fn == method == inplace == jit on a simple single tensor input
-    # TODO: should this jitting the method and inplace variants, too?
+    # TODO: should this test jitting the method and inplace variants, too?
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
-        def _fn(t):
+        def _variant_consistency_fn_wrapper(t):
             return op(t)
 
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
 
-        for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_fn)):
+        for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_variant_consistency_fn_wrapper)):
             if alt is None:
                 continue
 
@@ -247,10 +257,11 @@ class TestUnaryUfuncs(TestCase):
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
-                # Allows array dtype to be float32 when comparing with bfloat16 tensors
-                #   since NumPy doesn't support the bfloat16 dtype
+                # Allows array dtype to be float32 when comparing with bfloat16
+                # or float16 tensors since NumPy doesn't support the bfloat16 dtype
+                # and it promotes some low precision floats to float32
                 if expected.dtype == np.float32:
-                    assert actual.dtype in (torch.bfloat16, torch.float32)
+                    assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
                 else:
                     assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
 
@@ -269,6 +280,9 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(unary_ufuncs)
     def test_reference_numerics(self, device, dtype, op):
+        if op.ref is None:
+            raise unittest.SkipTest('Skipped! Op has no available reference.')
+
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain,
                                            include_large_values=op.handles_large_floats)

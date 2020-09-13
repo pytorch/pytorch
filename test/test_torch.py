@@ -20307,19 +20307,11 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('sqrt'),
-                  _TorchMathTestMeta('erf', ref_backend='scipy'),
-                  _TorchMathTestMeta('erfc', ref_backend='scipy'),
-                  _TorchMathTestMeta('exp'),
+torch_op_tests = [_TorchMathTestMeta('exp'),
                   _TorchMathTestMeta('expm1'),
-                  _TorchMathTestMeta('floor'),
-                  _TorchMathTestMeta('ceil'),
                   _TorchMathTestMeta('rad2deg'),
                   _TorchMathTestMeta('deg2rad'),
-                  _TorchMathTestMeta('rsqrt', reffn=lambda x: np.reciprocal(np.sqrt(x))),
                   _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
-                  _TorchMathTestMeta('trunc'),
-                  _TorchMathTestMeta('round'),
                   # FIXME lgamma produces different result compared to scipy at -inf
                   _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
                   _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
@@ -20334,7 +20326,6 @@ torch_op_tests = [_TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('digamma',
                                      input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
                                      replace_inf_with_nan=True),
-                  _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.),
                   _TorchMathTestMeta('logit', ref_backend='scipy')]
 
 

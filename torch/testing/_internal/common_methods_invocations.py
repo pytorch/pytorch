@@ -21,7 +21,11 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
+
+if TEST_SCIPY:
+    import scipy
+    import scipy.special
 
 
 class SkipInfo(object):
@@ -198,6 +202,31 @@ class UnaryUfuncInfo(OpInfo):
 
 # Operator database (sorted alphabetically)
 op_db = [
+    # TODO: abs should always compare with rtol = atol = 0
+    # NOTE: the jit does not properly return a float tensor from abs, so
+    #   test_variant_consistency is skipped
+    # NOTE: complex autograd doesn't work as expected
+    UnaryUfuncInfo('abs',
+                   ref=np.abs,
+                   dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_fn_grad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_grad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_grad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_fn_gradgrad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_gradgrad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_gradgrad',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                   )),
+    # Windows complex acos seems to be relatively unstable (TODO: file an issue)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
                    domain=(-1, 1),
@@ -208,6 +237,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.float16],
                                 active_if=TEST_WITH_ROCM),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -246,6 +278,10 @@ op_db = [
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and_half(),
                    test_inplace_grad=False),
+    UnaryUfuncInfo('ceil',
+                   ref=np.ceil,
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -258,6 +294,22 @@ op_db = [
     UnaryUfuncInfo('cosh',
                    ref=np.cosh,
                    dtypesIfCPU=floating_and_complex_types(),),
+    UnaryUfuncInfo('erf',
+                   ref=scipy.special.erf if TEST_SCIPY else None,
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
+                                                  torch.float16: 1e-3}),)),
+    UnaryUfuncInfo('erfc',
+                   ref=scipy.special.erfc if TEST_SCIPY else None,
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
+                                                  torch.float16: 1e-2}),)),
+    UnaryUfuncInfo('floor',
+                   ref=np.floor,
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -287,6 +339,16 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half),),
+    UnaryUfuncInfo('rsqrt',
+                   ref=lambda a: np.reciprocal(np.sqrt(a)),
+                   dtypesIfCPU=floating_and_complex_types(),
+                   domain=(0, float('inf')),
+                   decorators=(precisionOverride({torch.cfloat: 1e-3,
+                                                  torch.float16: 1e-1}),),),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
@@ -299,15 +361,40 @@ op_db = [
                    ref=np.sinh,
                    dtypesIfCPU=floating_and_complex_types(),
                    decorators=(precisionOverride({torch.float16: 1e-2}),),),
+    # TODO: Comparing bfloat16 sqrt with NumPy's float32 sqrt requires test-specific precision
+    UnaryUfuncInfo('sqrt',
+                   ref=np.sqrt,
+                   domain=(0, float('inf')),
+                   decorators=(precisionOverride({torch.cfloat: 1e-3}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),
+                   )),
+    # MacOS CPU complex reference numerics are skipped, see https://github.com/pytorch/pytorch/issues/44611
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_MACOS)
                    )),
+    # MacOS CPU complex reference numerics are skipped, see https://github.com/pytorch/pytorch/issues/44611
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_MACOS)
+                   )),
+    UnaryUfuncInfo('trunc',
+                   ref=np.trunc,
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),),
 ]
 
 # Common operator groupings
