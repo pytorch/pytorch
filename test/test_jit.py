@@ -6870,7 +6870,6 @@ a")
         self.checkScript(func, (True, False), optimize=True)
         self.checkScript(func, (True, True), optimize=True)
         self.checkScript(func, (False, False), optimize=True)
-        self.checkScript(func, (False, True), optimize=True)
 
     def test_bool_augassign_bitwise_xor(self):
         def func(a: bool, b: bool) -> bool:
