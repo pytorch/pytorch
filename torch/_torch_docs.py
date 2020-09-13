@@ -3647,14 +3647,19 @@ Example::
 add_docstr(torch.linspace, r"""
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Creates a one-dimensional tensor of size :attr:`steps` whose values interpolate
-linearly from :attr:`start` to :attr:`end`, inclusive.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :attr:`start: to :attr:`end`, inclusive. That is, the value are:
+
+.. math::
+    (\text{start}, \text{start} + \frac{\text{end} - \text{start}}{\text{steps}}, \ldots, \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}}, \text{end})
 
 .. warning::
-    Not providing a value for :attr:`steps` is deprecated. If no value for
-    :attr:`steps` is given then a tensor with 100 elements will be created,
-    as in previous PyTorch releases. In a future PyTorch release, failing to
-    provide a value for :attr:`steps` will throw a runtime error.
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
@@ -3960,16 +3965,20 @@ logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 
-Creates a one-dimensional tensor of size :attr:`steps` whose values interpolate
-logarithmically from :attr:`start` to :attr:`end`, inclusive.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :attr:`start`: to :attr:`end`, inclusive, on a logarithmic scale.
+That is, the values are:
 
-:math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
+.. math::
+    (\text{base}^{\text{start}}, \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})}, \ldots, \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})}, \text{base}^{\text{end}})
 
 .. warning::
-    Not providing a value for :attr:`steps` is deprecated. If no value for
-    :attr:`steps` is given then a tensor with 100 elements will be created,
-    as in previous PyTorch releases. In a future PyTorch release, failing to
-    provide a value for :attr:`steps` will throw a runtime error.
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
