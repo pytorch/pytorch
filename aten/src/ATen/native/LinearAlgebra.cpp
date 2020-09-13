@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -217,7 +218,7 @@ static void addmm_impl_cpu_(
     return;
   }
 
-  if (beta.to<double>() != 0.0 && !self.is_same(result)) {
+  if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
 
@@ -550,10 +551,17 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
-  result.resize_({});
+  at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   return result.fill_(self.dot(tensor));
+}
+
+Tensor& vdot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  at::native::resize_output(result, {});
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  return result.fill_(self.vdot(other));
 }
 
 /*
@@ -700,6 +708,537 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+// helper methods for matrix_exp
+namespace {
+
+template <typename scalar_t, int ROW, int COL>
+using array2d = std::array<std::array<scalar_t, COL>, ROW>;
+
+// we consider 6 Taylor expansions of degree
+// 1, 2, 4, 8, 12, 18
+constexpr int total_n_degs = 6;
+
+Tensor operator_1_norm(const Tensor& tensor) {
+  return std::get<0>(tensor.abs().sum(-2).max(-1));
+}
+
+// Allocates a buffers of uninitialized or zero values
+// of shape [n_copies, a.size()]
+Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
+  auto res = at::empty(
+    {n_copies, a.size(0), a.size(1), a.size(2)},
+    a.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+  
+  if (is_zero) {
+    res.zero_();
+  }
+
+  return res;
+}
+
+// Makes `buffer` to store `num_matrices` number of matrices needed for
+// compute the matrix exponentials of different orders, i.e.
+// first `num_matrices` matrices from the list l := {I, A, A^2, A^3, A^6}
+// in a contiguous block of memory such that
+// buffer[0, ...] = l[0], // I
+// buffer[1, ...] = l[1], // A
+// ...
+// buffer[num_matrices - 1, ...] = l[num_matries - 1]
+void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
+  auto a_sizes_minus_last = a.sizes().vec();
+  a_sizes_minus_last.pop_back();
+  // fill I
+  buffer.select(0, 0).copy_(
+    at::diag_embed(
+      at::ones({1}, buffer.options())
+        .expand(a_sizes_minus_last)
+    )
+  );
+
+  // fill a
+  buffer.select(0, 1).copy_(a);
+
+  // fill a^2
+  if (2 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 2), // out for a^2
+      buffer.select(0, 1),
+      buffer.select(0, 1)
+    );
+  }
+
+  // fill a^3
+  if (3 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 3), // out for a^3
+      buffer.select(0, 1),
+      buffer.select(0, 2)
+    );
+  }
+
+  // fill a^6
+  if (4 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 4),
+      buffer.select(0, 3),
+      buffer.select(0, 3)
+    );
+  }
+}
+
+inline Tensor _move_memory_if_cuda_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() == at::kCUDA)
+    ? mem.to(at::device_of(in).value())
+    : mem;
+}
+
+// convert a 1D blob to a 2D Tensor of size [1, blob.size()]
+// such that blob.device() == in.device())
+// designed to be used with _compute_linear_combination
+template <typename scalar_t>
+inline Tensor _blob_to_Tensor(
+  std::initializer_list<scalar_t> blob,
+  const Tensor& in
+) {
+  // we convert to void* expecitly because begin() returns
+  // a pointer to a constant.
+  // Blob is assumed to be a 1D array, that is why
+  // we also insert a fake dimension so that the result could directly
+  // be used in _compute_linear_combination
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
+    .unsqueeze(0);
+  return _move_memory_if_cuda_input(tensor, in);
+}
+
+// I + A
+Tensor compute_T1(const Tensor& A) {
+  // 2 for {I, A}
+  auto As = _allocate_buffer(A, 2);
+  _fill_matrix_powers(As, A, 2);
+  return As.sum(0);
+}
+
+// I + A + A^2 / 2
+Tensor compute_T2(const Tensor& A) {
+  auto As = _allocate_buffer(A, 3);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+  As.select(0, 2).div_(2.0);
+  return As.sum(0);
+}
+
+// I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+template <typename scalar_t>
+Tensor compute_T4(const Tensor& A) {
+  auto As = _allocate_buffer(A, 4);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+  
+  at::native::matmul(
+    // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
+    As.select(0, 3),
+    // contains A^2
+    As.select(0, 2),
+    // computes (I / 2 + A / 6 + A^2 / 24)
+    at::native::_compute_linear_combination(
+      As.narrow(0, 0, 3),
+      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+    )
+  );
+
+  // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+  return at::native::_compute_linear_combination(
+    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  );
+}
+
+template <typename scalar_t>
+Tensor compute_T8(const Tensor& A) {
+  constexpr scalar_t sqrt_177 = 0.1330413469565007072504e+2;
+  constexpr scalar_t x3 = 2. / 3.;
+  constexpr scalar_t x1 = x3 * ((1. + sqrt_177) / 88.);
+  constexpr scalar_t x2 = x3 * ((1. + sqrt_177) / 352.);
+  constexpr scalar_t x4 = (-271. + 29. * sqrt_177) / (315. * x3);
+  constexpr scalar_t x5 = (-11. + 11. * sqrt_177) / (1260. * x3);
+  constexpr scalar_t x6 = (-99. + 11. * sqrt_177) / (5040. * x3);
+  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
+  constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
+
+  auto As = _allocate_buffer(A, 5);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+
+  // A4 =  A2 * (x1 * A + x2 * A2)
+  at::native::matmul(
+    // output for A4
+    As.select(0, 3),
+    // As.select(0, 2) = A^2
+    As.select(0, 2),
+    at::native::_compute_linear_combination(
+      // extract {A, A^2} from As
+      As.narrow(0, 1, 2),
+      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+    )
+  );
+
+  // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
+  at::native::matmul(
+    // output for A8
+    As.select(0, 4),
+    // x3 * A2 + A4
+    at::native::_compute_linear_combination(
+      As.narrow(0, 2, 2),
+      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+    ),
+    at::native::_compute_linear_combination(
+      As.narrow(0, 0, 4),
+      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+    )
+  );
+
+  // return I + A + y2 * A2 + A8;
+  return at::native::_compute_linear_combination(
+    As,
+    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  );
+}
+
+template <typename scalar_t>
+Tensor compute_T12(const Tensor& A) {
+  constexpr int num_prods = 4;
+  array2d<scalar_t, num_prods, num_prods> b = {{
+    {
+      9.0198e-16,
+      0.46932117595418237389,
+      -0.20099424927047284052,
+      -0.04623946134063071740
+    },
+    {
+      5.31597895759871264183,
+      1.19926790417132231573,
+      0.01179296240992997031,
+      0.01108844528519167989
+    },
+    {
+      0.18188869982170434744,
+      0.05502798439925399070,
+      0.09351590770535414968,
+      0.00610700528898058230
+    },
+    {
+      -2.0861320e-13,
+      -0.13181061013830184015,
+      -0.02027855540589259079,
+      -0.00675951846863086359
+    }
+  }};
+
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device `device_of(A)`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  );
+  bs = _move_memory_if_cuda_input(bs, A);
+
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
+
+  auto Bs = at::native::_compute_linear_combination(As, bs);
+
+  // compute A6
+  Bs.select(0, 2).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 3),
+    Bs.select(0, 3)
+  ));
+
+  return Bs.select(0,0).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 1).add_(Bs.select(0, 2)),
+    Bs.select(0, 2)
+  ));
+}
+
+template <typename scalar_t>
+Tensor compute_T18(const Tensor& A) {
+  constexpr int num_prods = 5;
+  array2d<scalar_t, num_prods, num_prods> b = {{
+    {
+      0.,
+      -1.00365581030144618291e-01,
+      -8.02924648241156932449e-03,
+      -8.92138498045729985177e-04,
+      0.
+    },
+    {
+      0.,
+      3.97849749499645077844e-01,
+      1.36783778460411720168e+00,
+      4.98289622525382669416e-01,
+      -6.37898194594723280150e-04
+    },
+    {
+      -1.09676396052962061844e+01,
+      1.68015813878906206114e+00,
+      5.71779846478865511061e-02,
+      -6.98210122488052056106e-03,
+      3.34975017086070470649e-05
+    },
+    {
+      -9.04316832390810593223e-02,
+      -6.76404519071381882256e-02,
+      6.75961301770459654925e-02,
+      2.95552570429315521194e-02,
+      -1.39180257516060693404e-05
+    },
+    {
+      0.,
+      0.,
+      -9.23364619367118555360e-02,
+      -1.69364939002081722752e-02,
+      -1.40086798182036094347e-05
+    }
+  }};
+
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device `device_of(A)`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  );
+  bs = _move_memory_if_cuda_input(bs, A);
+
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
+
+  auto Bs = at::native::_compute_linear_combination(As, bs);
+
+  // compute A9
+  Bs.select(0, 3).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 0),
+    Bs.select(0, 4))
+  );
+
+  return Bs.select(0, 1).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 2).add_(Bs.select(0, 3)),
+    Bs.select(0, 3)
+  ));
+}
+
+template <typename scalar_t>
+void compute_T18_scale_square(
+  Tensor& mexp_out,
+  const Tensor& a,
+  const Tensor& norm,
+  scalar_t theta
+) {
+  // Scale
+  const auto s = at::max(
+    at::zeros_like(norm),
+    at::ceil(at::log2(norm / theta))
+  ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
+  const auto pow2s = at::pow(2, s);
+  const auto a_scaled = a / pow2s;
+
+  // Square
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+  auto s_cpu = (s.device().type() == at::kCPU)
+    ? s : s.to(at::kCPU);
+  for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+    auto s_val = s_cpu.select(0, i).template item<int64_t>();
+    auto mexp = mexp_scaled.select(0, i);
+    for (int64_t p = 0; p < s_val; ++p) {
+      mexp = at::matmul(mexp, mexp);
+    }
+    mexp_out.select(0, i).copy_(mexp);
+  }
+}
+
+template <typename scalar_t>
+Tensor mexp_impl(
+  const Tensor& a,
+  std::array<scalar_t, total_n_degs> thetas,
+  bool compute_highest_degree_approx = false
+) {
+  auto res = at::empty_like(a);
+  const auto norm = operator_1_norm(a);
+  // `norm_cpu` is used to decide which Tensors require which approximation
+  // based on their norm. This decision takes place on CPU.
+  // It requires moving data back and forth between devices when `a` is on CUDA,
+  // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+  // and better performance overall (benchmarked).
+  const auto norm_cpu = (a.device().type() == at::kCUDA)
+    ? norm.to(at::kCPU) : norm;
+
+  if (!compute_highest_degree_approx) {
+    constexpr std::array<
+      Tensor(*)(const Tensor&),
+      total_n_degs - 1> 
+    compute_Ts = {
+      compute_T1, compute_T2, compute_T4<scalar_t>,
+      compute_T8<scalar_t>, compute_T12<scalar_t>
+    };
+
+    for (int i = 0; i < total_n_degs - 1; ++i) {
+      auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
+      auto norm_upper_bound = thetas[i];
+      // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+      auto idx_curr_norm_interval = (
+        (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
+      ).nonzero().squeeze(-1);
+
+      if (idx_curr_norm_interval.numel()) {
+        auto idx_to_device = _move_memory_if_cuda_input(
+          idx_curr_norm_interval, a
+        );
+        auto sub_a = at::index_select(a, 0, idx_to_device);
+        res.index_put_({idx_to_device}, compute_Ts[i](sub_a));
+      }
+    }
+
+    // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+    auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
+      .nonzero().squeeze(-1);
+
+    if (idx_large_norm.numel()) {
+      auto idx_to_device = _move_memory_if_cuda_input(
+        idx_large_norm, a
+      );
+      auto a_large_norm = at::index_select(a, 0, idx_to_device);
+      auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
+      auto mexp_out = at::empty_like(a_large_norm);
+
+      compute_T18_scale_square(
+        mexp_out,
+        a_large_norm,
+        large_norm_subset,
+        thetas[total_n_degs - 1]
+      );
+      res.index_put_({idx_large_norm}, mexp_out);
+    }
+
+    return res;
+  }
+
+  compute_T18_scale_square(
+    res, a, norm,
+    thetas[total_n_degs - 1]
+  );
+
+  return res;
+}
+
+// matrix exponential
+Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
+  // squash batch dimensions to one dimension for simplicity
+  const auto a_3d = a.view({-1, a.size(-2), a.size(-1)});
+
+  if (a.scalar_type() == at::ScalarType::Float
+      || a.scalar_type() == at::ScalarType::ComplexFloat) {
+    constexpr std::array<float, total_n_degs> thetas_float = {
+      1.192092800768788e-07, // deg 1
+      5.978858893805233e-04, // deg 2
+      5.116619363445086e-02, // deg 4
+      5.800524627688768e-01, // deg 8
+      1.461661507209034e+00, // deg 12
+      3.010066362817634e+00  // deg 18
+    };
+
+    return mexp_impl<float>(a_3d, thetas_float, compute_highest_degree_approx)
+      .view(a.sizes());
+  }
+  else { // if Double or ComplexDouble
+    constexpr std::array<double, total_n_degs> thetas_double = {
+      2.220446049250313e-16, // deg 1
+      2.580956802971767e-08, // deg 2
+      3.397168839976962e-04, // deg 4
+      4.991228871115323e-02, // deg 8
+      2.996158913811580e-01, // deg 12
+      1.090863719290036e+00  // deg 18
+    };
+
+    return mexp_impl<double>(a_3d, thetas_double, compute_highest_degree_approx)
+      .view(a.sizes());
+  }
+}
+
+// Based on:
+//
+// Mathias, Roy. 
+// A Chain Rule for Matrix Functions and Applications.
+// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
+//
+template <typename func_t>
+Tensor backward_analytic_function_of_a_matrix(
+    const Tensor& self, const Tensor& grad,
+    const func_t& function_of_a_matrix
+  ) {
+  auto self_transposed = self.transpose(-2, -1);
+  auto self_transposed_sizes = self_transposed.sizes().vec();
+  self_transposed_sizes[self.dim() - 2] <<= 1;
+  self_transposed_sizes[self.dim() - 1] <<= 1;
+
+  auto n = self_transposed.size(-1);
+  auto meta_grad = at::zeros(self_transposed_sizes, grad.options());
+  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(self_transposed);
+  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(self_transposed);
+  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+
+  auto grad_input = function_of_a_matrix(meta_grad)
+    .narrow(-2, 0, n).narrow(-1, n, n);
+  return grad_input;
+}
+
+};
+
+// Computes the matrix exponential for a given batch of squared matrices.
+// The implementaion is based on:
+//
+// Bader, P.; Blanes, S.; Casas, F.
+// Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
+// Mathematics 2019, 7, 1174.
+//
+Tensor matrix_exp(const Tensor& a) {
+  TORCH_CHECK(a.dim() >= 2 
+          && (at::isFloatingType(a.scalar_type()) 
+           || at::isComplexType(a.scalar_type())),
+              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
+              "of floating or complex types with dim at least 2");
+  TORCH_CHECK(a.size(-1) == a.size(-2),
+              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
+              "of squared matrices");
+
+  if (a.size(-1) == 1) {
+    return a.exp();
+  }
+
+  return mexp(a);
+}
+
+Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  return backward_analytic_function_of_a_matrix(
+    self, grad,
+    [](const Tensor& a) {
+      return a.matrix_exp();
+    }
+  );
+}
+
 Tensor matrix_power(const Tensor& a, int64_t n) {
   TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
               "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
@@ -753,10 +1292,13 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   if (dim.size() == 1 || dim.size() == 0) {
     return at::norm(self, 2, dim, keepdim);
   }
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
+  TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
   if (self.is_complex()){
-    return at::sqrt(at::sum(at::real(self.conj() * self), dim, keepdim));
+    return at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
   } else {
-    return at::sqrt(at::sum((self * self), dim, keepdim));
+    return at::sqrt(at::sum((self * self), dim_, keepdim));
   }
 }
 
@@ -774,10 +1316,13 @@ Tensor &frobenius_norm_out(
   if (dim.size() == 1 || dim.size() == 0) {
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
+  TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum(at::real(self.conj() * self), dim, keepdim));
+    return at::sqrt_out(result, at::sum(at::real(self.conj() * self), dim_, keepdim));
   } else {
-    return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
+    return at::sqrt_out(result, at::sum((self * self), dim_, keepdim));
   }
 }
 
@@ -811,8 +1356,10 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
 
-  auto permutation = create_dim_backshift_permutation(dim[0], dim[1], self.dim());
+  auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
   auto permutation_reverse = create_reverse_permutation(permutation);
   Tensor p = self.permute(permutation);
   // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
@@ -829,17 +1376,241 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
 
-  auto permutation = create_dim_backshift_permutation(dim[0], dim[1], self.dim());
+  auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
   auto permutation_reverse = create_reverse_permutation(permutation);
 
   Tensor p = self.permute(permutation);
   at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
   if (keepdim) {
     result.unsqueeze_(-1);
-    result = result.permute(permutation_reverse);
+    Tensor result_ = result.permute(permutation_reverse);
+    result.set_(result_);
   }
   return result;
+}
+
+// Creates a vector of length ndim with values equal to its indices
+// (e.g. [0, 1, 2, ..., ndim-1])
+static std::vector<int64_t> make_dim_list(int64_t ndim) {
+  std::vector<int64_t> dim_list(ndim);
+  for (int64_t ind = 0; ind < ndim; ind++) {
+    dim_list[ind] = ind;
+  }
+  return dim_list;
+}
+
+// Checks for valid arguments to linalg_norm when type(ord) == str
+static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim, optional<ScalarType> opt_dtype) {
+  TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
+  TORCH_CHECK(!opt_dtype.has_value(), "ord=\'", str_ord, "\' does not yet support the dtype argument");
+  bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
+  TORCH_CHECK(dims_valid, "order \"", str_ord,
+    "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
+}
+
+// Performs vector norm for ord = +/-infinity, and the second dimension reduction
+// for matrix norms.
+static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
+  Tensor result;
+  if (self.numel() == 0 && self.sizes()[dim] > 0) {
+    // This special case is needed in matrix norm for tensors with 3 or more dims,
+    // or in vector norm for order inf and -inf for tesnsors with 2 or more dims.
+    // When the sizes of the dims to be reduced are greater than 0 but another dim
+    // in the tensor is size 0 (thus numel == 0), we must either flatten or resize
+    // the second reduction dim to 1, to avoid calling min/max, which would throw
+    // an error.
+    if (self.sizes()[dim] != 1) {
+      auto new_sizes = self.sizes().vec();
+      new_sizes[dim] = 1;
+      self.resize_(new_sizes);
+    }
+    result = keepdim ? self : self.flatten(dim);
+  } else {
+    if (ord > 0) {
+      result = std::get<0>(self.max(dim, keepdim));
+    } else {
+      result = std::get<0>(self.min(dim, keepdim));
+    }
+  }
+  return result;
+}
+
+// Performs matrix norm
+static Tensor _linalg_norm_matrix(const Tensor &self, optional<Scalar> opt_ord,
+                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  Tensor result;
+  auto ord = opt_ord.value_or(2.0).toDouble();
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "matrix norm only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "matrix norm only supports strided layout, got: ", self.layout());
+
+  TORCH_CHECK(dim.size() == 2, "_linalg_norm_matrix: 'dim' must either specify 2 dimensions. ",
+    "Got 'dim' specifying ", dim.size(), " dims");
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
+  TORCH_CHECK(dim_[0] != dim_[1],
+    "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
+
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
+      "Can only calculate the mean of floating and complex types. Got ",
+      toString(scalarType), " instead.");
+
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(scalarType);
+  } else {
+    self_ = self;
+  }
+
+  if (std::abs(ord) == 2) {
+    // Need to shift the reduction dims to the back, because at::svd will only operate on
+    // the last 2 dimensions
+    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
+    auto permutation_reverse = create_reverse_permutation(permutation);
+
+    result = std::get<1>(self_.permute(permutation).svd()).abs();
+    result = _norm_min_max(result, ord, result.dim() - 1, keepdim);
+
+    if (keepdim) {
+      result.unsqueeze_(-1);
+      result = result.permute(permutation_reverse);
+    }
+  } else {
+    // abs(p) == infinity and abs(p) == 1 will perform identical reductions, except
+    // that the order of the two dims is swapped. So we can swap the dims if
+    // abs(p) == infinity to simplify the rest of the operation's logic.
+    if (std::abs(ord) == INFINITY) {
+      std::swap(dim_[0], dim_[1]);
+    }
+    // If the dim of the second reduction is greater than that of the first reduction
+    // and we are not keeping the dims, then the fact that the output of the first
+    // reduction will have one fewer dimension means that the second reduction dim
+    // will be off by one, so we need to correct that.
+    if ((dim_[1] > dim_[0]) && !keepdim) {
+      dim_[1]--;
+    }
+    if (std::abs(ord) == 1 || std::abs(ord) == INFINITY) {
+      result = self_.abs().sum(dim_[0], keepdim);
+      result = _norm_min_max(result, ord, dim_[1], keepdim);
+    } else {
+      TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
+    }
+  }
+  return result;
+}
+
+// Performs vector norm
+// This function mostly serves as a wrapper for at::norm, but it overrides a few cases
+// for numpy compatibility. These cases are corrected within this wrapper, rather than
+// in at::norm itself, to avoid breaking backward compatibility.
+static Tensor _linalg_norm_vector(const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  if (opt_ord.has_value()) {
+    TORCH_INTERNAL_ASSERT(dim.size() == 1);
+    auto ord = opt_ord.value().toDouble();
+    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
+    if (std::abs(ord) == INFINITY) {
+      // The ord = +/-infinity case is overridden because at::norm does not match numpy
+      // when the input contains extreme values (like nan or +/-inf) or if the input
+      // size is degenerate (like size(0), size(0, N), etc)
+      self_ = self_.abs();
+      return _norm_min_max(self_, ord, dim[0], keepdim);
+    } else if ((self_.numel() == 0) && (ord < 0)) {
+      // For negative orders with degenerate input sizes, at::norm's result does not
+      // match numpy.
+      Tensor result = self_.abs().pow(ord + 1).sum(dim[0], keepdim);
+      if (ord >= -1) {
+        // Result must be infinite in this case, and the simplest way to make that
+        // happen is to simply add infinity
+        result += INFINITY;
+      } else {
+        result = result.pow(1.0 / (ord + 1));
+      }
+      return result;
+    }
+  } else {
+    // If ord == None, need to check for unique dims because at::norm does not check it
+    // for this case.
+    std::vector<int64_t> dim_(dim);
+    maybe_wrap_dims(dim_, self.dim());
+    bool unique_dims = (std::unique(dim_.begin(), dim_.end())) == dim_.end();
+    TORCH_CHECK(unique_dims, "Expected dims to be different, got this instead: (", dim, ")");
+  }
+  if (opt_dtype.has_value()) {
+    return at::norm(self, opt_ord, dim, keepdim, opt_dtype.value());
+  } else {
+    return at::norm(self, opt_ord, dim, keepdim);
+  }
+}
+
+static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional<Scalar> opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  // Callers must give the ord argument as either a number, a string, or neither.
+  // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
+  TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
+  if (opt_dtype.has_value()) {
+    auto dtype = opt_dtype.value();
+    TORCH_CHECK(dtype == result.scalar_type(), "provided dtype must match dtype of result, but got",
+      "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
+  }
+  int64_t ndim = self.dim();
+  Tensor result_;
+  if (opt_str_ord.has_value()) {
+    // 'ord' is string
+    auto str_ord = opt_str_ord.value();
+    check_str_ord_valid(str_ord, opt_dim, ndim, opt_dtype);
+    if (str_ord == "fro") {
+      result_ = at::frobenius_norm(self, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+    } else if (str_ord == "nuc") {
+      if (opt_dim.has_value()) {
+        result_ = at::nuclear_norm(self, opt_dim.value(), keepdim);
+      } else {
+        result_ = at::nuclear_norm(self, keepdim);
+      }
+    }
+  } else {
+    // 'ord' is int or None
+    std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
+    if (!opt_num_ord.has_value() || dim_.size() == 1) {
+      result_ = _linalg_norm_vector(self, opt_num_ord, dim_, keepdim, opt_dtype);
+    } else if (dim_.size() == 2) {
+      result_ = _linalg_norm_matrix(self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
+    } else {
+      TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
+        "not 1-D or 2-D");
+    }
+  }
+  resize_output(result, result_.sizes());
+  result.copy_(result_);
+  return result;
+}
+
+// Numerical or None norms
+Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  Tensor result = at::empty({0}, options);
+  return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+}
+
+// Frobenius and nuclear norms
+Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  Tensor result = at::empty({0}, options);
+  return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+// Numerical or None norms
+Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
+}
+
+// Frobenius and nuclear norms
+Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
@@ -874,6 +1645,7 @@ static inline Tensor _chain_matmul_three_matrices(TensorList matrices) {
 Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
+  TORCH_CHECK(matrices.size() > 0, "chain_matmul: Expected one or more matrices");
   if (matrices.size() == 1) {
     return matrices[0];
   } else if (matrices.size() == 2) {

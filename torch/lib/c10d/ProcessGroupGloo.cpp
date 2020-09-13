@@ -796,14 +796,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
-
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
-    for (size_t i = 1; i < inputs.size(); i++) {
-      inputs[i].copy_(inputs[0]);
-    }
+    outputs_ = inputs;
   }
 
   template <typename T>
@@ -818,6 +811,18 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
+
+
+  std::vector<at::Tensor> result() override {
+    TORCH_CHECK(
+        isCompleted(),
+        "Work needs to be completed before calling result(). "
+        "Should call wait() before result().");
+    return outputs_;
+  }
+
+ protected:
+  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -1008,7 +1013,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
-  std::vector<at::Tensor> result() const override {
+  std::vector<at::Tensor> result() override {
     return outputs;
   }
 
@@ -1159,17 +1164,14 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Run allreduce on host side tensors.
     allreduce(tmp);
 
-    // Kick off copy back to the CUDA tensors.
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      inputs[i].copy_(tmp[0], /* non_blocking */ true);
+      inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    outputs_ = inputs;
   }
 
   void synchronize() override {
@@ -2297,11 +2299,20 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
+      c10d::checkSplitSizes(inputCounts, inputTensor, context->size);
+      c10d::checkSplitSizes(outputCounts, outputTensor, context->size);
+      std::vector<int64_t> sendCounts(context->size);
+      std::vector<int64_t> recvCounts(context->size);
+      std::vector<int64_t> sendOffsets(context->size);
+      std::vector<int64_t> recvOffsets(context->size);
+      c10d::computeLengthsAndOffsets(
+          inputCounts, inputTensor, &sendCounts, &sendOffsets);
+      c10d::computeLengthsAndOffsets(
+          outputCounts, outputTensor, &recvCounts, &recvOffsets);
       gloo::AlltoallvOptions opts(context);
       opts.setTag(tag);
-      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, inputCounts);
-      GENERATE_ALL_TYPES(
-          scalarType, setOutput, opts, outputTensor, outputCounts);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, sendCounts);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor, recvCounts);
       gloo::alltoallv(opts);
     }
   }

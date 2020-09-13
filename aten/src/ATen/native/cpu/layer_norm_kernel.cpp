@@ -83,8 +83,6 @@ void LayerNormKernelImplInternal(
   T* Y_data = Y->data_ptr<T>();
   T* mean_data = mean->data_ptr<T>();
   T* rstd_data = rstd->data_ptr<T>();
-  const bool gamma_null = gamma_data == nullptr;
-  const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; ++i) {
       const T* X_ptr = X_data + i * N;
@@ -93,25 +91,43 @@ void LayerNormKernelImplInternal(
       T rstd_val;
       std::tie(mean_val, rstd_val) = WelfordMoments(N, X_ptr);
       rstd_val = T(1) / std::sqrt(std::max(rstd_val, T(0)) + eps);
-      const T scale = rstd_val;
-      const T bias = -rstd_val * mean_val;
-      if (gamma_null || beta_null) {
-        for (int64_t j = 0; j < N; ++j) {
-          const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-          const T beta_v = beta_null ? T(0) : beta_data[j];
-          Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
-        }
-      } else {
-        const Vec scale_vec(scale);
-        const Vec bias_vec(bias);
+      const T c1 = rstd_val;
+      const T c2 = -rstd_val * mean_val;
+      const Vec c1_vec(c1);
+      const Vec c2_vec(c2);
+      if (gamma_data != nullptr && beta_data != nullptr) {
         vec256::map3<T>(
-            [scale_vec, bias_vec](Vec x, Vec gamma, Vec beta) {
-              return (x * scale_vec + bias_vec) * gamma + beta;
+            [c1_vec, c2_vec](Vec x_vec, Vec gamma_vec, Vec beta_vec) {
+              return (x_vec * c1_vec + c2_vec) * gamma_vec + beta_vec;
             },
             Y_ptr,
             X_ptr,
             gamma_data,
             beta_data,
+            N);
+      } else if (gamma_data != nullptr) {
+        vec256::map2<T>(
+            [c1_vec, c2_vec](Vec x_vec, Vec gamma_vec) {
+              return (x_vec * c1_vec + c2_vec) * gamma_vec;
+            },
+            Y_ptr,
+            X_ptr,
+            gamma_data,
+            N);
+      } else if (beta_data != nullptr) {
+        vec256::map2<T>(
+            [c1_vec, c2_vec](Vec x_vec, Vec beta_vec) {
+              return (x_vec * c1_vec + c2_vec) + beta_vec;
+            },
+            Y_ptr,
+            X_ptr,
+            beta_data,
+            N);
+      } else {
+        vec256::map<T>(
+            [c1_vec, c2_vec](Vec x_vec) { return x_vec * c1_vec + c2_vec; },
+            Y_ptr,
+            X_ptr,
             N);
       }
       mean_data[i] = mean_val;
