@@ -6884,7 +6884,7 @@ a")
         self.checkScript(func, (False, True), optimize=True)
 
     def test_number_augassign_bitwise_lshift(self):
-        def func():
+        def func() -> int:
             z = 8
             z <<= 2
             return z
