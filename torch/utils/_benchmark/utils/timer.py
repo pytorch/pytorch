@@ -120,11 +120,11 @@ class Timer(object):
         populate_timer.timeit(1)
         return self._timer.timeit(1)
 
-    def _estimate_block_size(self, min_run_time, check_cache_speedup=True):
+    def _estimate_block_size(self, min_run_time: float, check_cache_speedup=True):
         cache_sensitivity = None
         overhead = np.median([self._timer.timeit(0) for _ in range(5)])
-        cache_speedup = None
-        uncached_time = None
+        cache_speedup = 0.0
+        uncached_time = 0.0
         if check_cache_speedup:
             uncached_time = self._measure_uncached_runtime()
 
