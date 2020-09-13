@@ -1981,7 +1981,7 @@ struct to_ir {
       case TK_RSHIFT:
         return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
       case TK_POW:
-        return use_inplace_op ? aten::pow : aten::pow;
+        return aten::pow;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
