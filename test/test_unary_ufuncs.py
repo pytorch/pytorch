@@ -31,8 +31,23 @@ if TEST_NUMPY:
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
 
-# Functions tested here:
-#
+# Functions tested here (in alphabetical order):
+# acosh
+# asin
+# asinh
+# atan
+# atanh
+# cos
+# cosh
+# log
+# log10
+# log1p
+# log2
+# neg
+# sin
+# sinh
+# tan
+# tanh
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
@@ -51,7 +66,6 @@ _large_float_vals = (-501, 501,
                      -13437.7, 13437.7,
                      -4988429.2, 4988429.2,
                      -1e20, 1e20)
-_float_extremals = (float('inf'), float('-inf'), float('nan'))
 
 
 # Returns an iterable of contiguous tensors with the same storage on the requested
@@ -65,17 +79,20 @@ _float_extremals = (float('inf'), float('-inf'), float('nan'))
 #   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
 #   a large 2D tensor.
 #
-# These tensors will include interesting values. If include_large_values
-#   is true they will include larger values (>500), too, and if
-#   include_extremal_values is true they will include extremal values
-#   like -inf, inf, and nan.
+# These tensors will include "interesting" values, unless they have bool dtype.
+#   If include_large_values is true they will include larger values (>500)
+#   when the dtype is an integer or float type. Float types will also include
+#   extremal values like -inf, inf, and nan. Note that complex types currently
+#   never include large values or extremal values due to cross-platform
+#   inconsistencies in handling these values.
 #
-# The randomly generated values can be constracted by the domain
-#   argument.
+# The randomly generated values can be restricted by the domain
+#   argument, which will ensure that all values are within the given domain.
+#   For complex tensors, the domain argument clamps the real and imaginary
+#   part separately.
 def generate_numeric_tensors(device, dtype, *,
                              domain=(None, None),
-                             include_large_values=True,
-                             include_extremal_values=True):
+                             include_large_values=True):
     medium_length = 812
     large_size = (1029, 917)
     offset = 63
@@ -93,12 +110,20 @@ def generate_numeric_tensors(device, dtype, *,
                    make_tensor(large_size, device=device, dtype=dtype, low=None, high=None))
         return tensors
 
+    low = domain[0] if domain[0] is not None else -float('inf')
+    high = domain[1] if domain[1] is not None else float('inf')
+
     # Acquires dtype-specific vals
     if dtype.is_floating_point or dtype.is_complex:
-        large_vals = _large_float_vals if include_large_values else tuple()
-        extremals = _float_extremals if include_extremal_values else tuple()
-        vals = _float_vals + large_vals + extremals
+        # NOTE: large and extremal complex values are not tested
+        large_vals = _large_float_vals if include_large_values and dtype.is_floating_point else tuple()
+        opt_inf_vals = (-float('inf'), float('inf')) if dtype.is_floating_point else tuple()
+        opt_nan = (float('nan'),) if dtype.is_floating_point else tuple()
 
+        unfiltered_vals = _float_vals + large_vals + opt_inf_vals
+        filtered_vals = tuple(val for val in unfiltered_vals if (val > low and val < high))
+
+        vals = filtered_vals + opt_nan
         # Converts float -> complex vals if dtype is complex
         if dtype.is_complex:
             vals = tuple(complex(x, y) for x, y in product(vals, vals))
@@ -112,7 +137,7 @@ def generate_numeric_tensors(device, dtype, *,
     assert len(vals) < medium_length
 
     # Constructs the large tensor containing vals
-    large_tensor = make_tensor(large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
+    large_tensor = make_tensor(large_size, device=device, dtype=dtype, low=low, high=high)
 
     # Inserts the vals at an odd place
     large_tensor[57][offset:offset + len(vals)] = torch.tensor(vals, device=device, dtype=dtype)
@@ -206,8 +231,7 @@ class TestUnaryUfuncs(TestCase):
 
         for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_fn)):
             if alt is None:
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
+                continue
 
             actual = alt(t.clone())
             self.assertEqual(actual, expected, rtol=0, atol=0)
@@ -219,7 +243,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected)
+            self.assertEqual(actual.item(), expected, msg)
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
@@ -240,19 +264,14 @@ class TestUnaryUfuncs(TestCase):
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
-    #   1D tensors and a large 2D tensor with interesting and extremal values
-    #   and discontiguities.
+    #   1D tensors and a large 2D tensor with interesting and extremal values.
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @suppress_warnings
     @ops(unary_ufuncs)
     def test_reference_numerics(self, device, dtype, op):
-        include_extremals = (op.handles_complex_extremals if
-                             dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
-
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain,
-                                           include_large_values=op.handles_large_floats,
-                                           include_extremal_values=include_extremals)
+                                           include_large_values=op.handles_large_floats)
         for t in tensors:
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
@@ -271,8 +290,6 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             self.assertEqualHelper(actual, expected, msg, dtype=dtype)
-
-    # Tests for testing (dis)contiguity consistency
 
     @ops(unary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
