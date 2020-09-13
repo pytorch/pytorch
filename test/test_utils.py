@@ -618,8 +618,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             stmt="torch.sum(torch.ones((10,10)))",
         )
-        small = timer.adaptive_autorange(min_run_time=0.1)
-        self.assertFalse(small.has_warnings)
+        small = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
         timer = benchmark_utils.Timer(
             stmt="torch.sum(torch.ones((500,500)))",
         )
