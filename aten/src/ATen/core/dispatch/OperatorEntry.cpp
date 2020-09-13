@@ -160,8 +160,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::Autograd if available
-  //    (2.2) Use kernel from DispatchKey::Math if available
+  //    (2.1) Use kernel from DispatchKey::Math if available
+  //    (2.2) Use kernel from DispatchKey::Autograd if available
   //    (2.3) Special logic to handle catchAll for Autograd keys
   //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
   //          if there's no direct registration to the backend key.
@@ -186,17 +186,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   }
 
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
-    // 2.1. For autograd backend keys, use kernel from DispatchKey::Autograd if available
-    auto kern_autograd = kernels_.find(DispatchKey::Autograd);
-    if (kern_autograd != kernels_.end()) {
-      TORCH_INTERNAL_ASSERT(!kern_autograd->second.empty());
-      TORCH_INTERNAL_ASSERT(kern_autograd->second.front().kernel.isValid());
-      return {kern_autograd->second.front(), "autograd kernel"};
-    }
-  }
-
-  // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
+  // 2.1. Use Math kernel if available. For autograd keys, we only use kernel from Math
   //      when there's no direct registeration to its corresponding backend key.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
     auto kern_math = kernels_.find(DispatchKey::Math);
@@ -210,9 +200,19 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     }
   }
 
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
+    // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+    auto kern_autograd = kernels_.find(DispatchKey::Autograd);
+    if (kern_autograd != kernels_.end()) {
+      TORCH_INTERNAL_ASSERT(!kern_autograd->second.empty());
+      TORCH_INTERNAL_ASSERT(kern_autograd->second.front().kernel.isValid());
+      return {kern_autograd->second.front(), "autograd kernel"};
+    }
+  }
+
   // 2.3. For autograd backend keys, we use kernel from catchAll if there's no direct
   //      registration to the backend key. Once CatchAll is moved to Math, this should
-  //      fit 2.2 and we can remove 2.3 entirely.
+  //      fit 2.1 and we can remove 2.3 entirely.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
       && kernels_.find(getBackendKeyFromAutograd(dispatch_key)) == kernels_.end()
       && !catchAllKernel_.empty()) {
