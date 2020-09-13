@@ -1164,3 +1164,12 @@ def is_tensor_method_or_property(func: Callable) -> bool:
        of ``torch.Tensor``.
     """
     return func in get_tensor_methods() or func.__name__ == "__get__"
+
+def is_tensor_like(inp):
+    """
+    Returns ``True`` if the passed-in input is a tensor-like.
+
+    Currently, this occurs whenever there's a ``__torch_function__``
+    attribute on the input.
+    """
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")

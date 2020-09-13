@@ -15275,6 +15275,21 @@ a")
         wrapped_loaded = Wrapper(inner_module_loaded)
         self.assertEqual(wrapped(torch.ones(1)), wrapped_loaded(torch.ones(1)))
 
+    def test_interpret_graph(self):
+        def fn(x):
+            return x.unfold(0, 1, 1)
+
+        graph_str = """
+        graph(%a : Tensor, %b : Tensor):
+          %c : Tensor = aten::mul(%a, %b)
+          return (%c)
+        """
+        graph = parse_ir(graph_str)
+        a = torch.rand(10)
+        b = torch.rand(10)
+        test = torch._C._jit_interpret_graph(graph, (a, b))
+        ref = a * b
+        self.assertEqual(test, ref)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
@@ -15692,6 +15707,9 @@ def add_nn_module_test(*args, **kwargs):
     def do_test(self):
         if test_name in EXCLUDE_SCRIPT_MODULES:
             return
+        if not kwargs.get('check_jit', True):
+            raise unittest.SkipTest('module test skipped on JIT')
+
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
         else:
@@ -15754,16 +15772,18 @@ def add_nn_module_test(*args, **kwargs):
         else:
             input = (kwargs['input_size'],)
 
-        # Extra parameters to forward()
-        if 'extra_args' in kwargs:
-            input = input + kwargs['extra_args']
-
         if 'target_size' in kwargs:
             input = input + (kwargs['target_size'],)
         elif 'target_fn' in kwargs:
             if torch.is_tensor(input):
                 input = (input,)
             input = input + (kwargs['target_fn'](),)
+        elif 'target' in kwargs:
+            input = input + (kwargs['target'],)
+
+        # Extra parameters to forward()
+        if 'extra_args' in kwargs:
+            input = input + kwargs['extra_args']
 
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))

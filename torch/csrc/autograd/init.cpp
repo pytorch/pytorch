@@ -12,23 +12,28 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
   if (!tensor_module)
-    throw python_error();
+    return nullptr;
 
   // NOTE: "leaks" THPVariableClass
   THPVariableClass = PyObject_GetAttrString(tensor_module, "Tensor");
   if (!THPVariableClass)
-    throw python_error();
+    return nullptr;
 
   auto autograd_module = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
   if (!autograd_module)
-    throw python_error();
+    return nullptr;
 
   // NOTE: "leaks" Function
   THPFunctionClass = PyObject_GetAttrString(autograd_module, "Function");
   if (!THPFunctionClass)
-    throw python_error();
+    return nullptr;
 
-  auto m = py::handle(autograd_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module)
+    return nullptr;
+  auto _C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = _C_m.def_submodule("_autograd", "autograd bindings");
+
 
   py::enum_<ProfilerState>(m, "ProfilerState")
       .value("Disabled", ProfilerState::Disabled)

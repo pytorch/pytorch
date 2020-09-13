@@ -881,6 +881,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
                 return None
+            elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
+                return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
                 new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
