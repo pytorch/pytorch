@@ -206,15 +206,15 @@ struct ParserImpl {
         int modifier = L.next().text()[0];
         return create_compound(modifier, r, {});
       } break;
-      case TK_LSHIFT_EQ:{
+      case TK_LSHIFT_EQ: {
         L.next();
         return create_compound(TK_LSHIFT, r, {});
       } break;
-      case TK_RSHIFT_EQ:{
+      case TK_RSHIFT_EQ: {
         L.next();
         return create_compound(TK_RSHIFT, r, {});
       } break;
-      case TK_POW_EQ:{
+      case TK_POW_EQ: {
         L.next();
         return create_compound(TK_POW, r, {});
       } break;
