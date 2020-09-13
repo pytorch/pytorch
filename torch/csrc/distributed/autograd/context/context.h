@@ -104,7 +104,7 @@ class TORCH_API DistAutogradContext {
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+  std::shared_ptr<c10::ivalue::Future> clearAndWaitForOutstandingRpcsAsync();
 
   void clearOutstandingRpcs();
 
