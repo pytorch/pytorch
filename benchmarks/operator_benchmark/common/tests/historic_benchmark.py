@@ -20,8 +20,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 OP_BENCHMARK_ROOT = os.path.split(os.path.split(ROOT)[0])[0]
 
 HEAD = "head"
-VERSIONS = (HEAD, "1.6", "1.5", "1.4", "1.3")
-OLD_VERSIONS = ("1.4", "1.3")  # Some failures are expected.
+VERSIONS = (HEAD, "1.6", "1.5.1", "1.4", "1.3", "1.2", "1.1")
+OLD_VERSIONS = ("1.4", "1.3", "1.2", "1.1")  # Some failures are expected.
 ENV_TEMPLATE = "historic_microbenchmark_{version}"
 
 EXCLUDE = [
