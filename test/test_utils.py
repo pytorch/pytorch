@@ -612,7 +612,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertIsInstance(median, float)
 
     def test_cache_speedup(self):
-        x = torch.ones((1000,1000))
+        x = torch.ones((1000, 1000))
         timer = benchmark_utils.Timer(
             stmt="torch.sum(x)", globals={'x': x}
         )
