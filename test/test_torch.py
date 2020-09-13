@@ -18226,6 +18226,39 @@ else:
 
         self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
 
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nan_to_num(self, device, dtype):
+        for dim in range(0, 5):
+            for with_extremal in [False, True]:
+                for contiguous in [False, True]:
+                    shape = self._rand_shape(dim, 3, 5)
+                    x = self._generate_input(shape, dtype, device, with_extremal=with_extremal)
+                    if not contiguous:
+                        x = x.T
+                    self.compare_with_numpy(torch.nan_to_num, np.nan_to_num, x)
+                    self.compare_with_numpy(lambda x: x.nan_to_num(), np.nan_to_num, x)
+
+                    nan = random.random()
+                    pos_inf = random.random() * 5
+                    neg_inf = random.random() * 10
+                    # With args
+                    self.compare_with_numpy(lambda x: x.nan_to_num(nan=nan, pos_inf=pos_inf),
+                                            lambda x: np.nan_to_num(x, nan=nan, posinf=pos_inf),
+                                            x)
+                    self.compare_with_numpy(lambda x: x.nan_to_num(pos_inf=pos_inf, neg_inf=neg_inf),
+                                            lambda x: np.nan_to_num(x, posinf=pos_inf, neginf=neg_inf),
+                                            x)
+
+                    # Out Variant
+                    out = torch.empty_like(x)
+                    result = torch.nan_to_num(x)
+                    torch.nan_to_num(x, out=out)
+                    self.assertEqual(result, out)
+
+                    result = torch.nan_to_num(x, nan=nan, pos_inf=pos_inf, neg_inf=neg_inf)
+                    torch.nan_to_num(x, out=out, nan=nan, pos_inf=pos_inf, neg_inf=neg_inf)
+                    self.assertEqual(result, out)
+
     @onlyCUDA
     @tf32_on_and_off(0.005)
     def test_mv_stride_0(self, device):
