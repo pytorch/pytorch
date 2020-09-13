@@ -582,7 +582,6 @@ void testRegisterizerAllocs() {
   Buffer b(BufHandle("B", {1}, kInt));
   Buffer c(BufHandle("C", {1}, kInt));
   VarHandle x("x", kInt);
-  VarHandle y("y", kInt);
 
   VarHandle b_(b.data()->base_handle());
 
@@ -614,9 +613,9 @@ void testRegisterizerAllocs() {
 
   /*
    * int C_ = C[0];
+   * Allocate(B, int, {C_});
    * int A_ = C_;
    * int B_ = 0;
-   * Allocate(B, int, {C_});
    * for (int x = 0; x < 10; x++) {
    *   B_ = B_ + x;
    *   A_ = C_;
@@ -632,9 +631,9 @@ void testRegisterizerAllocs() {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: int C_ = C[0];
+# CHECK: Allocate(B
 # CHECK: int A_ = C_;
 # CHECK: int B_ = 0;
-# CHECK: Allocate(B
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK:   B_ =
 # CHECK:   A_ = C_
@@ -762,6 +761,56 @@ void testRegisterizerParallelized() {
   ASSERT_THROWS_WITH(
       registerize(stmt),
       "Registerization must occur after parallelism flattening");
+}
+
+void testRegisterizerConditions() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {5}, kInt));
+  VarHandle x("x", kInt);
+  Stmt* stmt = Block::make({For::make(
+      x,
+      0,
+      10,
+      Block::make({
+          Cond::make(
+              CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+              Store::make(
+                  a,
+                  {x},
+                  IfThenElse::make(
+                      CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+                      Add::make(Load::make(a, {x}, 1), x),
+                      Add::make(Load::make(a, {x - 5}, 1), x)),
+                  1),
+              Store::make(
+                  a,
+                  {x - 5},
+                  IfThenElse::make(
+                      CompareSelect::make(x, 5, CompareSelectOperation::kLT),
+                      Add::make(Load::make(a, {x}, 1), x),
+                      Add::make(Load::make(a, {x - 5}, 1), x)),
+                  1)),
+      }))});
+
+  std::ostringstream before;
+  before << *stmt;
+
+  /* for (int x = 0; x < 10; x++) {
+   *   if (x<5 ? 1 : 0) {
+   *     A[x] = IfThenElse(x<5 ? 1 : 0, (A[x]) + x, (A[x - 5]) + x);
+   *   } else {
+   *     A[x - 5] = IfThenElse(x<5 ? 1 : 0, (A[x]) + x, (A[x - 5]) + x);
+   *   }
+   * }
+   */
+
+  // No change.
+  registerize(stmt);
+
+  std::ostringstream after;
+  after << *stmt;
+
+  ASSERT_EQ(before.str(), after.str());
 }
 
 } // namespace jit

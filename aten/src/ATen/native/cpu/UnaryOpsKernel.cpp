@@ -111,7 +111,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 template <typename T>
 void LogitMKLKernel(T eps, TensorIterator* it) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED
@@ -348,10 +348,15 @@ static void trigamma_kernel(TensorIterator& iter) {
 }
 
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
-  switch (n) {
-    case 0: digamma_kernel(iter); break;
-    case 1: trigamma_kernel(iter); break;
-    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
+  if (n == 0) {
+    digamma_kernel(iter);
+  } else if (n == 1) {
+    trigamma_kernel(iter);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "polygamma", [&]() {
+      cpu_kernel(
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+    });
   }
 }
 
@@ -641,6 +646,7 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, i0)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)

@@ -10,32 +10,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-class TORCH_CUDA_API IndexLowering : public OptOutMutator {
- private:
-  std::vector<Expr*> lowered_exprs;
-  Expr* active_scope = nullptr;
-
-  // Wrap pushBack in lower_utils if active_scope is null we want it to go
-  // straight to lower_exprs
-  void pushBack(Expr*);
-
-  // Custom dispatch for Expr, want to find out of it's a TV op
-  Statement* mutate(Expr*) final;
-
-  // Open the for loop.
-  Statement* mutate(ForLoop*) final;
-
-  // Open the for loop.
-  Statement* mutate(IfThenElse*) final;
-
-  // Remake operations with TensorIndex
-  Statement* mutate(UnaryOp*) final;
-  Statement* mutate(BinaryOp*) final;
-  Statement* mutate(TernaryOp*) final;
-  Statement* mutate(ReductionOp*) final;
-  Statement* mutate(BroadcastOp*) final;
-  void generate(const std::vector<Expr*>& exprs);
-
+class TORCH_CUDA_API IndexLowering : public OptInDispatch {
  public:
   static std::vector<Expr*> getIndexedExprs(
       Fusion* fusion,
@@ -45,6 +20,43 @@ class TORCH_CUDA_API IndexLowering : public OptOutMutator {
     il.generate(incoming_exprs);
     return il.lowered_exprs;
   }
+
+ private:
+  // Wrap pushBack, if active_scope is null we want it to go
+  // straight to lower_exprs
+  void pushBack(Expr*);
+
+  // Open the for loop.
+  void handle(kir::ForLoop*) final;
+
+  // Open the for loop.
+  void handle(kir::IfThenElse*) final;
+
+  // Remake operations with TensorIndex
+  void handle(UnaryOp*) final;
+  void handle(BinaryOp*) final;
+  void handle(TernaryOp*) final;
+  void handle(ReductionOp*) final;
+  void handle(BroadcastOp*) final;
+  void handle(kir::Allocate*) final;
+  void handle(kir::Sync*) final;
+
+  void generate(const std::vector<Expr*>& exprs);
+
+  Val* lowerOperand(Val* op, Val* out) const;
+  Val* lowerOutput(Expr* expr) const;
+
+ private:
+  std::vector<Expr*> lowered_exprs;
+
+  // This is a slight work around as scope has a couple definitions, we have the
+  // Scope that's in ForLoop/IfThenElse which is really just a wrapper around
+  // std::vector<Expr*> and then we have the actual ForLoop/IfThenElse. We want
+  // to be able to carry both around because when we push back to a scope it
+  // could be either the body or else body of the IfThenElse. However, we want
+  // to understand the nesting of IfThenElse/ForLoop nodes.
+  kir::Scope* active_scope = nullptr;
+  Expr* active_scope_expr = nullptr;
 };
 
 } // namespace fuser

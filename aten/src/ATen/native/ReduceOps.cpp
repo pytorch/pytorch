@@ -143,6 +143,137 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
+static Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
+  Tensor ret = at::cumsum(-x, dim);
+
+  int64_t end_idx = ret.size(dim) - 1;
+  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone(at::MemoryFormat::Preserve);
+  ret -= ret_sum.expand_as(ret);
+  ret += x;
+  return ret;
+}
+
+Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
+  /*
+    There are two algorithms to do this. The first one
+    is very efficient, but works only when there are no
+    nonzero elements in the input.
+
+    The second one is much more complex, but it doesn't
+    assume anything on the input. The main downside is
+    that it takes time O(n^2), where n = input.size(self.dim)
+    (i.e. the length of the cumulative product). This is in
+    contrast to the forward pass and the efficient algorithm,
+    which are both O(n).
+
+    The second algorithm is a simple application of the chain
+    rule. If x is an n-dimensional vector, and y = cumprod(x),
+    and F is the final cost, then
+
+    dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
+
+    The term dF / dy_j is just grad_output[j] (assuming again
+    everything is one-dimensional).
+
+    The term (dy_j / dx_k) is easilly seen to be
+
+    if j >= k
+      dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
+    else:
+      dy_j / dx_k = 0
+
+    Note that the indicator (j>=k) can be taken out
+    by replacing the sum in (1) with a sum from
+    j = k to n.
+
+    Thus,
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+
+    with
+    dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
+
+    Note that this last term is just the cumulative product
+    with k omitted. Thus, if x_k (the input) is nonzero, we can
+    just express this as
+
+    dy_j / dx_k = (prod_{1 <= i <= j} x_i) / x_k
+                = y_j / x_k
+
+    So therefore,
+
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+
+    so
+
+    grad_output = sum_scan_exclusiv(grad_output * output) / input
+
+    If the input is nonzero, we need to calculate the dy_j / dx_k
+    by using the formula (2), called in the code omitted_products.
+
+    The way the code calculates it is simply by noting that
+
+    prod_{1 <= i <= j, i != k} x_i
+        = (prod_{1 <= i <= k} x_i) * (prod_{k + 1 <= i <= j} x_i)
+
+    the first term is calculated as prods_until_k, which since
+    doesn't depend in j is easy to vectorize.
+
+    The second term (indexed by j) is the cumulative product of
+    x_{k+1}, x_{k+2}, ..., x_n, and it's named in the code
+    prods_from_k_pkus_1, and it's calculated as a cumprod.
+
+    In order to vectorize this properly, we need to add to
+    omitted_products the dimensions where k > j, and therefore
+    dy_j / dx_k = 0, which is done right after the assert.
+  */
+
+  if (input.dim() == 0 || input.numel() == 0) {
+    return grad;
+  }
+  dim = at::maybe_wrap_dim(dim, input.sizes().size());
+  int64_t dim_size = input.size(dim);
+  if (dim_size == 1) {
+    return grad;
+  }
+
+  // Simple case with nonzero elements in the input
+  if ((input != 0).all().item<uint8_t>()) {
+    Tensor result = at::cumprod(input, dim);
+    return sum_scan_exclusive(result * grad, dim) / input;
+  }
+
+  auto ones_size = input.sizes().vec();
+  ones_size[dim] = 1;
+  Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+  Tensor grad_input = at::zeros(input.sizes(), grad.options());
+  Tensor prods_from_k_plus_1;
+  Tensor omitted_products;
+  for (int k = 0; k < dim_size; ++k) {
+    if (k == 0) {
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+    } else if (k == dim_size - 1) {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      omitted_products = prods_until_k;
+    } else {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+    }
+
+    // At this point omitted_products is the same size
+    // as input, except on the dimension dim where it's
+    // dim_size - k
+    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
+
+    grad_input.select(dim, k).copy_(
+        at::sum(grad.slice(dim, k) * omitted_products,dim));
+  }
+
+  return grad_input;
+}
+
 // Implement std::is_nan<IntegralType> for MSVC.
 namespace {
 #ifdef _MSC_VER
@@ -248,6 +379,16 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
   at::cummin_out(values, indices, self, dim);
   return std::make_tuple(values, indices);
 }
+
+Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
+  if (input.numel() == 0) {
+    return input;
+  }
+  auto result = at::zeros(input.sizes(), input.options());
+  return result.scatter_add_(dim, indices, grad);
+}
+
+
 // ALL REDUCE #################################################################
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
@@ -424,7 +565,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
-    auto maxes = at::max_values(self, dims, true);
+    auto maxes = at::amax(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, at::exp(self - maxes), dims, keepdim);
@@ -631,40 +772,30 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
-Tensor min_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  if (dims.size() == 1) {
-    return std::get<0>(self.min(dims[0], keepdim));
-  } else {
-    Tensor result = at::empty({0}, self.options());
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("min_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "min_values on a tensor with no elements is not defined.");
-    min_values_stub(iter.device_type(), iter);
-    return result;
-  }
+Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
+  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  min_values_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  if (dims.size() == 1) {
-    return std::get<0>(self.max(dims[0], keepdim));
-  } else {
-    Tensor result = at::empty({0}, self.options());
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("max_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "max_values on a tensor with no elements is not defined.");
-    max_values_stub(iter.device_type(), iter);
-    return result;
-  }
+Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amin_out(result, self, dim, keepdim);
 }
 
-Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: min_values with names");
-  return at::min_values(self, dimnames_to_positions(self, dims), keepdim);
+Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
+  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  max_values_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: max_values with names");
-  return at::max_values(self, dimnames_to_positions(self, dims), keepdim);
+Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amax_out(result, self, dim, keepdim);
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
@@ -733,7 +864,7 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmin_out(result, self, dim, keepdims);
 }
 
-static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -873,7 +1004,19 @@ Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
+  if (trivial_return.has_value()) {
+    return trivial_return.value();
+  }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_var(self, unbiased);
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, false);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -881,7 +1024,7 @@ Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
@@ -893,7 +1036,19 @@ Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
+  if (trivial_return.has_value()) {
+    return trivial_return.value();
+  }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_std(self, unbiased);
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, true);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -901,7 +1056,7 @@ Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 
@@ -1045,6 +1200,19 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
     });
   });
   return result.load();
+}
+
+// max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
+// functions that select values. value_selecting_reduction_backward is the
+// backward function for those operators; it propagates the grad to the
+// specific value locations referred to at `indices`.
+Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    auto grad_ = grad.unsqueeze(dim);
+    auto indices_ = indices.unsqueeze(dim);
+    return at::zeros(sizes, grad_.options()).scatter_(dim, indices_, grad_);
+  }
+  return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
 }} // namespace at::native

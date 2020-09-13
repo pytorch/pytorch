@@ -30,7 +30,7 @@ namespace {
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
-  mobile::Module deserialize(c10::optional<at::Device> device);
+  c10::IValue deserialize(c10::optional<at::Device> device);
 
  private:
   c10::IValue readArchive(
@@ -47,12 +47,11 @@ BytecodeDeserializer::BytecodeDeserializer(
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
-mobile::Module BytecodeDeserializer::deserialize(
+c10::IValue BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
-  auto temp = readArchive("data", mcu, std::move(device));
-  return mobile::Module(temp.toObject(), mcu);
+  return readArchive("data", mcu, std::move(device));
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
@@ -154,6 +153,70 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
+namespace mobile {
+
+mobile::Module _load_data(std::istream& in, c10::optional<at::Device> device) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _load_data(std::move(rai), std::move(device));
+}
+
+mobile::Module _load_data(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_data(std::move(rai), std::move(device));
+}
+
+mobile::Module _load_data(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnterLoadModel();
+  }
+  try {
+    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+    BytecodeDeserializer deserializer(std::move(reader));
+    auto mcu = std::make_shared<mobile::CompilationUnit>();
+    mobile::Module result = mobile::Module(
+        deserializer.deserialize(std::move(device)).toObject(), mcu);
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata["model_name"] = result.name();
+    }
+    if (observer) {
+      observer->onExitLoadModel(copied_metadata);
+    }
+    return result;
+  } catch (c10::Error& error) {
+    if (observer) {
+      observer->onFailLoadModel(error.what());
+    }
+    TORCH_RETHROW(error);
+  } catch (...) {
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailLoadModel(error.what());
+      }
+      TORCH_RETHROW(error);
+    }
+  }
+}
+
+} // namespace mobile
+
 std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     c10::optional<at::Device> device) {
@@ -171,31 +234,16 @@ std::map<std::string, at::Tensor> _load_parameters(
 std::map<std::string, at::Tensor> _load_parameters(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  if (observer) {
-    observer->onEnterLoadModel();
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
+  auto result = deserializer.deserialize(std::move(device)).toGenericDict();
+  std::map<std::string, at::Tensor> map;
+  for (const auto& e : result) {
+    auto key = e.key().toString()->string();
+    auto value = e.value().toTensor().tensor_data();
+    map[key] = value;
   }
-  try {
-    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-    BytecodeDeserializer deserializer(std::move(reader));
-    mobile::Module result = deserializer.deserialize(std::move(device));
-    std::string name = result.name();
-    if (observer) {
-      observer->onExitLoadModel(name);
-    }
-    return result.named_parameters();
-  } catch (const std::exception& ex) {
-    if (observer) {
-      observer->onFailLoadModel(
-          "Error occured during loading model: " + (std::string)ex.what());
-    }
-    TORCH_CHECK(false, ex.what());
-  } catch (...) {
-    if (observer) {
-      observer->onFailLoadModel("unknown exception");
-    }
-    TORCH_CHECK(false, "unknown exception");
-  }
+  return map;
 }
 
 } // namespace jit

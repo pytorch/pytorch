@@ -42,6 +42,7 @@ def libtorch_generated_sources(gencode_pattern):
     ]] + [
         "torch/csrc/autograd/TraceTypeManual.cpp",
         "torch/csrc/autograd/VariableTypeManual.cpp",
+        "torch/csrc/autograd/FunctionsManual.cpp",
     ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
@@ -91,9 +92,7 @@ core_sources_common = [
 ]
 
 jit_sources_common = [
-    "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
-    "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
 
 libtorch_sources_common = core_sources_common + jit_sources_common
@@ -164,6 +163,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
@@ -177,6 +177,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/hoist_conv_packed_params.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/inline_forked_closures.cpp",
+    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/insert_guards.cpp",
@@ -198,6 +199,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
+    "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
@@ -241,6 +243,7 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/kernel.cpp",
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
     "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
+    "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
@@ -296,9 +299,10 @@ jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
+    "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
-    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]
@@ -310,9 +314,10 @@ libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
+    "torch/csrc/autograd/FunctionsManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/mobile/export.cpp",
+    "torch/csrc/jit/mobile/export_data.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
@@ -320,6 +325,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/optim/sgd.cpp",
+    "torch/csrc/jit/mobile/sequential.cpp",
+    "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
@@ -339,6 +346,10 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
+    "torch/csrc/jit/codegen/cuda/executor.cpp",
+    "torch/csrc/jit/codegen/cuda/executor_kernel_arg.cpp",
+    "torch/csrc/jit/codegen/cuda/executor_launch_params.cpp",
+    "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
@@ -350,6 +361,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
+    "torch/csrc/jit/codegen/cuda/kernel_ir.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
@@ -358,18 +370,18 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/lower_validation.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
-    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
+    "torch/csrc/jit/codegen/cuda/register_interface.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler.cpp",
+    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
-    "torch/csrc/jit/codegen/cuda/utils.cpp",
-    "torch/csrc/jit/codegen/cuda/register_interface.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
 ]
 
@@ -493,7 +505,8 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/scalar_type_analysis.cpp",
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
-    "torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.cpp",
+    "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
+    "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
