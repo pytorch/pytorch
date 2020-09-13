@@ -435,8 +435,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      opTimeout_(opTimeout),
-      futureNCCLCallbackStreams_(c10::cuda::device_count()) {
+      opTimeout_(opTimeout) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -772,11 +771,17 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     streamVal.push_back(at::cuda::getStreamFromPool());
 
     // If not set before, get a dedicated stream for the device to run
-    // FutureNCCL then callbacks.
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
-      futureNCCLCallbackStreams_[deviceIndex] =
-          std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
+    // FutureNCCL then callbacks. Future callbacks are supported
+    // in single process single GPU mode, so do it only
+    // if we are in that mode
+    if (devices.size() == 1) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (std::get<1>(futureNCCLCallbackStream_) == nullptr) {
+        futureNCCLCallbackStream_ = std::make_tuple(
+            deviceIndex,
+            std::make_shared<at::cuda::CUDAStream>(
+                at::cuda::getStreamFromPool()));
+      }
     }
   }
 
@@ -917,11 +922,12 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   auto deviceIndex = (*outputs_)[0].device().index();
   // Create a new FutureNCCL object after checking for single-process
   // single-device mode.
+  TORCH_INTERNAL_ASSERT(std::get<0>(futureNCCLCallbackStream_) == deviceIndex);
   return c10::make_intrusive<FutureNCCL>(
       at::IValue(*outputs_),
       deviceIndex,
       cudaEvents_,
-      futureNCCLCallbackStreams_[deviceIndex]);
+      std::get<1>(futureNCCLCallbackStream_));
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -952,7 +958,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Store references to outputs and futureNCCLCallbackStream to be used by
   // WorkNCCL::getFuture.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-  work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
+  work->futureNCCLCallbackStream_ = futureNCCLCallbackStream_;
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
