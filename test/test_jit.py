@@ -6900,7 +6900,7 @@ a")
         self.checkScript(func, (), optimize=True)
 
     def test_number_augassign_bitwise_pow(self):
-        def func() -> float:
+        def func():
             z = 8
             z **= 2
             return z
