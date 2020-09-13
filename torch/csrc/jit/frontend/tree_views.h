@@ -61,6 +61,8 @@ namespace jit {
 //       |     Mod                                                      '%'
 //       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
+//       |     LShift                                                   TK_LShift
+//       |     RShift                                                   TK_RSHIFT
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
@@ -599,6 +601,11 @@ struct AugAssignKind : public TreeView {
       case '/':
       case '%':
       case '|':
+      case '&':
+      case '^':
+      case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";
