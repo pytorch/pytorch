@@ -172,7 +172,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //  (3) Use fallthrough kernel that are registered as fallback.
   //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
-  //   Autograd > Math
+  //   Math > Autograd
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
   // TODO: we can remove (2.3) and (4) after TypeDefault registrations are moved from catchAll to Math
   //       so that Math can populate to Autograd backend keys before fallback kernels.
