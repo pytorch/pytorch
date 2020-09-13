@@ -909,20 +909,6 @@ TEST(OperatorRegistrationTest, RegisterMathKernel) {
   EXPECT_TRUE(called_nonautograd);
 }
 
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithMathKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::Math)
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
-  EXPECT_FALSE(called_nonautograd);
-  EXPECT_TRUE(called_autograd);
-}
-
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithMathKernel_thenCanCallMathKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .kernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::Math)
@@ -930,6 +916,12 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithMathKernel_thenC
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
+
+  // Math has higher precedence than Autograd
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 
   called_nonautograd = called_autograd = false;
   op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));

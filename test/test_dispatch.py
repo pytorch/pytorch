@@ -478,10 +478,10 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 CPU: fn1 [kernel]
 CUDA: fn3 [math kernel]
 XLA: fn3 [math kernel]
-AutogradOther: fn2 [autograd kernel]
+AutogradOther: fn3 [math kernel]
 AutogradCPU: fn2 [autograd kernel]
-AutogradCUDA: fn2 [autograd kernel]
-AutogradXLA: fn2 [autograd kernel]
+AutogradCUDA: fn3 [math kernel]
+AutogradXLA: fn3 [math kernel]
 ''')
 
     def test_computed_table_with_cpu_autograd_catchall(self):
