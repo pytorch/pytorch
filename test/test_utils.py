@@ -611,6 +611,14 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
 
+    def test_cache_speedup(self):
+        x = torch.ones((1000,1000))
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(x)", globals={'x': x}
+        )
+        blocked = timer.blocked_autorange()
+        self.assertTrue(blocked.has_cache_warning)
+
     def test_adaptive_timer(self):
         # Validate both on different sizes validate against blocked_autorange
         # This looks for relative differences btetween orders of magnitude to
@@ -623,7 +631,6 @@ class TestBenchmarkUtils(TestCase):
             stmt="torch.sum(torch.ones((500,500)))",
         )
         medium = timer.adaptive_autorange(min_run_time=0.1)
-        self.assertFalse(medium.has_warnings)
         blocked_medium = timer.blocked_autorange(min_run_time=0.1)
         self.assertLess(small.median, medium.median)
         # This acts as a control to compare to a different way to measure the same value.

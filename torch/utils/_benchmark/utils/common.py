@@ -21,6 +21,8 @@ _MIN_CONFIDENCE_INTERVAL = 25e-9  # 25 ns
 _IQR_WARN_THRESHOLD = 0.1
 _IQR_GROSS_WARN_THRESHOLD = 0.25
 
+_CACHE_SPEEDUP_THRESHOLD = 1.5
+_CACHE_SPEEDUP_MIN_SECONDS = 0.000005
 
 class Measurement:
     """The result of a Timer measurement.
@@ -80,11 +82,17 @@ class Measurement:
     def meets_confidence(self, threshold=_IQR_WARN_THRESHOLD):
         return self._iqr / self._median < threshold
 
-    def add_cache_warning(self, message: str):
+    def set_cache_speedup(self, cache_speedup):
+        if self._median <= _CACHE_SPEEDUP_MIN_SECONDS:
+            return
+        self._cache_speedup = cache_speedup
+        if cache_speedup < _CACHE_SPEEDUP_THRESHOLD:
+            return
         self._has_cache_warning = True
-        self.warnings.append(
-            r" WARNING: {}\n           {}\n".format(
-                'Runtime is impacted by caching effects.', message)
+        self._warnings.append(
+            "  WARNING: {}\n           {}\n".format(
+                'Runtime is impacted by CPU caching effects.',
+                'CPU Caching speeds up by about {:.2f}x.'.format(cache_speedup))
         )
 
     @property

@@ -8,8 +8,9 @@ import torch
 from torch.utils._benchmark.utils import common
 
 
-_CACHE_SENSIVITY_RATIO = 1.5
-_CACHE_SENSIVITY_MIN_SECONDS = 0.0000005
+# Set the default caceh size. This may not be the exact caceh size,
+# but it is enough to expose cache effects on many architectures.
+_CACHE_SENSITIVITY_CACHE_SIZE_MB = 3
 
 __all__ = ["Timer"]
 
@@ -96,7 +97,7 @@ class Timer(object):
         return times
 
     def adaptive_autorange(self, threshold=0.1, max_run_time=10, callback=None, min_run_time=0.01):
-        number = self._estimate_block_size(min_run_time=0.05)
+        number, cache_speedup = self._estimate_block_size(min_run_time=0.05)
 
         def time_hook():
             return self._timer.timeit(number)
@@ -108,29 +109,23 @@ class Timer(object):
             return False
         times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
         measure = self._construct_measurement(number, times)
+        measure.set_cache_speedup(cache_speedup)
         return measure
 
     def _measure_uncached_runtime(self):
-        cache_clear = common.CPUCacheClear(cache_size_mb=cache_size_mb)
+        cache_clear = common.CPUCacheClear(cache_size_mb=_CACHE_SENSITIVITY_CACHE_SIZE_MB)
         cache_clear.clear_cpu_cache()
         populate_timer = timeit.Timer('sum(range(2)); torch.tanh(torch.tensor([1.1]))',
                                       globals={'torch': torch})
         populate_timer.timeit(1)
         return self._timer.timeit(1)
 
-    def _calculate_cache_sensitivity(self, cached_runtime, uncached_runtime):
-        if cached_runtime <= _CACHE_SENSIVITY_MIN_SECONDS:
-            return False, None
-        speedup = uncached_runtime / cached_runtime
-        return speedup >= _CACHE_SENSIVITY_RATIO, speedup
-
-    def _estimate_block_size(self, min_run_time, check_cache_sensitivity=True):
+    def _estimate_block_size(self, min_run_time, check_cache_speedup=True):
         cache_sensitivity = None
-
         overhead = np.median([self._timer.timeit(0) for _ in range(5)])
-        cache_sensitivity = None
+        cache_speedup = None
         uncached_time = None
-        if check_cache_sensitivity:
+        if check_cache_speedup:
             uncached_time = self._measure_uncached_runtime()
 
         number = 1
@@ -139,18 +134,18 @@ class Timer(object):
             # compared to the inner loop. This also serves as a warmup.
             while True:
                 time_taken = self._timer.timeit(number)
-                if check_cache_sensitivity:
-                    cache_sensitivity = uncached_time / (time_taken / number)
+                if check_cache_speedup:
+                    cache_speedup = uncached_time / (time_taken / number)
                 relative_overhead = overhead / time_taken
                 if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
                     break
                 if time_taken > min_run_time:
                     break
                 number *= 10
-        return number, cache_sensitivity
+        return number, cache_speedup
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
-        number = self._estimate_block_size(min_run_time)
+        number, cache_speedup = self._estimate_block_size(min_run_time)
 
         def time_hook():
             return self._timer.timeit(number)
@@ -159,4 +154,6 @@ class Timer(object):
             return True
         times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time,
                                                 callback=callback)
-        return self._construct_measurement(number_per_run=number, times=times)
+        measure = self._construct_measurement(number_per_run=number, times=times)
+        measure.set_cache_speedup(cache_speedup)
+        return measure
