@@ -107,7 +107,7 @@ You may have some code that tries to recover from out of memory errors.
 
 But find that when you do run out of memory, your recovery code can't allocate
 either. That's because the python exception object holds a reference to the
-stack frame where the error was raised. Which prevents the original tensor
+stack frame where the error was raised. This prevents the original tensor
 objects from being freed. The solution is to move you OOM recovery code outside
 of the ``except`` clause.
 
