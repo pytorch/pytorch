@@ -746,7 +746,7 @@
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
 
-- name: nan_to_num(Tensor self, float? nan=None, float? pos_inf=None, float? neg_inf=None) -> Tensor
+- name: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   self: nan_to_num_backward(grad, self)
 
 - name: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)

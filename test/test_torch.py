@@ -18238,15 +18238,16 @@ else:
                     self.compare_with_numpy(torch.nan_to_num, np.nan_to_num, x)
                     self.compare_with_numpy(lambda x: x.nan_to_num(), np.nan_to_num, x)
 
-                    nan = random.random()
-                    pos_inf = random.random() * 5
-                    neg_inf = random.random() * 10
                     # With args
-                    self.compare_with_numpy(lambda x: x.nan_to_num(nan=nan, pos_inf=pos_inf),
-                                            lambda x: np.nan_to_num(x, nan=nan, posinf=pos_inf),
+                    nan = random.random()
+                    posinf = random.random() * 5
+                    neginf = random.random() * 10
+
+                    self.compare_with_numpy(lambda x: x.nan_to_num(nan=nan, posinf=posinf),
+                                            lambda x: np.nan_to_num(x, nan=nan, posinf=posinf),
                                             x)
-                    self.compare_with_numpy(lambda x: x.nan_to_num(pos_inf=pos_inf, neg_inf=neg_inf),
-                                            lambda x: np.nan_to_num(x, posinf=pos_inf, neginf=neg_inf),
+                    self.compare_with_numpy(lambda x: x.nan_to_num(posinf=posinf, neginf=neginf),
+                                            lambda x: np.nan_to_num(x, posinf=posinf, neginf=neginf),
                                             x)
 
                     # Out Variant
@@ -18255,8 +18256,8 @@ else:
                     torch.nan_to_num(x, out=out)
                     self.assertEqual(result, out)
 
-                    result = torch.nan_to_num(x, nan=nan, pos_inf=pos_inf, neg_inf=neg_inf)
-                    torch.nan_to_num(x, out=out, nan=nan, pos_inf=pos_inf, neg_inf=neg_inf)
+                    result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
+                    torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
                     self.assertEqual(result, out)
 
     @onlyCUDA

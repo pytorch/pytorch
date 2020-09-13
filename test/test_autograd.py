@@ -4536,13 +4536,13 @@ for shape in [(1,), ()]:
 
         gradcheck(lambda x: x.nan_to_num(nan=1.2), a)
 
-        gradcheck(lambda x: x.nan_to_num(nan=1.2, pos_inf=2.0), a)
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0), a)
 
-        gradcheck(lambda x: x.nan_to_num(nan=1.2, pos_inf=2.0, neg_inf=-2.0), a)
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0, neginf=-2.0), a)
 
-        gradcheck(lambda x: x.nan_to_num(pos_inf=2.0, neg_inf=-2.0), a)
+        gradcheck(lambda x: x.nan_to_num(posinf=2.0, neginf=-2.0), a)
 
-        gradcheck(lambda x: x.nan_to_num(neg_inf=-2.0), a)
+        gradcheck(lambda x: x.nan_to_num(neginf=-2.0), a)
 
     def test_custom_function_error(self):
         class BadFw(Function):

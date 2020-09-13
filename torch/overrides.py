@@ -484,7 +484,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mv: lambda input, vec, out=None: -1,
         torch.mvlgamma: lambda input, p: -1,
         torch.narrow: lambda input, dim, start, length: -1,
-        torch.nan_to_num: lambda input, nan=0.0, pos_inf=None, neg_inf=None, out=None: -1,
+        torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch.native_layer_norm: lambda input, weight, bias, M, N, eps: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
