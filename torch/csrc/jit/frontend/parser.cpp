@@ -214,7 +214,7 @@ struct ParserImpl {
         L.next();
         return create_compound(TK_RSHIFT, r, {});
       } break;
-      case TK_POW_EQ:{
+      case TK_POW_EQ: {
         L.next();
         return create_compound(TK_POW, r, {});
       } break;
