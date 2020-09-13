@@ -61,7 +61,7 @@ if TEST_NUMPY:
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
-_int_vals = (0, -1, 1, -55, 55, -127, 127, -128, 128)
+_int_vals = (0, -1, 1, -55, 55, -127, 127, -128)  # NOTE: should fit within int8
 _large_int_vals = (-1113, 1113, -10701, 10701)
 _float_vals = (0.,
                -.001, .001,
