@@ -3971,8 +3971,9 @@ logspace(start, end, steps, base=10.0, *, \
 """ + r"""
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start` to :attr:`end`, inclusive, on a logarithmic scale.
-That is, the values are:
+spaced from :math:`{{\text{{base}}}}^{{\text{{start}}}}` to
+:math:`{{\text{{base}}}}^{{\text{{end}}}}`, inclusive, on a logarithmic scale
+with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
