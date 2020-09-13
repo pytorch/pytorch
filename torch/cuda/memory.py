@@ -497,10 +497,8 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     lines = []
     lines.append(f"GPU:{device}")
     if len(procs) == 0:
-        lines.append(f"no processes are running")
+        lines.append("no processes are running")
     for p in procs:
         mem = p.usedGpuMemory / (1024 * 1024)
         lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
-
-
