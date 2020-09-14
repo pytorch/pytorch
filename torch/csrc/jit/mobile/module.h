@@ -35,6 +35,10 @@ class TORCH_API Module {
       : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
   Module() = default;
   Method get_method(const std::string& method_name) const;
+  template <typename... Types>
+  c10::IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
+  }
   c10::IValue forward(std::vector<c10::IValue> inputs) {
     return get_method("forward")(std::move(inputs));
   }
