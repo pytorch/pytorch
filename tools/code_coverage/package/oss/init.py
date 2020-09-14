@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 from ..util.setting import (
     JSON_FOLDER_BASE_DIR,
     LOG_DIR,
+    CompilerType,
     Option,
     Test,
     TestList,
@@ -26,6 +27,16 @@ from .utils import (
     get_oss_binary_folder,
     get_pytorch_folder,
 )
+
+
+BLOCKED_PYTHON_TESTS = {
+    "run_test.py",
+    "print_test_stats.py",
+    "test_dataloader.py",
+    "test_multiprocessing.py",
+    "test_multiprocessing_spawn.py",
+    "test_utils.py",
+}
 
 
 def initialization() -> Tuple[Option, TestList, List[str]]:
@@ -101,7 +112,7 @@ def get_test_list(run_only: Optional[List[str]]) -> TestList:
     # add c++ test list
     test_list.extend(get_test_list_by_type(run_only, TestType.CPP))
     # add python test list
-    py_run_only = run_only if run_only else ["run_test.py"]
+    py_run_only = get_python_run_only(run_only)
     test_list.extend(get_test_list_by_type(py_run_only, TestType.PY))
 
     # not find any test to run
@@ -122,6 +133,29 @@ def empty_list_if_none(arg_interested_folder: Optional[List[str]]) -> List[str]:
 def gcc_export_init():
     remove_folder(JSON_FOLDER_BASE_DIR)
     create_folder(JSON_FOLDER_BASE_DIR)
+
+
+def get_python_run_only(args_run_only: Optional[List[str]]) -> List[str]:
+    # if user specifies run-only option
+    if args_run_only:
+        return args_run_only
+
+    # if not specified, use default setting, different for gcc and clang
+    if detect_compiler_type() == CompilerType.GCC:
+        return ["run_test.py"]
+    else:
+        # for clang, some tests will result in too large intermidiate files that can't be merged by llvm, we need to skip them
+        run_only: List[str] = []
+        binary_folder = get_oss_binary_folder(TestType.PY)
+        g = os.walk(binary_folder)
+        for _, _, file_list in g:
+            for file_name in file_list:
+                if file_name in BLOCKED_PYTHON_TESTS or not file_name.endswith(".py"):
+                    continue
+                run_only.append(file_name)
+            # only run tests in the first-level folder in test/
+            break
+        return run_only
 
 
 def print_init_info() -> None:
