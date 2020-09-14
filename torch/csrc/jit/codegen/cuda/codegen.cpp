@@ -273,7 +273,12 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
   void handle(const kir::UnaryOp* node) final {
     if (!print_inline_) {
-      indent() << gen(node->out()) << " = ";
+      indent() << gen(node->out());
+      if (!node->out()->isScalar() && !node->in()->isScalar()) {
+        code_ << "\n";
+        indent() << kTab;
+      }
+      code_ << " = ";
     }
 
     if (auto op = inline_op_str(node->getUnaryOpType())) {
@@ -317,7 +322,12 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
   void handle(const kir::BinaryOp* node) final {
     if (!print_inline_) {
-      indent() << gen(node->out()) << " = ";
+      indent() << gen(node->out());
+      if (!node->out()->isScalar()) {
+        code_ << "\n";
+        indent() << kTab;
+      }
+      code_ << " = ";
     }
 
     code_ << genBinaryOp(
@@ -330,7 +340,12 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
   void handle(const kir::TernaryOp* node) final {
     if (!print_inline_) {
-      indent() << gen(node->out()) << " = ";
+      indent() << gen(node->out());
+      if (!node->out()->isScalar()) {
+        code_ << "\n";
+        indent() << kTab;
+      }
+      code_ << " = ";
     }
 
     code_ << node->getTernaryOpType() << "(" << gen(node->in1()) << ", "
