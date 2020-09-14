@@ -237,6 +237,19 @@ py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
   }
 }
 
+py::object PyRRef::getRRefType() {
+  // GIL is not released when calling this function.
+  if (!type_.has_value()) {
+    pybind11::gil_scoped_release release;
+    auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+    auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
+    pybind11::gil_scoped_acquire acquire;
+    type_ = isOwner() ? typeFuncs.onOwner_(*this) : typeFuncs.onUser_(*this);
+  }
+
+  return *type_;
+}
+
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
   auto rrefForkData = ctx.prepareChildFork(rref_);
