@@ -144,7 +144,7 @@ option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in develo
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
+option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -614,6 +614,22 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
+  float32x4x2_t v;
+  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  vst1q_f32_x2(a, v);
+  return 0;
+}" HAS_VST1)
+
+  if(NOT HAS_VST1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
   float a[] = {1.0, 1.0};
   vld1q_f32_x2(a);
   return 0;
@@ -626,7 +642,7 @@ endif()
 
 
 # Add code coverage flags to supported compilers
-if(CODE_COVERAGE)
+if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS  " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS  " --coverage -fprofile-abs-path")
