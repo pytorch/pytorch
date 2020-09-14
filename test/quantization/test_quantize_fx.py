@@ -24,6 +24,7 @@ from torch.quantization import (
 from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_qat_qconfig,
     prepare,
     prepare_qat,
@@ -179,6 +180,54 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    @skipIfNoFBGEMM
+    def test_dynamic_quant_fp16(self):
+        class Linear(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                return F.linear(x, self.weight)
+
+        linear_input = torch.rand(8, 5)
+        linear_weight = torch.rand(10, 5)
+
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_module_input = torch.rand(8, 5)
+
+        tests = [
+            (Linear, (linear_weight,), (linear_input,),
+             ns.call_function(torch.ops.quantized.linear_dynamic),
+             ns.call_function(torch.ops.quantized.linear_prepack_fp16)),
+            (LinearModule, (), (linear_module_input,),
+             ns.call_module(nnqd.Linear),
+             None),
+        ]
+        for (ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            for debug in [True, False]:
+                node_occurrence = dict()
+                if weight_prepack_node:
+                    if debug:
+                        node_occurrence[weight_prepack_node] = 1
+                    else:
+                        node_occurrence[weight_prepack_node] = 0
+                m = ModuleClass(*module_constructor_inputs).eval()
+                m = symbolic_trace(m)
+                qconfig_dict = {"": float16_dynamic_qconfig}
+                m = quantize_dynamic_fx(m, qconfig_dict, debug=debug)
+                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
