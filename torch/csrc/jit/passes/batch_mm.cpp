@@ -475,7 +475,9 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
-  PeepholeOptimize(graph);
+  // Also, disable shape optimizations since they shouldn't affect
+  // transposes and batch_mm called on unguarded profiled types
+  PeepholeOptimize(graph, /*disable_shape_peepholes=*/true);
 }
 
 } // namespace jit
