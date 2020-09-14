@@ -160,3 +160,21 @@ class TestProfiler(JitTestCase):
         foo(x, y)
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check("CallFunction").check_next("Tensor = prim::TupleUnpack").run(g)
+
+    def test_autograd_fallback_graph(self):
+        @torch.jit.script
+        def foo(a, b):
+            c = a * b
+            d = c * b
+            e = d * b
+            return d + e
+
+        x = torch.ones(1, requires_grad=True)
+        y = torch.ones(1, requires_grad=True)
+        foo(x, y)
+        b = foo(x, y)
+        b.backward(torch.ones([1], dtype=torch.float), retain_graph=True)
+        b.backward(torch.ones([1], dtype=torch.float))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("fallback_function").check_next("CallFunction").run(g)
