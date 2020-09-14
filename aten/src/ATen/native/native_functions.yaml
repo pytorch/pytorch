@@ -3627,7 +3627,8 @@
     CPU, CUDA: clone
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
-    QuantizedCPU, QuantizedCUDA: quantized_clone
+    QuantizedCPU: quantized_clone
+    QuantizedCUDA: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
