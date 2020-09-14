@@ -130,11 +130,14 @@ def generate_numeric_tensors(device, dtype, *,
         opt_inf_vals = (-float('inf'), float('inf')) if dtype.is_floating_point else tuple()
         opt_nan = (float('nan'),) if dtype.is_floating_point else tuple()
 
+        # NOTE: float (and complex) filter is strictly less than / greater than
+        #   since float domains exclude their endpoints
         unfiltered_vals = _float_vals + large_vals + opt_inf_vals
         filtered_vals = tuple(val for val in unfiltered_vals if (val > low and val < high))
-
         vals = filtered_vals + opt_nan
-        # Converts float -> complex vals if dtype is complex
+
+        # Derives complex values from float values if the dtype is complex
+        # NOTE: complex values are constructed as float val x float val pairs
         if dtype.is_complex:
             vals = tuple(complex(x, y) for x, y in product(vals, vals))
     elif dtype is torch.uint8:
