@@ -1337,8 +1337,33 @@ AT_ERROR("symeig: MAGMA library not found in "
 #endif
 }
 
-// put eig_cuda_helper at the bottom to minimize the git diff. We will move it up in a next commit
-static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors);
+/*
+ * Internal helper; like eig_cuda but:
+ *   1. assume that self is a square matrix of side "n"
+ *   2. return CPU tensors, which will be copied to GPU memory by the caller
+ */
+static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors) {
+  // copy self to pinned CPU memory
+  auto self_working_copy = at::empty(self.sizes(),
+                                     at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+
+  self_working_copy.transpose_(0, 1); // make it column-ordered, what magmaEig wants
+  self_working_copy.copy_(self);
+
+  // tensors holding the results
+  auto out_eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto out_eigvecs = eigenvectors
+                     ? at::empty({n, n}, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                     : Tensor();
+
+  int64_t info;
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
+    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
+  });
+  singleCheckErrors(info, "eig_cuda");
+
+  return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
+}
 
 std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
@@ -1379,33 +1404,6 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   }
 }
 
-/*
- * Like eig_cuda but:
- *   1. assume that self is a square matrix of side "n"
- *   2. return CPU tensors, which will be copied to GPU memory by the caller
- */
-static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors) {
-  // copy self to pinned CPU memory
-  auto self_working_copy = at::empty(self.sizes(),
-                                     at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
-
-  self_working_copy.transpose_(0, 1); // make it column-ordered, what magmaEig wants
-  self_working_copy.copy_(self);
-
-  // tensors holding the results
-  auto out_eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto out_eigvecs = eigenvectors
-                     ? at::empty({n, n}, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
-                     : Tensor();
-
-  int64_t info;
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
-    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
-  });
-  singleCheckErrors(info, "eig_cuda");
-
-  return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
-}
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
