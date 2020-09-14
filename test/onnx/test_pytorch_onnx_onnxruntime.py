@@ -1019,6 +1019,27 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_dynamic_arange_out(self):
+        class ArangeOutModel(torch.nn.Module):
+            def forward(self, end):
+                out_t = torch.tensor([1], dtype=torch.int64)
+                return torch.arange(end, out=out_t)
+
+        x = torch.tensor(8)
+        self.run_test(ArangeOutModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_dynamic_arange_start_out(self):
+        class ArangeStartOutModel(torch.nn.Module):
+            def forward(self, start, end):
+                out_t = torch.tensor([1], dtype=torch.int64)
+                return torch.arange(start.size(0), end, out=out_t)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8)
+        self.run_test(ArangeStartOutModel(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
@@ -1028,6 +1049,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
         self.run_test(ArangeModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_out(self):
+        class ArangeOutModel(torch.nn.Module):
+            def forward(self, end):
+                out_t = torch.tensor([1], dtype=torch.float)
+                return torch.arange(end, out=out_t)
+
+        x = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeOutModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_start_out(self):
+        class ArangeStartOutModel(torch.nn.Module):
+            def forward(self, start, end):
+                out_t = torch.tensor([1], dtype=torch.float)
+                return torch.arange(start.size(0), end, out=out_t)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeStartOutModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_no_type(self):
