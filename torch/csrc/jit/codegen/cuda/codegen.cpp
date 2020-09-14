@@ -116,13 +116,16 @@ class CudaKernelGenerator : private OptInConstDispatch {
                << ") extern __shared__ char array[];\n";
 
       if (has_dynamic_smem) {
-        indent() << "unsigned offset = "
-                 << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
-                 << kernel_summary.largest_smem_data_type << "));\n";
+        indent() << "unsigned offset = 0;\n";
       }
 
       if (has_reductions) {
         indent() << "void* shared_mem = array;\n";
+        if (has_dynamic_smem) {
+          indent() << "offset += "
+                   << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
+                   << kernel_summary.largest_smem_data_type << "));\n";
+        }
       }
     }
   }
