@@ -1,5 +1,10 @@
 #pragma once
 
+// TODO: unify to C10_MOBILE. In theory this header could be used in OSS.
+#ifdef XPLAT_MOBILE_BUILD
+#include <ATen/selected_mobile_ops.h>
+#endif
+
 /**
  * This header implements functionality to build PyTorch with only a certain
  * set of operators (+ dependencies) included.

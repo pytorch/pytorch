@@ -253,7 +253,7 @@ class TestAutograd(TestCase):
 
         tmp = (t1 + t2) * (t1 + t2)
         t3 = TestAutograd.SimulateBackwardError.apply(tmp)
-        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
+        with self.assertRaisesRegex(Exception, "Simulate error on backward pass"):
             t3.sum().backward()
 
     def test_invalid_gradients(self):
@@ -1563,6 +1563,29 @@ class TestAutograd(TestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
+    def test_diagonal_expanded_v(self):
+        value = torch.rand([])
+        v_expanded = torch.tensor(value).expand(10)
+        a = torch.rand(10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a.diagonal(), a, v_expanded)
+        self.assertEqual(result, torch.eye(10) * value)
+
+    def test_select_expanded_v(self):
+        v_expanded = torch.rand(10).expand(10, 10)
+        a = torch.rand(10, 10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a[0], a, v_expanded)
+        expected = torch.zeros(10, 10, 10)
+        expected[0] = v_expanded
+        self.assertEqual(result, expected)
+
+    def test_slice_expanded_v(self):
+        v_expanded = torch.rand(10, 1).expand(2, 10, 10)
+        a = torch.rand(10, 10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a[3:5], a, v_expanded)
+        expected = torch.zeros(10, 10, 10)
+        expected[3:5] = v_expanded
+        self.assertEqual(result, expected)
+
     def test_stack(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = torch.randn(10, 10, requires_grad=True)
@@ -2313,7 +2336,7 @@ class TestAutograd(TestCase):
                 return grad
 
         d = ReentrantFunc.apply(c)
-        with self.assertRaisesRegex(RuntimeError, 'Simulate error'):
+        with self.assertRaisesRegex(Exception, 'Simulate error'):
             d.sum().backward()
 
     def test_broadcast_tensors(self):
@@ -3025,6 +3048,10 @@ class TestAutograd(TestCase):
             sort_by="self_cpu_time_total", row_limit=10, header="TEST"))
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10))
+        print(prof.table(
+            sort_by="self_cpu_time_total", row_limit=10, header="TEST", top_level_events_only=True))
+        print(prof.key_averages(group_by_input_shape=True).table(
+            sort_by="self_cpu_time_total", row_limit=10, top_level_events_only=True))
 
         total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
         print(
@@ -4556,6 +4583,11 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        bins = torch.linspace(0, 1.0, requires_grad=True)
+        vals = torch.rand(5, 5, requires_grad=True)
+        out = torch.bucketize(vals, bins)
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -6168,7 +6200,7 @@ class TestAutogradDeviceType(TestCase):
         t7 = t6 * t6
 
         # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(RuntimeError, "Simulate error"):
+        with self.assertRaisesRegex(Exception, "Simulate error"):
             torch.autograd.backward([t5.sum(), t7.sum()])
 
         # No grads should be accumulated since child graph will stop execution
@@ -6964,6 +6996,24 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
 
+    def test_preserve_backtrace(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            def backward(ctx, *grad):
+                raise ValueError("something")
+
+        t = torch.rand(10, requires_grad=True)
+        try:
+            Foo.apply(t).sum().backward()
+        except Exception:
+            import traceback
+            tb = sys.exc_info()[2]
+            tb_str = "\n".join(traceback.format_tb(tb))
+            self.assertTrue('raise ValueError("something")' in tb_str)
 
 for test in method_tests():
     add_test(*test)

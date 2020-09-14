@@ -843,24 +843,30 @@ void Reducer::initialize_bucket_views(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views_out.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
+            contents.as_strided(v.sizes(), v.strides(), offset));
+      } else {
+        replica.bucket_views_out.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
       }
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views_out.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
+            contents.narrow(0, offset, length).view(v.sizes()));
+      } else {
+        replica.bucket_views_out.push_back(
+            contents.narrow(0, offset, length).view(v.sizes()));
       }
+    }
+    // If `initialize_bucket_views` was called from `initialize_buckets`,
+    // by default `bucket_views_out` and `bucket_views_in` are
+    // essentially the same thing.
+    if (populate_bucket_views_in) {
+      replica.bucket_views_out = replica.bucket_views_in;
     }
   }
 }

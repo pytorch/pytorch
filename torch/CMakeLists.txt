@@ -148,6 +148,12 @@ if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       )
+    if(USE_STATIC_CUDNN)
+        set_source_files_properties(
+          ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+          PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
+        )
+    endif()
 endif()
 
 if(USE_NUMPY)
