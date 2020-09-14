@@ -4577,6 +4577,12 @@ median(input) -> Tensor
 
 Returns the median value of all elements in the :attr:`input` tensor.
 
+.. note::
+    The median is not unique for :attr:`input` tensors with an even number
+    of elements. In this case the lower of the two medians is returned. To
+    compute the mean of both medians in :attr:`input`, use :func:`torch.quantile`
+    with ``q=0.5`` instead.
+
 .. warning::
     This function produces deterministic (sub)gradients unlike ``median(dim=0)``
 
@@ -4603,6 +4609,12 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs tensor having 1 fewer dimension than :attr:`input`.
+
+.. note::
+    The median is not unique for :attr:`input` tensors with an even number
+    of elements in the dimension :attr:`dim`. In this case the lower of the
+    two medians is returned. To compute the mean of both medians in
+    :attr:`input`, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
     ``indices`` does not necessarily contain the first occurrence of each

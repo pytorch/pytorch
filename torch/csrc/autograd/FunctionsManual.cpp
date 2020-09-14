@@ -915,7 +915,6 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 }
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
-  // TODO: figure out where to use beta
   auto d = (input - target).abs();
   auto grad_input = grad * (d < beta).type_as(grad) / beta;
   if (reduction == at::Reduction::Mean) {
