@@ -147,7 +147,7 @@ def load(f, map_location=None, _extra_files=None):
         os.remove("scriptmodule.pt")
     """
     if isinstance(f, string_classes):
-        if not os.path.exists(f):
+        if not os.path.exists(f):  # type: ignore
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore

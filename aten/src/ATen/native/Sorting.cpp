@@ -270,10 +270,16 @@ void quantile_impl(
       "quantile() input tensor must be either float or double dtype");
   TORCH_CHECK(
       self.scalar_type() == q.scalar_type(),
-      "quantile() q must be same dtype as the input tensor");
+      "quantile() q tensor must be same dtype as the input tensor");
+  TORCH_CHECK(
+      self.scalar_type() == out.scalar_type(),
+      "quantile() out tensor must be same dtype as the input tensor");
   TORCH_CHECK(
       self.device() == q.device(),
-      "quantile() q must be on the same device as the input tensor");
+      "quantile() q tensor must be on the same device as the input tensor");
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "quantile() out tensor must be on the same device as the input tensor");
 
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
@@ -290,24 +296,7 @@ void quantile_impl(
   if (q.dim() > 0) {
     out_shape.insert(out_shape.begin(), q.numel());
   }
-
-  // Check or resize output
-  if (out.numel() > 0) {
-    TORCH_CHECK(
-        out.sizes().vec() == out_shape,
-        "quantile() expected output shape to be ",
-        out_shape,
-        " but got ",
-        out.sizes().vec());
-    TORCH_CHECK(
-        self.scalar_type() == out.scalar_type(),
-        "quantile() out tensor must be same dtype as the input tensor");
-    TORCH_CHECK(
-        self.device() == out.device(),
-        "quantile() out tensor must be on the same device as the input tensor");
-  } else {
-    resize_output(out, out_shape);
-  }
+  resize_output(out, out_shape);
 
   if (self.device().is_cpu()) {
     return quantile_cpu_impl(out, self, q, _dim, ignore_nan);
@@ -340,28 +329,30 @@ void quantile_impl(
       sorted.size(-1) <= std::pow(2, 24),
       "quantile() input tensor is too large");
 
+  // Convert q in [0, 1] to ranks in [0, reduction_size)
   Tensor ranks;
   if (ignore_nan) {
-    // For nanquantile, compute ranks based on number of non-nan values since
-    // sort compares nans as largest value. If all values are nan, set rank to 0
-    // so that the quantile computed will be nan.
+    // For nanquantile, compute ranks based on number of non-nan values.
+    // If all values are nan, set rank to 0 so the quantile computed is nan.
     ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
-    ranks.masked_fill_(ranks == -1, 0);
+    ranks.masked_fill_(ranks < 0, 0);
   } else {
-    ranks = q * (sorted.size(-1) - 1);
+    // For quantile, compute ranks based on reduction size. If there is nan
+    // set rank to last index so the quantile computed will be nan.
+    int64_t last_index = sorted.size(-1) - 1;
+    std::vector<Tensor> tl =
+        at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
+    ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
-
   Tensor ranks_below = ranks.toType(kLong);
   Tensor weights = ranks - ranks_below;
   Tensor ranks_above = ranks.ceil_().toType(kLong);
 
-  Tensor values_below = ignore_nan ? sorted.gather(-1, ranks_below)
-                                   : sorted.index_select(-1, ranks_below);
-  Tensor values_above = ignore_nan ? sorted.gather(-1, ranks_above)
-                                   : sorted.index_select(-1, ranks_above);
+  Tensor values_below = sorted.gather(-1, ranks_below);
+  Tensor values_above = sorted.gather(-1, ranks_above);
 
+  // Interpolate to compute quantiles and copy to out tensor
   values_below.lerp_(values_above, weights);
-
   if (q.dim() == 0) {
     // If q is scalar, remove last dim to match out shape
     values_below.squeeze_(-1);
@@ -369,14 +360,7 @@ void quantile_impl(
     // Move quantiles to first dim to match out shape
     values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
   }
-
   out.copy_(values_below);
-
-  if (!ignore_nan) {
-    // If there are nan values and nans are not ignored then
-    // all quantiles should be nan
-    out.masked_fill_(sorted.isnan().any(-1, false), NAN);
-  }
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
