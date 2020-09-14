@@ -8044,11 +8044,11 @@ class TestTorchDeviceType(TestCase):
                     ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
-                torch_method(3, **kwargs, layout=torch.sparse_coo)
+                torch_method(3, layout=torch.sparse_coo)
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                torch_method(3, **kwargs, dtype=torch.long)
-            self.assertTrue(torch_method(3, **kwargs, requires_grad=True).requires_grad)
-            self.assertFalse(torch_method(3, **kwargs).requires_grad)
+                torch_method(3, dtype=torch.long)
+            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
             test(window, kwargs={})

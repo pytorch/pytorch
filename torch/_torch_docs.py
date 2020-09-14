@@ -9004,8 +9004,6 @@ Args:
     periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
         If False, returns a symmetric window suitable for use in filter design.
     beta (float, optional): shape parameter for the window
-
-Keyword args:
     {dtype}
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
