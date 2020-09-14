@@ -770,7 +770,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
       ctx->srcFutures =
           List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
       if (src->hasError()) {
-        dst->setError(*src->error());
+        dst->setError(src->exception_ptr());
       } else {
         dst->markCompleted(src->constValue());
       }

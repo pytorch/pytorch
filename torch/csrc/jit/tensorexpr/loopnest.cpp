@@ -718,10 +718,6 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
-  if (f->ndim() == 0) {
-    throw malformed_input("Tensor lowered to zero dimensions");
-  }
-
   const Expr* initializer = t->initializer();
   if (initializer) {
     buf_initializers_[t->func_var()] = initializer;
@@ -910,16 +906,100 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor >= size_val) {
+      *head = f;
+      *tail = nullptr;
+      return;
+    }
+  }
+
+  if (!f) {
+    throw malformed_input("sliceHead attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceHead attempted on loop with no parent", p);
+  }
+
+  const Expr* head_end =
+      new Min(new Add(f->start(), new IntImm(factor)), f->stop(), true);
+  *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
+  *tail = new For(
+      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
+    LoopNest::normalize(*tail, tail);
+  }
+
+  // TODO: record history of transformations
+}
+
+void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor >= size_val) {
+      *head = nullptr;
+      *tail = f;
+      return;
+    }
+  }
+
+  if (!f) {
+    throw malformed_input("sliceTail attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceTail attempted on loop with no parent", p);
+  }
+
+  const Expr* tail_start =
+      new Max(f->start(), new Sub(f->stop(), new IntImm(factor)), true);
+  *head = new For(
+      f->var(),
+      f->start(),
+      tail_start,
+      Stmt::clone(f->body()),
+      f->loop_options());
+  *tail = new For(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
+    LoopNest::normalize(*head, head);
+  }
+
+  // TODO: record history of transformations
+}
+
 void LoopNest::splitWithTail(
     For* f,
     int factor,
     For** outer,
     For** inner,
     For** tail) {
-  Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
-  } else if (!p) {
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
@@ -1213,17 +1293,13 @@ void LoopNest::normalize(For* f, For** normalized) {
     throw malformed_input("normalize attempted on loop with no parent");
   }
 
-  if (!f->start()->isConstant()) {
-    // Do not normalize when the loop start is not a constant.
-    *normalized = f;
-    return;
-  }
-
-  int start_idx = immediateAs<int>(f->start());
-  if (start_idx == 0) {
-    // No need to normalize in this case.
-    *normalized = f;
-    return;
+  if (f->start()->isConstant()) {
+    int start_idx = immediateAs<int>(f->start());
+    if (start_idx == 0) {
+      // No need to normalize in this case.
+      *normalized = f;
+      return;
+    }
   }
 
   auto for_body_normalized = Substitute(
@@ -1233,7 +1309,8 @@ void LoopNest::normalize(For* f, For** normalized) {
       VarHandle(f->var()),
       ExprHandle(0),
       ExprHandle(f->stop()) - ExprHandle(f->start()),
-      for_body_normalized);
+      for_body_normalized,
+      f->loop_options());
 
   p->replace_stmt(f, *normalized);
 }
@@ -1247,7 +1324,8 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return std::vector<For*>(result.rbegin(), result.rend());
+  std::reverse(result.begin(), result.end());
+  return result;
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {

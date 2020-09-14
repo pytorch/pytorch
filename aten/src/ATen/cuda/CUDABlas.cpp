@@ -533,6 +533,20 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 #endif
 }
 
+template <>
+void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const cuComplex*>(x),
+                                   incx, reinterpret_cast<const cuComplex*>(y), incy,
+                                   reinterpret_cast<cuComplex*>(result)));
+}
+
+template <>
+void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZdotc(handle, n, reinterpret_cast<const cuDoubleComplex*>(x),
+                                   incx, reinterpret_cast<const cuDoubleComplex*>(y), incy,
+                                   reinterpret_cast<cuDoubleComplex*>(result)));
+}
+
 } // namespace blas
 } // namespace cuda
 } // namespace at

@@ -49,12 +49,12 @@ def get_source_lines_and_file(obj, error_msg=None):
         filename = inspect.getsourcefile(obj)
         sourcelines, file_lineno = inspect.getsourcelines(obj)
     except OSError as e:
-        msg = ("Can't get source for {}. TorchScript requires source access in "
+        msg = (f"Can't get source for {obj}. TorchScript requires source access in "
                "order to carry out compilation, make sure original .py files are "
-               "available. Original error: {}".format(obj, e))
+               "available.")
         if error_msg:
             msg += '\n' + error_msg
-        raise OSError(msg)
+        raise OSError(msg) from e
 
     return sourcelines, file_lineno, filename
 

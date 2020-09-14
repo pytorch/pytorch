@@ -15,7 +15,6 @@ import traceback
 import warnings
 import threading
 from typing import List, Optional, Tuple, Union
-from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
@@ -180,9 +179,9 @@ def _lazy_init():
                 try:
                     queued_call()
                 except Exception as e:
-                    msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                           "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-                    raise_from(DeferredCudaCallError(msg), e)
+                    msg = (f"CUDA call failed lazily at initialization with error: {str(e)}\n\n"
+                           f"CUDA call was originally invoked at:\n\n{orig_traceback}")
+                    raise DeferredCudaCallError(msg) from e
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True
