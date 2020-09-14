@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from torch._C import ListType
 import warnings
 from sys import maxsize as maxsize
 
@@ -175,7 +174,7 @@ def _is_value(x):
 
 
 def _is_tensor_list(x):
-    return x.type().isSubtypeOf(ListType.ofTensors())
+    return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
 
 
 def _unimplemented(op, msg):
@@ -313,7 +312,7 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if isinstance(scale_factor.type(), torch._C.ListType):
+    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor.isCompleteTensor() and scale_factor.type().dim() > 0):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, 0)

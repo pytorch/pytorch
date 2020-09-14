@@ -279,7 +279,7 @@ def _len(g, self):
 
 
 def __getitem_(g, self, i):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if sym_help._is_tensor_list(self):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
     else:
