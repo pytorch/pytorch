@@ -22,6 +22,7 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
@@ -154,13 +155,9 @@ def doAutodiffCheck(testname):
         return False
     return True
 
-if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-    EXCLUDE_SCRIPT_MODULES.update({
-        'test_nn_LocalResponseNorm_1d',
-        'test_nn_LPPool2d',
-        'test_nn_LPPool2d_norm',
-    })
 
+# TODO: enable TE in PE when all tests are fixed
+torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
@@ -679,17 +676,14 @@ class TestJit(JitTestCase):
         # a_copy is modified
         torch.testing.assert_allclose(orig_res, a_copy)
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
             # if result == 2 we will trigger a bailout and
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
-            if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-                FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
-            else:
-                FileCheck().check_not("prim::If").run(gre)
+            FileCheck().check_not("prim::If").run(gre)
 
         def test_dim():
             @torch.jit.script
@@ -2751,7 +2745,7 @@ class TestScript(JitTestCase):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    @unittest.skip("bailouts are being deprecated")
     def test_dominated_bailout(self):
         with enable_profiling_mode_for_profiling_tests():
             # functional dominated guard
@@ -2829,11 +2823,10 @@ class TestScript(JitTestCase):
             with num_profiled_runs(2):
                 test_not_const(torch.rand([1, 2]))
                 test_not_const(torch.rand([2, 2]))
-                test_not_const(torch.rand([3, 2]))
 
                 graph_str = torch.jit.last_executed_optimized_graph()
-                FileCheck().check("Double(*:2, 2:1, requires_grad=0, device=cpu) = ").run(graph_str)
-                FileCheck().check_not("Double(1:2, 2:1, requires_grad=0, device=cpu) = ").run(graph_str)
+                FileCheck().check("profiled_type=Double(*:2, 2:1, requires_grad=0, device=cpu").run(graph_str)
+                FileCheck().check_not("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu").run(graph_str)
 
 
     def test_nested_bailouts(self):
@@ -5279,7 +5272,7 @@ a")
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(func, [alpha, beta, x, y], optimize=False)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    @unittest.skip("bailouts are being deprecated")
     def test_profiling_graph_executor(self):
         @torch.jit.script
         def def_in_one_branch(x, z):
@@ -5310,7 +5303,7 @@ a")
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    @unittest.skip("bailouts are being deprecated")
     def test_maxpool_guard_elimination(self):
         @torch.jit.script
         def my_maxpool(x):
@@ -5323,7 +5316,7 @@ a")
             bailout_graph_str = str(my_maxpool.graph_for(a))
             FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    @unittest.skip("bailouts are being deprecated")
     def test_slice_guard_elimination(self):
         @torch.jit.script
         def my_slice(x):
@@ -5336,7 +5329,7 @@ a")
             bailout_graph_str = str(my_slice.graph_for(a))
             FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    @unittest.skip("bailouts are being deprecated")
     def test_unsqueeze_guard_elimination(self):
         @torch.jit.script
         def my_unsqueeze(x):
@@ -10539,29 +10532,39 @@ a")
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the original version of test_rand")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
             a = torch.rand([3, 4])
             return a + 1.0 - a
 
-        fn = self.checkScript(test_rand, ())
-        out = fn()
-        self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
-                   .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
+        with enable_profiling_mode_for_profiling_tests():
+            with num_profiled_runs(1):
+                fn = torch.jit.script(test_rand)
+                out = fn()
+                graph_str = torch.jit.last_executed_optimized_graph()
+                self.assertEqual(out.dtype, torch.double)
+                FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
+                           .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(graph_str)
+
+            # fn = self.checkScript(test_rand, ())
+            # out = fn()
+            # self.assertEqual(out.dtype, torch.double)
 
         @torch.jit.script
         def randint():
             return torch.randint(0, 5, [1, 2])
 
-        out = randint(profile_and_replay=True)
-        self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(1:2, 2:1, requires_grad=0, device=cpu)") \
-                   .check_not("Float(1:2, 2:1, requires_grad=0, device=cpu)").run(randint.graph_for())
+        with enable_profiling_mode_for_profiling_tests():
+            with num_profiled_runs(1):
+                out = randint()
+                graph_str = torch.jit.last_executed_optimized_graph()
+                self.assertEqual(out.dtype, torch.double)
+                FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)").run(graph_str)
+
 
     def test_erase_number_types(self):
         def func(a):
@@ -15274,6 +15277,21 @@ a")
         wrapped_loaded = Wrapper(inner_module_loaded)
         self.assertEqual(wrapped(torch.ones(1)), wrapped_loaded(torch.ones(1)))
 
+    def test_interpret_graph(self):
+        def fn(x):
+            return x.unfold(0, 1, 1)
+
+        graph_str = """
+        graph(%a : Tensor, %b : Tensor):
+          %c : Tensor = aten::mul(%a, %b)
+          return (%c)
+        """
+        graph = parse_ir(graph_str)
+        a = torch.rand(10)
+        b = torch.rand(10)
+        test = torch._C._jit_interpret_graph(graph, (a, b))
+        ref = a * b
+        self.assertEqual(test, ref)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
@@ -15691,6 +15709,9 @@ def add_nn_module_test(*args, **kwargs):
     def do_test(self):
         if test_name in EXCLUDE_SCRIPT_MODULES:
             return
+        if not kwargs.get('check_jit', True):
+            raise unittest.SkipTest('module test skipped on JIT')
+
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
         else:
@@ -15753,16 +15774,18 @@ def add_nn_module_test(*args, **kwargs):
         else:
             input = (kwargs['input_size'],)
 
-        # Extra parameters to forward()
-        if 'extra_args' in kwargs:
-            input = input + kwargs['extra_args']
-
         if 'target_size' in kwargs:
             input = input + (kwargs['target_size'],)
         elif 'target_fn' in kwargs:
             if torch.is_tensor(input):
                 input = (input,)
             input = input + (kwargs['target_fn'](),)
+        elif 'target' in kwargs:
+            input = input + (kwargs['target'],)
+
+        # Extra parameters to forward()
+        if 'extra_args' in kwargs:
+            input = input + kwargs['extra_args']
 
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))

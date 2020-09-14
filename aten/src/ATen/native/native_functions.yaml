@@ -1138,6 +1138,11 @@
     CPU: cummin_helper_cpu
     CUDA: cummin_helper_cuda
 
+- func: cummaxmin_backward(Tensor grad, Tensor input, Tensor indices, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1148,6 +1153,11 @@
   variants: function, method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod_backward(Tensor grad, Tensor input, int dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -1193,6 +1203,11 @@
 
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
+
+- func: diagonal_backward(Tensor grad, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1848,10 +1863,10 @@
 - func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
   use_c10_dispatcher: full
 
-- func: linspace(Scalar start, Scalar end, int steps=100, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: linspace.out(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: linspace_cpu_out
     CUDA: linspace_cuda_out
@@ -1924,10 +1939,10 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: logspace(Scalar start, Scalar end, int steps=100, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 
-- func: logspace.out(Scalar start, Scalar end, int steps=100, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
@@ -2727,6 +2742,12 @@
   dispatch:
     CPU: gelu_backward_cpu
     CUDA: gelu_backward_cuda
+
+- func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  python_module: nn
+  device_guard: False
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   use_c10_dispatcher: full
@@ -4862,6 +4883,11 @@
   use_c10_dispatcher: full
   variants: method, function
 
+- func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
@@ -4904,6 +4930,11 @@
   dispatch:
     CPU: legacy::cpu::_th_trace
     CUDA: trace_cuda
+
+- func: trace_backward(Tensor grad, int[] sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5206,6 +5237,11 @@
     CPU: legacy::cpu::_th_take
     CUDA: legacy::cuda::_th_take
 
+- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: index_select_out_cpu_
@@ -5241,6 +5277,11 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+
+- func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -7043,6 +7084,108 @@
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
 
+- func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_linear1d_cpu
+    CUDA: upsample_linear1d_cuda
+
+- func: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_linear1d_backward_cpu
+    CUDA: upsample_linear1d_backward_cuda
+
+- func: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_bilinear2d_cpu
+    CUDA: upsample_bilinear2d_cuda
+    QuantizedCPU: upsample_bilinear2d_quantized_cpu
+
+- func: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_bilinear2d_backward_cpu
+    CUDA: upsample_bilinear2d_backward_cuda
+
+- func: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_trilinear3d_cpu
+    CUDA: upsample_trilinear3d_cuda
+
+- func: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_trilinear3d_backward_cpu
+    CUDA: upsample_trilinear3d_backward_cuda
+
+- func: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_bicubic2d_cpu
+    CUDA: upsample_bicubic2d_cuda
+
+- func: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_bicubic2d_backward_cpu
+    CUDA: upsample_bicubic2d_backward_cuda
+
+- func: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest1d_cpu
+    CUDA: upsample_nearest1d_cuda
+
+- func: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest1d_backward_cpu
+    CUDA: upsample_nearest1d_backward_cuda
+
+- func: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest2d_cpu
+    CUDA: upsample_nearest2d_cuda
+    QuantizedCPU: upsample_nearest2d_quantized_cpu
+
+- func: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest2d_backward_cpu
+    CUDA: upsample_nearest2d_backward_cuda
+
+- func: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest3d_cpu
+    CUDA: upsample_nearest3d_cuda
+    QuantizedCPU: upsample_nearest3d_quantized_cpu
+
+- func: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: upsample_nearest3d_backward_cpu
+    CUDA: upsample_nearest3d_backward_cuda
+
+# NOTE: all of the non-"vec" upsample overloads are only kept for backward compatibility.
 - func: upsample_linear1d.out(Tensor self, int[1] output_size, bool align_corners, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
@@ -7222,107 +7365,6 @@
     CUDA: upsample_nearest3d_backward_out_cuda
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest3d_backward_cpu
-    CUDA: upsample_nearest3d_backward_cuda
-
-- func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_linear1d_cpu
-    CUDA: upsample_linear1d_cuda
-
-- func: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_linear1d_backward_cpu
-    CUDA: upsample_linear1d_backward_cuda
-
-- func: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_bilinear2d_cpu
-    CUDA: upsample_bilinear2d_cuda
-    QuantizedCPU: upsample_bilinear2d_quantized_cpu
-
-- func: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_bilinear2d_backward_cpu
-    CUDA: upsample_bilinear2d_backward_cuda
-
-- func: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_trilinear3d_cpu
-    CUDA: upsample_trilinear3d_cuda
-
-- func: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_trilinear3d_backward_cpu
-    CUDA: upsample_trilinear3d_backward_cuda
-
-- func: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_bicubic2d_cpu
-    CUDA: upsample_bicubic2d_cuda
-
-- func: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_bicubic2d_backward_cpu
-    CUDA: upsample_bicubic2d_backward_cuda
-
-- func: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest1d_cpu
-    CUDA: upsample_nearest1d_cuda
-
-- func: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest1d_backward_cpu
-    CUDA: upsample_nearest1d_backward_cuda
-
-- func: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest2d_cpu
-    CUDA: upsample_nearest2d_cuda
-    QuantizedCPU: upsample_nearest2d_quantized_cpu
-
-- func: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest2d_backward_cpu
-    CUDA: upsample_nearest2d_backward_cuda
-
-- func: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: upsample_nearest3d_cpu
-    CUDA: upsample_nearest3d_cuda
-    QuantizedCPU: upsample_nearest3d_quantized_cpu
-
-- func: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:

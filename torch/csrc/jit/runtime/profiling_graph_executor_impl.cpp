@@ -370,7 +370,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    RemoveProfilingNodes(copy);
+    GRAPH_DEBUG(
+        "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
     runNoGradOptimizations(copy);
   }
@@ -460,7 +462,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   if (optimized_plan_) {
-    GRAPH_DUMP("plan already optimized:", (*optimized_plan_).graph);
+    GRAPH_DEBUG("plan already optimized:", (*optimized_plan_).graph);
     return *optimized_plan_;
   }
 
@@ -494,8 +496,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
-  GRAPH_DUMP("Optimized Graph: ", copy);
-  // cache
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
