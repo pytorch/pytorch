@@ -713,6 +713,85 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }
+
+void populateRemoteProfiledEvents(
+    std::vector<torch::autograd::profiler::Event>& profiledEvents,
+    const torch::autograd::profiler::ProfilerConfig& profilingConfig,
+    const std::vector<std::vector<torch::autograd::profiler::Event>>&
+        event_lists) {
+  // Gather all events into a vector
+  for (auto& l : event_lists) {
+    for (auto& e : l) {
+      profiledEvents.push_back(e);
+    }
+  }
+  // find __start_profile event and __cuda_start_event.
+  bool cuda_profiling_enabled =
+      profilingConfig.state == torch::autograd::profiler::ProfilerState::CUDA;
+  bool found_cpu_start = false;
+  const torch::autograd::profiler::Event* profilerStart = nullptr;
+  // Each device has its own cudaProfilerStart, so we must take
+  // care to use the correct one depending on the device the
+  // operation ran on.
+  std::unordered_map<int, const torch::autograd::profiler::Event*>
+      cudaProfilerStarts;
+  for (auto& e : profiledEvents) {
+    if (!found_cpu_start && 0 == strcmp(e.name(), "__start_profile")) {
+      profilerStart = &e;
+      found_cpu_start = true;
+    }
+    if (cuda_profiling_enabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
+      e.setCudaUs(e.cpu_us());
+      auto device = e.device();
+      TORCH_CHECK(
+          device != -1,
+          "CUDA profiling was enabled but could not find CUDA device.");
+      TORCH_CHECK(
+          cudaProfilerStarts.find(device) == cudaProfilerStarts.end(),
+          c10::str("Duplicate __cuda_start_event found for ", device));
+      cudaProfilerStarts[device] = &e;
+    }
+    // TODO: determine no. of CUDA devices and break here if we have
+    // a cudaProfilerStart for all of them, in the case of cuda
+    // profiling.
+    if (found_cpu_start && !cuda_profiling_enabled) {
+      break;
+    }
+  }
+  // We should always find __start_profile.
+  TORCH_CHECK(
+      profilerStart != nullptr, "Expected to find __start_profile event.");
+  // Should have >= 1 CUDA start event.
+  // TODO: we can enhance this assert by ensuring we have found a
+  // start for every available CUDA device.
+  TORCH_CHECK(
+      !cuda_profiling_enabled || cudaProfilerStarts.size() > 0,
+      "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
+
+  if (cuda_profiling_enabled) {
+    // Compute and set global time for when this CUDA kernel was
+    // launched/ended, since deserialized event will not have a
+    // corresponding CUDA event.
+    for (auto& e : profiledEvents) {
+      if (e.has_cuda()) {
+        auto cuda_device = e.device();
+        TORCH_CHECK(
+            cuda_device != -1,
+            "CUDA profiling was enabled but could not find CUDA device.");
+        auto it = cudaProfilerStarts.find(cuda_device);
+        TORCH_CHECK(
+            it != cudaProfilerStarts.end(),
+            c10::str(
+                "Failed to find __cuda_start_event for device ", cuda_device));
+        auto cudaProfilerStartEvent = it->second;
+        double cuda_elapsed_us = cudaProfilerStartEvent->cuda_elapsed_us(e);
+        int64_t cuda_us = cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
+        e.setCudaUs(cuda_us);
+      }
+    }
+  }
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

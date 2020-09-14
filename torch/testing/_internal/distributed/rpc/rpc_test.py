@@ -31,6 +31,7 @@ from torch.testing._internal.dist_utils import (
     wait_until_pending_futures_and_users_flushed,
     wait_until_owners_and_forks_on_rank,
     worker_name,
+    single_threaded_process_group_agent,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -67,6 +68,9 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::sigmoid",
     "aten::sigmoid",
 ]
+
+# Remote operations are prefixed with the following string for RPC profiling.
+REMOTE_OP_STR = "#remote_op: "
 
 
 VALUE_FUTURE = concurrent.futures.Future()
@@ -371,6 +375,17 @@ def async_wrong_type():
 @rpc.functions.async_execution
 def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
+
+
+def slow_add(x, y):
+    time.sleep(1)
+    return torch.add(x, y)
+
+
+@rpc.functions.async_execution
+def slow_async_add(to, x, y):
+    return rpc.rpc_async(to, slow_add, args=(x, y))
+
 
 @rpc.functions.async_execution
 def async_add_with_future_ctor(to, x, y, z):
@@ -1046,7 +1061,6 @@ class RpcTest(RpcAgentTestFixture):
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
-        REMOTE_OP_STR = "#remote_op: "
 
         def get_name(event):
             return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
@@ -1179,7 +1193,6 @@ class RpcTest(RpcAgentTestFixture):
             )
 
             for expected_remote_event_name in EXPECTED_REMOTE_EVENTS:
-                REMOTE_OP_STR = "#remote_op: "
                 expected_key = rpc_profiling_key + REMOTE_OP_STR + expected_remote_event_name
                 self.assertTrue(expected_key in remote_events)
                 remote_event = remote_events[expected_key]
@@ -1212,6 +1225,58 @@ class RpcTest(RpcAgentTestFixture):
             ),
         )
         fut.wait()
+
+    def _run_rpc_profiling_async_function(self):
+        if self.rank != 1:
+            return
+
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+        x = torch.ones(2)
+        y = torch.ones(2)
+        with torch.autograd.profiler.profile() as prof:
+            ret = rpc.rpc_async(dst1, slow_async_add, args=(dst2, x, y), timeout=20)
+            out = ret.wait()
+
+        print(prof.key_averages().table())
+        function_events = prof.function_events
+        # slow_async_add resulted in an RPC from dst1 -> dst2, so this should be
+        # recorded.
+        key_prefix = _build_rpc_profiling_key(
+            RPCExecMode.ASYNC,
+            slow_async_add.__qualname__,
+            worker_name(self.rank),
+            dst1
+        )
+
+        nested_rpc_key_prefix = _build_rpc_profiling_key(
+            RPCExecMode.ASYNC,
+            slow_add.__qualname__,
+            dst1,
+            dst2
+        )
+        expected_key = key_prefix + REMOTE_OP_STR + nested_rpc_key_prefix
+        remote_events = [event for event in function_events if event.is_remote]
+        rpc_remote_event = [event for event in remote_events if event.name == expected_key]
+        self.assertEqual(1, len(rpc_remote_event))
+        rpc_remote_event = rpc_remote_event[0]
+        self.assertEqual(rpc_remote_event.node_id, (self.rank + 1) % self.world_size)
+        # slow_async_add's RPC does an add on dst2, which should be reflected as well.
+        remote_add_key = expected_key + REMOTE_OP_STR + torch.jit._builtins._find_builtin(torch.add)
+        remote_add_event = [event for event in remote_events if event.name == remote_add_key]
+        self.assertEqual(1, len(remote_add_event))
+        remote_add_event = remote_add_event[0]
+        # Validate that node_id is dst2.
+        self.assertEqual(remote_add_event.node_id, (self.rank + 2) % self.world_size)
+
+    @dist_init
+    def test_rpc_profiling_async_function(self):
+        self._run_rpc_profiling_async_function()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_rpc_profiling_async_function_single_threaded(self):
+        self._run_rpc_profiling_async_function()
 
     @dist_init
     def test_rpc_profiling_remote_record_function(self):
@@ -1261,11 +1326,9 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     def validate_profiling_workload(self, dst, prof):
-        REMOTE_OP_STR = "#remote_op: "
 
         def convert_remote_to_local(event_name):
-            remote_op_key = REMOTE_OP_STR
-            return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+            return event_name[event_name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR) :]
 
         events = prof.function_events
         remote_events = {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -124,6 +125,12 @@ TORCH_API void writeWrappedPayload(
 TORCH_API std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message);
+
+TORCH_API void populateRemoteProfiledEvents(
+    std::vector<torch::autograd::profiler::Event>& profiledEvents,
+    const torch::autograd::profiler::ProfilerConfig& profilerConfig,
+    const std::vector<std::vector<torch::autograd::profiler::Event>>&
+        event_lists);
 
 } // namespace rpc
 } // namespace distributed

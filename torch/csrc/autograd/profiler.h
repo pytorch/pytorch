@@ -370,6 +370,14 @@ private:
   void processEvents(const std::vector<Event*>& events);
 };
 
+// A struct to control settings of disableProfiler options, to be used in
+// conjunction with TlSProfilerGuard.
+
+struct TORCH_API ProfilerDisableOptions {
+  bool cleanupTLSState = true;
+  bool consolidate = true;
+};
+
 // A guard that enables the profiler, taking in an optional callback to process
 // the results
 // Usage:
@@ -379,16 +387,27 @@ private:
 //   });
 //   Code to profile
 // }
+
 struct TORCH_API TLSProfilerGuard {
   explicit TLSProfilerGuard(
       const ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
-          resultCallback = c10::nullopt)
-      : cb_(std::move(resultCallback)) {
+          resultCallback = c10::nullopt,
+      c10::optional<ProfilerDisableOptions> profilerDisableOptions =
+          c10::nullopt)
+      : cb_(std::move(resultCallback)),
+        profilerDisableOptions_(std::move(profilerDisableOptions)) {
     enableProfiler(cfg);
   }
   ~TLSProfilerGuard() {
-    thread_event_lists event_lists = disableProfiler();
+    thread_event_lists event_lists;
+    if (profilerDisableOptions_) {
+      event_lists = disableProfiler(
+          profilerDisableOptions_->cleanupTLSState,
+          profilerDisableOptions_->consolidate);
+    } else {
+      event_lists = disableProfiler();
+    }
     if (cb_) {
       (*cb_)(event_lists);
     }
@@ -396,6 +415,7 @@ struct TORCH_API TLSProfilerGuard {
 
  private:
   c10::optional<std::function<void(const thread_event_lists&)>> cb_;
+  c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
 } // namespace profiler
