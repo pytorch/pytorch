@@ -2538,7 +2538,7 @@ class TestAutograd(TestCase):
             if A.dim() > 2:
                 X = X.expand(X_shape)
 
-            D, U = torch.lobpcg2(A=A, k=k, B=B, X=X, niter=-1)
+            D, U = torch.lobpcg2(A=A, k=k, B=B, X=X)
 
             # LOBPCG uses a random initial eigenspace approximation
             # if parameter `X` is not provided.
@@ -2559,15 +2559,23 @@ class TestAutograd(TestCase):
             A = A.matmul(A.transpose(-1, -2)) / 10
             A.requires_grad_(True)
 
-            gradcheck(lambda A: func(k, A, largest), A, eps=1e-5)
-            # gradgradcheck(lambda A: func(k, A), A)
+            gradcheck(lambda A: func(k, A, largest), A)
+
+            # Custom gradient vectors for better stability due to some
+            # non-determinism in the lobpcg's forward.
+            # Note it is not required if symeig is in forward instead (tested).
+            D_grad = torch.rand(*A.shape[:-2], k) / 10
+            U_grad = torch.rand(*A.shape[:-1], k) / 10
+            gradgradcheck(lambda A: func(k, A, largest), A, [D_grad, U_grad], atol=1e-4)
 
             # check whether A.grad is symmetric
-            A = A.detach().clone().requires_grad_(True)
+            A = A.detach().requires_grad_(True)
             D, U = func(k, A, largest)
             (D.sum() + U.sum()).backward()
             self.assertEqual(A.grad, A.grad.transpose(-1, -2))
 
+        # the tests below take about 1-2 minutes to finish,
+        # but we want to be extra sure that the backward is correct.
         for largest in [True, False]:
             run_symeig_test(1, (6, 6), largest=largest)
             run_symeig_test(1, (2, 6, 6), largest=largest)

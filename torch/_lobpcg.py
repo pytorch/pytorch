@@ -43,21 +43,34 @@ def _polynomial_coefficients_given_roots(roots):
 
     Note: for better performance requires writing a low-level kernel
     """
-
     poly_order = roots.shape[-1]
     poly_coeffs_shape = list(roots.shape)
     # we assume p(x) = x^n + a_{n-1} * x^{n-1} + ... + a_1 * x + a_0,
-    # so poly_coeffs = {a_0, ..., a_n, a_{n+1}(== 1)}
-    poly_coeffs_shape[-1] += 1
+    # so poly_coeffs = {a_0, ..., a_n, a_{n+1}(== 1)},
+    # but we insert one extra coefficient to enable better vectorization below
+    poly_coeffs_shape[-1] += 2
     poly_coeffs = roots.new_zeros(poly_coeffs_shape)
+    poly_coeffs[..., 0] = 1
     poly_coeffs[..., -1] = 1
 
     # perform the Horner's rule
     for i in range(1, poly_order + 1):
-        for j in range(poly_order - i - 1, poly_order):
-            poly_coeffs[..., j] -= roots[..., i - 1] * poly_coeffs[..., j + 1]
+        # note that it is computationally hard to compute backward for this method,
+        # because then given the coefficients it would require finding the roots and/or
+        # calculating the sensitivity based on the Vieta's theorem.
+        # So the code below tries to circumvent the explicit root finding by series
+        # of operations on memory copies imitating the Horner's method.
+        # The memory copies are required to construct nodes in the computational graph
+        # by exploting the explicit (not in-place, separate node for each step)
+        # nature of the Horner's method.
+        # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
+        poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
+        out = poly_coeffs_new.narrow(-1, poly_order - i, i + 1)
+        out -= roots.narrow(-1, i - 1, 1) * poly_coeffs.narrow(-1, poly_order - i + 1, i + 1)
+        poly_coeffs = poly_coeffs_new
 
-    return poly_coeffs
+    return poly_coeffs.narrow(-1, 1, poly_order + 1)
+
 
 def _polynomial_value(poly, x, zero_power, transition):
     """
