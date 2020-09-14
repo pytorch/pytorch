@@ -1238,7 +1238,6 @@ class RpcTest(RpcAgentTestFixture):
             ret = rpc.rpc_async(dst1, slow_async_add, args=(dst2, x, y), timeout=20)
             out = ret.wait()
 
-        print(prof.key_averages().table())
         function_events = prof.function_events
         # slow_async_add resulted in an RPC from dst1 -> dst2, so this should be
         # recorded.

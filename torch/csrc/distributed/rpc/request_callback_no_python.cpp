@@ -521,7 +521,6 @@ void RequestCallbackNoPython::processRpc(
               // Only clean up TLS states of profiler if we are disabling on
               // the main thread.
               bool shouldCleanUpTLSStates = (std::this_thread::get_id() == tid);
-              auto rank = RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_;
               auto event_lists = torch::autograd::profiler::disableProfiler(
                   shouldCleanUpTLSStates, true);
               if (wrappedRpcResponseFuture->hasError()) {
