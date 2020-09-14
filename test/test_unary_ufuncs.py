@@ -61,7 +61,7 @@ if TEST_NUMPY:
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
-_int_vals = (0, -1, 1, -55, 55, -127, 127, -128)  # NOTE: should fit within int8
+_int_vals = (0, -1, 1, -55, 55, -127, 127, -128, 128)
 _large_int_vals = (-1113, 1113, -10701, 10701)
 _float_vals = (0.,
                -.001, .001,
@@ -141,8 +141,14 @@ def generate_numeric_tensors(device, dtype, *,
         vals = _unsigned_int_vals
     else:  # dtypes is a signed integer type
         assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-        large_vals = _large_int_vals if include_large_values else tuple()
-        vals = _int_vals + large_vals
+        unfiltered_vals = _int_vals + _large_int_vals
+
+        # filters to symmetric integer range to avoid ASAN issues
+        # NOTE: for example, abs(-128.int8) will throw a representable value ASAN error in
+        m = torch.iinfo(dtype).max
+        low = max(-1 * m, low)
+        high = min(m, high)
+        vals = tuple(val for val in unfiltered_vals if (val >= low and val <= high))
 
     assert len(vals) < medium_length
 
