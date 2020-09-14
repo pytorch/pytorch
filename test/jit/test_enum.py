@@ -265,9 +265,7 @@ class TestEnum(JitTestCase):
                 return self.e.value
 
         m = TestModule(Color.RED)
-        # TODO(gmagogsfm): Re-enable hooks when Enum attr pickling is supported.
-        with torch._jit_internal._disable_emit_hooks():
-            scripted = torch.jit.script(m)
+        scripted = torch.jit.script(m)
 
         FileCheck() \
             .check("TestModule") \
@@ -312,10 +310,7 @@ class TestEnum(JitTestCase):
                 return self.e
 
         m = TestModule(Color.RED)
-
-        # TODO(gmagogsfm): Re-enable hooks when Enum attr pickling is supported.
-        with torch._jit_internal._disable_emit_hooks():
-            scripted = torch.jit.script(m)
+        scripted = torch.jit.script(m)
 
         FileCheck() \
             .check("TestModule") \

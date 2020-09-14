@@ -26,6 +26,12 @@ class C10_API AllocationPlan {
     // This maps one allocation id (X) to another allocation id (Y).
     // Allocation X is alive until allocation Y. From allocation Y onwards
     // allocation X is not referenced.
+    // Thus Y is the id of the first allocation after X is freed.
+    // NB: When an allocation is recorded, along with recording its size,
+    // we also set the lifetime to be numeric_limits::max()
+    // This is to track allocations that are made during the scope of
+    // profiling but were not freed until after the scope ended.
+    // Such allocations are not managed by profiling allocator.
     std::vector<uint64_t> allocation_lifetimes;
     // Maps an allocation to some offset in a blob of memory.
     std::vector<uint64_t> allocation_offsets;
@@ -66,14 +72,14 @@ class C10_API AllocationPlanner {
 // NOT THREAD SAFE profiling allocator.
 class C10_API CPUProfilingAllocator {
   private:
-    AllocationPlan* plan_{nullptr};
+    const AllocationPlan* plan_{nullptr};
     uint64_t allocation_id_{0};
     uint64_t current_size_{0};
     void* blob_{nullptr};
     ska::flat_hash_map<const void*, uint64_t> allocation_ptr_to_id_;
   public:
     ~CPUProfilingAllocator();
-    void set_plan(AllocationPlan* plan);
+    void set_plan(const AllocationPlan* plan);
     void unset_plan();
     void* allocate(const size_t bytes);
     void free(void* const ptr);
@@ -88,30 +94,30 @@ class C10_API CPUProfilingAllocator {
  * }
  * plan now contains allocation plan.
  */
-class C10_API WithProfileAllocationsGaurd {
+class C10_API WithProfileAllocationsGuard {
   public:
-    WithProfileAllocationsGaurd(AllocationPlan* plan);
-    ~WithProfileAllocationsGaurd();
+    WithProfileAllocationsGuard(AllocationPlan* plan);
+    ~WithProfileAllocationsGuard();
   private:
     std::unique_ptr<AllocationPlanner> planner_;
 };
 
 /*
  * Usage: Validate allocation plan made with WithProfileAllocationGuard
- * bool plan_validation_success, succes = true;
+ * bool plan_validation_success, success = true;
  * for (some number of representative inputs)
  * {
- *   WithValidateAllocationPlanGaurd(&plan, &plan_validation_success);
+ *   WithValidateAllocationPlanGuard(&plan, &plan_validation_success);
  *   module.forward(...);
  *   success = success && plan_validation_success;
  * }
  * success == true means allocations are according to plan
  * else for some inputs allocation pattern changed.
  */
-class C10_API WithValidateAllocationPlanGaurd {
+class C10_API WithValidateAllocationPlanGuard {
   public:
-    WithValidateAllocationPlanGaurd(AllocationPlan* plan, bool* success);
-    ~WithValidateAllocationPlanGaurd();
+    WithValidateAllocationPlanGuard(AllocationPlan* plan, bool* success);
+    ~WithValidateAllocationPlanGuard();
   private:
     std::unique_ptr<AllocationPlanner> planner_;
     bool* success_;
@@ -124,18 +130,17 @@ AllocationPlanner* GetThreadLocalAllocationPlanner();
  * First make allocation plan.
  *  See WithProfileAllocationsGuard usage.
  * Second validate allocation plan.
- *  See WithValidateAllocationPlanGaurd usage.
+ *  See WithValidateAllocationPlanGuard usage.
  * CPUProfilingAllocator profiling_allocator;
  * {
  *   WithProfilingAllocatorGuard allocator_guard(&profiling_allocator, &plan);
  *   module.forward(...);
  * }
- * plan now contains allocation plan.
  */
 class C10_API WithProfilingAllocatorGuard {
   public:
     WithProfilingAllocatorGuard(
-        CPUProfilingAllocator* allocator, AllocationPlan* const plan);
+        CPUProfilingAllocator* allocator, const AllocationPlan* plan);
     ~WithProfilingAllocatorGuard();
   private:
     CPUProfilingAllocator* prev_allocator_ptr_{nullptr};

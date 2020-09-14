@@ -1563,6 +1563,29 @@ class TestAutograd(TestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
+    def test_diagonal_expanded_v(self):
+        value = torch.rand([])
+        v_expanded = torch.tensor(value).expand(10)
+        a = torch.rand(10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a.diagonal(), a, v_expanded)
+        self.assertEqual(result, torch.eye(10) * value)
+
+    def test_select_expanded_v(self):
+        v_expanded = torch.rand(10).expand(10, 10)
+        a = torch.rand(10, 10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a[0], a, v_expanded)
+        expected = torch.zeros(10, 10, 10)
+        expected[0] = v_expanded
+        self.assertEqual(result, expected)
+
+    def test_slice_expanded_v(self):
+        v_expanded = torch.rand(10, 1).expand(2, 10, 10)
+        a = torch.rand(10, 10, 10, requires_grad=True)
+        result, = torch.autograd.grad(a[3:5], a, v_expanded)
+        expected = torch.zeros(10, 10, 10)
+        expected[3:5] = v_expanded
+        self.assertEqual(result, expected)
+
     def test_stack(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = torch.randn(10, 10, requires_grad=True)
@@ -4560,6 +4583,11 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        bins = torch.linspace(0, 1.0, requires_grad=True)
+        vals = torch.rand(5, 5, requires_grad=True)
+        out = torch.bucketize(vals, bins)
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

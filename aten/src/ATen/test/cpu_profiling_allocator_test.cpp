@@ -43,7 +43,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
   auto valid_allocation_plan = [&]() {
     c10::AllocationPlan plan;
     {
-      c10::WithProfileAllocationsGaurd profile_guard(&plan);
+      c10::WithProfileAllocationsGuard profile_guard(&plan);
       output = run_with_control_flow(
           a, conv_weight, linear_weight, true, pointers);
     }
@@ -54,7 +54,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     [&](bool record_mode, bool validation_mode) -> bool {
     c10::AllocationPlan plan;
     {
-      c10::WithProfileAllocationsGaurd profile_guard(&plan);
+      c10::WithProfileAllocationsGuard profile_guard(&plan);
       output =
         run_with_control_flow(a, conv_weight, linear_weight, record_mode, pointers);
     }
@@ -62,7 +62,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     for (uint64_t i = 0; i < 10; ++i) {
       bool validation_success;
       {
-        c10::WithValidateAllocationPlanGaurd
+        c10::WithValidateAllocationPlanGuard
           validation_guard(&plan, &validation_success);
         output = run_with_control_flow(
             a, conv_weight, linear_weight, validation_mode, pointers);
@@ -90,7 +90,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   auto valid_allocation_plan = [&]() {
     c10::AllocationPlan plan;
     {
-      c10::WithProfileAllocationsGaurd profile_guard(&plan);
+      c10::WithProfileAllocationsGuard profile_guard(&plan);
       output = run_with_control_flow(
           a, conv_weight, linear_weight, false, pointers);
     }
@@ -104,7 +104,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
       pointers.clear();
       c10::AllocationPlan plan;
       {
-        c10::WithProfileAllocationsGaurd profile_guard(&plan);
+        c10::WithProfileAllocationsGuard profile_guard(&plan);
         output = run_with_control_flow(
             a,
             conv_weight,

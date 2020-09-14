@@ -222,7 +222,7 @@ void AllocationPlanner::record_free(const void* ptr) {
     // Free being recorded was allocated outside of WithProfileAllocationGuard
     return;
   }
-  auto id = (*it).second;
+  auto id = it->second;
   TORCH_CHECK(id < allocation_plan_->allocation_lifetimes.size(),
       "Allocation must have been recorded during record_allocation.");
   allocation_plan_->allocation_lifetimes[id] = allocation_id_;
@@ -232,6 +232,17 @@ bool AllocationPlanner::validate_allocation(
     const uint64_t size, const void* ptr) {
   if (allocation_id_ >= allocation_plan_->allocation_sizes.size() ||
       allocation_plan_->allocation_sizes[allocation_id_] != size) {
+    TORCH_WARN(
+        "Allocation request does not match plan:",
+        "Allocation id:",
+        allocation_id_,
+        ", Number of recorded allocations:",
+        allocation_plan_->allocation_sizes.size(),
+        ", Recorded size of the requested allocation:",
+        allocation_plan_->allocation_sizes[allocation_id_],
+        ", but got:",
+        size);
+
     return false;
   }
   allocation_ptr_to_id_.emplace(ptr, allocation_id_);
@@ -262,12 +273,8 @@ void AllocationPlanner::formulate_plan() {
         std::numeric_limits<uint64_t>::max()) {
       continue;
     }
-    if (allocation_plan_->allocation_offsets[i] +
-        allocation_plan_->allocation_sizes[i] > allocation_plan_->total_size) {
-      allocation_plan_->total_size =
-        allocation_plan_->allocation_offsets[i] +
-        allocation_plan_->allocation_sizes[i];
-    }
+    auto limit = allocation_plan_->allocation_offsets[i] + allocation_plan_->allocation_sizes[i];
+    allocation_plan_->total_size = std::max(allocation_plan_->total_size, limit);
   }
 }
 
@@ -276,7 +283,7 @@ void AllocationPlanner::clear() {
   allocation_ptr_to_id_.clear();
 }
 
-void CPUProfilingAllocator::set_plan(AllocationPlan* plan) {
+void CPUProfilingAllocator::set_plan(const AllocationPlan* plan) {
   TORCH_CHECK(plan != nullptr, "Allocation plan is nullptr.");
   plan_ = plan;
   allocation_id_ = 0;
@@ -324,14 +331,14 @@ void CPUProfilingAllocator::free(void* const ptr) {
     //    for (....) {
     //      {
     //        CPUProfilingAllocator
-    //        out = ...some op (This also previous memory help by out)
+    //        out = ...some op (This also frees previous memory held by out)
     //      }
     //      out is used..
     //    }
     c10::free_cpu(ptr);
     return;
   }
-  auto id = (*it).second;
+  auto id = it->second;
   TORCH_CHECK(id < plan_->allocation_lifetimes.size(),
       "Freeing allocation that is not accordingly to the plan.");
   auto lifetime_id = plan_->allocation_lifetimes[id];
@@ -349,7 +356,7 @@ CPUProfilingAllocator::~CPUProfilingAllocator() {
   c10::free_cpu(blob_);
 }
 
-WithProfileAllocationsGaurd::WithProfileAllocationsGaurd(
+WithProfileAllocationsGuard::WithProfileAllocationsGuard(
     AllocationPlan* plan) {
   // Nesting of allocation profiling does not seem meanigful.
   TORCH_CHECK(allocation_planner == nullptr,
@@ -359,12 +366,12 @@ WithProfileAllocationsGaurd::WithProfileAllocationsGaurd(
   allocation_planner = planner_.get();
 }
 
-WithProfileAllocationsGaurd::~WithProfileAllocationsGaurd() {
+WithProfileAllocationsGuard::~WithProfileAllocationsGuard() {
   planner_->formulate_plan();
   allocation_planner = nullptr;
 }
 
-WithValidateAllocationPlanGaurd::WithValidateAllocationPlanGaurd(
+WithValidateAllocationPlanGuard::WithValidateAllocationPlanGuard(
     AllocationPlan* plan, bool* success) {
   // Nesting of allocation profiling does not seem meanigful.
   TORCH_CHECK(allocation_planner == nullptr,
@@ -374,7 +381,7 @@ WithValidateAllocationPlanGaurd::WithValidateAllocationPlanGaurd(
   allocation_planner = planner_.get();
 }
 
-WithValidateAllocationPlanGaurd::~WithValidateAllocationPlanGaurd() {
+WithValidateAllocationPlanGuard::~WithValidateAllocationPlanGuard() {
   *success_ = planner_->validation_success;
   allocation_planner = nullptr;
 }
@@ -384,7 +391,7 @@ AllocationPlanner* GetThreadLocalAllocationPlanner() {
 }
 
 WithProfilingAllocatorGuard::WithProfilingAllocatorGuard(
-    CPUProfilingAllocator* allocator, AllocationPlan* plan) {
+    CPUProfilingAllocator* allocator, const AllocationPlan* plan) {
   // Nesting of profiling allocator is not supported.
   TORCH_CHECK(profiling_allocator == nullptr,
       "Nesting profiling allocators is not supported.");

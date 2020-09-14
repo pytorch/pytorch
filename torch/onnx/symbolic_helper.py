@@ -71,6 +71,8 @@ def _parse_arg(value, desc):
             return tval
         elif desc == 'is':
             return [int(v) for v in tval]
+        elif desc == 'fs':
+            return [float(v) for v in tval]
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':
@@ -288,20 +290,14 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
 
 
 def _interpolate_get_scales_if_available(g, scales):
-    available_scales = _maybe_get_const(scales[0], 'f') != -1 and not _is_none(scales[0])
+    available_scales = _maybe_get_const(scales[0], 'fs') != -1 and not _is_none(scales[0])
 
     if not available_scales:
         return None
 
-    scales_list = []
-    for scale in scales:
-        unsqueezed_scale = _unsqueeze_helper(g, scale, 0)
-        # ONNX only supports float for the scales. double -> float.
-        unsqueezed_scale = g.op("Cast", unsqueezed_scale,
-                                to_i=cast_pytorch_to_onnx["Float"])
-        scales_list.append(unsqueezed_scale)
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    scales = g.op("Concat", offsets, *scales_list, axis_i=0)
+    scales_list = g.op("Constant", value_t=torch.tensor(_maybe_get_const(scales[0], 'fs')))
+    scales = g.op("Concat", offsets, scales_list, axis_i=0)
     return scales
 
 
