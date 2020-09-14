@@ -2065,6 +2065,18 @@ void testSimplifyConstantCond() {
     Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block, nullptr);
   }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
 }
 
 void testSimplifyEliminateEmptyCond() {
