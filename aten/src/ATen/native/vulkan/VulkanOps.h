@@ -64,6 +64,10 @@ void add(
     const VulkanTensor& input1,
     float alpha);
 
+void mul(VulkanTensor& output, const VulkanTensor& input, const float s);
+
+void add(VulkanTensor& output, const VulkanTensor& input, const float s);
+
 void conv2d_prepack_weights(
     VulkanTensor& output,
     const float* weight,
