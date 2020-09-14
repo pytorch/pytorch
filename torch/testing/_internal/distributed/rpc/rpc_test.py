@@ -531,6 +531,20 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
 
+    @dist_init
+    def test_rref_proxy_non_exist(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+        msg = "non_exist is not an attribute of type"
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.rpc_sync().non_exist()
+
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.rpc_async().non_exist()
+
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.remote().non_exist()
+
     def _test_rref_proxy_tensor(self, dst):
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
 
@@ -3035,7 +3049,7 @@ class RpcTest(RpcAgentTestFixture):
             ret = rref.remote().static_async_add(dst2, x, x, y).to_here()
             ret += rref.remote().class_async_add(dst2, x, x, y).to_here()
 
-        self.assertEqual(ret, 2* 4 * x)
+        self.assertEqual(ret, 2 * 4 * x)
 
     @dist_init
     def test_async_class_rref_proxy(self):
