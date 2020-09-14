@@ -129,9 +129,9 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   // TODO: Some ops have conversion happen at Peephole pass.
   //       The conversion here is incomplete for these ops.
   //       e.g: ListConstruct, ListUnpack, etc.
-  onnx::ModelProto model_p;
+  onnx::ModelProto model_proto;
   RawDataExportMap export_map;
-  std::tie(model_p, export_map) = _export_onnx(
+  std::tie(model_proto, export_map) = _export_onnx(
       n_graph,
       {},
       opset_version,
@@ -144,8 +144,6 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
       true,
       false,
       std::string());
-  onnx::ModelProto model_proto;
-  model_proto = model_p;
 
   // infer shape
   onnx::shape_inference::InferShapes(model_proto);
