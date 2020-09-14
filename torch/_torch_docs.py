@@ -8984,8 +8984,8 @@ layout=torch.strided, device=None, requires_grad=False) -> Tensor
 Computes the Kaiser window with window length :attr:`window_length` and shape parameter :attr:`beta`.
 
 Let I_0 be the zeroth order modified Bessel function of the first kind (see :func:`torch.i0`) and
-N = :attr:'window_length' - 1 if :attr:'periodic' is False and
-:attr:`window_length` if :attr:`periodic` is True. This computes:
+``N = L - 1`` if :attr:`periodic` is False and ``L`` if :attr:`periodic` is True,
+where L is the :attr:`window_length`. This function computes:
 
 .. math::
     out_i = I_0 \left( \beta \sqrt{1 - {\frac{i - N/2}{N/2}}^2 } \right) / I_0( \beta )
@@ -9001,9 +9001,9 @@ to produce a periodic window as input to functions like :func:`torch.stft`.
 """ + r"""
 Args:
     window_length (int):  positive integer controlling the returned window size.
-    beta: shape parameter for the window
     periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
         If False, returns a symmetric window suitable for use in filter design.
+    beta (float, optional): shape parameter for the window
 
 Keyword args:
     {dtype}

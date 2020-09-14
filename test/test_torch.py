@@ -8035,7 +8035,7 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_signal_window_functions(self, device):
 
-        def test(name, kwargs={}):
+        def test(name, kwargs):
             torch_method = getattr(torch, name + '_window')
             for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
@@ -8051,10 +8051,10 @@ class TestTorchDeviceType(TestCase):
             self.assertFalse(torch_method(3, **kwargs).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
-            test(window)
+            test(window, kwargs={})
 
         for num_test in range(50):
-            test('kaiser', {'beta': random.random() * 30})
+            test('kaiser', kwargs={'beta': random.random() * 30})
 
     def test_broadcast(self, device):
 
