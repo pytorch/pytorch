@@ -13,7 +13,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
 import torch.distributed as dist
 from typing import Dict, Optional
 
@@ -97,7 +97,6 @@ TESTS = [
 WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
-    'distributed/test_distributed_spawn',
 ]
 
 ROCM_BLOCKLIST = [
@@ -198,9 +197,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 """
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
-FILE_SCHEMA = "file://"
-if sys.platform == 'win32':
-    FILE_SCHEMA = "file:///"
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
