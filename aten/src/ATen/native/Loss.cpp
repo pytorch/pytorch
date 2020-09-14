@@ -304,7 +304,14 @@ Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t r
 
 Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
   if (reduction != Reduction::None) {
-    result = at::smooth_l1_loss(input, target, reduction, beta);
+    Tensor loss;
+    auto iter = TensorIterator::binary_op(loss, input, target);
+    smooth_l1_stub(iter.device_type(), iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
   } else {
     auto iter = TensorIterator::binary_op(result, input, target);
     smooth_l1_stub(iter.device_type(), iter, beta);
