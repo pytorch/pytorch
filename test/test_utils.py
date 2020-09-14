@@ -611,7 +611,6 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
 
-<<<<<<< HEAD
     def test_cache_speedup(self):
         x = torch.ones((1000, 1000))
         timer = benchmark_utils.Timer(
