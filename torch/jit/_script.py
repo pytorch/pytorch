@@ -191,7 +191,10 @@ class ScriptMeta(type):
 
         @functools.wraps(original_init)
         def init_then_script(self, *args, **kwargs):
+            num_methods = len(cls._methods)
             original_init(self, *args, **kwargs)
+            added_methods_in_init = len(cls._methods) > num_methods
+
             if type(self) == cls:
 
                 def make_stubs(module):
@@ -200,7 +203,7 @@ class ScriptMeta(type):
 
                 self.__dict__[
                     "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(self, make_stubs)
+                ] = torch.jit._recursive.create_script_module(self, make_stubs, share_types=not added_methods_in_init)
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find

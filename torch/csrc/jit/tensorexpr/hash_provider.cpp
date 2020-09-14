@@ -241,24 +241,6 @@ void HashProvider::visit(const BaseCallNode* v) {
   putHash(v, hash);
 }
 
-void HashProvider::visit(const Intrinsics* v) {
-  CACHE_GUARD();
-  // calls to rand are not symbolic and have a different value each time, they
-  // should not hash to anything and this is the best we can do.
-  if (v->op_type() == kRand) {
-    putHash(v, (SimplifierHashType)rand());
-    return;
-  }
-
-  SimplifierHashType hash(te_hash(v->func_name()));
-  for (int i = 0; i < v->nparams(); i++) {
-    v->param(i)->accept(this);
-    hash = hash_combine(hash, hashOf(v->param(i)));
-  }
-
-  putHash(v, hash);
-}
-
 void HashProvider::visit(const Allocate* v) {
   CACHE_GUARD();
   const Var* buffer_var = v->buffer_var();
