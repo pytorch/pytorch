@@ -7090,7 +7090,7 @@ workflows:
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
           requires:
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
-      - anaconda-prune:
+      - anaconda_prune:
           name: anaconda-prune-pytorch-nightly
           context: "org-member"
           packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
@@ -7099,7 +7099,7 @@ workflows:
             branches:
               only:
                 - postnightly
-      - anaconda-prune:
+      - anaconda_prune:
           name: anaconda-prune-pytorch-test
           context: "org-member"
           packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
