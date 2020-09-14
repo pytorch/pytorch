@@ -25,12 +25,12 @@ struct Resource final {
     template<
         typename Type,
         typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
-    Data<Pointer> map() const;
+    Data<Pointer> map() const &;
 
     template<
         typename Type,
         typename Pointer = std::add_pointer_t<Type>>
-    Data<Pointer> map();
+    Data<Pointer> map() &;
   };
 
   /*
@@ -144,7 +144,7 @@ class Resource::Memory::Scope final {
 };
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{
@@ -154,7 +154,7 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
 }
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{
