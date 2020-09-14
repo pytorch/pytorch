@@ -347,6 +347,16 @@ static void trigamma_kernel(TensorIterator& iter) {
   });
 }
 
+static void exp2_kernel(TensorIterator& iter) {
+  // Supports only floating types as std::exp2 doesn't have
+  // complex overloads.
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "exp2", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::exp2(a); });
+  });
+}
+
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel(iter);
@@ -611,6 +621,7 @@ REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
 REGISTER_DISPATCH(imag_stub, &imag_kernel);
 REGISTER_DISPATCH(conj_stub, &conj_kernel);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);

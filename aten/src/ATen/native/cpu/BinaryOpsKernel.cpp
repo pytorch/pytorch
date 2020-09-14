@@ -588,7 +588,20 @@ void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+    auto one_vec = Vec256<scalar_t>(scalar_t{1});
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        return a * std::conj(scalar_t{1} - b * b);
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a * (one_vec - b * b).conj();
+      });
+  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>(scalar_t{1});
     cpu_kernel_vec(
       iter,
@@ -599,6 +612,7 @@ void tanh_backward_kernel(TensorIterator& iter) {
         return a * (one_vec - b * b);
       });
   });
+  }
 }
 
 void mse_kernel(TensorIterator& iter) {

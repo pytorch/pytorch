@@ -230,19 +230,19 @@
   self: not_implemented("all")
 
 - name: acosh(Tensor self) -> Tensor
-  self: grad * (self.pow(2) - 1).rsqrt()
+  self: grad * (self.pow(2) - 1).rsqrt().conj()
 
 - name: acosh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of acosh")
 
 - name: asinh(Tensor self) -> Tensor
-  self: grad * (self.pow(2) + 1).rsqrt()
+  self: grad * (self.pow(2) + 1).rsqrt().conj()
 
 - name: asinh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of asinh")
 
 - name: atanh(Tensor self) -> Tensor
-  self: grad * 1 / (1 - self.pow(2))
+  self: grad * 1 / (1 - self.pow(2)).conj()
 
 - name: atanh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of atanh")
@@ -254,7 +254,7 @@
   self: grad * (-self * self + 1).rsqrt().conj()
 
 - name: atan(Tensor self) -> Tensor
-  self: grad / (self.conj() * self.conj() + 1)
+  self: grad / (self * self + 1).conj()
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -436,6 +436,9 @@
 - name: exp(Tensor self) -> Tensor
   self: grad * result
 
+- name: exp2(Tensor self) -> Tensor
+  self: grad * result * M_LN2
+
 - name: expm1(Tensor self) -> Tensor
   self: grad * (result + 1)
 
@@ -607,16 +610,16 @@
   self: grad * polygamma(n + 1, self)
 
 - name: log(Tensor self) -> Tensor
-  self: grad.div(self)
+  self: grad.div(self.conj())
 
 - name: log10(Tensor self) -> Tensor
-  self: grad / (self * 2.3025850929940456)
+  self: grad / (self.conj() * 2.3025850929940456)
 
 - name: log1p(Tensor self) -> Tensor
   self: log1p_backward(grad, self)
 
 - name: log2(Tensor self) -> Tensor
-  self: grad / (self * 0.6931471805599453)
+  self: grad / (self.conj() * 0.6931471805599453)
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
   self: grad / (1 + exp(other - self))
@@ -737,7 +740,7 @@
   other: mul_tensor_backward(grad, self, other.scalar_type())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: mul_scalar_backward(grad, other, self.scalar_type())
+  self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
@@ -1226,6 +1229,7 @@
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction)
+  target: smooth_l1_loss_backward(grad, target, self, reduction)
 
 - name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: soft_margin_loss_backward(grad, self, target, reduction)
@@ -1594,6 +1598,7 @@
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
+  target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold, output)

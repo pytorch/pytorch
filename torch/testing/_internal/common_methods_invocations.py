@@ -67,7 +67,7 @@ class OpInfo(object):
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
-            assert isinstance(dtype_list, _dispatch_dtypes)
+            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
 
@@ -373,6 +373,11 @@ op_db = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
+    UnaryUfuncInfo('exp2',
+                   ref=np.exp2,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None)
 ]
 
 # Common operator groupings
@@ -542,11 +547,7 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
-        # ('__rdiv__', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant',
-        #     (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
-        # ('__rdiv__', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant',
-        #     (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs', (True,)),
         ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
@@ -555,8 +556,10 @@ def method_tests():
         ('pow', torch.rand(S, S, S) + 1e-3, (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('pow', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True,)),
+        ('pow', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-3 * (1+1j), (3.14,), 'complex_constant', (True,)),
         ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True, 'aten::pow')),
         ('pow', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
+        ('pow', uniform_scalar(1e-3 * (1 + 1j), requires_grad=True), (3.14,), 'complex_scalar_constant', (True,)),
         ('__rpow__', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True, 'aten::pow')),
         ('transpose', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
         ('transpose', (), (0, 0), 'scalar', (False,)),
@@ -609,6 +612,8 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
+        ('exp2', (S, S, S), NO_ARGS, '', (False,)),
+        ('exp2', (), NO_ARGS, 'scalar', (False,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
         ('expm1', (), NO_ARGS, 'scalar', (True,)),
         ('erf', torch.rand(S, S, S), NO_ARGS, '', (True,)),
@@ -625,13 +630,12 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
-        # ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        # ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        # ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log10', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log2', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
@@ -666,7 +670,6 @@ def method_tests():
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
         ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
