@@ -1986,7 +1986,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
-    def test_rref_type_x(self):
+    def test_rref_type(self):
 
         def launched_rpc(events):
             expected_name = "rpc_sync#_rref_typeof_on_owner"
