@@ -175,24 +175,59 @@ void copy_staging_to_buffer(
     api::Command::Buffer command_buffer,
     const api::Resource::Buffer staging,
     const api::Resource::Buffer buffer) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      staging,
+      "Invalid Vulkan staging buffer!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      buffer,
+      "Invalid Vulkan buffer!");
+
+  command_buffer.copy(
+      staging.handle,
+      buffer.handle,
+      std::min(
+          staging.memory.allocation_info.size,
+          buffer.memory.allocation_info.size));
 }
 
 void copy_buffer_to_staging(
     api::Command::Buffer command_buffer,
     const api::Resource::Buffer buffer,
     const api::Resource::Buffer staging) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      buffer,
+      "Invalid Vulkan buffer!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      staging,
+      "Invalid Vulkan staging buffer!");
 }
 
 void copy_buffer_to_image(
     api::Command::Buffer command_buffer,
     const api::Resource::Buffer buffer,
     const api::Resource::Image image) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      buffer,
+      "Invalid Vulkan buffer!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      image,
+      "Invalid Vulkan image!");
 }
 
 void copy_image_to_buffer(
     api::Command::Buffer command_buffer,
     const api::Resource::Image image,
     const api::Resource::Buffer buffer) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      image,
+      "Invalid Vulkan image!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      buffer,
+      "Invalid Vulkan buffer!");
 }
 
 } // namespace
@@ -218,8 +253,49 @@ vTensor::vTensor(
     dirty_{} {
 }
 
-VkBuffer vTensor::buffer() const {
-  if (dirty_.staging || dirty_.image) {
+const vTensor* vTensor::host() const & {
+  if ((image_ && dirty_.image) || (buffer_ && dirty_.buffer)) {
+    api::Command::Buffer command_buffer =
+        context_->command().pool.primary.allocate();
+
+    command_buffer.begin();
+    {
+      if (dirty_.image) {
+        copy_image_to_buffer(command_buffer, image_, buffer_);
+        dirty_.image = 0u;
+        dirty_.buffer = 1u;
+      }
+
+      if (dirty_.buffer) {
+        copy_buffer_to_staging(command_buffer, buffer_, staging_);
+        dirty_.buffer = 0u;
+      }
+    }
+    command_buffer.end();
+    command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
+  }
+
+  return this;
+}
+
+vTensor* vTensor::host(const Access::Flags access) & {
+  vTensor* const tensor = const_cast<vTensor*>(
+      const_cast<const vTensor&>(*this).host());
+
+  if (access & Access::Write) {
+    if (staging_) {
+      dirty_.staging = 1u;
+    }
+    else {
+      dirty_.buffer = 1u;
+    }
+  }
+
+  return tensor;
+}
+
+VkBuffer vTensor::buffer() const & {
+  if (buffer_ && ((staging_ && dirty_.staging) || (image_ && dirty_.image))) {
     api::Command::Buffer command_buffer =
         context_->command().pool.primary.allocate();
 
@@ -241,18 +317,18 @@ VkBuffer vTensor::buffer() const {
   return buffer_.handle;
 }
 
-VkBuffer vTensor::buffer(const Access::Flags access) {
+VkBuffer vTensor::buffer(const Access::Flags access) & {
   const VkBuffer buffer = const_cast<const vTensor&>(*this).buffer();
 
-  if (access & Access::Write) {
+  if (buffer && (access & Access::Write)) {
     dirty_.buffer = 1;
   }
 
   return buffer;
 }
 
-VkImage vTensor::image() const {
-  if (dirty_.staging || dirty_.buffer) {
+VkImage vTensor::image() const & {
+  if (image_ && ((staging_ && dirty_.staging) || (buffer_ && dirty_.buffer))) {
     api::Command::Buffer command_buffer =
         context_->command().pool.primary.allocate();
 
@@ -276,10 +352,10 @@ VkImage vTensor::image() const {
   return image_.handle;
 }
 
-VkImage vTensor::image(const Access::Flags access) {
+VkImage vTensor::image(const Access::Flags access) & {
   const VkImage image = const_cast<const vTensor&>(*this).image();
 
-  if (access & Access::Write) {
+  if (image && (access & Access::Write)) {
     dirty_.image = 1;
   }
 

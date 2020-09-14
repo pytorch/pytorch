@@ -41,13 +41,13 @@ struct Resource final {
     template<
         typename Type,
         typename Pointer = Access::Pointer<Type, Access::Read>>
-    Data<Pointer> map() const;
+    Data<Pointer> map() const &;
 
     template<
         typename Type,
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
-    Data<Pointer> map();
+    Data<Pointer> map() &;
   };
 
   /*
@@ -154,7 +154,7 @@ class Resource::Memory::Scope final {
 };
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{
@@ -164,7 +164,7 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
 }
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
   static_assert(
