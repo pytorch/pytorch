@@ -154,13 +154,13 @@ def true_divide(g, self, other):
     # Case 2: self is floating, other is not
     # Casts other to self's dtype
     if sym_help._is_fp(self):
-        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
         return div(g, self, other)
 
     # Case 3: other is floating, self is not
     # Casts self to other's dtype
     if sym_help._is_fp(other):
-        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
         return div(g, self, other)
 
     # Case 4: neither is floating
@@ -171,8 +171,8 @@ def true_divide(g, self, other):
     if torch.get_default_dtype() is torch.double:
         onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Double']
 
-    g.op("Cast", self, to_i=onnx_scalar_type)
-    g.op("Cast", other, to_i=onnx_scalar_type)
+    self = g.op("Cast", self, to_i=onnx_scalar_type)
+    other = g.op("Cast", other, to_i=onnx_scalar_type)
     return div(g, self, other)
 
 
@@ -1552,12 +1552,12 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         if dtype is None:
             dtype = sym_help._unpack_list(data)[0].type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        input_list = list()   
+        input_list = list()
         for t in sym_help._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = g.op("Reshape", t, shape_reference)
             t = g.op("Cast", t, to_i=sym_help.scalar_type_to_onnx[dtype])
-            input_list.append(t)    
+            input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
@@ -2242,7 +2242,7 @@ def _std(g, input, dim, unbiased, keepdim):
 # torch.std(input, unbiased=True)
 # torch.std(input, dim, keepdim=False, unbiased=True)
 def std(g, input, *args):
-    if args[0].type().isSubtypeOf(ListType.ofInts()):
+    if len(args) == 3:
         return _std(g, input, *args)
     else:
         return _std(g, input, None, args[0], None)

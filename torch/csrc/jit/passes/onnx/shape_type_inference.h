@@ -5,6 +5,9 @@
 namespace torch {
 namespace jit {
 
+TORCH_API TypePtr
+MergeInferredType(TypePtr existing_type, TypePtr inferred_type);
+
 // Utilize ONNX Shape Inference for node.
 // The node must have ONNX namespace, and is valid ONNX node accroding to spec.
 // On successful ONNX shape inference runs, the function updates output types of
