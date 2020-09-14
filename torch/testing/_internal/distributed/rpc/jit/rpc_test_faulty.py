@@ -24,7 +24,7 @@ def two_args_two_kwargs(
 
 
 @torch.jit.script
-def rpc_async_call_remote_torchscript_in_torchscript(
+def script_rpc_async_call(
     dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
     fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
@@ -109,7 +109,7 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         # is less than the RPC takes to execute.
         rpc._set_rpc_timeout(0.001)
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            rpc_async_call_remote_torchscript_in_torchscript(
+            script_rpc_async_call(
                 dst_worker_name, args, kwargs
             )
 
