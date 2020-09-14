@@ -810,6 +810,21 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   return masked_select_out_cpu(result, self, mask);
 }
 
+Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
+  // The following could just be written as `zeros_like(input).masked_scatter(mask, grad)`.
+  // However, as an optimization, we call the in-place variant of masked_scatter.
+  // Unfortunately, that doesn't allow for the broadcasting of the LHS, so we need
+  // to explicitly broadcast here (the out-of-place variant of masked_scatter
+  // implicitly handles broadcasting).
+  auto result = at::zeros_like(
+      input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
+  return result.masked_scatter_(mask, grad);
+}
+
+Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
+  return at::zeros_like(input).put_(index, grad, true);
+}
+
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
     if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
