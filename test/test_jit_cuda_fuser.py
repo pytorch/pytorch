@@ -688,7 +688,6 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GROUP)
 
-    @unittest.skipIf(True, "re-enable this after merging reduction fix PR #375")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
