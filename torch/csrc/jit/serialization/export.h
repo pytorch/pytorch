@@ -8,8 +8,8 @@
 
 #include <ostream>
 
-namespace ONNX_NAMESPACE{
-    class ModelProto;
+namespace ONNX_NAMESPACE {
+class ModelProto;
 }
 
 namespace torch {
@@ -42,7 +42,8 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     bool use_external_data_format = false,
     const std::string& onnx_file_path = std::string());
 
-TORCH_API std::tuple<::ONNX_NAMESPACE::ModelProto, RawDataExportMap> export_onnx_opt(
+TORCH_API std::tuple<::ONNX_NAMESPACE::ModelProto, RawDataExportMap>
+_export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
