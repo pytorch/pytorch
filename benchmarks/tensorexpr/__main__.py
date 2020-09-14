@@ -192,7 +192,7 @@ Works only with Python3.\n A few examples:
         tensor_dim_specs = [dim.split(':') for dim in tensor_dim_specs]
 
         configs = []
-        for start,stop,inc in tensor_dim_specs:
+        for start, stop, inc in tensor_dim_specs:
             dim_list = []
             if inc == 'pow2' :
                 curr = int(start)
