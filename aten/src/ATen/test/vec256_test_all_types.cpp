@@ -131,10 +131,11 @@ namespace {
     }
     TYPED_TEST(SignManipulation, Absolute) {
         using vec = TypeParam;
+        bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         test_unary<vec>(
             NAME_INFO(absolute), RESOLVE_OVERLOAD(local_abs),
             [](vec v) { return v.abs(); },
-            createDefaultUnaryTestCase<vec>(TestSeed()),
+            createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(SignManipulation, Negate) {
@@ -292,10 +293,9 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
-        UVT tolerance = std::is_same<UVT, float>::value ? static_cast<UVT>(5.e-5) : getDefaultTolerance<UVT>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, tolerance })
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -308,10 +308,9 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
-        UVT tolerance = std::is_same<UVT, float>::value ? static_cast<UVT>(5.e-5) : getDefaultTolerance<UVT>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, tolerance })
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
