@@ -10408,14 +10408,14 @@ class TestTorchDeviceType(TestCase):
         inputs.extend([0.75, (1,), (1, 1), (1, 2, 1)])
         inputs.extend([[float('nan')], [[float('nan'), float('nan')], [1, 2]]])
         inputs.extend([[[float('nan'), float('nan')], [float('nan'), 2]]])
-        quantiles.extend([0.5, (0., 1.), np.random.rand(10)])
+        quantiles.extend([0.5, [0., 1.], np.random.rand(10)])
 
         # Enumerate all input combinations
         for op, x, q, keepdim in product(ops, inputs, quantiles, keepdims):
             if type(x) is tuple:
                 a = torch.randn(x, dtype=dtype, device=device)
                 # Make some random elements NaN
-                a.masked_fill_(torch.randint_like(a, 25) == 0, float('nan'))
+                a.masked_fill_(torch.randint_like(a, 20) == 0, float('nan'))
             else:
                 a = torch.tensor(x, dtype=dtype, device=device)
 
@@ -10436,7 +10436,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):
-        def check(a, q, dim, expected_grad, ops=[torch.quantile, torch.nanquantile]):
+        def check(a, q, dim, expected_grad, ops=(torch.quantile, torch.nanquantile)):
             for op in ops:
                 t = torch.tensor(a, device=device, requires_grad=True)
                 op(t, torch.tensor(q, device=device), dim).sum().backward()
