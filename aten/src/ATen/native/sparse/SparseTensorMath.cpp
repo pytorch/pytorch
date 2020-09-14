@@ -126,9 +126,8 @@ SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
-  if (!is_same_tensor(r, t)) {
-    copy_sparse_to_sparse_(r, t);
-  }
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
   r._values().neg_();
   return r;
 }
@@ -152,8 +151,7 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   if (is_same_tensor(r, t)) {
     // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
     TORCH_CHECK(r.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
-  }
-  else {
+  } else {
     copy_sparse_to_sparse_(r, t.coalesce());
   }
   r._values().asin_();

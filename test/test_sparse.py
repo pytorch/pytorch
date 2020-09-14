@@ -1697,19 +1697,19 @@ class TestSparse(TestCase):
     def _test_neg_negative(self, sparse_tensor):
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.neg()
-        self.assertEqual(expected_output, torch.neg(sparse_tensor).to_dense())
-        sparse_tensor_out = torch.zeros_like(sparse_tensor)
-        torch.neg(sparse_tensor, out=sparse_tensor_out)
-        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+        for op in (torch.neg, torch.negative):
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
+            sparse_tensor_out = torch.zeros_like(sparse_tensor)
+            op(sparse_tensor, out=sparse_tensor_out)
+            self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
         self.assertEqual(expected_output, sparse_tensor.neg().to_dense())
         sparse_tensor_copy = sparse_tensor.clone()
         self.assertEqual(expected_output, sparse_tensor_copy.neg_().to_dense())
 
-        self.assertEqual(expected_output, torch.negative(sparse_tensor).to_dense())
         self.assertEqual(expected_output, (-sparse_tensor).to_dense())
-        sparse_tensor_out = torch.zeros_like(sparse_tensor)
-        torch.negative(sparse_tensor, out=sparse_tensor_out)
-        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
         self.assertEqual(expected_output, sparse_tensor.negative().to_dense())
         sparse_tensor_copy = sparse_tensor.clone()
         self.assertEqual(expected_output, sparse_tensor_copy.negative_().to_dense())
@@ -1722,7 +1722,7 @@ class TestSparse(TestCase):
                 values=torch.tensor([3.0, -4.0, 5.0]),
                 size=[3, ],
                 device=self.device
-            )
+            ).coalesce()
             self._test_neg_negative(input_coalesced)
 
             # hybrid sparse input
@@ -1731,7 +1731,7 @@ class TestSparse(TestCase):
                 values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
                 size=[4, 5, 2],
                 device=self.device
-            )        
+            ).coalesce()
             self._test_neg_negative(input_coalesced)
 
         if self.is_uncoalesced:
@@ -1756,53 +1756,53 @@ class TestSparse(TestCase):
     def _test_asin_arcsin(self, sparse_tensor):
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.asin()
-        self.assertEqual(expected_output, torch.asin(sparse_tensor).to_dense())
-        sparse_tensor_out = torch.zeros_like(sparse_tensor)
-        torch.asin(sparse_tensor, out=sparse_tensor_out)
-        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+        for op in (torch.asin, torch.arcsin):
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
+            sparse_tensor_out = torch.zeros_like(sparse_tensor)
+            op(sparse_tensor, out=sparse_tensor_out)
+            self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
         self.assertEqual(expected_output, sparse_tensor.asin().to_dense())
-        self.assertEqual(expected_output, sparse_tensor.coalesce().asin_().to_dense())
-
-        self.assertEqual(expected_output, torch.arcsin(sparse_tensor).to_dense())
-        sparse_tensor_out = torch.zeros_like(sparse_tensor)
-        torch.arcsin(sparse_tensor, out=sparse_tensor_out)
-        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
         self.assertEqual(expected_output, sparse_tensor.arcsin().to_dense())
-        self.assertEqual(expected_output, sparse_tensor.coalesce().arcsin_().to_dense())
 
-        # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-            sparse_tensor.asin_()
+        self.assertEqual(expected_output, sparse_tensor.clone().coalesce().asin_().to_dense())
+        self.assertEqual(expected_output, sparse_tensor.clone().coalesce().arcsin_().to_dense())
 
-        # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-            sparse_tensor.arcsin_()
+        if self.is_uncoalesced:
+            # test in-place op on uncoalesced input
+            with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                sparse_tensor.asin_()
+
+            # test in-place op on uncoalesced input
+            with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                sparse_tensor.arcsin_()
 
     def test_asin_arcsin(self):
 
         if not self.is_uncoalesced:
             input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0, 1, 2]]),
-                values=torch.tensor([3.0, -4.0, 5.0]),
-                size=[3, ],
+                indices=torch.tensor([[0, 1, 2, 3]]),
+                values=torch.tensor([0.5, -0.5, 0.7, -0.7]),
+                size=[4, ],
                 device=self.device
-            )
+            ).coalesce()
             self._test_asin_arcsin(input_coalesced)
 
             # hybrid sparse input
             input_coalesced = torch.sparse_coo_tensor(
                 indices=torch.tensor([[1, 3], [2, 4]]),
-                values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                values=torch.tensor([[-0.1, 0.24], [-0.44, 0.1]]),
                 size=[4, 5, 2],
                 device=self.device
-            )
+            ).coalesce()
             self._test_asin_arcsin(input_coalesced)
 
         if self.is_uncoalesced:
             # test uncoalesced input
             input_uncoalesced = torch.sparse_coo_tensor(
                 indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                values=torch.tensor([0.3, -0.3, -0.4, 0.3, -0.5, 0.15]),
                 size=[3, ],
                 device=self.device
             )
