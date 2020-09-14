@@ -34,7 +34,7 @@ def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
 
 def _polynomial_coefficients_given_roots(roots):
     """
-    Given `roots` of a polynomial, find the polynomial's coefficients.
+    Given the `roots` of a polynomial, find the polynomial's coefficients.
 
     If roots = (r_1, ..., r_n), then the method returns
     coefficients (a_0, a_1, ..., a_n (== 1)) so that
@@ -133,10 +133,12 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # compute U_ortho, a basis for the orthogonal complement to the span(U),
     # by projecting a random [..., m, m-k] matrix onto the subspace spanned
     # by the columns of U.
+    #
     # fix seed for determinism
     torch_curr_random_state = torch.get_rng_state()
     torch.manual_seed(13)
 
+    # orthogonal complement to the span(U)
     U_ortho = proj_U_ortho.matmul(
         torch.randn(
             (*A.shape[:-1], A.size(-1) - D.size(-1)),
@@ -145,6 +147,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
         )
     )
     U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
+
     # restore random state
     torch.set_rng_state(torch_curr_random_state)
 
@@ -207,9 +210,11 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     )
     # we need to invert 'chr_poly_D_at_A_to_U_ortho`, for that we compute its
     # Cholesky decomposition and then use `torch.cholesky_solve` for better stability.
+    # Cholesky decomposition requires the input to be positive-definite.
     # Note that `chr_poly_D_at_A_to_U_ortho` is positive-definite if
     # 1. `largest` == False, or
     # 2. `largest` == True and `k` is even
+    # under the assumption that `A` has distinct eigenvalues.
     #
     # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
     chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
@@ -226,10 +231,10 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # it resides in span(U_ortho)
     res -= U_ortho.matmul(
         chr_poly_D_at_A_to_U_ortho_sign * torch.cholesky_solve(
-            U_ortho_t,
+            U_ortho_t.matmul(series_acc),
             chr_poly_D_at_A_to_U_ortho_L
         )
-    ).matmul(series_acc.matmul(Ut))
+    ).matmul(Ut)
 
     return res
 
