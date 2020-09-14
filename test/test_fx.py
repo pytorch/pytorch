@@ -373,6 +373,40 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    def test_fx_is_tracing(self):
+        class M(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.did_trace = False
+
+            def forward(self, a, b):
+                if torch.fx.is_tracing():
+                    self.did_trace = True
+                return a + b
+
+        m = M()
+        m.forward(torch.rand(1), torch.rand(1))
+        self.assertFalse(m.did_trace)
+        symbolic_trace(m)
+        self.assertTrue(m.did_trace)
+
+    def test_fx_double_tracing(self):
+        class M(torch.nn.Module):
+
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, t):
+                symbolic_trace(self.inner)
+                return t
+
+        m = M(None)
+        mi = M(m)
+        with self.assertRaisesRegex(RuntimeError, 'already symbolically tracing'):
+            symbolic_trace(mi)
+
     def test_node_tagging(self):
         class TaggingDelegate(DefaultDelegate):
             def create_node(self, kind : str, target : Union[str, Callable],

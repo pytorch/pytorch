@@ -9,6 +9,7 @@ from .graph_module import GraphModule
 from .proxy import Proxy, _create_proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
+_FX_IS_TRACING: bool = False
 
 def _find_module(root: torch.nn.Module, m: torch.nn.Module):
     for n, p in root.named_modules():
@@ -178,6 +179,14 @@ class DefaultDelegate(DelegateBase):
 def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
     return Proxy(delegate.placeholder(name), delegate)
 
+def is_tracing() -> bool:
+    """
+        Returns a bool indicating whether torch.fx is currently symbolically tracing a module.
+        Can be useful for gating module logic that is incompatible with symbolic tracing.
+    """
+    global _FX_IS_TRACING
+    return _FX_IS_TRACING
+
 # Symbolic tracing API
 #
 # Given an `nn.Module` instance `root`, this function will return a `GraphModule`
@@ -187,6 +196,8 @@ def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
 def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> GraphModule:
+
+    global _FX_IS_TRACING
     graph = Graph()
     delegate = delegate_class(root, graph)
 
@@ -215,8 +226,14 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
             target = _find_module(root, mod)
             return _create_proxy(delegate, 'call_module', target, args, kwargs)
     try:
+        if _FX_IS_TRACING:
+            raise RuntimeError('attempted to call symbolic_trace() but FX is already symbolically tracing')
+        _FX_IS_TRACING = True
+
         torch.nn.Module.__call__ = module_call_wrapper
         graph.output(delegate.create_arg(fn(*args)))
     finally:
         torch.nn.Module.__call__ = orig_call
+        _FX_IS_TRACING = False
+
     return GraphModule(root, graph)
