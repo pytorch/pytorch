@@ -398,7 +398,7 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
 
 static void kaiser_window_kernel(TensorIterator& iter, int64_t window_length, double beta){
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
-    auto alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
     cpu_kernel(iter, [=](scalar_t a){
         return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
     });

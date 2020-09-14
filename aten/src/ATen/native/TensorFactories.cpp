@@ -911,6 +911,9 @@ Tensor blackman_window(
     bool periodic,
     const TensorOptions& options) {
   window_function_checks("blackman_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }
@@ -984,14 +987,18 @@ Tensor hann_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ kaiser_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor kaiser_window(int64_t window_length, double beta, const TensorOptions& options) {
-  return native::kaiser_window(window_length, beta, /*periodic=*/true, options);
+Tensor kaiser_window(int64_t window_length, const TensorOptions& options) {
+  return native::kaiser_window(window_length, /*periodic=*/true, /*beta=*/12.0, options);
+}
+
+Tensor kaiser_window(int64_t window_length, bool periodic, const TensorOptions& options) {
+  return native::kaiser_window(window_length, periodic, /*beta=*/12.0, options);
 }
 
 Tensor kaiser_window(
     int64_t window_length,
-    double beta,
     bool periodic,
+    double beta,
     const TensorOptions& options) {
   window_function_checks("kaiser_window", options, window_length);
   if (window_length == 0) {

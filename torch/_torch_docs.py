@@ -8931,29 +8931,22 @@ Returns:
 
 
 add_docstr(torch.kaiser_window, """
-kaiser_window(window_length, beta, periodic=True, *, dtype=None, \
+kaiser_window(window_length, periodic=True, beta=12.0, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
-Kaiser window function.
+Computes the Kaiser window with window length :attr:`window_length` and shape parameter :attr:`beta`.
+
+Let I_0 be the zeroth order modified Bessel function of the first kind (see :func:`torch.i0`) and
+N = :attr:'window_length' - 1 if :attr:'periodic' is False and
+:attr:`window_length` if :attr:`periodic` is True. This computes:
 
 .. math::
-    w[n] = I_0 \left( \beta \sqrt{1 - \frac{4n^2}{(M-1)^2}} \right) / I_0( \beta )
+    out_i = I_0 \left( \beta \sqrt{1 - {\frac{i - N/2}{N/2}}^2 } \right) / I_0( \beta )
 
-with
-
-.. math::
-    -\frac{M-1}{2} \leq n \leq \frac{M-1}{2}
-
-where :math:`M` is the full window size.
-
-If :attr:`periodic` is true, the :math:`M` in
-above formula is in fact :math:`\text{window\_length} + 1`. 
-This flag determines whether the returned window trims off 
-the last duplicate value from the symmetric window and is
-ready to be used as a periodic window with functions like
-:meth:`torch.stft`. Also, we always have
-``torch.kaiser_window(L, B, periodic=True)`` equal to
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
+Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+The :attr:`periodic` argument is intended as a helpful shorthand
+to produce a periodic window as input to functions like :func:`torch.stft`.
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
@@ -8962,8 +8955,8 @@ ready to be used as a periodic window with functions like
 Args:
     window_length (int):  positive integer controlling the returned window size.
     beta: shape parameter for the window
-    periodic (bool, optional): If True, returns a periodic window, for use in spectral analysis.
-        If False, returns a symmetric window, for use in filter design.
+    periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
+        If False, returns a symmetric window suitable for use in filter design.
 
 Keyword args:
     {dtype}
@@ -8971,9 +8964,6 @@ Keyword args:
           ``torch.strided`` (dense layout) is supported.
     {device}
     {requires_grad}
-
-Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing samples from the window
 
 """.format(**factory_common_args))
 

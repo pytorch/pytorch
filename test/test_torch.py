@@ -8028,29 +8028,30 @@ class TestTorchDeviceType(TestCase):
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self.compare_with_numpy(torch_fn, np_fn, data)
 
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_signal_window_functions(self, device):
 
-        def test(name, args=()):
+        def test(name, kwargs={}):
             torch_method = getattr(torch, name + '_window')
             for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
-                    res = torch_method(size, *args, periodic=periodic, device=device)
+                    res = torch_method(size, periodic=periodic, **kwargs, device=device)
                     # NB: scipy always returns a float32 result
-                    ref = torch.from_numpy(signal.get_window((name, *args), size, fftbins=periodic))
+                    ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
-                torch_method(3, *args, layout=torch.sparse_coo)
+                torch_method(3, **kwargs, layout=torch.sparse_coo)
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                torch_method(3, *args, dtype=torch.long)
-            self.assertTrue(torch_method(3, *args, requires_grad=True).requires_grad)
-            self.assertFalse(torch_method(3, *args).requires_grad)
+                torch_method(3, **kwargs, dtype=torch.long)
+            self.assertTrue(torch_method(3, **kwargs, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3, **kwargs).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
             test(window)
 
         for num_test in range(50):
-            test('kaiser', (random.random() * 30,))
+            test('kaiser', {'beta': random.random() * 30})
 
     def test_broadcast(self, device):
 

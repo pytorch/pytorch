@@ -187,7 +187,7 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
 void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "kaiser_window_cuda", [&] {
-      auto alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+      const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
         return calc_i0(static_cast<scalar_t>(beta) * ::sqrt(1 - ::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
       });
