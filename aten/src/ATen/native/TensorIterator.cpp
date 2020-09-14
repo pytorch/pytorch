@@ -816,7 +816,7 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, const bool promote_integer_inputs_to_float) {
+    const Tensor& b) {
   return TensorIteratorConfig()
      .set_check_mem_overlap(true)
      .add_output(out)
@@ -826,7 +826,22 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
      .promote_inputs_to_common_dtype(true)
      .cast_common_dtype_to_outputs(true)
      .enforce_safe_casting_to_output(true)
-     .promote_integer_inputs_to_float(promote_integer_inputs_to_float)
+     .build();
+}
+
+// Helper to construct a binary op that promotes integer inputs to float.
+TensorIterator TensorIterator::binary_float_op(Tensor& out, const Tensor& a,
+    const Tensor& b) {
+  return TensorIteratorConfig()
+     .set_check_mem_overlap(true)
+     .add_output(out)
+     .add_input(a)
+     .add_input(b)
+     .allow_cpu_scalars(true)
+     .promote_inputs_to_common_dtype(true)
+     .cast_common_dtype_to_outputs(true)
+     .enforce_safe_casting_to_output(true)
+     .promote_integer_inputs_to_float(true)
      .build();
 }
 

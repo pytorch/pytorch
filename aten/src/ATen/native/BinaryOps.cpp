@@ -122,18 +122,14 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(
-    result, self, other,
-    /*promote_integer_inputs_to_float=*/true);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
-  auto iter = TensorIterator::binary_op(
-    result, self, other,
-    /*promote_integer_inputs_to_float=*/true);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return iter.output();
 }
