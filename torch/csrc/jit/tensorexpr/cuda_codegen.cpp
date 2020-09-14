@@ -110,7 +110,7 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
     case ScalarType::Short:
       return "short";
     case ScalarType::Long:
-      return "long";
+      return "long long";
     default:
       return dtype.ToCppString();
   }
@@ -141,6 +141,60 @@ void CudaAnalysis::visit(const Allocate* v) {
     p = p->get_parent();
   }
   throw std::runtime_error("Global alloc not supported yet");
+}
+
+void CudaAnalysis::visit(const For* v) {
+  // Recurse first.
+  v->body()->accept(this);
+
+  const LoopOptions& loop_options = v->loop_options();
+  if (loop_options.is_gpu_block_index()) {
+    int gpu_block_index = loop_options.gpu_block_index();
+    if (gpu_block_index >= 3) {
+      throw std::runtime_error("support only 3D gpu_block_index");
+    }
+    const Expr* prev = nullptr;
+    if (gpu_block_extents_.size() <= gpu_block_index) {
+      gpu_block_extents_.resize(gpu_block_index + 1);
+    } else {
+      prev = gpu_block_extents_[gpu_block_index];
+    }
+    if (!is_zero(v->start())) {
+      throw std::runtime_error(
+          "start must be zero for gpu_block_index: " +
+          std::to_string(v->start()));
+    }
+
+    if (prev == nullptr) {
+      gpu_block_extents_[gpu_block_index] = v->stop();
+    } else {
+      gpu_block_extents_[gpu_block_index] =
+          IRSimplifier::simplify(new Max(prev, v->stop(), true));
+    }
+  } else if (loop_options.is_gpu_thread_index()) {
+    int gpu_thread_index = loop_options.gpu_thread_index();
+    if (gpu_thread_index >= 3) {
+      throw std::runtime_error("support only 3D gpu_thread_index");
+    }
+    const Expr* prev = nullptr;
+    if (gpu_thread_extents_.size() <= gpu_thread_index) {
+      gpu_thread_extents_.resize(gpu_thread_index + 1);
+    } else {
+      prev = gpu_thread_extents_[gpu_thread_index];
+    }
+    if (!is_zero(v->start())) {
+      throw std::runtime_error(
+          "start must be zero for gpu_thread_index: " +
+          std::to_string(v->start()));
+    }
+
+    if (prev == nullptr) {
+      gpu_thread_extents_[gpu_thread_index] = v->stop();
+    } else {
+      gpu_thread_extents_[gpu_thread_index] =
+          IRSimplifier::simplify(new Max(prev, v->stop(), true));
+    }
+  }
 }
 
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
@@ -186,7 +240,19 @@ void CudaPrinter::visit(const For* v) {
 }
 
 void CudaPrinter::visit(const Cast* v) {
-  os() << cudaDtypeCppString(v->dtype());
+  if (v->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__float2half(";
+    v->src_value()->accept(this);
+    os() << ")";
+    return;
+  } else if (v->src_value()->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__half2float(";
+    v->src_value()->accept(this);
+    os() << ")";
+    return;
+  }
+
+  os() << "(" << cudaDtypeCppString(v->dtype()) << ")";
   os() << "(";
   v->src_value()->accept(this);
   os() << ")";
@@ -209,6 +275,9 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
+  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
+    func_name = "abs";
+  }
 
   os() << func_name << "(";
   for (int i = 0; i < v->nparams(); i++) {
@@ -222,15 +291,6 @@ void CudaPrinter::visit(const Intrinsics* v) {
 
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    if (v->indices().empty()) {
-      os() << "__half2float(" << *v->base_handle() << ")";
-    } else {
-      os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-           << "])";
-    }
-    return;
-  }
   // Detects whether the load target is also a store target.
   // TODO: this is currently too wide. It detects whether a store-target
   // exists within the program. In fact, this check is only necessary within a
@@ -239,8 +299,9 @@ void CudaPrinter::visit(const Load* v) {
     os() << *v->base_handle();
     return;
   }
-  if (v->dtype().scalar_type() == ScalarType::Bool) {
-    // There's no __ldg overload for bool.
+  if (v->dtype().scalar_type() == ScalarType::Bool ||
+      v->dtype().scalar_type() == ScalarType::Half) {
+    // There's no __ldg overload for bool or half.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
   }
@@ -366,12 +427,7 @@ void CudaPrinter::visit(const Store* v) {
   } else {
     os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   }
-  if (v->value()->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__float2half(" << *v->value() << ");";
-  } else {
-    os() << *v->value() << ";";
-  }
-  os() << std::endl;
+  os() << *v->value() << ";";
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
@@ -388,21 +444,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  auto dtype = v->dtype().scalar_type();
-  switch (dtype) {
-    case ScalarType::Half:
-      // doing Half math in float.
-    case ScalarType::Float:
-      os() << "fmaxf";
-      break;
-    case ScalarType::Double:
-      os() << "fmax";
-      break;
-    default:
-      os() << "max";
-      break;
-  }
-  os() << "(";
+  os() << "maximum(";
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -410,21 +452,7 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  auto dtype = v->dtype().scalar_type();
-  switch (dtype) {
-    case ScalarType::Half:
-      // doing Half math in float.
-    case ScalarType::Float:
-      os() << "fminf";
-      break;
-    case ScalarType::Double:
-      os() << "fmin";
-      break;
-    default:
-      os() << "min";
-      break;
-  }
-  os() << "(";
+  os() << "minimum(";
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -456,12 +484,7 @@ void CudaPrinter::visit(const Block* v) {
 
 void CudaPrinter::visit(const Let* v) {
   emitIndent();
-  if (v->dtype().scalar_type() == ScalarType::Half) {
-    // we do math in floats so use that.
-    os() << "float";
-  } else {
-    os() << cudaDtypeCppString(v->dtype());
-  }
+  os() << cudaDtypeCppString(v->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -504,6 +527,27 @@ class PrioritizeLoad : public IRMutator {
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
+  }
+
+  const Expr* mutate(const Cast* v) override {
+    const Load* src_load = dynamic_cast<const Load*>(v->src_value());
+    const Expr* new_src = v->src_value()->accept_mutator(this);
+    const Var* new_var = dynamic_cast<const Var*>(new_src);
+    if (!src_load || !new_var) {
+      return new Cast(v->dtype(), new_src);
+    }
+
+    // We just did the prioritize load, let's fold in the Cast.
+    MemLoadList& load_list = load_stack_.back();
+    assert(!load_list.empty());
+    auto pair = load_list.back();
+    assert(pair.first == new_var);
+    load_list.pop_back();
+
+    new_var = new Var("v", v->dtype());
+    const Expr* new_value = new Cast(v->dtype(), pair.second);
+    load_list.push_back(std::make_pair(new_var, new_value));
+    return new_var;
   }
 
   Stmt* mutate(const Store* v) override {
@@ -599,61 +643,60 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
 
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
+    auto& extents = cuda_analysis_->gpu_block_extents();
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_index >= 3) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
-    const Expr* prev = nullptr;
-    if (gpu_block_extents_.size() <= gpu_block_index) {
-      gpu_block_extents_.resize(gpu_block_index + 1);
-    } else {
-      prev = gpu_block_extents_[gpu_block_index];
-    }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
-    }
-
-    if (prev == nullptr) {
-      gpu_block_extents_[gpu_block_index] = v->stop();
-    } else {
-      gpu_block_extents_[gpu_block_index] =
-          IRSimplifier::simplify(new Max(prev, v->stop(), true));
-    }
 
     const Var* metaVar = gpu_block_vars_[gpu_block_index];
-    return Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+    body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+
+    // extents is the max found, if we don't equal that we may be smaller.
+    // Mask it with the current loops stop.
+    if (!exprEquals(extents[gpu_block_index], v->stop())) {
+      body = new Cond(
+          new CompareSelect(
+              metaVar,
+              v->stop(),
+              new IntImm(1),
+              new IntImm(0),
+              CompareSelectOperation::kLT),
+          body,
+          nullptr);
+    }
+    return body;
   } else if (loop_options.is_gpu_thread_index()) {
+    auto& extents = cuda_analysis_->gpu_thread_extents();
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_index >= 3) {
       throw std::runtime_error("support only 3D gpu_thread_index");
     }
-    const Expr* prev = nullptr;
-    if (gpu_thread_extents_.size() <= gpu_thread_index) {
-      gpu_thread_extents_.resize(gpu_thread_index + 1);
-    } else {
-      prev = gpu_thread_extents_[gpu_thread_index];
-    }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_thread_index: " +
-          std::to_string(v->start()));
-    }
 
+    // If a thread dimension has changed, insert a syncThreads in the enclosing
+    // Block.
     if (last_thread_dim_ && !exprEquals(last_thread_dim_, v->stop())) {
       need_sync_ = true;
     }
     last_thread_dim_ = v->stop();
-    if (prev == nullptr) {
-      gpu_thread_extents_[gpu_thread_index] = v->stop();
-    } else {
-      gpu_thread_extents_[gpu_thread_index] =
-          IRSimplifier::simplify(new Max(prev, v->stop(), true));
-    }
 
     const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
-    return Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+    body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+
+    // extents is the max found, if we don't equal that we may be smaller.
+    // Mask it with the current loops stop.
+    if (!exprEquals(extents[gpu_thread_index], v->stop())) {
+      body = new Cond(
+          new CompareSelect(
+              metaVar,
+              v->stop(),
+              new IntImm(1),
+              new IntImm(0),
+              CompareSelectOperation::kLT),
+          body,
+          nullptr);
+    }
+    return body;
   }
 
   return new For(
@@ -692,27 +735,19 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
 class NoThreadIdxRewriter : public IRMutator {
  private:
   Stmt* rewrite(const std::vector<Stmt*>& stmts) {
-    std::vector<Stmt*> cloned_stmts(stmts.size());
-    for (size_t index = 0; index < stmts.size(); index++) {
-      cloned_stmts[index] = Stmt::clone(stmts[index]);
-    }
-    Stmt* new_block = Block::make(cloned_stmts);
+    Stmt* new_block = Block::make(stmts);
     // Wrap the new block under a trivial thread-idx
     //   for t in 0..1: // threadIdx
-    //     if (t < 1):
     //       new_block
     // Note: the insertion of this for loop serves two purpose. First it is
     // turned into a mask; Second, it will make sure a sync point is inserted
     // when we switch to another thread-idx axis.
     VarHandle t("t", kInt);
-    ExprHandle t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
-    // TODO: move "if (t < 1)" to threadIdx generation
-    Cond* masked_block = Cond::make(t_lt_1, new_block, nullptr);
     LoopOptions thread_idx_opt;
     // TODO: the added trivial threadIdx needs to match the kernel threadIdx
     // dimensions
     thread_idx_opt.set_gpu_thread_index(0);
-    For* trivial_loop = For::make(t, 0, 1, masked_block, thread_idx_opt);
+    For* trivial_loop = For::make(t, 0, 1, new_block, thread_idx_opt);
     return trivial_loop;
   }
 
@@ -743,7 +778,7 @@ class NoThreadIdxRewriter : public IRMutator {
     int index = 0;
     for (auto old_stmt : old_stmts) {
       need_rewrite_ = false;
-      Stmt* new_stmt = old_stmt->accept_mutator(this);
+      Stmt* new_stmt = Stmt::clone(old_stmt->accept_mutator(this));
       need_rewrites[index] = need_rewrite_;
       new_stmts[index] = new_stmt;
       index++;
@@ -762,7 +797,7 @@ class NoThreadIdxRewriter : public IRMutator {
     need_rewrite_ = false;
     // If nothing needs fix, return as it is
     if (!any_need_fix) {
-      return (Stmt*)v;
+      return Block::make(new_stmts);
     }
 
     // If all needs fix, then we could have its parent statement to merge
@@ -776,7 +811,7 @@ class NoThreadIdxRewriter : public IRMutator {
         return new_block;
       }
       need_rewrite_ = true;
-      return (Stmt*)v;
+      return Block::make(new_stmts);
     }
 
     // if some needs fix, rewrites the consecutive parts
@@ -831,6 +866,23 @@ static std::ostream& operator<<(
   return out;
 }
 
+static const char* resource_string = R"(
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
+
+template<typename T>
+T maximum(T a, T b) {
+  return isnan(a) ? a : (a > b ? a : b);
+}
+
+template<typename T>
+T minimum(T a, T b) {
+  return isnan(a) ? a : (a < b ? a : b);
+}
+
+)";
+
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
@@ -844,19 +896,20 @@ void CudaCodeGen::Initialize() {
   cuda_analysis_ = std::make_unique<CudaAnalysis>();
   printer_ =
       std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
-  metavar_rewriter_ = std::make_unique<GPUMetaVarRewriter>();
+  metavar_rewriter_ =
+      std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  os() << "#define NAN __int_as_float(0x7fffffff)\n"
-          "#define POS_INFINITY __int_as_float(0x7f800000)\n"
-          "#define NEG_INFINITY __int_as_float(0xff800000)\n";
+  os() << resource_string;
+
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
 
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
+  Stmt* stmt_v = stmt();
   CudaHalfChecker halfChecker;
-  stmt()->accept(&halfChecker);
+  stmt_v = stmt_v->accept_mutator(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
@@ -898,11 +951,10 @@ void CudaCodeGen::Initialize() {
     os() << std::endl;
   }
 
-  Stmt* stmt_v = stmt();
+  stmt_v->accept(cuda_analysis_.get());
+
   NoThreadIdxRewriter no_thread_idx;
   stmt_v = stmt_v->accept_mutator(&no_thread_idx);
-
-  stmt_v->accept(cuda_analysis_.get());
   stmt_v = stmt_v->accept_mutator(metavar_rewriter_.get());
 
   AtomicAddFuser atomic_add_fuser(
@@ -914,6 +966,7 @@ void CudaCodeGen::Initialize() {
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);
   stmt_v = IRSimplifier::simplify(stmt_v);
+  set_stmt(stmt_v);
 
   stmt_v->accept(printer_.get());
   os() << std::endl;

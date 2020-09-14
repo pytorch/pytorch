@@ -4926,8 +4926,8 @@ class TestJit(TestCase):
 
             # check on different data
             values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
+            expected = f(*values).clone()
+            actual = traced_f(*values).clone()
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
             self.assertEqual(expected, actual,

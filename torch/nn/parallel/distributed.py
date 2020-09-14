@@ -231,6 +231,7 @@ class DistributedDataParallel(Module):
         parameters.
 
     Example::
+
         >>> import torch.distributed.autograd as dist_autograd
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
         >>> from torch import optim
@@ -586,6 +587,10 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
+        if self.ddp_join_enabled:
+            # Notify joined ranks whether they should sync in backwards pass or not.
+            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -636,6 +641,19 @@ class DistributedDataParallel(Module):
         )
         dist.all_reduce(all_active_procs, group=self.process_group)
         return all_active_procs.item()
+
+    # When running in join mode, schedules an allreduce to notify joined ranks
+    # of whether backwards pass synchronization will run this iteraton or not.
+    def _check_global_requires_backward_grad_sync(self, is_joined_rank):
+        if not is_joined_rank and self.require_backward_grad_sync:
+            requires_sync_tensor = torch.ones(1, device=self.device)
+        else:
+            requires_sync_tensor = torch.zeros(1, device=self.device)
+
+        work = dist.all_reduce(
+            requires_sync_tensor, group=self.process_group, async_op=True
+        )
+        return work, requires_sync_tensor
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.
@@ -688,7 +706,7 @@ class DistributedDataParallel(Module):
     def join(self, divide_by_initial_world_size=True, enable=True):
         r"""
         A context manager to be used in conjunction with an instance of
-        :class:`torch.nn.parallel.distributed.DistributedDataParallel` to be
+        :class:`torch.nn.parallel.DistributedDataParallel` to be
         able to train with uneven inputs across participating processes.
 
         This context manager will keep track of already-joined DDP processes,
@@ -710,10 +728,10 @@ class DistributedDataParallel(Module):
 
         .. warning::
             This module works only with the multi-process, single-device usage
-            of :class:`torch.nn.parallel.distributed.DistributedDataParallel`,
+            of :class:`torch.nn.parallel.DistributedDataParallel`,
             which means that a single process works on a single GPU.
 
-        ..warning::
+        .. warning::
             This module currently does not support custom distributed collective
             operations in the forward pass, such as ``SyncBatchNorm`` or other
             custom defined collectives in the model's forward pass.
@@ -731,7 +749,7 @@ class DistributedDataParallel(Module):
                 ``world_size`` even when we encounter uneven inputs. If you set
                 this to ``False``, we divide the gradient by the remaining
                 number of nodes. This ensures parity with training on a smaller
-                world_size although it also means the uneven inputs would
+                ``world_size`` although it also means the uneven inputs would
                 contribute more towards the global gradient. Typically, you
                 would want to set this to ``True`` for cases where the last few
                 inputs of your training job are uneven. In extreme cases, where
@@ -744,6 +762,7 @@ class DistributedDataParallel(Module):
 
 
         Example::
+
           >>>  import torch
           >>>  import torch.distributed as dist
           >>>  import os
@@ -800,6 +819,22 @@ class DistributedDataParallel(Module):
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
+
+                        (
+                            work,
+                            should_sync_backwards_tensor,
+                        ) = self._check_global_requires_backward_grad_sync(
+                            is_joined_rank=True
+                        )
+                        work.wait()
+                        # If nonzero, then we should sync in the bwd pass.
+                        should_sync_backwards = should_sync_backwards_tensor.item() != 0
+                        # Forward param sync is disabled in the next iteration
+                        # if we are skipping grad sync this iteration. Hence, we
+                        # set require_forward_param_sync appropriately here.
+                        self.require_forward_param_sync = should_sync_backwards
+                        if not should_sync_backwards:
+                            continue
                         # Schedules one allreduce per gradient bucket to match
                         # the backwards pass allreduce.
                         self._match_all_reduce_for_bwd_pass()

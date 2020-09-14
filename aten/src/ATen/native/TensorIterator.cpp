@@ -865,6 +865,7 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
   return TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .add_output(out)
     .add_input(a)
     .resize_outputs(false)
@@ -887,6 +888,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
       " and output2 has ", out2.strides());
   return TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .add_output(out1)
     .add_output(out2)
     .add_input(a)

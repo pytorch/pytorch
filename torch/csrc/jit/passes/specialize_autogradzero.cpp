@@ -98,7 +98,6 @@ struct AutogradZeroSpecializer {
     }
     for (Node* n : profiled_opt_uses) {
       n->output()->replaceAllUsesWith(v);
-      n->destroy();
     }
   }
 
@@ -113,8 +112,9 @@ struct AutogradZeroSpecializer {
     replaceBlockInputsWithGraphInputs(true_block);
     false_block->cloneFrom(graph_->block(), value_map);
     replaceBlockInputsWithGraphInputs(false_block);
+    replaceBlockWithFallbackGraph(graph_->block(), graph_->inputs());
 
-    WithInsertPoint wip{graph_->block()};
+    WithInsertPoint wip{graph_->block()->param_node()->next()};
     Value* none_val = graph_->insertConstant(IValue());
     std::vector<Value*> checks;
 
@@ -147,7 +147,7 @@ struct AutogradZeroSpecializer {
 
       state_[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
       auto check = graph_->insert(prim::AutogradAnyNonZero, {inp});
-      if (!*pttp->undefined()) {
+      if (*pttp->undefined()) {
         check = graph_->insert(aten::__not__, {check});
       }
       checks.push_back(check);

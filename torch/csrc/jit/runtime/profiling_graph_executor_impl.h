@@ -4,13 +4,6 @@
 namespace torch {
 namespace jit {
 
-TORCH_API Node* createFallbackGraph(
-    Block* b,
-    ArrayRef<Value*> inputs,
-    Graph* g);
-
-TORCH_API void replaceBlockWithFallbackGraph(Block* b);
-
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
