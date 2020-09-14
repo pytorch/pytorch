@@ -277,10 +277,13 @@ class AbstractTestCases:
         def test_dim_reduction_less_than_64(self):
             sizes = [1] * 65
             x = torch.randn(sizes)
-            with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
-                torch.sum(x, 64)
-            with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
-                torch.sum(x, -1)
+            ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
+                   torch.amin, torch.amax, torch.norm]
+            for op in ops:
+                with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+                    op(x, 64)
+                with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+                    op(x, -1)
 
         @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
         def test_logsumexp(self):
@@ -10432,6 +10435,22 @@ class TestTorchDeviceType(TestCase):
                 torch_op(a, q, dim, keepdim, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
+    def test_quantile_backward(self, device):
+        def check(a, q, dim, expected_grad, ops=[torch.quantile, torch.nanquantile]):
+            for op in ops:
+                t = torch.tensor(a, device=device, requires_grad=True)
+                op(t, torch.tensor(q, device=device), dim).sum().backward()
+                self.assertEqual(t.grad, expected_grad)
+
+        check([1., 2, 3], 0.5, 0, [0, 1, 0])
+        check([1., 2, 3, 4], 0.5, 0, [0, 0.5, 0.5, 0])
+        check([3., 1, 4, 2], 0.5, 0, [0.5, 0, 0, 0.5])
+        check([1., 2, 3, 4], [0.25, 0.5, 0.75], 0, [0.25, 1.25, 1.25, 0.25])
+        check([[1., 2], [2, 1]], 0., 0, [[1, 0], [0, 1]])
+        check([[1., 2], [4, 3]], 1., 1, [[0, 1], [1, 0]])
+        check([1, float('nan'), 2], 0.5, 0, [0, 1, 0], [torch.quantile])
+        check([1, float('nan'), 2], 0.5, 0, [0.5, 0, 0.5], [torch.nanquantile])
+
     def test_quantile_error(self, device):
         def check(a, q, args, kwargs, message):
             with self.assertRaisesRegex(RuntimeError, r'quantile\(\) ' + message):
@@ -10442,21 +10461,18 @@ class TestTorchDeviceType(TestCase):
         check([], 0.5, [], {}, r'input tensor must be non-empty')
         check([1.], [[1.]], [], {}, r'q must be a scalar or 1D tensor')
         check([1], 0.5, [], {}, r'input tensor must be either float or double dtype')
-        check([1.], [1], [], {}, r'q must be same dtype as the input tensor')
+        check([1.], [1], [], {}, r'q tensor must be same dtype as the input tensor')
         check([1.], -1., [], {}, r'q must be in the range \[0, 1\] but got -1')
         check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
-
         check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
               r'out tensor must be same dtype as the input tensor')
-        check([1.], [0.5], [], {'out': torch.empty(1, 1, dtype=torch.float64, device=device)},
-              r'expected output shape to be 1 but got 1 1')
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')
 
         if self.device_type == "cuda":
             with self.assertRaisesRegex(
-                    RuntimeError, r'quantile\(\) q must be on the same device as the input tensor'):
+                    RuntimeError, r'quantile\(\) q tensor must be on the same device as the input tensor'):
                 torch.randn(1, device=device).quantile(torch.tensor(0.5))
             with self.assertRaisesRegex(
                     RuntimeError, r'quantile\(\) out tensor must be on the same device as the input tensor'):
@@ -13411,6 +13427,8 @@ class TestTorchDeviceType(TestCase):
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, True, True, 'cuda'),
+            ("exp2", doubles, True, True, 'cpu'),
+            ("exp2", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
@@ -18844,6 +18862,19 @@ else:
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
+    def test_repeated_dim(self, device):
+        ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
+               torch.amin, torch.amax, torch.norm]
+        x = torch.randn(3, 3, 3, 3, device=device)
+
+        error_msg = r'appears multiple times in the list of dims'
+        norm_error_msg = r'Expected dims to be different, got'
+        for op in ops:
+            for dim in [(0, 0), (0, -4)]:
+                e_msg = norm_error_msg if op == torch.norm else error_msg
+                with self.assertRaisesRegex(RuntimeError, e_msg):
+                    op(x, dim=dim)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -19233,6 +19264,12 @@ class TestViewOps(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Tensor must have a last dimension of size 2",
             lambda: torch.view_as_complex(x))
+
+        # zero dimension tensor
+        z = torch.tensor(2.0)
+        self.assertRaisesRegex(
+            RuntimeError, "Input tensor must have one or more dimensions",
+            lambda: torch.view_as_complex(z))
 
         y = x.reshape(0, 2)  # torch.Size([0, 2])
         res = torch.view_as_complex(y)
