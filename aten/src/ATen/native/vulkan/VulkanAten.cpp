@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/VulkanAten.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/InferSize.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -112,6 +113,56 @@ Tensor adaptive_avg_pool2d(const at::Tensor& input, IntArrayRef outputSize) {
   return new_with_vtensor_vulkan(std::move(output), input.options());
 }
 
+Tensor avg_pool2d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  TORCH_CHECK(
+      kernel_size.size() == 1 || kernel_size.size() == 2,
+      "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  const int kH = safe_downcast<int>(kernel_size[0]);
+  const int kW =
+      kernel_size.size() == 1 ? kH : safe_downcast<int>(kernel_size[1]);
+
+  TORCH_CHECK(
+      stride.empty() || stride.size() == 1 || stride.size() == 2,
+      "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
+  const int dH = stride.empty() ? kH : safe_downcast<int>(stride[0]);
+  const int dW = stride.empty()
+      ? kW
+      : stride.size() == 1 ? dH : safe_downcast<int>(stride[1]);
+
+  TORCH_CHECK(
+      padding.size() == 1 || padding.size() == 2,
+      "avg_pool2d: padding must either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int>(padding[1]);
+
+  const auto& x = vtensor_from_vulkan(self);
+  auto inputSize = self.sizes();
+  const int64_t iN = inputSize[0];
+  const int64_t iC = inputSize[1];
+  const int64_t iH = inputSize[2];
+  const int64_t iW = inputSize[3];
+
+  const int64_t oH =
+      pooling_output_shape<int64_t>(iH, kH, padH, dH, 1, ceil_mode);
+  const int64_t oW =
+      pooling_output_shape<int64_t>(iW, kW, padW, dW, 1, ceil_mode);
+
+  pool2d_shape_check(
+      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW);
+
+  VulkanTensor y{{iN, iC, oH, oW}};
+  vulkan::detail::avg_pool2d(
+      y, x, iH, iW, oH, oW, iN, iC, kH, kW, dH, dW, padH, padW);
+  return new_with_vtensor_vulkan(std::move(y), self.options());
+}
+
 Tensor max_pool2d(
     const at::Tensor& self,
     const IntArrayRef kernel_size,
@@ -203,7 +254,7 @@ Tensor reshape(at::Tensor const& input, IntArrayRef shape) {
       input.options());
 }
 
-Tensor cat(TensorList tensors, int64_t dim) {
+Tensor cat(const TensorList tensors, int64_t dim) {
   TORCH_INTERNAL_ASSERT(
       dim == 0 || dim == 1,
       "Vulkan cat is implemented only for batch and channels dimensions");
@@ -236,6 +287,40 @@ Tensor cat(TensorList tensors, int64_t dim) {
 
   vulkan::detail::cat(output, vTensors, dim);
   return new_with_vtensor_vulkan(std::move(output), tensor.options());
+}
+
+Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  return new_with_vtensor_vulkan(
+      vulkan::detail::transpose(vtensor_from_vulkan(self), dim0, dim1),
+      self.options());
+}
+
+Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
+  auto& x = vtensor_from_vulkan(self);
+  x = vulkan::detail::transpose(x, dim0, dim1);
+  return self;
+}
+
+Tensor view(const Tensor& self, IntArrayRef size) {
+  return new_with_vtensor_vulkan(
+      vulkan::detail::reshape_copy(
+          vtensor_from_vulkan(self), at::infer_size(size, self.numel())),
+      self.options());
+}
+
+Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
+  return self;
+}
+
+Tensor slice(
+    const Tensor& self,
+    int64_t dim,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
+  return new_with_vtensor_vulkan(
+      vulkan::detail::slice(vtensor_from_vulkan(self), dim, start, end, step),
+      self.options());
 }
 
 Tensor add(const Tensor& self, const Tensor& other, const Scalar alpha) {
@@ -292,6 +377,19 @@ Tensor mul_scalar(const Tensor& self, Scalar other) {
   VulkanTensor output{self.sizes().vec()};
   vulkan::detail::mul(output, x, s);
   return new_with_vtensor_vulkan(std::move(output), self.options());
+}
+
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  auto sliced = vulkan::aten::slice(self, dim, index, index + 1, 1);
+  auto sizes = self.sizes().vec();
+  sizes.erase(sizes.begin() + dim);
+  return vulkan::aten::reshape(sliced, sizes);
+}
+
+Tensor unsqueeze(const Tensor& self, int64_t dim) {
+  auto sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + dim, 1);
+  return vulkan::aten::reshape(self, sizes);
 }
 
 Tensor convolution(
@@ -425,6 +523,14 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
+  m.impl("slice.Tensor", TORCH_FN(slice));
+  m.impl("reshape", TORCH_FN(reshape));
+  m.impl("select.int", TORCH_FN(select));
+  m.impl("transpose.int", TORCH_FN(transpose));
+  m.impl("_cat", TORCH_FN(cat));
+  m.impl_UNBOXED("transpose_", transpose_);
+  m.impl("view", TORCH_FN(view));
+  m.impl("unsqueeze", TORCH_FN(unsqueeze));
   m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
@@ -438,6 +544,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       "_adaptive_avg_pool2d",
       TORCH_FN(at::native::vulkan::aten::adaptive_avg_pool2d));
+  m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
   m.impl("max_pool2d", TORCH_FN(at::native::vulkan::aten::max_pool2d));
   m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
