@@ -1429,6 +1429,16 @@
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: exp2(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: exp2_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: expm1(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
