@@ -170,6 +170,8 @@ namespace jit {
   _(SimplifyIfComponents)                   \
   _(SimplifyOpaqueTerms)                    \
   _(SimplifySymbolicMinMax)                 \
+  _(SimplifyNestedMax)                      \
+  _(SimplifyNestedMin)                      \
   _(SimplifyWontReorderFloat)               \
   _(SimplifyRoundModPattern)                \
   _(SimplifyRoundModPatternFactorization)   \
