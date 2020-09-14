@@ -2,73 +2,72 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
+#include <unordered_set>
+
 namespace torch {
 namespace jit {
 namespace fuser {
 
 namespace {
 
-class BuffersExtractor final : OptOutDispatch {
+//! Scan all primary expressions in the Kernel IR and build
+//! list of specialized nodes
+//!
+//! \note primary expressions are expressions which are not subexpressions
+//!   in a larger expression (things like ForLoop or IfThenElse are not
+//!   real expressions)
+//!
+class KernelIrScanner : private OptOutDispatch {
  public:
-  explicit BuffersExtractor(const std::vector<Expr*>& exprs) {
+  std::vector<kir::Allocate*> global_allocations;
+  std::vector<kir::Allocate*> dynamic_allocations;
+  std::vector<kir::Allocate*> static_allocations;
+  std::unordered_set<Expr*> primary_expressions;
+
+ public:
+  explicit KernelIrScanner(const std::vector<Expr*>& exprs) {
     for (auto expr : exprs) {
       handle(expr);
     }
   }
 
-  const auto& globalAllocs() const {
-    return global_allocations_;
-  }
-
-  const auto& dynamicAllocs() const {
-    return dynamic_allocations_;
-  }
-
-  const auto& staticAllocs() const {
-    return static_allocations_;
-  }
-
  private:
   void handle(Expr* expr) final {
+    TORCH_CHECK(primary_expressions.insert(expr).second);
     OptOutDispatch::handle(expr);
   }
 
   void handle(kir::ForLoop* fl) final {
     for (auto expr : fl->body().exprs()) {
-      OptOutDispatch::handle(expr);
+      handle(expr);
     }
   }
 
   void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->thenBody().exprs()) {
-      OptOutDispatch::handle(expr);
+      handle(expr);
     }
     for (auto expr : ite->elseBody().exprs()) {
-      OptOutDispatch::handle(expr);
+      handle(expr);
     }
   }
 
   void handle(kir::Allocate* a) final {
     switch (a->getMemoryType()) {
       case MemoryType::Global:
-        global_allocations_.push_back(a);
+        global_allocations.push_back(a);
         break;
       case MemoryType::Shared:
         if (a->size()->isConstScalar()) {
-          static_allocations_.push_back(a);
+          static_allocations.push_back(a);
         } else {
-          dynamic_allocations_.push_back(a);
+          dynamic_allocations.push_back(a);
         }
         break;
       case MemoryType::Local:
         break;
     }
   }
-
- private:
-  std::vector<kir::Allocate*> global_allocations_;
-  std::vector<kir::Allocate*> dynamic_allocations_;
-  std::vector<kir::Allocate*> static_allocations_;
 };
 
 } // namespace
@@ -82,16 +81,17 @@ Kernel::Kernel(
 }
 
 void Kernel::analyze() {
+  const KernelIrScanner ir_scanner(exprs_);
+
   // Cache the list of buffers used within the kernel
-  BuffersExtractor buffers_extractor(exprs_);
-  summary_.global_allocations = buffers_extractor.globalAllocs();
-  summary_.dynamic_smem_allocations = buffers_extractor.dynamicAllocs();
-  summary_.static_smem_allocations = buffers_extractor.staticAllocs();
+  summary_.global_allocations = ir_scanner.global_allocations;
+  summary_.dynamic_smem_allocations = ir_scanner.dynamic_allocations;
+  summary_.static_smem_allocations = ir_scanner.static_allocations;
 
   // Figure out if the kernel uses random numbers
-  for (auto expr : exprs_) {
-    if (expr->getExprType() == ExprType::UnaryOp) {
-      if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike) {
+  for (auto expr : ir_scanner.primary_expressions) {
+    if (expr->getExprType() == ExprType::KirUnaryOp) {
+      if (expr->as<kir::UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike) {
         summary_.is_stochastic = true;
         break;
       }
@@ -100,10 +100,10 @@ void Kernel::analyze() {
 
   // Look for reductions and shared memory buffers
   size_t max_smem_type_size = 0;
-  for (auto expr : exprs_) {
+  for (auto expr : ir_scanner.primary_expressions) {
     for (auto out : expr->outputs()) {
-      if (out->getValType() == ValType::KirTensorView) {
-        const auto tv = out->as<kir::TensorView>();
+      if (out->getValType() == ValType::TensorIndex) {
+        const auto tv = out->as<kir::TensorIndex>()->view();
         const auto domain = tv->domain();
 
         // Do we have any reductions?

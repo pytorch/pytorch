@@ -430,8 +430,6 @@ class TORCH_CUDA_API TensorIndex : public Val {
     return indices_.size();
   }
 
-  // i here is int, as we want to accept negative value and ::size_type can be a
-  // uint.
   Val* index(int i) const;
 
   const std::vector<Val*>& indices() const {
@@ -568,6 +566,9 @@ class TORCH_CUDA_API Scope {
 // in its body are considered inside the scope of the for loop. In the future
 // the implementation should look quite different so that we can do proper
 // dependency annalysis like in Fusion.
+//
+// TODO(kir): this is not a real expression
+//
 class TORCH_CUDA_API ForLoop : public Expr {
  public:
   explicit ForLoop(
@@ -609,6 +610,9 @@ class TORCH_CUDA_API ForLoop : public Expr {
 // are considered inside the scope of the if statement. In the future the
 // implementation should look quite different so that we can do proper
 // dependency annalysis like in Fusion.
+//
+// TODO(kir): this is not a real expression
+//
 class TORCH_CUDA_API IfThenElse : public Expr {
  public:
   explicit IfThenElse(

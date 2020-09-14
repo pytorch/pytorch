@@ -24,8 +24,8 @@ class CudaKernelGenerator : private OptInConstDispatch {
       const std::string& kernel_name) {
     CudaKernelGenerator codegen(kernel);
     codegen.genDeclaration(kernel_name);
-    codegen.genPrologue();
     codegen.startBlock();
+    codegen.genPrologue();
     codegen.genBody();
     codegen.endBlock();
     TORCH_CHECK(codegen.block_nest_level_ == 0);

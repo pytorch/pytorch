@@ -15,6 +15,9 @@ namespace jit {
 namespace fuser {
 
 //! Summary of interesting facts about the kernel
+//
+// TODO(kir): const node ptrs
+//
 struct KernelSummary {
   //! List of global buffers
   std::vector<kir::Allocate*> global_allocations;

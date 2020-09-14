@@ -32,7 +32,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "=====*===============================" << std::endl;
+              << "======================================\n" << std::endl;
   }
 
   return code;
@@ -53,7 +53,7 @@ void FusionExecutor::debugCompileFusionFromStr(
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "=====*===============================" << std::endl;
+              << "======================================\n" << std::endl;
   }
 
   fusion_id_ = id;
