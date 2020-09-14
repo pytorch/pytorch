@@ -249,6 +249,7 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)             \
   _(NormalizeOnNestedInnerLoop)             \
   _(NormalizeAndSplitWithTail)              \
+  _(DetectInlineRankMismatch)               \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
