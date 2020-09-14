@@ -20,9 +20,7 @@
 #include <thrust/transform.h>
 #include <THC/THCAtomics.cuh>
 
-#ifndef __HIP_PLATFORM_HCC__
 #include <cub/cub.cuh>
-#endif
 
 #include <c10/macros/Macros.h>
 
@@ -865,13 +863,6 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   int N = self_.numel();
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 // compute number of nonzero elements
-#ifdef __HIP_PLATFORM_HCC__
-  auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto first = thrust::device_ptr<scalar_t>(self_.data_ptr<scalar_t>());
-  auto num_nonzeros_h = thrust::transform_reduce(
-                  thrust::cuda::par(thrust_allocator).on(stream),
-                  first, first + N, NonZeroOp<scalar_t>(), int(0), thrust::plus<int>());
-#else
   size_t temp_storage_bytes=0;
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int));
@@ -883,7 +874,6 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   C10_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
   //need to synchronize to make sure data is available on the host
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-#endif
   //expected output size is num_nonzeros x ndim
   //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)
@@ -895,12 +885,6 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
     out.resize_({self.dim(), num_nonzeros_h});
   //Scalars are expected to produce output of size (1,0), so we can't write to it
   if (self.dim() > 0) {
-#ifdef __HIP_PLATFORM_HCC__
-    thrust::counting_iterator<int64_t> counting_itr(0);
-    thrust::copy_if(thrust::cuda::par(thrust_allocator).on(stream),
-    counting_itr, counting_itr+N, first, thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>()),
-    NonZeroOp<scalar_t>());
-#else
     cub::CountingInputIterator<int64_t> counting_itr(0);
     temp_storage_bytes = 0;
     cub::DeviceSelect::Flagged(nullptr, temp_storage_bytes, counting_itr, itr,
@@ -908,12 +892,9 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
     temp_storage = allocator.allocate(temp_storage_bytes);
     cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
       out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
-#endif
     if (num_nonzeros_h > 0 && self.dim() > 1){
         int64_t div = 1;
-#ifndef __HIP_PLATFORM_HCC__
         auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-#endif
         for (int dim = self.dim()-1; dim >= 0; dim--){
             int64_t dim_size = self.sizes()[dim];
             thrust::transform(

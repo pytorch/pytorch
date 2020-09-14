@@ -435,7 +435,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      opTimeout_(opTimeout) {
+      opTimeout_(opTimeout),
+      futureNCCLCallbackStreams_(c10::cuda::device_count()) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
@@ -449,17 +450,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     throw std::runtime_error(
         "Invalid value for environment variable: " +
         std::string(NCCL_ASYNC_ERROR_HANDLING));
-  }
-
-  // If single-process single-device mode, WorkNCCL::getFuture is supported,
-  // so get a dedicated stream for each device to run FutureNCCL then callbacks.
-  // Depending on the device index of collective outputs, WorkNCCL passes
-  // the corresponding device's then callback stream to FutureNCCL.
-  futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
-  for (int device_index = 0; device_index < c10::cuda::device_count();
-       device_index++) {
-    futureNCCLCallbackStreams_.push_back(std::make_shared<at::cuda::CUDAStream>(
-        at::cuda::getStreamFromPool(device_index)));
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -545,24 +535,26 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         if (checkForNCCLErrors(ncclComms)) {
           LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
-          LOG(INFO) << "Aborting communicators that received errors";
-          // We abort NCCL communicators that have received errors from this
-          // thread, and exceptions are set on the corresponding work objects.
-          // The workCleanupThread will then loop through the unfinished
-          // collectives and throw exceptions if an exception has been set on
-          // any of the work objects from this thread.
-          for (const auto& ncclComm : ncclComms) {
-            ncclComm->ncclCommAbort();
-            // Note that we don't remove the aborted communicators from the
-            // cache. The reason is that if we do remove the communicator
-            // from the cache, it is possible that a new collective operation
-            // calls `ncclCommInitRank` to create a new communicator whereas
-            // other ranks might have failed/timed out and didn't enter
-            // `ncclCommInitRank`. As a result, when there is a failure on
-            // a communicator the application receives an exception and its
-            // their responsibility to destroy the process group and recreate
-            // it to recover from errors.
-            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+          if (blockingWait_ || asyncErrorHandling_) {
+            LOG(INFO) << "Aborting communicators that received errors";
+            // We abort NCCL communicators that have received errors from this
+            // thread, and exceptions are set on the corresponding work objects.
+            // The workCleanupThread will then loop through the unfinished
+            // collectives and throw exceptions if an exception has been set on
+            // any of the work objects from this thread.
+            for (const auto& ncclComm : ncclComms) {
+              ncclComm->ncclCommAbort();
+              // Note that we don't remove the aborted communicators from the
+              // cache. The reason is that if we do remove the communicator
+              // from the cache, it is possible that a new collective operation
+              // calls `ncclCommInitRank` to create a new communicator whereas
+              // other ranks might have failed/timed out and didn't enter
+              // `ncclCommInitRank`. As a result, when there is a failure on
+              // a communicator the application receives an exception and its
+              // their responsibility to destroy the process group and recreate
+              // it to recover from errors.
+              abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+            }
           }
         }
       }
@@ -770,12 +762,22 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // GPU world size and GPU rank
     int numRanks = getSize() * devices.size();
     int rank = getRank() * devices.size() + i;
+    // Get the device index
+    int deviceIndex = devices[i].index();
 
-    gpuGuard.set_index(devices[i].index());
+    gpuGuard.set_index(deviceIndex);
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool());
+
+    // If not set before, get a dedicated stream for the device to run
+    // FutureNCCL then callbacks.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
+      futureNCCLCallbackStreams_[deviceIndex] =
+          std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
+    }
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
@@ -901,6 +903,10 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     std::vector<at::Device> devices) {
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
+}
+
+std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
+  return *outputs_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::

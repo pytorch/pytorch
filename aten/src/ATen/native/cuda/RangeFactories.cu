@@ -49,8 +49,16 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for linspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -93,7 +101,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 
@@ -101,8 +109,16 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   return result;
 }
 
-Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
+Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for logspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -144,7 +160,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 

@@ -1,10 +1,10 @@
 import torch
-from torch.quantization.default_mappings import (
-    DEFAULT_MODULE_MAPPING,
-    DEFAULT_OPERATOR_MAPPING,
-)
 from torch.fx.graph import (
     Node,
+)
+from ..quantization_mappings import (
+    get_static_quant_module_class,
+    get_quantized_operator,
 )
 from .pattern_utils import (
     register_quant_pattern,
@@ -181,10 +181,7 @@ class ConvRelu(QuantizeHandler):
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
-            # TODO: make the mapping configurable?
-            assert type(self.conv) in DEFAULT_MODULE_MAPPING, \
-                'unhandled conv type:{}'.format(type(self.conv))
-            qconv_cls = DEFAULT_MODULE_MAPPING[type(self.conv)]
+            qconv_cls = get_static_quant_module_class(type(self.conv))
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
@@ -335,7 +332,7 @@ class BatchNorm(QuantizeHandler):
             self.bn[1].activation_post_process = activation_post_process
         else:
             self.bn.activation_post_process = activation_post_process
-        qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
+        qbn_cls = get_static_quant_module_class(type(self.bn))
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
@@ -371,7 +368,8 @@ class DefaultNode(QuantizeHandler):
         if node.op == 'call_module':
             module = quantizer.modules[node.target]
             module.activation_post_process = activation_post_process
-            quantized_module = DEFAULT_MODULE_MAPPING[type(module)].from_float(module)
+            quantized_module_cls = get_static_quant_module_class(type(module))
+            quantized_module = quantized_module_cls.from_float(module)
             parent_name, name = _parent_name(node.target)
             setattr(quantizer.modules[parent_name], name, quantized_module)
             return quantizer.quantized_graph.create_node(
@@ -385,7 +383,7 @@ class DefaultNode(QuantizeHandler):
             scale = float(scale)
             zero_point = int(zero_point)
 
-            quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
             kwargs = load_arg(quantized=False)(node.kwargs)
             kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
@@ -405,7 +403,7 @@ class ELU(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+        quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
         kwargs = load_arg(quantized=False)(node.kwargs)
         kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})

@@ -1,13 +1,4 @@
 import torch
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from torch.quantization.default_mappings import (
-    DEFAULT_QAT_MODULE_MAPPING,
-)
-
 from torch.fx import (
     GraphModule,
     Proxy,
@@ -18,6 +9,17 @@ from torch.fx.graph import (
     Node,
     map_arg,
 )
+
+from torch.quantization import (
+    propagate_qconfig_,
+    convert,
+)
+
+from ..quantization_mappings import (
+    get_qat_module_mappings,
+)
+
+from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
@@ -163,7 +165,7 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root):
-        convert(root, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=True, remove_qconfig=False)
+        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self, root, input_graph):
         def get_qconfig(module):
@@ -429,20 +431,25 @@ class Quantizer:
         for node in model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
-                result = obj.convert(self, node, load_arg)
-                quantized = True
-                # Need to get correct quantized/non-quantized state for the output of CopyNode
-                if isinstance(obj, CopyNode):
-                    assert node.op in [
-                        'call_module',
-                        'call_function',
-                        'call_method'], \
-                        'CopyNode of type ' + node.op + ' is not handled'
-                    quantized = is_quantized(node.args[0])
-
-                # output of dynamic quantization is not quantized
-                if self.is_dynamic_quant:
+                if qconfig is None:
+                    result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
+                else:
+                    result = obj.convert(self, node, load_arg)
+                    # Need to get correct quantized/non-quantized state for the output of CopyNode
+                    if isinstance(obj, CopyNode):
+                        assert node.op in [
+                            'call_module',
+                            'call_function',
+                            'call_method'], \
+                            'CopyNode of type ' + node.op + ' is not handled'
+                        quantized = is_quantized(node.args[0])
+                    else:
+                        quantized = True
+
+                    # output of dynamic quantization is not quantized
+                    if self.is_dynamic_quant:
+                        quantized = False
 
                 if quantized:
                     quant_env[node.name] = result
@@ -470,7 +477,7 @@ class Quantizer:
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
-        self.quantized_graph.output(load_non_quantized(model.graph.result))
+        self.quantized_graph.output(map_arg(model.graph.result, load_non_quantized))
 
         to_be_removed = []
         for name, _ in model.named_modules():
@@ -478,6 +485,7 @@ class Quantizer:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
+        _remove_qconfig(model)
         model = GraphModule(model, self.quantized_graph)
         return model
 
