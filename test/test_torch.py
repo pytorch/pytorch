@@ -13400,6 +13400,8 @@ class TestTorchDeviceType(TestCase):
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, True, True, 'cuda'),
+            ("exp2", doubles, True, True, 'cpu'),
+            ("exp2", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
