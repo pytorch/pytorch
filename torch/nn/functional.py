@@ -3227,6 +3227,7 @@ upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_n
 GRID_SAMPLE_INTERPOLATION_MODES = {
     'bilinear': 0,
     'nearest': 1,
+    'bicubic': 2,
 }
 
 GRID_SAMPLE_PADDING_MODES = {
@@ -3331,9 +3332,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
             return handle_torch_function(
                 grid_sample, tens_ops, input, grid, mode=mode, padding_mode=padding_mode,
                 align_corners=align_corners)
-    if mode != 'bilinear' and mode != 'nearest':
+    if mode != 'bilinear' and mode != 'nearest' and mode != 'bicubic':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
-                         "'bilinear' or 'nearest', but got: '{}'".format(mode))
+                         "'bilinear', 'nearest' or 'bicubic', but got: '{}'".format(mode))
     if padding_mode != 'zeros' and padding_mode != 'border' and padding_mode != 'reflection':
         raise ValueError("nn.functional.grid_sample(): expected padding_mode "
                          "to be 'zeros', 'border', or 'reflection', "
@@ -3341,8 +3342,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
     if mode == 'bilinear':
         mode_enum = 0
-    else:  # mode == 'nearest'
+    elif mode == 'nearest':
         mode_enum = 1
+    else:  # mode == 'bicubic'
+        mode_enum = 2
 
     if padding_mode == 'zeros':
         padding_mode_enum = 0

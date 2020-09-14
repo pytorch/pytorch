@@ -483,6 +483,8 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
                 *out_ptr_NCHW = static_cast<scalar_t>(0);
               }
             }
+          } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+            TORCH_WARN("bicubic forward");
           }
         }
       }
@@ -628,6 +630,8 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
               safe_add_2d(gInp_ptr_NC, iy_nearest, ix_nearest, gInp_sH, gInp_sW,
                           inp_H, inp_W, *gOut_ptr_NCHW);
             }
+          } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+            TORCH_WARN("bicubic backward");
           }
         }
       }
@@ -640,6 +644,15 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
                            bool align_corners) {
+
+  // Use native for bicubic interpolation
+  // TODO: implement bicubic interpolation in AVX2.
+  // i.e. aten/src/Aten/native/cpu/GridSamplerKernel.cpp
+  if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic) {
+    return native::_grid_sampler_2d_cpu_fallback(
+      input, grid, interpolation_mode, padding_mode, align_corners);
+  }
+
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
   if (input.scalar_type() != kDouble) {
@@ -682,6 +695,15 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
                              int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+
+  // Use native for bicubic interpolation
+  // TODO: implement bicubic interpolation in AVX2.
+  // i.e. aten/src/Aten/native/cpu/GridSamplerKernel.cpp
+  if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic) {
+    return native::_grid_sampler_2d_cpu_fallback_backward(
+      grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
+  }
+
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
   if (input.scalar_type() != kDouble) {
