@@ -93,14 +93,14 @@ class C10_EXPORT vTensor final {
     Future(const Future&) = delete;
     Future& operator=(const Future&) = delete;
     Future(Future&&);
-    Future& operator=(Future&&);
+    Future& operator=(Future&&) &;
     template<typename T, typename = details::is_convertible<T, Pointer>>
     Future(Future<T>&&);
     template<typename T, typename = details::is_convertible<T, Pointer>>
-    Future& operator=(Future<T>&&);
+    Future& operator=(Future<T>&&) &;
     ~Future();
 
-    api::Resource::Memory::Data<Pointer> wait();
+    api::Resource::Memory::Data<Pointer> wait() &;
 
    private:
     template<typename P, typename E>
@@ -117,23 +117,27 @@ class C10_EXPORT vTensor final {
   template<
       typename Type,
       typename Pointer = Access::Pointer<Type, Access::Read>>
-  Future<Pointer> host() const;
+  Future<Pointer> host() const &;
 
   template<
       typename Type,
       Access::Flags kAccess,
       typename Pointer = Access::Pointer<Type, kAccess>>
-  Future<Pointer> host();
+  Future<Pointer> host() &;
 
   /*
     Device access - these functions can be expensive.
   */
 
-  VkBuffer buffer() const;
-  VkBuffer buffer(Access::Flags access);
+  VkBuffer buffer() const &;
+  VkBuffer buffer(Access::Flags access) &;
 
-  VkImage image() const;
-  VkImage image(Access::Flags access);
+  VkImage image() const &;
+  VkImage image(Access::Flags access) &;
+
+ private:
+  const vTensor* host() const &;
+  vTensor* host(Access::Flags access) &;
 
  private:
   api::Resource::Image image_;
@@ -176,7 +180,7 @@ inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::Future(
 template<typename Pointer>
 inline vTensor::Future<Pointer, details::is_pointer<Pointer>>&
 vTensor::Future<Pointer, details::is_pointer<Pointer>>::operator=(
-    Future&& future) {
+    Future&& future) & {
   tensor_ = std::move(future.tensor_);
   future.tensor_ = nullptr;
   return *this;
@@ -194,7 +198,7 @@ template<typename Pointer>
 template<typename T, typename>
 inline vTensor::Future<Pointer, details::is_pointer<Pointer>>&
 vTensor::Future<Pointer, details::is_pointer<Pointer>>::operator=(
-    Future<T>&& future) {
+    Future<T>&& future) & {
   tensor_ = std::move(future.tensor_);
   future.tensor_ = nullptr;
   return *this;
@@ -207,16 +211,30 @@ inline vTensor::Future<Pointer, details::is_pointer<Pointer>>::~Future() {
   }
 }
 
+template<typename Pointer>
+inline api::Resource::Memory::Data<Pointer>
+vTensor::Future<Pointer, details::is_pointer<Pointer>>::wait() & {
+  TORCH_CHECK(
+      tensor_,
+      "Future is in an invalid state.  "
+      "Potential reason: this future is moved from.");
+
+  const api::Resource::Buffer& buffer =
+      tensor_->staging_ ?
+          tensor_->staging_ :
+          tensor_->buffer_;
+
+  return buffer.memory.template map<Pointer>();
+}
+
 template<typename, typename Pointer>
-inline vTensor::Future<Pointer> vTensor::host() const {
-  Future<void*> host(const vTensor*, Access::Flags);
-  return host(this, Access::Read);
+inline vTensor::Future<Pointer> vTensor::host() const & {
+  return Future<Pointer>(host());
 }
 
 template<typename, vTensor::Access::Flags kAccess, typename Pointer>
-inline vTensor::Future<Pointer> vTensor::host() {
-  Future<void*> host(const vTensor*, Access::Flags);
-  return host(this, kAccess);
+inline vTensor::Future<Pointer> vTensor::host() & {
+  return Future<Pointer>(host(kAccess));
 }
 
 } // namespace ops

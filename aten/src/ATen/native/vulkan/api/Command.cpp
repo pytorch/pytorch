@@ -99,6 +99,32 @@ void Command::Buffer::bind(
       nullptr);
 }
 
+void Command::Buffer::copy(
+    const VkBuffer source,
+    const VkBuffer destination,
+    const size_t size) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      source,
+      "Invalid Vulkan source buffer!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      destination,
+      "Invalid Vulkan destination buffer!");
+
+  const VkBufferCopy buffer_copy{
+    0u,
+    0u,
+    size,
+  };
+
+  vkCmdCopyBuffer(
+      command_buffer_,
+      source,
+      destination,
+      1u,
+      &buffer_copy);
+}
+
 void Command::Buffer::dispatch() {
 }
 
