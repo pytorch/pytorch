@@ -376,7 +376,7 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     # infer input types from dtype. If not, then check if any of start, stop,
     # or step are floating point, and infer the type from get_default.
     # Otherwise, the dtype is inferred to be torch.int64.
-    if _is_value(dtype) and _is_none(dtype):
+    if dtype is None or (_is_value(dtype) and _is_none(dtype)):
         if _is_all_integral([start, end, step]):
             type = scalar_type_to_pytorch_type.index(torch.int64)
         else:
