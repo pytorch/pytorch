@@ -4356,7 +4356,7 @@ Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than ``input``.
 
 .. note:: If there are multiple maximal values in a reduced row then
-the indices of the first maximal value is returned.
+          the indices of the first maximal value is returned.
 
 Args:
     {input}
@@ -4704,7 +4704,7 @@ Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the output tensors having 1 fewer dimension than :attr:`input`.
 
 .. note:: If there are multiple minimal values in a reduced row then
-the indices of the first minimal value is returned.
+          the indices of the first minimal value is returned.
 
 Args:
     {input}
