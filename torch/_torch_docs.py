@@ -4332,7 +4332,7 @@ Returns the maximum value of all elements in the ``input`` tensor.
 .. warning::
     This function produces deterministic (sub)gradients unlike ``max(dim=0)``
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
 
 Args:
     {input}
