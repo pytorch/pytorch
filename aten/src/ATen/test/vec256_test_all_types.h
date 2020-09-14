@@ -25,7 +25,7 @@ CACHE_ALIGN #define
 #endif
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
 #define TEST_AGAINST_DEFAULT 1
-#elif !definef(CPU_CAPABILITY_AVX) &&  !definef(CPU_CAPABILITY_AVX2) && !definef(CPU_CAPABILITY_VSX)
+#elif !defined(CPU_CAPABILITY_AVX) &&  !defined(CPU_CAPABILITY_AVX2) && !defined(CPU_CAPABILITY_VSX)
 #define TEST_AGAINST_DEFAULT 1
 #else
 #undef TEST_AGAINST_DEFAULT
