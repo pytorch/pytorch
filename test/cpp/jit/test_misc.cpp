@@ -2173,5 +2173,44 @@ void testTLSFutureCallbacks() {
   }
 }
 
+void testProfilerDisableInCallback() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>([&profilerEnabledCb] {
+      // Ensure the profiler is still enabled in this thread.
+      profilerEnabledCb();
+      auto t1 = torch::ones({2, 2});
+      auto t2 = torch::ones({2, 2});
+      torch::add(t1, t2);
+      // Don't cleanup TLSState, and just consolidate.
+      auto thread_event_lists = torch::autograd::profiler::disableProfiler(false, true);
+      // Ensure that the events from this thread are still profiled and we obtain
+      // the expected in events in our consolidated list when calling disableProfiler().
+      bool found_ones = false;
+      bool found_add = false;
+      for (const auto& li : thread_event_lists) {
+        for (const auto& evt : li) {
+          if (strcmp(evt.name(), "aten::add") == 0) {
+            found_add = true;
+          } else if (strcmp(evt.name(), "aten::ones") == 0) {
+            found_ones = true;
+          }
+        }
+      }
+      ASSERT_TRUE(found_ones);
+      ASSERT_TRUE(found_add);
+    }));
+    // Disable the profiler, but do not consolidate results in the main thread.
+    torch::autograd::profiler::disableProfiler(true, false);
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
+    t.join();
+}
+
 } // namespace jit
 } // namespace torch

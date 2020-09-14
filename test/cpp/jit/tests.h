@@ -91,6 +91,7 @@ namespace jit {
   _(DefaultArgTypeHinting)                        \
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
+  _(ProfilerDisableInCallback)                    \
   _(MobileTypeParser)                             \
   _(LiteInterpreterBuiltinFunction)               \
   _(LiteInterpreterPrim)                          \
