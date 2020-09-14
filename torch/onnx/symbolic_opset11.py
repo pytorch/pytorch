@@ -273,7 +273,9 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    return g.op("SequenceLength", self)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        return g.op("SequenceLength", self)
+    return g.op("Size", self)
 
 
 def __getitem_(g, self, i):
