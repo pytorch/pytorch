@@ -9,12 +9,15 @@
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
+
+static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
@@ -32,95 +35,147 @@ bool isSupported(Node* node) {
   if (tensorexpr::getTEGenerateBlockCode()) {
     return isSupportedForBlock(node);
   }
-  // TODO:
-  switch (node->kind()) {
-    case aten::add:
-    case aten::_cast_Float:
-    case aten::type_as:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::eq:
-    case aten::ne:
-    case aten::ge:
-    case aten::gt:
-    case aten::le:
-    case aten::lt:
-    case aten::pow:
-    case aten::clamp:
-    case aten::lerp:
-    case aten::log10:
-    case aten::log:
-    case aten::log2:
-    case aten::exp:
-    case aten::erf:
-    case aten::erfc:
-    case aten::fmod:
-    case aten::cos:
-    case aten::sin:
-    case aten::tan:
-    case aten::acos:
-    case aten::asin:
-    case aten::atan:
-    case aten::atan2:
-    case aten::cosh:
-    case aten::sinh:
-    case aten::tanh:
-    case aten::sqrt:
-    case aten::rsqrt:
-    case aten::abs:
-    case aten::floor:
-    case aten::ceil:
-    case aten::round:
-    case aten::trunc:
-    case aten::threshold:
-    case aten::remainder:
-    case prim::ConstantChunk:
-    case aten::cat:
-    case prim::ListConstruct:
-    case aten::sigmoid:
-    case aten::relu:
-    case aten::addcmul:
-    case aten::neg:
-    case aten::reciprocal:
-    case aten::sum:
-    case aten::expm1:
-    case aten::lgamma:
-    case aten::unsqueeze:
-    case aten::frac:
-    // TODO: uncomment once we can handle rand+broadcasts
-    // case aten::rand_like:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward:
-    case aten::__and__:
-    case aten::__or__:
-    case aten::__xor__:
-    case aten::__lshift__:
-    case aten::__rshift__:
-    case aten::where:
-      return true;
-    // Operators that can be both elementwise or reductions:
-    case aten::min:
-    case aten::max:
-      if (node->inputs().size() != 2) {
+
+  // clang-format off
+  // breaks up the schema strings so they are no longer discoverable with ctrl-F
+  static const OperatorSet supported_operator_set{
+      "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+      "aten::type_as(Tensor self, Tensor other) -> Tensor",
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::eq.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::eq.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ne.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ne.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ge.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ge.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::gt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::gt.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::le.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::le.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // TODO : do we support pow.Scalar ?
+      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: support clamp_min, clamp_max
+      "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
+      "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
+      "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::log10(Tensor self) -> Tensor",
+      "aten::log(Tensor self) -> Tensor",
+      "aten::log2(Tensor self) -> Tensor",
+      // TODO: log1p
+      "aten::exp(Tensor self) -> Tensor",
+      "aten::erf(Tensor self) -> Tensor",
+      "aten::erfc(Tensor self) -> Tensor",
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cos(Tensor self) -> Tensor",
+      "aten::sin(Tensor self) -> Tensor",
+      "aten::tan(Tensor self) -> Tensor",
+      "aten::acos(Tensor self) -> Tensor",
+      "aten::asin(Tensor self) -> Tensor",
+      "aten::atan(Tensor self) -> Tensor",
+      "aten::atan2(Tensor self, Tensor other) -> Tensor",
+      "aten::cosh(Tensor self) -> Tensor",
+      "aten::sinh(Tensor self) -> Tensor",
+      "aten::tanh(Tensor self) -> Tensor",
+      "aten::sqrt(Tensor self) -> Tensor",
+      "aten::rsqrt(Tensor self) -> Tensor",
+      "aten::abs(Tensor self) -> Tensor",
+      "aten::floor(Tensor self) -> Tensor",
+      "aten::ceil(Tensor self) -> Tensor",
+      "aten::round(Tensor self) -> Tensor",
+      "aten::trunc(Tensor self) -> Tensor",
+      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::sigmoid(Tensor self) -> Tensor",
+      "aten::relu(Tensor self) -> Tensor",
+      "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
+      "aten::neg(Tensor self) -> Tensor",
+      "aten::reciprocal(Tensor self) -> Tensor",
+      "aten::expm1(Tensor self) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
+      "aten::frac(Tensor self) -> Tensor",
+      // TODO: uncomment once we can handle rand+broadcasts
+      // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__or__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__xor__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__xor__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor",
+      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
+      "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
+      "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+      "aten::where(Tensor condition) -> Tensor[]",
+      // TODO: enable other min/max variants, operators that can be both
+      // elementwise or reductions:
+      "aten::min.other(Tensor self, Tensor other) -> Tensor",
+      "aten::max.other(Tensor self, Tensor other) -> Tensor",
+      // TODO: enable slice, shape inference is not implemented for this op yet
+  };
+  static const OperatorSet supported_reduction_set{
+      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+  };
+  // clang-format on
+
+  if (node->isMemberOf(supported_operator_set) ||
+      (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
+    // We only insert guards on Tensor types, so we rely on the output
+    // of a node being uniquely determined by its input types.
+    // bail if any non-Tensor input affects the output type
+    // and cannot be reasoned about statically
+
+    // Value is either an int or a float (can occur from .item())
+    for (Value* v : node->inputs()) {
+      if (v->type()->cast<NumberType>()) {
         return false;
       }
-      if (!node->inputs()[0]->type()->cast<TensorType>() ||
-          !node->inputs()[1]->type()->cast<TensorType>()) {
-        return false;
+    }
+
+    // non-const dtype / device
+    for (auto arg_name : {"dtype", "device"}) {
+      if (auto index = node->schema().argumentIndexWithName(arg_name)) {
+        if (!toIValue(node->input(*index))) {
+          return false;
+        }
       }
-      return true;
-    case aten::slice:
-      // TODO: Shape inference is not implemented for this op yet
-      return false;
-    default:
-      return false;
+    }
+
+    return true;
   }
+
+  // unschematized ops
+  switch (node->kind()) {
+    case prim::ConstantChunk:
+    case prim::ListConstruct:
+      return true;
+  }
+
+  return false;
 }
 
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = false;
+
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
@@ -134,6 +189,16 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
+}
+
+bool setTexprReductionsEnabled(bool value) {
+  bool old_value = texpr_reductions_enabled;
+  texpr_reductions_enabled = value;
+  return old_value;
+}
+
+bool texprReductionsEnabled() {
+  return texpr_reductions_enabled;
 }
 
 struct nodesComparator {
@@ -495,41 +560,56 @@ class TensorExprFuser {
   }
 
   bool isFusableOnDevice(Node* node) {
-    for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
-        if (!canFuseOnDevice(output)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  bool canHandle(Node* node) {
-    if (node->kind() == prim::Constant) {
-      // TODO: add support for tensor constants.
-      return false;
-    }
-    if (!allShapesAreKnown(node)) {
-      return false;
-    }
-
-    // Don't include nodes whose inputs are tensor constants - we cannot handle
-    // them at the moment.
-    // TODO: actually support tensor constants and remove this.
-    for (Value* input : node->inputs()) {
-      if (input->node()->kind() == prim::Constant &&
-          input->type()->cast<TensorType>()) {
+    for (const auto& input : node->inputs()) {
+      if (!canFuseOnDevice(input)) {
         return false;
       }
     }
-    return tensorexpr::isSupported(node);
+    return true;
   }
 
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
     return false;                           \
+  }
+
+  bool canHandle(Node* node) {
+    REQ(node->kind() != prim::Constant);
+    REQ(allShapesAreKnown(node));
+    REQ(isFusableOnDevice(node));
+
+    // Don't include nodes whose inputs are tensor constants - we cannot handle
+    // them at the moment.
+    // TODO: actually support tensor constants and remove this.
+    for (Value* input : node->inputs()) {
+      if (input->node()->kind() == prim::Constant) {
+        REQ(!input->type()->cast<TensorType>())
+      }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
+      }
+    }
+    if (node->kind() == aten::cat) {
+      REQ(node->input(0)->node()->kind() == prim::ListConstruct);
+      REQ(node->input(0)->uses().size() == 1);
+      REQ(node->input(1)->node()->kind() == prim::Constant);
+      auto const& listconstruct = node->input(0)->node();
+      REQ(tensorexpr::pickDeviceType(listconstruct->inputs()));
+    } else {
+      REQ(tensorexpr::pickDeviceType(node->inputs()));
+    }
+
+    REQ(tensorexpr::isSupported(node));
+    return true;
   }
 
   bool canMerge(Node* consumer, Node* producer) {
@@ -540,6 +620,17 @@ class TensorExprFuser {
     REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
+
+    // Device checks
+    if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
+      // aten::cat needs a special handling because it takes a Tensor[] as its
+      // input We deal with that in the code below.
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(consumer_device);
+      auto producer_device = tensorexpr::pickDeviceType(producer->inputs());
+      REQ(producer_device);
+      REQ(*consumer_device == *producer_device);
+    }
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -570,6 +661,15 @@ class TensorExprFuser {
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = producer->input(0)->node();
+      // We're merging listconstruct->cat->consumer. cat is the producer here
+      // and we cannot determine its device type - we should use device of the
+      // listconstruct instead
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      auto consumer_device = tensorexpr::pickDeviceType(consumer->inputs());
+      REQ(listconstruct_device);
+      REQ(consumer_device);
+      REQ(*listconstruct_device == *consumer_device);
       for (auto const& input : listConstruct->inputs()) {
         REQ(isFusableOnDevice(input->node()));
       }
@@ -578,9 +678,13 @@ class TensorExprFuser {
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
       auto const& listConstruct = consumer->input(0)->node();
-      for (auto const& input : listConstruct->inputs()) {
-        REQ(isFusableOnDevice(input->node()));
-      }
+      // We're merging listconstruct->cat. cat is the consumer and listconstruct
+      // is the producer. cat doesn't have its device type and thus the only
+      // thing we should check is that listconstruct's device is well defined
+      // (e.g. all its inputs has the same device).
+      auto listconstruct_device =
+          tensorexpr::pickDeviceType(listConstruct->inputs());
+      REQ(listconstruct_device);
     } else {
       REQ(isFusableOnDevice(producer));
     }
@@ -662,6 +766,11 @@ class TensorExprFuser {
     for (Value* output : subgraph_outputs) {
       false_block->registerOutput(output);
     }
+
+    // types get copied to the fallback graph, so remove specializations before
+    // replacing
+    removeTensorTypeSpecializations(false_block);
+    replaceBlockWithFallbackGraph(false_block, fusion_group->inputs());
 
     // Fill in the true block. It has all inputs type-checked and its
     // body should be the fusion group node.

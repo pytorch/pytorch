@@ -341,17 +341,20 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 
   float sum_squares = 0.0;
   __shared__ float row_sum_squares_avg;
+  extern __shared__ float x_ij[];
 
   for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
     // i: index in the embedding dimension
-    float x_ij = 0.0;
+    float t_x_ij = 0.0;
+
     for (int dup_id = 0; dup_id < num_dup; dup_id++) {
       int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
-      x_ij += grad[group * block_size + i];
+      t_x_ij += grad[group * block_size + i];
     }
-    x_ij += weight_decay *
-        rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);
-    sum_squares += x_ij * x_ij;
+    t_x_ij += weight_decay *
+      rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);;
+    sum_squares += t_x_ij * t_x_ij;
+    x_ij[i] = t_x_ij;
   }
   float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
 
@@ -365,15 +368,9 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
   // update param
   float step = LR / (sqrtf(param_mom[index]) + epsilon);
   for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-    float x_ij = 0.0;
-    for (int dup_id = 0; dup_id < num_dup; dup_id++) {
-      int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
-      x_ij += grad[group * block_size + i];
-    }
     const size_t paramIdx = index * block_size + i; // index for param
-    x_ij += weight_decay * rand_factor.convertTypeFromParamToTarget(param[paramIdx]);
     param[paramIdx] =
-        rand_factor.convertTypeFromTargetToParam(param[paramIdx] + x_ij * step);
+        rand_factor.convertTypeFromTargetToParam(param[paramIdx] + x_ij[i] * step);
   }
 }
 
@@ -1209,6 +1206,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
       seed.y = maxThreads * block_size;
     }
 
+    CAFFE_ENFORCE_LE(block_size, 10240,
+      "Block size is too big and will exceed the max size of the shared memory");
     if (round_option_ == STOCHASTIC) {
       rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
           IndexType,
@@ -1218,7 +1217,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
           STOCHASTIC>
           <<<num_indices,
              std::min(maxThreads, block_size),
-             0,
+             block_size * sizeof(float),
              context_.cuda_stream()>>>(
               prefix_sum_length_data,
               N,
@@ -1244,7 +1243,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
           NEAREST>
           <<<num_indices,
              std::min(maxThreads, block_size),
-             0,
+             block_size * sizeof(float),
              context_.cuda_stream()>>>(
               prefix_sum_length_data,
               N,

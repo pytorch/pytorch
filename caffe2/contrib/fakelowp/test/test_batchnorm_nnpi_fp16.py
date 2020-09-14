@@ -45,7 +45,7 @@ class BatchnormTest(unittest.TestCase):
            size=st.integers(2, 30),
            input_channels=st.integers(2, 40),
            batch_size=st.integers(2, 20))
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=None)
     def test_bn(self, seed, size, input_channels, batch_size):
         workspace.ResetWorkspace()
         np.random.seed(seed)
