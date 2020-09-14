@@ -26,7 +26,7 @@ struct NoTF32Guard {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
   ~NoTF32Guard() {
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, original_mode));
+    cublasSetMathMode(handle, original_mode);
   }
 #endif
 };
