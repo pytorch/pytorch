@@ -178,5 +178,3 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check("fallback_function").check_next("CallFunction").run(g)
-        
-        
