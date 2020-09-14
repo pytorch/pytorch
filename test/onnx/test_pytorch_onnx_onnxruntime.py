@@ -31,7 +31,7 @@ def to_numpy(tensor):
         return tensor.cpu().numpy()
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
-                    do_constant_folding=True, keep_initializers_as_inputs=True, 
+                    do_constant_folding=True, keep_initializers_as_inputs=True,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
                     onnx_shape_inference=False,
@@ -2874,6 +2874,20 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.randn(16)
         self.run_test(model, inputs)
 
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_transpose(self):
+        class LoopModel(torch.nn.Module):
+            def forward(self, x):
+                res = torch.zeros_like(x[0])
+                for i in range(x.size(0)):
+                    res += x[0].transpose(0, 1)
+                return res
+
+        model = torch.jit.script(LoopModel())
+        x = torch.randn(5, 3, 3)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list(self):
         class ListModel(torch.jit.ScriptModule):
@@ -4137,6 +4151,22 @@ class TestONNXRuntime(unittest.TestCase):
                 return out
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_if_transpose(self):
+        class IfModel(torch.nn.Module):
+            def forward(self, x):
+                x = x.transpose(0, 1)
+                if x.size(0) == 2:
+                    return x.transpose(0, 1)
+                else:
+                    return x
+
+        x = torch.randn(2, 3)
+        self.run_test(torch.jit.script(IfModel()), x,
+                      output_names=['output_1'],
+                      dynamic_axes={'output_1': [0, 1]})
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
