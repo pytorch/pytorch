@@ -10436,7 +10436,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):
-        def check(a, q, dim, expected_grad, ops=[torch.quantile, torch.nanquantile]):
+        def check(a, q, dim, expected_grad, ops=(torch.quantile, torch.nanquantile)):
             for op in ops:
                 t = torch.tensor(a, device=device, requires_grad=True)
                 op(t, torch.tensor(q, device=device), dim).sum().backward()
