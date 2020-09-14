@@ -539,7 +539,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
         if (node->size()->isConstScalar()) {
           // Static shared memory
           indent() << "__shared__ " << node->buffer_type() << " " << gen(tv)
-                   << "[" << gen(node->size()) << "];\n";
+                   << "[" << genInline(node->size()) << "];\n";
         } else {
           // Align Offset Position
           indent() << "offset = alignBufferSize(offset,"
