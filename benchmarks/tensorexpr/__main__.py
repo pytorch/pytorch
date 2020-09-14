@@ -192,23 +192,22 @@ Works only with Python3.\n A few examples:
         tensor_dim_specs = [dim.split(':') for dim in tensor_dim_specs]
 
         configs = []
-        for dim in tensor_dim_specs :
-            assert len(dim) == 3, "There should be three dimensions for: start, stop, inc!"
+        for start,stop,inc in tensor_dim_specs :
             dim_list = []
-            if dim[2] == 'pow2' :
-                curr = int(dim[0])
-                while curr <= int(dim[1]) :
+            if inc == 'pow2' :
+                curr = int(start)
+                while curr <= int(stop) :
                     dim_list.append(curr)
                     curr <<= 1
-            elif dim[2] == 'pow2+1' :
-                curr = int(dim[0])
-                while curr <= int(dim[1]) :
+            elif inc == 'pow2+1' :
+                curr = int(start)
+                while curr <= int(stop) :
                     dim_list.append(curr)
                     curr -= 1
                     curr <<= 1
                     curr += 1
             else :
-                dim_list = list(range(int(dim[0]), int(dim[1]) + int(dim[2]), int(dim[2])))
+                dim_list = list(range(int(start), int(stop) + int(inc), int(inc)))
             configs.append(dim_list)
         configs = itertools.product(*configs)
 

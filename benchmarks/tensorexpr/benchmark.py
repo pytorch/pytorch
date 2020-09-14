@@ -91,13 +91,7 @@ class Benchmark(object):
         return False
 
     def dtype_to_bytes(self) :
-        import torch
-        if self.dtype == torch.float32 :
-            return 4
-        elif self.dtype == torch.float16 :
-            return 2
-        else :
-            raise ValueError("Unknown Data Type: {}".format(self.dtype))
+        return torch.tensor(0, dtype=self.dtype).element_size()
 
     @staticmethod
     def default_configs():
@@ -129,6 +123,8 @@ class Benchmark(object):
         self.print_ir = args.print_ir
         if args.cuda_fuser == "old" :
             torch._C._jit_override_can_fuse_on_gpu(True)
+            if args.print_kernel :
+                os.environ['PYTORCH_FUSION_DEBUG'] = '1'
             return self.run_impl(True)
         elif args.cuda_fuser == "te" :
             torch._C._jit_set_texpr_fuser_enabled(True)
