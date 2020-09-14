@@ -197,12 +197,14 @@ ReductionOp::ReductionOp(
     BinaryOpType reduction_op_type,
     Val* init,
     Val* out,
-    Val* in)
+    Val* in,
+    Bool* pred)
     : Expr(ExprType::KirReductionOp),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
-      in_(in) {
+      in_(in),
+      pred_(pred) {
   addOutput(out);
   addInput(in);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
@@ -417,12 +419,14 @@ GridReduction::GridReduction(ReductionOp* reduction_op)
 
 GridReduction::GridReduction(
     ReductionOp* reduction_op,
-    kir::Allocate* reduction_buffer,
-    kir::Allocate* sync_buffer)
+    Allocate* reduction_buffer,
+    Allocate* sync_buffer,
+    Bool* pred)
     : Expr(ExprType::GridReduction),
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer) {}
+      sync_buffer_(sync_buffer),
+      pred_(pred) {}
 
 std::string GridReduction::getPredicateFlagName(const TensorView* val) {
   std::stringstream ss;

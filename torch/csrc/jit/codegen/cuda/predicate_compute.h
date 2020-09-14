@@ -45,7 +45,8 @@ class PredicateCompute {
   static kir::Bool* getInlinePredicate(
       Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::Bool* thread_pred);
+      kir::Bool* thread_pred,
+      bool ignore_block_grid_reductions = true);
 };
 
 class TORCH_CUDA_API UnrollPredicate {
