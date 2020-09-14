@@ -105,10 +105,11 @@ void LoopNestGenerator::popFor() {
 }
 
 void LoopNestGenerator::pushBack(Expr* expr) {
-  if (for_loops.size() == 0)
+  if (for_loops.size() == 0) {
     lowered_exprs.push_back(expr);
-  else
+  } else {
     scope_utils::pushBack(for_loops.back(), expr);
+  }
 }
 
 // Update for loop structure based on this TensorView, if there's an allocation

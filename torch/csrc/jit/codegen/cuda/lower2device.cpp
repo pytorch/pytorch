@@ -94,8 +94,7 @@ void GpuLower::lower() {
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
-  // Run our passes keeping the lowered expressions and forwarding
-  // them.
+  // Run our passes keeping the lowered expressions and forwarding them
   const auto lowered_exprs =
       LoopNestGenerator::loweredExprs(fusion_, preds, fusion_->exprs(true));
 

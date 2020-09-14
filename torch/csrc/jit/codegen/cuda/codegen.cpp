@@ -72,7 +72,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
           break;
         }
         case ValType::KirScalar:
-          code_ << val->getDataType().value() << " " << val;
+          code_ << val->getDataType().value() << " " << gen(val);
           break;
         default:
           TORCH_CHECK(!"Unexpected parameter type");
@@ -190,35 +190,42 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::Bool* node) final {
-    if (auto def = node->getOrigin()) {
+    const auto def = node->getOrigin();
+    if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
+    } else if (node->isSymbolic()) {
+      code_ << "b" << node->name();
     } else {
-      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
       code_ << *node->value();
     }
   }
 
   void handle(const kir::Float* node) final {
-    if (auto def = node->getOrigin()) {
+    const auto def = node->getOrigin();
+    if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
+    } else if (node->isSymbolic()) {
+      code_ << "f" << node->name();
     } else {
-      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
       const int digits = std::numeric_limits<Float::ScalarType>::max_digits10;
       code_ << std::setprecision(digits) << *node->value();
     }
   }
 
   void handle(const kir::Half* node) final {
-    if (auto def = node->getOrigin()) {
+    const auto def = node->getOrigin();
+    if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
+    } else if (node->isSymbolic()) {
+      code_ << "h" << node->name();
     } else {
-      TORCH_INTERNAL_ASSERT(!node->isSymbolic());
       code_ << "__float2half(" << *node->value() << ")";
     }
   }
 
   void handle(const kir::Int* node) final {
-    if (auto def = node->getOrigin()) {
+    const auto def = node->getOrigin();
+    if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
     } else if (node->isSymbolic()) {
       code_ << "i" << node->name();
