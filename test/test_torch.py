@@ -16022,6 +16022,16 @@ class TestTorchDeviceType(TestCase):
         # check that the result is the same as the non-out version
         self.assertEqual(evals, out_evals)
         self.assertEqual(evecs, out_evecs)
+        #
+        # check what happens in the eigenvectors=False case
+        out_evals = torch.full_like(evals, fill_value=math.nan)
+        out_evecs = torch.tensor([1, 2, 3], dtype=dtype, device=device)
+        evals2, evecs2 = torch.eig(t, eigenvectors=False, out=(out_evals, out_evecs))
+        # check that the out_evals was used in-place
+        self.assertEqual(evals2.data_ptr(), out_evals.data_ptr())
+        self.assertEqual(evals, out_evals)
+        # check that out_evecs was NOT touched at all
+        assert out_evecs.tolist() == [1, 2, 3]
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

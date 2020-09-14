@@ -1371,7 +1371,8 @@ std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor 
   int64_t n = self.size(-1);
 
   at::native::resize_output(e, {n, 2});
-  at::native::resize_output(v, self.sizes());
+  if (eigenvectors)
+      at::native::resize_output(v, self.sizes());
 
   Tensor cpu_vals, cpu_vecs;
   std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
