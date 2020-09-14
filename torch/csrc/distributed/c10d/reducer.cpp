@@ -852,6 +852,7 @@ void Reducer::initialize_bucket_views(
 void Reducer::populate_bucket_views_out(
     Reducer::BucketReplica& replica,
     at::Tensor& tensor) {
+  replica.bucket_views_out.clear();
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -1079,7 +1080,6 @@ void Reducer::finalize_backward() {
         } else {
           // Reinitialize only `bucket_views_out` with the future_result by
           // following the same logic in `initialize_buckets`.
-          replica.bucket_views_out.clear();
           populate_bucket_views_out(replica, future_result[i]);
         }
       }

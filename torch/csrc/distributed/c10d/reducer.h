@@ -221,15 +221,14 @@ class Reducer {
   };
 
   // This function is called inside `initialize_buckets`, it initializes both
-  // views_in and views_out into the contents tensor for each variable's grad.
-  // Views serve as entry points to copy_ each grad's data in/out of the flat
-  // contents tensor.
+  // bucket_views_in and bucket_views_out into the contents tensor for each
+  // variable's grad. Views serve as entry points to copy_ each grad's data
+  // in/out of the flat contents tensor.
   void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
 
   // This function is called inside `finalize_backward`, it happens only if
-  // DDP communication hook was registered to recreate just views_out with the
-  // result of `future_work`. Note that before the
-  // call in `finalize_backward`, views_out must be cleared.
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
   void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
 
   // A bucket holds N bucket replicas (1 per model replica).
