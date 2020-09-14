@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 
@@ -174,8 +175,11 @@ void IndexLowering::handle(ReductionOp* rop) {
 
   kir::ReductionOp* block_reduction_op = nullptr;
   if (is_block_reduce) {
+    auto pred =
+        PredicateCompute::getInlinePredicate(rop, loops, nullptr, false);
+
     block_reduction_op = new kir::ReductionOp(
-        rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in);
+        rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in, pred);
     pushBack(block_reduction_op);
   }
 
@@ -237,8 +241,10 @@ void IndexLowering::handle(ReductionOp* rop) {
         ? new kir::ReductionOp(
               rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in)
         : block_reduction_op;
-    const auto grid_reduction =
-        new kir::GridReduction(grid_reduction_op, reduce_buffer, sync_buffer);
+    auto pred =
+        PredicateCompute::getInlinePredicate(rop, loops, nullptr, false);
+    const auto grid_reduction = new kir::GridReduction(
+        grid_reduction_op, reduce_buffer, sync_buffer, pred);
 
     pushBack(reduce_buffer);
     pushBack(sync_buffer);

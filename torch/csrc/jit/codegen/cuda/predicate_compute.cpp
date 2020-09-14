@@ -71,8 +71,17 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
 kir::Bool* PredicateCompute::getInlinePredicate(
     Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
-    kir::Bool* thread_pred) {
+    kir::Bool* thread_pred,
+    bool ignore_block_grid_reductions) {
   if (loops.empty()) {
+    return new kir::Bool(true);
+  }
+
+  // Handle these elsewhere
+  if (ignore_block_grid_reductions &&
+      expr->getExprType() == ExprType::ReductionOp &&
+      (expr->as<ReductionOp>()->out()->as<TensorView>()->hasBlockReduction() ||
+       expr->as<ReductionOp>()->out()->as<TensorView>()->hasGridReduction())) {
     return new kir::Bool(true);
   }
 
