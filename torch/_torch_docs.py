@@ -4332,8 +4332,6 @@ Returns the maximum value of all elements in the ``input`` tensor.
 .. warning::
     This function produces deterministic (sub)gradients unlike ``max(dim=0)``
 
-.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
-
 Args:
     {input}
 
@@ -4356,6 +4354,9 @@ If ``keepdim`` is ``True``, the output tensors are of the same size
 as ``input`` except in the dimension ``dim`` where they are of size 1.
 Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than ``input``.
+
+.. note:: If there are multiple maximal values in a reduced row then
+the indices of the first maximal value is returned.
 
 Args:
     {input}
@@ -4679,8 +4680,6 @@ Returns the minimum value of all elements in the :attr:`input` tensor.
 .. warning::
     This function produces deterministic (sub)gradients unlike ``min(dim=0)``
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
-
 Args:
     {input}
 
@@ -4703,6 +4702,9 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the output tensors having 1 fewer dimension than :attr:`input`.
+
+.. note:: If there are multiple minimal values in a reduced row then
+the indices of the first minimal value is returned.
 
 Args:
     {input}
