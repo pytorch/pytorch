@@ -433,13 +433,14 @@ GridReduction::GridReduction(
 
 std::string GridReduction::getPredicateFlagName(const TensorView* val) {
   std::stringstream ss;
-  ss << "T" << val->name() << "pred";
+  ss << "T" << val->name() << "_pred";
   return ss.str();
 }
 
+// TODO(kir): remove this
 std::string GridReduction::getPredicateFlagName(const fuser::TensorView* val) {
   std::stringstream ss;
-  ss << "T" << val->name() << "pred";
+  ss << "T" << val->name() << "_pred";
   return ss.str();
 }
 

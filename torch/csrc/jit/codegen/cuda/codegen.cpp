@@ -490,7 +490,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
       indent() << kTab << gen(rop->in()) << ",\n";
     }
     indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
-    indent() << kTab << gen(work_buffer) << ",\n";
+    indent() << kTab << "&" << gen(work_buffer) << "[0],\n";
     indent() << kTab << gen(sync_buffer) << ",\n";
     indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
   }
