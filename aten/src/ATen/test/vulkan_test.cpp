@@ -114,6 +114,49 @@ TEST(VulkanTest, add_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanTest, mulScalar) {
+  if (!at::is_vulkan_available())
+    return;
+  auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  const float other = 3.14;
+  auto t_out_expected = t_in.mul(other);
+  auto tv_in = t_in.vulkan();
+  auto tv_out = tv_in.mul(other);
+  auto t_out = tv_out.cpu();
+
+  bool check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, addScalar) {
+  if (!at::is_vulkan_available())
+    return;
+  auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  float* data = t_in.data_ptr<float>();
+  auto numel = t_in.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  const float other = 3.14;
+  const float alpha = 2;
+  auto t_out_expected = t_in.add(other, alpha);
+  auto tv_in = t_in.vulkan();
+  auto tv_out = tv_in.add(other, alpha);
+  auto t_out = tv_out.cpu();
+
+  bool check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanTest, conv2d) {
   if (!at::is_vulkan_available())
     return;

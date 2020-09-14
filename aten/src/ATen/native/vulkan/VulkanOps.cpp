@@ -310,6 +310,104 @@ void add(
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 }
 
+void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
+  const auto sizes = input.sizes();
+
+  const auto C = std::accumulate(
+      sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C_4 = UP_DIV(C, 4);
+  const auto H = sizes[2];
+  const auto W = sizes[3];
+
+  auto device = context().device();
+  struct ConstBlock {
+    int32_t inputSize[4];
+    float s;
+  };
+  ConstBlock cb{{W, H, C_4, 0}, s};
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(add_scalar), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  auto commandBuffer = computeUnit.commandBuffer();
+  output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+  computeUnit.dispatchCommandBuffer(W, H, C_4, workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
+void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
+  const auto sizes = input.sizes();
+
+  const auto C = std::accumulate(
+      sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C_4 = UP_DIV(C, 4);
+  const auto H = sizes[2];
+  const auto W = sizes[3];
+
+  auto device = context().device();
+  struct ConstBlock {
+    int32_t inputSize[4];
+    float s;
+  };
+  ConstBlock cb{{W, H, C_4, 0}, s};
+  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
+
+  VkDescriptorSetLayout descriptorSetLayout{};
+  VkDescriptorPool descriptorPool{};
+  VkDescriptorSet descriptorSet{};
+  std::vector<VkDescriptorType> descriptorTypes{
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
+  createDescriptorSetLayoutSinglePool(
+      device,
+      descriptorTypes,
+      &descriptorSetLayout,
+      &descriptorPool,
+      &descriptorSet);
+
+  output.image()->bindStorageImage(descriptorSet, 0);
+  input.image()->bindShaderRead(descriptorSet, 1);
+  constBuffer.bind(descriptorSet, 2);
+
+  WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(mul_scalar), descriptorSetLayout, workGroupSize);
+  computeUnit.createCommandBuffer(descriptorSet);
+  auto commandBuffer = computeUnit.commandBuffer();
+  output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
+  input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+  computeUnit.dispatchCommandBuffer(W, H, C_4, workGroupSize);
+  computeUnit.endCommandBuffer();
+  computeUnit.submitAndWaitCommandBuffer();
+  vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+  vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
 VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
     const float* weights,
     const int OC,
