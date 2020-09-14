@@ -26,7 +26,20 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
     call conda install -y -q -c conda-forge cmake
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
+    call conda install -y -q -c rdonnelly libuv
+    if %errorlevel% neq 0 ( exit /b %errorlevel% )
 )
+
+:: Get installed libuv path
+@echo off
+FOR /f "tokens=1,2,3* delims=: " %%a IN ('conda info') DO (
+ IF "%%a %%b %%c"=="active env location" SET "active_conda_path=%%d\Library"
+)
+mkdir %active_conda_path%\lib\release
+copy %active_conda_path%\bin\uv.dll %active_conda_path%\lib\release
+copy %active_conda_path%\lib\uv.lib %active_conda_path%\lib\release
+copy %active_conda_path%\lib\uv_a.lib %active_conda_path%\lib\release
+set libuv_ROOT=%active_conda_path%
 
 pushd .
 if "%VC_VERSION%" == "" (
