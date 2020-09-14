@@ -611,6 +611,7 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
 
+<<<<<<< HEAD
     def test_cache_speedup(self):
         x = torch.ones((1000, 1000))
         timer = benchmark_utils.Timer(
@@ -632,7 +633,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             stmt="torch.sum(torch.ones((500,500)))",
         )
-        medium = timer.adaptive_autorange(min_run_time=0.1)
+        medium = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
         blocked_medium = timer.blocked_autorange(min_run_time=0.1)
         self.assertLess(small.median, medium.median)
         # This acts as a control to compare to a different way to measure the same value.

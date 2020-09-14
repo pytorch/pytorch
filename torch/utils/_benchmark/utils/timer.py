@@ -89,9 +89,9 @@ class Timer(object):
                 time_spent = time_hook()
                 times.append(time_spent)
                 total_time += time_spent
-                can_stop = stop_hook(times)
                 if callback:
                     callback(number, time_spent)
+                can_stop = stop_hook(times)
                 if max_run_time and total_time > max_run_time:
                     break
         return times
@@ -146,7 +146,6 @@ class Timer(object):
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
         number, cache_speedup = self._estimate_block_size(min_run_time)
-
         def time_hook():
             return self._timer.timeit(number)
 
