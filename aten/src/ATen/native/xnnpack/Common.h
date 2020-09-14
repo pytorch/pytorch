@@ -33,12 +33,19 @@ struct ContextLinear final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
+// This contains information for both the transpose and non-transpose cases.
 struct ContextConv2D final {
   Operator op;
   std::array<int64_t, 4> weight_size_;
   std::array<int64_t, 2> padding_;
+  std::array<int64_t, 2> output_padding_;
   std::array<int64_t, 2> stride_;
   std::array<int64_t, 2> dilation_;
+  const float* cached_input_ptr{nullptr};
+  const float* cached_output_ptr{nullptr};
+  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
+  bool transposed_;
+  int64_t groups_;
 
   ContextConv2D() = delete;
 
@@ -46,13 +53,19 @@ struct ContextConv2D final {
       Operator&& o,
       std::array<int64_t, 4> weight_size,
       std::array<int64_t, 2> padding,
+      std::array<int64_t, 2> output_padding,
       std::array<int64_t, 2> stride,
-      std::array<int64_t, 2> dilation)
+      std::array<int64_t, 2> dilation,
+      bool transposed,
+      int64_t groups)
       :  op(std::move(o)),
          weight_size_(weight_size),
          padding_(padding),
+         output_padding_(output_padding),
          stride_(stride),
-         dilation_(dilation) {}
+         dilation_(dilation),
+         transposed_(transposed),
+         groups_(groups) {}
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };

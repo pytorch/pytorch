@@ -829,10 +829,10 @@ void ComputeUnit::createComputePipeline(
 void ComputeUnit::createComputePipelineCompile(
     const std::string& glslSrc,
     const VkPipelineCache pipelineCache,
-    const VkDescriptorSetLayout& descrSetLayout,
+    const VkDescriptorSetLayout descrSetLayout,
     const WorkGroupSize workGroupSize) {
   shaderc::Compiler compiler{};
-  shaderc::CompileOptions options[];
+  shaderc::CompileOptions options{};
   options.SetGenerateDebugInfo();
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);

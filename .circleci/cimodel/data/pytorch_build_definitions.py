@@ -22,7 +22,8 @@ class Conf:
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
-    vulkan: bool = False
+    is_vulkan: bool = False
+    is_pure_torch: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -46,8 +47,12 @@ class Conf:
         leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_vulkan and not for_docker:
+            leading.append("vulkan")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
+        if self.is_pure_torch and not for_docker:
+            leading.append("pure_torch")
         if self.parallel_backend is not None and not for_docker:
             leading.append(self.parallel_backend)
 
@@ -186,7 +191,7 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
-            is_important=xenial_parent_config.is_important,
+            is_important=False,
         )
 
         configs.append(c)
@@ -258,11 +263,9 @@ def instantiate_configs():
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
+        is_pure_torch = fc.find_prop("is_pure_torch") or False
+        is_vulkan = fc.find_prop("is_vulkan") or False
         parms_list_ignored_for_docker_image = []
-
-        vulkan = fc.find_prop("vulkan") or False
-        if vulkan:
-            parms_list_ignored_for_docker_image.append("vulkan")
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -307,8 +310,13 @@ def instantiate_configs():
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
         build_only = fc.find_prop("build_only") or False
-        if build_only and restrict_phases is None:
+        is_coverage = fc.find_prop("is_coverage") or False
+        # TODO: fix pure_torch python test packaging issue.
+        if build_only or is_pure_torch:
             restrict_phases = ["build"]
+        if is_coverage and restrict_phases is None:
+            restrict_phases = ["build", "coverage_test"]
+
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -322,7 +330,8 @@ def instantiate_configs():
             cuda_version,
             rocm_version,
             is_xla,
-            vulkan,
+            is_vulkan,
+            is_pure_torch,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,
@@ -337,18 +346,22 @@ def instantiate_configs():
             and fc.find_prop("pyver") == "3.6"
             and cuda_version is None
             and parallel_backend is None
+            and not is_vulkan
+            and not is_pure_torch
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (
             compiler_name == "gcc"
             and compiler_version == "5.4"
             and not is_libtorch
+            and not is_vulkan
+            and not is_pure_torch
             and parallel_backend is None
         ):
             bc_breaking_check = Conf(

@@ -904,6 +904,76 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
         torch.testing.assert_allclose(expected_merged_values, output_merged_values)
 
+    def test_learning_rate(self):
+        base_lr = 0.05
+        no_iter = torch.tensor([0])
+        one_iter = torch.tensor([1])
+        two_iter = torch.tensor([2])
+
+        # Fixed policy
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+
+        # Step policy
+        gamma = 0.99
+        stepsize = 1
+
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (1.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (2.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=two_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+
+    def test_pack_segments(self):
+        s = torch.rand(3, 3, 3)
+        lengths = torch.tensor([2, 1])
+        packed_tensor, _ = torch.ops._caffe2.PackSegments(
+            lengths,
+            s,
+        )
+        self.assertEqual(packed_tensor.numpy().shape, (2, 2, 3, 3))
+        unpacked_tensor = torch.ops._caffe2.UnpackSegments(
+            lengths,
+            packed_tensor,
+        )
+        torch.testing.assert_allclose(s, unpacked_tensor)
+
+
 
 if __name__ == '__main__':
     unittest.main()

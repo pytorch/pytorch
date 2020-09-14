@@ -19,6 +19,7 @@ namespace jit {
   _(CreateAutodiffSubgraphs)                      \
   _(CustomOperators)                              \
   _(CustomOperatorAliasing)                       \
+  _(TemplatedOperatorCreator)                     \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
   _(SchemaMatching)                               \
@@ -33,6 +34,7 @@ namespace jit {
   _(TopologicalIndex)                             \
   _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
+  _(SubgraphUtilsVmap)                            \
   _(AliasAnalysis)                                \
   _(ContainerAliasing)                            \
   _(AliasRegistration)                            \
@@ -48,6 +50,7 @@ namespace jit {
   _(ClassParser)                                  \
   _(UnifyTypes)                                   \
   _(Profiler)                                     \
+  _(FallbackGraphs)                               \
   _(InsertAndEliminateRedundantGuards)            \
   _(LoopPeeler)                                   \
   _(InsertBailOuts)                               \
@@ -105,11 +108,14 @@ namespace jit {
   _(LiteInterpreterEval)                          \
   _(TorchbindIValueAPI)                           \
   _(LiteInterpreterDict)                          \
+  _(LiteInterpreterFindAndRunMethod)              \
+  _(LiteInterpreterFindWrongMethodName)           \
   _(MobileNamedParameters)                        \
   _(MobileSaveLoadData)                           \
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
+  _(LiteSequentialSampler)                        \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
@@ -120,6 +126,7 @@ namespace jit {
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
+  _(TypeCheck)                                      \
   _(GPU_IrGraphGenerator)                           \
   _(GPU_FusionDispatch)                             \
   _(GPU_FusionClear)                                \
@@ -225,7 +232,8 @@ namespace jit {
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
-  _(Interp)
+  _(Interp)                     \
+  _(TypeCheck)
 #endif
 
 #define DECLARE_JIT_TEST(name) void test##name();

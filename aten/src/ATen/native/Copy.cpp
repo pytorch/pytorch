@@ -134,7 +134,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(self)
     .add_input(src)
     .resize_outputs(false)

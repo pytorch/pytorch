@@ -949,6 +949,21 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
     return new Div(lhs_new, rhs_new);
   }
 
+  // If the numerator is zero, so is the result.
+  if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    return lhs_new;
+  }
+
+  // If the denominator is one, return numerator.
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    return lhs_new;
+  }
+
+  // If numberator and denominator are equal the result is 1.
+  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+    return getImmediateByType(v->dtype(), 1);
+  }
+
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
     return ret;
   }
@@ -998,6 +1013,22 @@ const Expr* PolynomialTransformer::mutate(const Min* v) {
   }
 
   return rhs_new;
+}
+
+const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+  const Expr* retval1_new = v->ret_val1()->accept_mutator(this);
+  const Expr* retval2_new = v->ret_val2()->accept_mutator(this);
+  const Expr* v_new = new CompareSelect(
+      lhs_new, rhs_new, retval1_new, retval2_new, v->compare_select_op());
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(v_new);
+  }
+
+  return v_new;
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1095,9 +1126,9 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
-      return Stmt::clone(true_new);
+      return true_new ? Stmt::clone(true_new) : nullptr;
     } else {
-      return Stmt::clone(false_new);
+      return false_new ? Stmt::clone(false_new) : nullptr;
     }
   }
 

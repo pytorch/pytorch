@@ -212,8 +212,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
       prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
       prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
-      prim::tolist,        prim::rpc_async,
-  };
+      prim::tolist,        prim::rpc_async,     prim::rpc_sync,
+      prim::rpc_remote};
 
   // WARNING: by adding a value to this set, you are asserting that your
   // primitive is only ever added during optimization and does not need
@@ -234,11 +234,15 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
       prim::CudaFusionGroup, // optimization pass adds it
+      prim::TensorExprGroup, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
+      prim::profile_optional, // used in interpreter only
+      prim::TypeCheck, // used in interpreter only
+      prim::FallbackGraph, // converted into prim::CallFunction
 
   };
 
@@ -266,6 +270,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::TensorExprGroup,
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
@@ -293,6 +298,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
+      prim::profile_optional,
+      prim::TypeCheck,
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
@@ -301,8 +308,11 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::unchecked_cast,
       prim::tolist,
       prim::rpc_async,
+      prim::rpc_sync,
+      prim::rpc_remote,
       prim::Enter,
       prim::Exit,
+      prim::FallbackGraph,
   };
 
   // Operators that should not be used by alias analysis

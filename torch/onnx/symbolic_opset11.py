@@ -227,10 +227,15 @@ def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
+    src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
         return g.op("ScatterElements", self, index, src, axis_i=dim)
     else:
+        # Check if scalar 'src' has same type as self (PyTorch allows different
+        # type for scalar src (but not when src is tensor)). If not, insert Cast node.
+        if self.type().scalarType() != src_type:
+            src = g.op("Cast", src, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
         return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
@@ -283,6 +288,19 @@ def __getitem_(g, self, i):
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
+
+def add(g, self, other, alpha=None):
+    if sym_help._is_value(self) and sym_help._is_tensor_list(self):
+        tensor_list_node = other.node()
+        if tensor_list_node.kind() != "prim::ListConstruct":
+            return _unimplemented("add", "does not support adding dynamic tensor list to another")
+        tensors = sym_help._unpack_list(other)
+        l = self
+        for t in tensors:
+            l = g.op("SequenceInsert", l, t)
+        return l
+
+    return torch.onnx.symbolic_opset9.add(g, self, other, alpha)
 
 def insert(g, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
@@ -366,6 +384,17 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
             return split_out
+        # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
+        if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
+            split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            res = []
+            for i in range(_outputs):
+                end = g.op("Add", start, split_sizes[i])  # split_sizes is a list of same length as _outputs
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+            return res
         return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
                 for i in range(_outputs)]
     else:

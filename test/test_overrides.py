@@ -644,27 +644,107 @@ def generate_tensor_like_override_tests(cls):
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
 
+class Wrapper:
+    "Basic data container that knows how to unwrap itself"
+    def __init__(self, data):
+        self.__dict__["_data"] = data
+        self.__dict__["used_attrs"] = set()
+        self.__dict__["used_calls"] = set()
+
+    def __getattr__(self, name):
+        if name in self.__dict__:
+            return self.__dict__[name]
+        self.used_attrs.add(name)
+
+        val = getattr(self._data, name)
+
+        # If it's a method
+        if callable(val):
+            c = getattr(type(self._data), name)
+            # Don't append self to args if classmethod/staticmethod
+            if c is val:
+                return lambda *a, **kw: wrap(self.__torch_function__(c, (Wrapper,), args=a, kwargs=kw))
+            # Otherwise append self to args
+            return lambda *a, **kw: wrap(self.__torch_function__(c, (Wrapper,), args=(self,) + a, kwargs=kw))
+
+        return wrap(val)
+
+    def __setattr__(self, name, value):
+        if name in self.__dict__:
+            self.__dict__[name] = value
+
+        self.used_attrs.add(name)
+        setattr(self._data, name, unwrap(value))
+
+    def __setitem__(self, key, value):
+        self._data[unwrap(key)] = unwrap(value)
+
+    def __getitem__(self, key):
+        return wrap(self._data[unwrap(key)])
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        self.used_calls.add(func)
+        args = unwrap(tuple(args))
+        kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+
+        return wrap(func(*args, **kwargs))
+
+    def __add__(self, other):
+        return self.__torch_function__(torch.add, (Wrapper,), (self, other))
+
+    def __sub__(self, other):
+        return self.__torch_function__(torch.sub, (Wrapper,), (self, other))
+
+    def __truediv__(self, other):
+        return self.__torch_function__(torch.true_divide, (Wrapper,), (self, other))
+
+    def __floordiv__(self, other):
+        return self.__torch_function__(torch.floor_divide, (Wrapper,), (self, other))
+
+    def __ge__(self, other):
+        return self.__torch_function__(torch.ge, (Wrapper,), (self, other))
+
+    def __gt__(self, other):
+        return self.__torch_function__(torch.gt, (Wrapper,), (self, other))
+
+    def __lt__(self, other):
+        return self.__torch_function__(torch.lt, (Wrapper,), (self, other))
+
+    def __le__(self, other):
+        return self.__torch_function__(torch.le, (Wrapper,), (self, other))
+
+    def __eq__(self, other):
+        return self.__torch_function__(torch.eq, (Wrapper,), (self, other))
+
+    def __ne__(self, other):
+        return self.__torch_function__(torch.ne, (Wrapper,), (self, other))
+
+    def __bool__(self):
+        return self.__torch_function__(torch.Tensor.__bool__, (Wrapper,), (self,))
+
+    def __int__(self):
+        return self.__torch_function__(torch.Tensor.__int__, (Wrapper,), (self,))
+
+
+# unwrap inputs if necessary
+def unwrap(v):
+    if type(v) in {tuple, list}:
+        return type(v)(unwrap(vi) for vi in v)
+
+    return v._data if isinstance(v, Wrapper) else v
+
+# wrap inputs if necessary
+def wrap(v):
+    if type(v) in {tuple, list}:
+        return type(v)(wrap(vi) for vi in v)
+
+    return Wrapper(v) if isinstance(v, torch.Tensor) else v
+
 class TestEinsumOverride(TestCase):
     "Regression test for gh-38479"
     def test_wrapper(self):
-        class Wrapper():
-            "Basic data container that knows how to unwrap itself"
-            def __init__(self, data):
-                self.data = data
-
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-
-                # unwrap inputs if necessary
-                def unwrap(v):
-                    return v.data if isinstance(v, Wrapper) else v
-
-                args = map(unwrap, args)
-                kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-
-                return func(*args, **kwargs)
-
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
         self.assertTrue(torch.allclose(torch.einsum('i,j->ij', x, y),
@@ -676,6 +756,52 @@ class TestEinsumOverride(TestCase):
         c = Wrapper(torch.randn(2, 7))
         self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
                                        torch.nn.functional.bilinear(a, c, b)))
+
+
+class TestGradCheckOverride(TestCase):
+    "Test that wrappers work with gradcheck."
+    def test_gradcheck(self):
+        from torch.autograd import gradcheck
+
+        a = wrap(torch.tensor(5.0, dtype=torch.double))
+        b = wrap(torch.tensor(6.0, dtype=torch.double))
+
+        a.requires_grad = True
+        b.requires_grad = True
+
+        gradcheck(torch.add, (a, b), raise_exception=False)
+
+        total_used_attrs = a.used_attrs.union(b.used_attrs)
+        total_used_calls = a.used_calls.union(b.used_calls)
+
+        # These attributes (and the functions below) may change
+        # if the gradcheck implementation changes. It's best to
+        # aim for attributes that may be commonly present on other
+        # Tensor-likes.
+        self.assertEqual(total_used_attrs, {
+            'data',
+            'dtype',
+            'is_floating_point',
+            'is_sparse',
+            'layout',
+            'nelement',
+            'new_zeros',
+            'requires_grad',
+            'retain_grad',
+            'size',
+            'stride',
+        })
+
+        self.assertEqual(total_used_calls, {
+            torch.Tensor.new_zeros,
+            torch.Tensor.size,
+            torch.Tensor.is_floating_point,
+            torch.Tensor.nelement,
+            torch.Tensor.retain_grad,
+            torch.Tensor.stride,
+            torch.autograd.grad,
+            torch.add,
+        })
 
 
 if __name__ == '__main__':

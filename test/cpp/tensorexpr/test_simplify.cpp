@@ -197,6 +197,122 @@ void testConstantFoldWithVar() {
   }
 }
 
+void testConditionalSelectFoldSimple() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(4.0f);
+  ExprHandle c(3.0f);
+  {
+    ExprHandle f = (a > b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a < b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a == c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a != c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldTwoLayer() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(2.0f);
+  ExprHandle c(2.0f);
+  ExprHandle d(1.0f);
+  {
+    ExprHandle f = (a + b < c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a + b > c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d == b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d != b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldWithVar() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle f = x < 4.f;
+
+  ExprHandle newF = IRSimplifier::simplify(f);
+  const IntImm* folded = newF.AsNode<IntImm>();
+  ASSERT_EQ(folded, nullptr);
+
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(5.f));
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
 void testUnFoldableExpr() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -890,6 +1006,32 @@ void testSimplifySubs() {
     ExprHandle body = (x % y + (x * 2 - x - y * 0) - x + 2) - (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
+}
+
+void testSimplifyDiv() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+
+  {
+    ExprHandle body = ExprHandle(0) / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    ExprHandle body = x / 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    ExprHandle body = x / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
   }
 }
 
@@ -1922,6 +2064,18 @@ void testSimplifyConstantCond() {
     Stmt* simplified = IRSimplifier::simplify(body);
     Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
   }
 }
 
