@@ -323,7 +323,7 @@ namespace {
 // them.
 struct Dependencies : public IterVisitor {
   std::unordered_set<Val*> dependencies_;
-  std::unordered_set<Val*> vals;
+  std::unordered_set<Val*> vals_;
 
   std::vector<Statement*> next(Val* v) override {
     if (dependencies_.find(v) != dependencies_.end())
@@ -332,7 +332,7 @@ struct Dependencies : public IterVisitor {
   }
 
   void handle(Val* val) override {
-    vals.emplace(val);
+    vals_.emplace(val);
   }
 
   Dependencies(
@@ -351,11 +351,43 @@ struct Dependencies : public IterVisitor {
     }
 
     Dependencies deps(dependencies, of);
-    return deps.vals;
+    return deps.vals_;
   }
 };
 
-// Looks for and returns
+// Looks for and returns all output values with dependencies on `of`.
+struct FindOutputs : public IterVisitor {
+  const std::unordered_set<Val*>& of_;
+  std::unordered_set<Val*> outs_;
+
+  void handle(Val* val) override {
+    if (of_.find(val) != of_.end()) {
+      Statement* out_stmt = stmt_stack.front().back();
+      if (out_stmt->isVal()) {
+        auto out_val = out_stmt->as<Val>();
+        if (of_.find(out_val) == of_.end()) {
+          outs_.emplace(out_val);
+        }
+      }
+    }
+  }
+
+  FindOutputs(const std::unordered_set<Val*>& _of) : of_(_of) {
+    auto fusion = (*of_.begin())->fusion();
+    traverseFrom(fusion, fusion->outputs(), false);
+  };
+
+  static std::unordered_set<Val*> getAllOutputsOf(
+      const std::unordered_set<Val*>& of) {
+    if (of.empty()) {
+      return std::unordered_set<Val*>();
+    }
+
+    FindOutputs finder(of);
+    return finder.outs_;
+  }
+};
+
 class DependencyChains : public IterVisitor {
  public:
   std::deque<std::deque<Val*>> dep_chains;
@@ -468,6 +500,15 @@ std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);
+}
+
+std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(
+    const std::unordered_set<Val*>& of) {
+  if (of.empty()) {
+    return std::unordered_set<Val*>();
+  }
+  FusionGuard fg((*of.begin())->fusion());
+  return FindOutputs::getAllOutputsOf(of);
 }
 
 void ExprSort::handle(Expr* expr) {
