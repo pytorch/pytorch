@@ -55,7 +55,7 @@ class Tracer(TracerBase):
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
-                    return self.create_node('get_param', n, None, None)
+                    return self.create_node('get_param', n, (), {})
             raise NameError('parameter is not a member of this module')
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
@@ -96,7 +96,7 @@ class Tracer(TracerBase):
                     i += 1
                 setattr(self.root, qualname, a)
 
-            return self.create_node('get_param', qualname, None, None)
+            return self.create_node('get_param', qualname, (), {})
         return super().create_arg(a)
 
     def is_leaf_module(self, m: torch.nn.Module) -> bool:
@@ -148,7 +148,7 @@ class Tracer(TracerBase):
         return GraphModule(root, self.graph)
 
     def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, None, None), self)
+        return Proxy(self.create_node('placeholder', name, (), {}), self)
 
 # Symbolic tracing API
 #
