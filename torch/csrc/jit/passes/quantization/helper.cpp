@@ -352,9 +352,11 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   } else if (n->kind() == Symbol::aten("append")) {
-    TORCH_WARN(
-        "Quantization for inplace operation aten::append "
-        "is not supported");
+    std::vector<Value*> inputs;
+    for (auto* input : n->inputs()) {
+      inputs.push_back(input);
+    }
+    return inputs;
   }
 
   return {};
