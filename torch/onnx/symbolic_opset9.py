@@ -622,6 +622,10 @@ def floor(g, input):
     return g.op("Floor", input)
 
 
+def _len(g, self):
+    return g.op("Size", self)
+
+
 @parse_args('v', 't', 't')
 def threshold(g, self, threshold, value):
     # See Note [Export inplace]
