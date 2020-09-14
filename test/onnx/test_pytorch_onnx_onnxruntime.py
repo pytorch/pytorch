@@ -2896,13 +2896,31 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()
-    def test_new_zero(self):
+    def test_new_zeros(self):
         class Zero_(torch.nn.Module):
             def forward(self, x):
-                return x.new_zeros(x.shape[2:])
+                return x.new_zeros(x.shape[1:2]), x.new_zeros(x.shape[2:], dtype=torch.long)
 
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_empty(self):
+        class Emtpy(torch.nn.Module):
+            def forward(self, x):
+                return x.new_empty(x.shape[0]).fill_(0), x.new_empty(x.shape[0], dtype=torch.long) * 0
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Emtpy(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_full(self):
+        class Full(torch.nn.Module):
+            def forward(self, x):
+                return x.new_full(x.shape[1:2], 5), x.new_full(x.shape[0:1], 1.3, dtype=torch.long)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Full(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):

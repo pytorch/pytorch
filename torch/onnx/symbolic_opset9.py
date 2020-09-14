@@ -1527,12 +1527,20 @@ def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
+def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None and self.isCompleteTensor():
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return empty(g, sizes, dtype, layout, device, pin_memory)
+
+
 def scalar_tensor(g, scalar, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
     scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
     return scalar
+
 
 def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
@@ -1553,6 +1561,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
@@ -1571,9 +1580,8 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'v', 'i', 'v', 'v', 'v')
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if dtype is None:
+    if dtype is None and self.isCompleteTensor():
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return zeros(g, sizes, dtype, layout, device, pin_memory)
@@ -1621,6 +1629,13 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+
+
+def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
+    if dtype is None and self.isCompleteTensor():
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
 def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
@@ -1689,6 +1704,7 @@ def unsqueeze(g, self, dim):
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
     return g.op("Unsqueeze", self, axes_i=[dim])
+
 
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
