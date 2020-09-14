@@ -11,7 +11,7 @@ PACKAGES_TO_PRUNE = "pytorch torchvision torchaudio torchtext ignite torchcsprng
 def gen_workflow_job(channel: str):
     return OrderedDict(
         {
-            "anaconda-prune": OrderedDict(
+            "anaconda_prune": OrderedDict(
                 {
                     "name": f"anaconda-prune-{channel}",
                     "context": quote("org-member"),
