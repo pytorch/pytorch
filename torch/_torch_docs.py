@@ -5911,9 +5911,9 @@ The Heaviside step function is defined as:
 
 .. math::
     \text{{heaviside}}(input, values) = \begin{cases}
-        \0, & \text{if input < 0}\\
-        \values, & \text{if input == 0}\\
-        \1, & \text{if input > 0}
+        0, & \text{if input < 0}\\
+        values, & \text{if input == 0}\\
+        1, & \text{if input > 0}
     \end{cases}
 """ + r"""
 

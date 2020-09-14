@@ -30,15 +30,17 @@ void AddMoments(int64_t m0_add, T m1_add, T m2_add, int64_t* m0, T* m1, T* m2) {
 
 template <typename T>
 std::pair<T, T> WelfordMoments(int64_t N, const T* X) {
-  constexpr int64_t K = vec256::Vec256<T>::size();
+  using Vec = vec256::Vec256<T>;
+  constexpr int64_t K = Vec::size();
   const int64_t n = N / K;
 
-  vec256::Vec256<T> m1_vec(0);
-  vec256::Vec256<T> m2_vec(0);
+  Vec m1_vec(0);
+  Vec m2_vec(0);
   for (int64_t i = 0; i < n; ++i) {
-    const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X + i * K);
-    const vec256::Vec256<T> delta_vec = x_vec - m1_vec;
-    m1_vec = m1_vec + delta_vec / vec256::Vec256<T>(static_cast<T>(i + 1));
+    const Vec x_vec = Vec::loadu(X + i * K);
+    const Vec delta_vec = x_vec - m1_vec;
+    const Vec c_vec = Vec(T(1) / static_cast<T>(i + 1));
+    m1_vec = m1_vec + delta_vec * c_vec;
     m2_vec = m2_vec + delta_vec * (x_vec - m1_vec);
   }
   std::array<T, K> m1_arr;
