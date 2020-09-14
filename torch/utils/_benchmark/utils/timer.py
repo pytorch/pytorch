@@ -146,6 +146,7 @@ class Timer(object):
 
     def blocked_autorange(self, callback=None, min_run_time=0.2):
         number, cache_speedup = self._estimate_block_size(min_run_time)
+
         def time_hook():
             return self._timer.timeit(number)
 

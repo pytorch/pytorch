@@ -277,6 +277,7 @@ def merge_measurements(measurements: List[Measurement]):
         for key, group in grouped_measurements.items()
     ]
 
+
 class CPUCacheClear:
     def __init__(self, cache_size_mb=2):
         self.cache_size_mb = cache_size_mb
@@ -285,7 +286,6 @@ class CPUCacheClear:
 
     def clear_cpu_cache(self):
         np.sum(self.array)
-
 
 
 @contextlib.contextmanager
