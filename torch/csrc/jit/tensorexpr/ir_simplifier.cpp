@@ -1126,9 +1126,9 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
-      return Stmt::clone(true_new);
+      return true_new ? Stmt::clone(true_new) : nullptr;
     } else {
-      return Stmt::clone(false_new);
+      return false_new ? Stmt::clone(false_new) : nullptr;
     }
   }
 
