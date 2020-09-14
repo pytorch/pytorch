@@ -424,16 +424,18 @@ class TensorExprFuser {
     }
   }
 
-  // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
-  void createFusionGroups(Block* block) {
-    std::vector<Node*> fusion_groups;
+  // Take a reverse pass over `block` to merge fusible groups.  Return whether
+  // any changes were made.
+  bool tryCreateFusionGroups(Block* block, std::vector<Node*>& fusion_groups) {
+    bool changed = false;
     auto reverse_iter = block->nodes().reverse();
+    Node* prev_fusion_group = nullptr;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
       GRAPH_DEBUG("Considering node:", *n)
 
       for (Block* b : n->blocks()) {
-        createFusionGroups(b);
+        changed |= tryCreateFusionGroups(b, fusion_groups);
       }
 
       if (!canHandle(n)) {
@@ -444,17 +446,59 @@ class TensorExprFuser {
       // fusion group from - skip them.
       if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
           n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
-          n->kind() == prim::Constant) {
+          n->kind() == prim::Constant || n->kind() == prim::TensorExprGroup) {
         it++;
         continue;
       }
 
       Node* fusion_group = createFusionGroup(n);
-      fusion_groups.push_back(fusion_group);
-      it = fusion_group->reverseIterator();
+      changed |= (fusion_group != n);
+      debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
+
+      // Try merging the just created fusion group into the previous one.
+      // If it did not work, then put the previous fusion group into
+      // fusion_groups vector - we will not touch it anymore in this loop.
+      // If merging suceeded, save the merged group as the "previous" fusion
+      // group so that we can try to merge the next one into it.
+      if (prev_fusion_group) {
+        debugDumpFusionGroup(
+            "Trying to merge into the previous fusion group: ",
+            prev_fusion_group);
+        if (canMerge(prev_fusion_group, fusion_group)) {
+          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
+          debugDumpFusionGroup(
+              "Successfully merged into the previous fusion group: ",
+              prev_fusion_group);
+        } else {
+          GRAPH_DEBUG("Cannot merge into the previous fusion group");
+          fusion_groups.push_back(prev_fusion_group);
+          prev_fusion_group = fusion_group;
+        }
+      } else {
+        prev_fusion_group = fusion_group;
+      }
+      it = prev_fusion_group->reverseIterator();
       it++;
     }
 
+    // We were adding groups into the vector lagging by one - catch up with
+    // adding the last one
+    if (prev_fusion_group) {
+      fusion_groups.push_back(prev_fusion_group);
+    }
+    return changed;
+  }
+
+  // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
+  // Iterate to a fixed point to find all opportunities.
+  void createFusionGroups(Block* block) {
+    std::vector<Node*> fusion_groups;
+    while (true) {
+      if (!tryCreateFusionGroups(block, fusion_groups)) {
+        break;
+      }
+      GRAPH_DEBUG("Fusion groups created, iterating:\n", *block->owningGraph());
+    }
     for (Node* n : fusion_groups) {
       inlineIfTooSmall(n);
     }
