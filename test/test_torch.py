@@ -277,10 +277,13 @@ class AbstractTestCases:
         def test_dim_reduction_less_than_64(self):
             sizes = [1] * 65
             x = torch.randn(sizes)
-            with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
-                torch.sum(x, 64)
-            with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
-                torch.sum(x, -1)
+            ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
+                   torch.amin, torch.amax, torch.norm]
+            for op in ops:
+                with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+                    op(x, 64)
+                with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
+                    op(x, -1)
 
         @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
         def test_logsumexp(self):
@@ -14669,7 +14672,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.hypot_(y),
                 lambda x, y: x.i0(),
                 lambda x, y: x.i0_(),
-                # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
+                lambda x, y: x.lerp(y, 0.5),
                 lambda x, y: x.log(),
                 lambda x, y: x.log_(),
                 lambda x, y: x.log10(),
@@ -18830,6 +18833,19 @@ else:
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
+    def test_repeated_dim(self, device):
+        ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
+               torch.amin, torch.amax, torch.norm]
+        x = torch.randn(3, 3, 3, 3, device=device)
+
+        error_msg = r'appears multiple times in the list of dims'
+        norm_error_msg = r'Expected dims to be different, got'
+        for op in ops:
+            for dim in [(0, 0), (0, -4)]:
+                e_msg = norm_error_msg if op == torch.norm else error_msg
+                with self.assertRaisesRegex(RuntimeError, e_msg):
+                    op(x, dim=dim)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -19219,6 +19235,12 @@ class TestViewOps(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Tensor must have a last dimension of size 2",
             lambda: torch.view_as_complex(x))
+
+        # zero dimension tensor
+        z = torch.tensor(2.0)
+        self.assertRaisesRegex(
+            RuntimeError, "Input tensor must have one or more dimensions",
+            lambda: torch.view_as_complex(z))
 
         y = x.reshape(0, 2)  # torch.Size([0, 2])
         res = torch.view_as_complex(y)
@@ -19912,7 +19934,7 @@ tensor_op_tests = [
     ('kthvalue', 'dim', _small_3d_unique, lambda t, d: [3, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('kthvalue', 'neg_dim', _small_3d_unique, lambda t, d: [3, -1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('lerp', '', _small_3d, lambda t, d: [_small_3d(t, d), 0.3],
-        1e-2, 1e-5, 1e-5, _float_types_no_half),
+        1e-2, 1e-5, 1e-5, _float_types),
     ('max', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('max', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('max', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),

@@ -3643,21 +3643,33 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
-add_docstr(torch.linspace,
-           r"""
-linspace(start, end, steps=100, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
+add_docstr(torch.linspace, r"""
+linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a one-dimensional tensor of :attr:`steps`
-equally spaced points between :attr:`start` and :attr:`end`.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
-The output tensor is 1-D of size :attr:`steps`.
+.. math::
+    (\text{start},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \ldots,
+    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{end})
+""" + """
+
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`. Default: ``100``.
+    steps (int): size of the constructed tensor
     {out}
     {dtype}
     {layout}
@@ -3952,23 +3964,37 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
-add_docstr(torch.logspace,
-           """
-logspace(start, end, steps=100, base=10.0, *, \
+# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
+add_docstr(torch.logspace, """
+logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
-Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced with base :attr:`base` between
-:math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
 
-The output tensor is 1-D of size :attr:`steps`.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :math:`{{\text{{base}}}}^{{\text{{start}}}}` to
+:math:`{{\text{{base}}}}^{{\text{{end}}}}`, inclusive, on a logarithmic scale
+with base :attr:`base`. That is, the values are:
+
+.. math::
+    (\text{base}^{\text{start}},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \ldots,
+    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{\text{end}})
+""" + """
+
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`. Default: ``100``.
+    steps (int): size of the constructed tensor
     base (float): base of the logarithm function. Default: ``10.0``.
     {out}
     {dtype}
@@ -5885,9 +5911,9 @@ The Heaviside step function is defined as:
 
 .. math::
     \text{{heaviside}}(input, values) = \begin{cases}
-        \0, & \text{if input < 0}\\
-        \values, & \text{if input == 0}\\
-        \1, & \text{if input > 0}
+        0, & \text{if input < 0}\\
+        values, & \text{if input == 0}\\
+        1, & \text{if input > 0}
     \end{cases}
 """ + r"""
 

@@ -535,24 +535,26 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         if (checkForNCCLErrors(ncclComms)) {
           LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
-          LOG(INFO) << "Aborting communicators that received errors";
-          // We abort NCCL communicators that have received errors from this
-          // thread, and exceptions are set on the corresponding work objects.
-          // The workCleanupThread will then loop through the unfinished
-          // collectives and throw exceptions if an exception has been set on
-          // any of the work objects from this thread.
-          for (const auto& ncclComm : ncclComms) {
-            ncclComm->ncclCommAbort();
-            // Note that we don't remove the aborted communicators from the
-            // cache. The reason is that if we do remove the communicator
-            // from the cache, it is possible that a new collective operation
-            // calls `ncclCommInitRank` to create a new communicator whereas
-            // other ranks might have failed/timed out and didn't enter
-            // `ncclCommInitRank`. As a result, when there is a failure on
-            // a communicator the application receives an exception and its
-            // their responsibility to destroy the process group and recreate
-            // it to recover from errors.
-            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+          if (blockingWait_ || asyncErrorHandling_) {
+            LOG(INFO) << "Aborting communicators that received errors";
+            // We abort NCCL communicators that have received errors from this
+            // thread, and exceptions are set on the corresponding work objects.
+            // The workCleanupThread will then loop through the unfinished
+            // collectives and throw exceptions if an exception has been set on
+            // any of the work objects from this thread.
+            for (const auto& ncclComm : ncclComms) {
+              ncclComm->ncclCommAbort();
+              // Note that we don't remove the aborted communicators from the
+              // cache. The reason is that if we do remove the communicator
+              // from the cache, it is possible that a new collective operation
+              // calls `ncclCommInitRank` to create a new communicator whereas
+              // other ranks might have failed/timed out and didn't enter
+              // `ncclCommInitRank`. As a result, when there is a failure on
+              // a communicator the application receives an exception and its
+              // their responsibility to destroy the process group and recreate
+              // it to recover from errors.
+              abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+            }
           }
         }
       }

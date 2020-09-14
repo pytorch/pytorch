@@ -143,6 +143,60 @@ void CudaAnalysis::visit(const Allocate* v) {
   throw std::runtime_error("Global alloc not supported yet");
 }
 
+void CudaAnalysis::visit(const For* v) {
+  // Recurse first.
+  v->body()->accept(this);
+
+  const LoopOptions& loop_options = v->loop_options();
+  if (loop_options.is_gpu_block_index()) {
+    int gpu_block_index = loop_options.gpu_block_index();
+    if (gpu_block_index >= 3) {
+      throw std::runtime_error("support only 3D gpu_block_index");
+    }
+    const Expr* prev = nullptr;
+    if (gpu_block_extents_.size() <= gpu_block_index) {
+      gpu_block_extents_.resize(gpu_block_index + 1);
+    } else {
+      prev = gpu_block_extents_[gpu_block_index];
+    }
+    if (!is_zero(v->start())) {
+      throw std::runtime_error(
+          "start must be zero for gpu_block_index: " +
+          std::to_string(v->start()));
+    }
+
+    if (prev == nullptr) {
+      gpu_block_extents_[gpu_block_index] = v->stop();
+    } else {
+      gpu_block_extents_[gpu_block_index] =
+          IRSimplifier::simplify(new Max(prev, v->stop(), true));
+    }
+  } else if (loop_options.is_gpu_thread_index()) {
+    int gpu_thread_index = loop_options.gpu_thread_index();
+    if (gpu_thread_index >= 3) {
+      throw std::runtime_error("support only 3D gpu_thread_index");
+    }
+    const Expr* prev = nullptr;
+    if (gpu_thread_extents_.size() <= gpu_thread_index) {
+      gpu_thread_extents_.resize(gpu_thread_index + 1);
+    } else {
+      prev = gpu_thread_extents_[gpu_thread_index];
+    }
+    if (!is_zero(v->start())) {
+      throw std::runtime_error(
+          "start must be zero for gpu_thread_index: " +
+          std::to_string(v->start()));
+    }
+
+    if (prev == nullptr) {
+      gpu_thread_extents_[gpu_thread_index] = v->stop();
+    } else {
+      gpu_thread_extents_[gpu_thread_index] =
+          IRSimplifier::simplify(new Max(prev, v->stop(), true));
+    }
+  }
+}
+
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
   std::vector<const Expr*> dims = alloc->dims();
   // TODO: this should be merged with the storage flattener.
@@ -589,61 +643,60 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
 
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
+    auto& extents = cuda_analysis_->gpu_block_extents();
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_index >= 3) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
-    const Expr* prev = nullptr;
-    if (gpu_block_extents_.size() <= gpu_block_index) {
-      gpu_block_extents_.resize(gpu_block_index + 1);
-    } else {
-      prev = gpu_block_extents_[gpu_block_index];
-    }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
-    }
-
-    if (prev == nullptr) {
-      gpu_block_extents_[gpu_block_index] = v->stop();
-    } else {
-      gpu_block_extents_[gpu_block_index] =
-          IRSimplifier::simplify(new Max(prev, v->stop(), true));
-    }
 
     const Var* metaVar = gpu_block_vars_[gpu_block_index];
-    return Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+    body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+
+    // extents is the max found, if we don't equal that we may be smaller.
+    // Mask it with the current loops stop.
+    if (!exprEquals(extents[gpu_block_index], v->stop())) {
+      body = new Cond(
+          new CompareSelect(
+              metaVar,
+              v->stop(),
+              new IntImm(1),
+              new IntImm(0),
+              CompareSelectOperation::kLT),
+          body,
+          nullptr);
+    }
+    return body;
   } else if (loop_options.is_gpu_thread_index()) {
+    auto& extents = cuda_analysis_->gpu_thread_extents();
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_index >= 3) {
       throw std::runtime_error("support only 3D gpu_thread_index");
     }
-    const Expr* prev = nullptr;
-    if (gpu_thread_extents_.size() <= gpu_thread_index) {
-      gpu_thread_extents_.resize(gpu_thread_index + 1);
-    } else {
-      prev = gpu_thread_extents_[gpu_thread_index];
-    }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_thread_index: " +
-          std::to_string(v->start()));
-    }
 
+    // If a thread dimension has changed, insert a syncThreads in the enclosing
+    // Block.
     if (last_thread_dim_ && !exprEquals(last_thread_dim_, v->stop())) {
       need_sync_ = true;
     }
     last_thread_dim_ = v->stop();
-    if (prev == nullptr) {
-      gpu_thread_extents_[gpu_thread_index] = v->stop();
-    } else {
-      gpu_thread_extents_[gpu_thread_index] =
-          IRSimplifier::simplify(new Max(prev, v->stop(), true));
-    }
 
     const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
-    return Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+    body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+
+    // extents is the max found, if we don't equal that we may be smaller.
+    // Mask it with the current loops stop.
+    if (!exprEquals(extents[gpu_thread_index], v->stop())) {
+      body = new Cond(
+          new CompareSelect(
+              metaVar,
+              v->stop(),
+              new IntImm(1),
+              new IntImm(0),
+              CompareSelectOperation::kLT),
+          body,
+          nullptr);
+    }
+    return body;
   }
 
   return new For(
@@ -682,27 +735,19 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
 class NoThreadIdxRewriter : public IRMutator {
  private:
   Stmt* rewrite(const std::vector<Stmt*>& stmts) {
-    std::vector<Stmt*> cloned_stmts(stmts.size());
-    for (size_t index = 0; index < stmts.size(); index++) {
-      cloned_stmts[index] = Stmt::clone(stmts[index]);
-    }
-    Stmt* new_block = Block::make(cloned_stmts);
+    Stmt* new_block = Block::make(stmts);
     // Wrap the new block under a trivial thread-idx
     //   for t in 0..1: // threadIdx
-    //     if (t < 1):
     //       new_block
     // Note: the insertion of this for loop serves two purpose. First it is
     // turned into a mask; Second, it will make sure a sync point is inserted
     // when we switch to another thread-idx axis.
     VarHandle t("t", kInt);
-    ExprHandle t_lt_1 = CompareSelect::make(t, 1, CompareSelectOperation::kLT);
-    // TODO: move "if (t < 1)" to threadIdx generation
-    Cond* masked_block = Cond::make(t_lt_1, new_block, nullptr);
     LoopOptions thread_idx_opt;
     // TODO: the added trivial threadIdx needs to match the kernel threadIdx
     // dimensions
     thread_idx_opt.set_gpu_thread_index(0);
-    For* trivial_loop = For::make(t, 0, 1, masked_block, thread_idx_opt);
+    For* trivial_loop = For::make(t, 0, 1, new_block, thread_idx_opt);
     return trivial_loop;
   }
 
@@ -733,7 +778,7 @@ class NoThreadIdxRewriter : public IRMutator {
     int index = 0;
     for (auto old_stmt : old_stmts) {
       need_rewrite_ = false;
-      Stmt* new_stmt = old_stmt->accept_mutator(this);
+      Stmt* new_stmt = Stmt::clone(old_stmt->accept_mutator(this));
       need_rewrites[index] = need_rewrite_;
       new_stmts[index] = new_stmt;
       index++;
@@ -752,7 +797,7 @@ class NoThreadIdxRewriter : public IRMutator {
     need_rewrite_ = false;
     // If nothing needs fix, return as it is
     if (!any_need_fix) {
-      return (Stmt*)v;
+      return Block::make(new_stmts);
     }
 
     // If all needs fix, then we could have its parent statement to merge
@@ -766,7 +811,7 @@ class NoThreadIdxRewriter : public IRMutator {
         return new_block;
       }
       need_rewrite_ = true;
-      return (Stmt*)v;
+      return Block::make(new_stmts);
     }
 
     // if some needs fix, rewrites the consecutive parts
@@ -851,7 +896,8 @@ void CudaCodeGen::Initialize() {
   cuda_analysis_ = std::make_unique<CudaAnalysis>();
   printer_ =
       std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
-  metavar_rewriter_ = std::make_unique<GPUMetaVarRewriter>();
+  metavar_rewriter_ =
+      std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
   os() << resource_string;
 
@@ -905,10 +951,10 @@ void CudaCodeGen::Initialize() {
     os() << std::endl;
   }
 
+  stmt_v->accept(cuda_analysis_.get());
+
   NoThreadIdxRewriter no_thread_idx;
   stmt_v = stmt_v->accept_mutator(&no_thread_idx);
-
-  stmt_v->accept(cuda_analysis_.get());
   stmt_v = stmt_v->accept_mutator(metavar_rewriter_.get());
 
   AtomicAddFuser atomic_add_fuser(
@@ -920,6 +966,7 @@ void CudaCodeGen::Initialize() {
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);
   stmt_v = IRSimplifier::simplify(stmt_v);
+  set_stmt(stmt_v);
 
   stmt_v->accept(printer_.get());
   os() << std::endl;
