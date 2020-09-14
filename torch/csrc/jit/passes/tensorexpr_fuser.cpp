@@ -424,9 +424,10 @@ class TensorExprFuser {
     }
   }
 
-  // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
-  void createFusionGroups(Block* block) {
-    std::vector<Node*> fusion_groups;
+  // Take a reverse pass over `block` to merge fusible groups.  Return whether
+  // any changes were made.
+  bool tryCreateFusionGroups(Block* block, std::vector<Node*>& fusion_groups) {
+    bool changed = false;
     auto reverse_iter = block->nodes().reverse();
     Node* prev_fusion_group = nullptr;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
@@ -434,7 +435,7 @@ class TensorExprFuser {
       GRAPH_DEBUG("Considering node:", *n)
 
       for (Block* b : n->blocks()) {
-        createFusionGroups(b);
+        changed |= tryCreateFusionGroups(b, fusion_groups);
       }
 
       if (!canHandle(n)) {
@@ -445,12 +446,13 @@ class TensorExprFuser {
       // fusion group from - skip them.
       if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
           n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
-          n->kind() == prim::Constant) {
+          n->kind() == prim::Constant || n->kind() == prim::TensorExprGroup) {
         it++;
         continue;
       }
 
       Node* fusion_group = createFusionGroup(n);
+      changed |= (fusion_group != n);
       debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
 
       // Try merging the just created fusion group into the previous one.
@@ -484,7 +486,19 @@ class TensorExprFuser {
     if (prev_fusion_group) {
       fusion_groups.push_back(prev_fusion_group);
     }
+    return changed;
+  }
 
+  // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
+  // Iterate to a fixed point to find all opportunities.
+  void createFusionGroups(Block* block) {
+    std::vector<Node*> fusion_groups;
+    while (true) {
+      if (!tryCreateFusionGroups(block, fusion_groups)) {
+        break;
+      }
+      GRAPH_DEBUG("Fusion groups created, iterating:\n", *block->owningGraph());
+    }
     for (Node* n : fusion_groups) {
       inlineIfTooSmall(n);
     }
@@ -647,7 +661,7 @@ class TensorExprFuser {
     REQ(consumer->owningBlock() == producer->owningBlock());
 
     // Symbolic checks
-    REQ(canHandle(producer) || producer->kind() == prim::TensorExprGroup);
+    REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
