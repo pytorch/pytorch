@@ -159,6 +159,12 @@ struct CaptureList {
     }
   }
 
+  void release_variables() {
+    for (auto& var_capture_ : var_captures_) {
+      var_capture_.reset_data();
+    }
+  }
+
  private:
   enum Capture : uint8_t {
     CAPTURE_TENSOR,
@@ -309,6 +315,10 @@ struct DifferentiableGraphBackward : public autograd::Node {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }
+  }
+
+  void release_variables() override {
+    captures_.release_variables();
   }
 
  private:
@@ -593,7 +603,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    SOURCE_DUMP("Optimizing the following function:", opt_graph);
+    GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
@@ -877,6 +887,50 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   CheckInplace(graph);
   GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
+}
+
+Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
+  auto graph = std::make_shared<Graph>();
+
+  // we are copying the block inside If or prim::Loop otherwise we are copying
+  // the whole graph we need to differentiate the two cases  because cloneFrom
+  // automatically adds inputs if we are copying graph's block and we will
+  //  need the inputs from a user otherwise
+  if (b->owningNode() != nullptr) {
+    std::unordered_map<Value*, Value*> input_mapping;
+    auto value_map = [&input_mapping](Value* v) { return input_mapping[v]; };
+    for (auto inp : inputs) {
+      input_mapping[inp] = graph->block()->addInput();
+    }
+    graph->block()->cloneFrom(b, value_map);
+  } else {
+    auto value_map = [](Value* v) { return v; };
+    graph->block()->cloneFrom(b, value_map);
+  }
+
+  auto fallback = b->owningGraph()->create(
+      prim::FallbackGraph, inputs, b->outputs().size());
+  fallback->g_(attr::Subgraph, graph);
+  b->prependNode(fallback);
+
+  for (size_t i = 0; i < inputs.size(); i++) {
+    graph->inputs()[i]->setType(inputs[i]->type());
+    graph->inputs()[i]->copyMetadata(inputs[i]);
+  }
+
+  for (size_t i = 0; i < b->outputs().size(); i++) {
+    fallback->output(i)->setType(b->outputs()[i]->type());
+    fallback->output(i)->copyMetadata(b->outputs()[i]);
+    b->replaceOutput(i, fallback->output(i));
+  }
+
+  ProfilingRecord::removeProfilingNodes(graph->block());
+
+  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
+    it.destroyCurrent();
+  }
+
+  return fallback;
 }
 
 } // namespace jit

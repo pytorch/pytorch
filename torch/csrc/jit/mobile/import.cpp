@@ -83,7 +83,12 @@ void print_unsupported_ops_and_throw(
     error_message += op_name + ", ";
   }
   error_message += "}";
-  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
+  TORCH_CHECK(
+      false,
+      "Following ops cannot be found. ",
+      "May need to add them explicitly to the selective build operator whitelist, ",
+      "or re-run the export_opnames to update the whitelist:",
+      error_message);
 }
 
 void parseMethods(
@@ -396,8 +401,13 @@ mobile::Module _load_for_mobile(
     auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
     BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata["model_name"] = result.name();
+    }
     if (observer) {
-      observer->onExitLoadModel(result.metadata());
+      observer->onExitLoadModel(copied_metadata);
     }
     return result;
   } catch (c10::Error& error) {

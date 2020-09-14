@@ -1055,7 +1055,7 @@ void initJitScriptBindings(PyObject* module) {
           "find_method",
           [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
-            return method != nullptr;
+            return method != c10::nullopt;
           },
           py::arg("method_name"))
       .def(
@@ -1067,7 +1067,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method(method_name, stack);
+            return m.get_method(method_name)(stack);
           },
           py::arg("method_name"),
           py::arg("input_tuple"))
@@ -1078,7 +1078,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method("forward", stack);
+            return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));
 
@@ -1533,7 +1533,13 @@ void initJitScriptBindings(PyObject* module) {
       std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
       .def(py::init<py::object>())
-      .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
+      .def(
+          "add_constant",
+          [](ConcreteModuleTypeBuilder& self,
+             std::string name,
+             py::object value) {
+            self.addConstant(std::move(name), std::move(value));
+          })
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
       .def(
           "add_function_attribute",
