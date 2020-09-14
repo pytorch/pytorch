@@ -2311,5 +2311,23 @@ void testNormalizeAndSplitWithTail() {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
+void testDetectInlineRankMismatch() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 8;
+
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Tensor* a = Compute(
+      "a", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a_buf(i); });
+  Tensor* reshape = Compute(
+      "reshape",
+      {{kTotalSize / 2, "i"}, {2, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) { return a->call(i, j); });
+  LoopNest l({reshape});
+  l.computeInline(l.getLoopBodyFor(a));
+  ASSERT_THROWS_WITH(
+      l.prepareForCodegen(),
+      "Buffer indexed access is inconsistent with its rank");
+}
+
 } // namespace jit
 } // namespace torch
