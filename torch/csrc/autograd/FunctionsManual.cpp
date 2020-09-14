@@ -203,7 +203,7 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
                           at::zeros({}, grad.options()),
                           (result * self.log()).conj());
     if (grad.is_complex()) {
-      return at::real(out)
+      return at::real(out);
     }
     return out;
   } else {
@@ -215,12 +215,12 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  auto base_ = (base.isComplex()) ? base.toComplexDouble() : base.toDouble();
+  auto base_ = base.toDouble(); // (base.isComplex()) ? base.toComplexDouble() : base.toDouble();
   if (base_ == 0) {
     // if (exponent.is_complex())
     return grad * at::where(exponent >= 0,
                             at::zeros({}, grad.options()),
-                            result * std::log(base.toDouble()));
+                            result * std::log(base_));
   } else {
     auto out = grad * (result * std::log(base_)).conj();
     if (!base.isComplex() && grad.is_complex()) {
@@ -264,15 +264,6 @@ Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
   return result;
 }
 
-Tensor div_scalar_backward(Tensor grad, Scalar other, ScalarType self_st) {
-  auto scalar_conj = at::scalar_to_tensor(other).conj().item();
-  auto result = grad / scalar_conj;
-  if (!at::isComplexType(self_st) && result.is_complex()) {
-    // R -> C
-    result = at::real(result);
-  }
-  return result;
-}
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();

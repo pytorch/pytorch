@@ -401,7 +401,7 @@
   other: div_tensor_other_backward(grad, self, other)
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: div_scalar_backward(grad, other, self.scalar_type())
+  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor
@@ -1667,8 +1667,8 @@
   output: grad * grad_output * (-2 * output + 1)
 
 - name: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
-  grad_output: tanh_backward(grad, output)
-  output: -2 * output * grad * grad_output
+  grad_output: tanh_backward(grad, output.conj())
+  output: grad.conj() * (-2 * output.conj() * grad_output)
 
 # cudnn
 - name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
