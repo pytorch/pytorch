@@ -224,18 +224,12 @@ void compileCudaFusionGroup(Node* fusion_node) {
   // This is not a critical code path, it's OK to do graph copy here;
   auto graph = fusion_node->g(attr::Subgraph)->copy();
 
-  if (!IsNewExecutorEnabled()) {
-    // TODO: this doesn't cover the case where input types are missing. If we do
-    //       the graph construction at run-time, it's expensive to copy graph
-    //       at critical path. We take the trade-off here as profiling executor
-    //       is the future;
-    //
-    // Type propagation that's here just to cover corner case, incase type
-    // propagation failed in the original subgraph. We currently need output
-    // types in order to support fp16, where we cast input to fp32 and output
-    // back to fp16.
-    TypePropagate(graph);
-  }
+  // type propagation is needed, as the protocol only requires scalar type on
+  // input tensors.
+  // Note that even for Profiling Executor, scalar type could still be missing,
+  // especially for output tensor from a given node (as profiling node only
+  // insert meta information after itself).
+  TypePropagate(graph);
 
   int32_t fusion_cache_id =
       CudaFusionManager::getManager().registerOrGetCacheId(graph);
