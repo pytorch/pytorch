@@ -8,6 +8,7 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/Resize.h>
 
 #include <THC/THC.h> // for USE_MAGMA
 
@@ -1336,12 +1337,22 @@ AT_ERROR("symeig: MAGMA library not found in "
 #endif
 }
 
+// put eig_cuda_helper at the bottom to minimize the git diff. We will move it up in a next commit
+static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors);
 
 std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
-  Tensor vals_tmp, vecs_tmp;
-  std::tie(vals_tmp, vecs_tmp) = eig_cuda(self, eigenvectors);
-  e.resize_as_(vals_tmp).copy_(vals_tmp);
-  v.resize_as_(vecs_tmp).copy_(vecs_tmp);
+  TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
+  squareCheckInputs(self);
+  int64_t n = self.size(-1);
+
+  at::native::resize_output(e, {n, 2});
+  at::native::resize_output(v, self.sizes());
+
+  Tensor cpu_vals, cpu_vecs;
+  std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
+  e.copy_(cpu_vals);
+  if (eigenvectors)
+      v.copy_(cpu_vecs);
   return std::tuple<Tensor&, Tensor&>(e, v);
 }
 
@@ -1350,11 +1361,30 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
+  // optimization: if self is empty, we can immediately allocate&return empty
+  // GPU tensors, instead of getting empty CPU tensors from eig_cuda_helper
+  // and copying them to GPU
   if (self.numel() == 0) {
     auto eigvals = at::empty({n, 2}, self.options());
     return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
+  Tensor cpu_vals, cpu_vecs;
+  std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
+
+  if (eigenvectors) {
+      return std::tuple<Tensor, Tensor>(cpu_vals.to(self.device()), cpu_vecs.to(self.device()));
+  } else {
+      return std::tuple<Tensor, Tensor>(cpu_vals.to(self.device()), at::empty({0}, self.options()));
+  }
+}
+
+/*
+ * Like eig_cuda but:
+ *   1. assume that self is a square matrix of side "n"
+ *   2. return CPU tensors, which will be copied to GPU memory by the caller
+ */
+static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors) {
   // copy self to pinned CPU memory
   auto self_working_copy = at::empty(self.sizes(),
                                      at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
@@ -1374,11 +1404,7 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   });
   singleCheckErrors(info, "eig_cuda");
 
-  if (eigenvectors) {
-      return std::tuple<Tensor, Tensor>(out_eigvals.to(self.device()), out_eigvecs.to(self.device()));
-  } else {
-      return std::tuple<Tensor, Tensor>(out_eigvals.to(self.device()), at::empty({0}, self.options()));
-  }
+  return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
 }
 
 
