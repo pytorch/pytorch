@@ -133,15 +133,19 @@ class CudaKernelGenerator : private OptInConstDispatch {
     }
   }
 
-  void startBlock() {
-    code_ << "{\n";
+  void startBlock(bool continuation = false) {
+    if (continuation) {
+      code_ << "{\n";
+    } else {
+      indent() << "{\n";
+    }
     ++block_nest_level_;
   }
 
   void endBlock(const char* sep = "\n") {
     --block_nest_level_;
     TORCH_CHECK(block_nest_level_ >= 0);
-    code_ << "}" << sep;
+    indent() << "}" << sep;
   }
 
   std::ostream& indent() {
@@ -151,10 +155,10 @@ class CudaKernelGenerator : private OptInConstDispatch {
     return code_;
   }
 
-  std::string gen(const Statement* statement) {
+  std::string gen(const Statement* stmt) {
     std::stringstream tmp_code;
     std::swap(tmp_code, code_);
-    handle(statement);
+    handle(stmt);
     std::swap(tmp_code, code_);
     return tmp_code.str();
   }
@@ -163,6 +167,14 @@ class CudaKernelGenerator : private OptInConstDispatch {
     std::stringstream tv_name;
     tv_name << "T" << tv->name();
     return tv_name.str();
+  }
+
+  std::string genInline(const Statement* stmt) {
+    const bool saved_inline = print_inline_;
+    print_inline_ = true;
+    const auto result = gen(stmt);
+    print_inline_ = saved_inline;
+    return result;
   }
 
   void handle(const Statement* node) final {
@@ -228,7 +240,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
         if (!first) {
           code_ << " + ";
         }
-        code_ << gen(ind);
+        code_ << genInline(ind);
         first = false;
       }
     }
@@ -253,6 +265,10 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::UnaryOp* node) final {
+    if (!print_inline_) {
+      indent() << gen(node->out()) << " = ";
+    }
+
     if (auto op = inline_op_str(node->getUnaryOpType())) {
       code_ << *op << gen(node->in());
     } else {
@@ -273,6 +289,10 @@ class CudaKernelGenerator : private OptInConstDispatch {
       }
       code_ << ")";
     }
+
+    if (!print_inline_) {
+      code_ << ";\n";
+    }
   }
 
   std::string genBinaryOp(
@@ -289,18 +309,34 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::BinaryOp* node) final {
+    if (!print_inline_) {
+      indent() << gen(node->out()) << " = ";
+    }
+
     code_ << genBinaryOp(
         node->getBinaryOpType(), gen(node->lhs()), gen(node->rhs()));
+
+    if (!print_inline_) {
+      code_ << ";\n";
+    }
   }
 
   void handle(const kir::TernaryOp* node) final {
+    if (!print_inline_) {
+      indent() << gen(node->out()) << " = ";
+    }
+
     code_ << node->getTernaryOpType() << "(" << gen(node->in1()) << ", "
           << gen(node->in2()) << ", " << gen(node->in3()) << ")";
+
+    if (!print_inline_) {
+      code_ << ";\n";
+    }
   }
 
   std::string genReductionOp(BinaryOpType op_type, DataType data_type) {
     std::stringstream lambda;
-    lambda << "[](" << data_type << "&a, " << data_type << "b) "
+    lambda << "[](" << data_type << " &a, " << data_type << " b) "
            << "{ a = " << genBinaryOp(op_type, "a", "b") << "; }";
     return lambda.str();
   }
@@ -328,9 +364,10 @@ class CudaKernelGenerator : private OptInConstDispatch {
       const auto data_type = node->out()->getDataType().value();
       indent() << "broadcast::blockBroadcast<" << (thread_x ? "true" : "false")
                << ", " << (thread_y ? "true" : "false") << ", "
-               << (thread_z ? "true" : "false") << ">(" << gen(node->out())
-               << ", " << gen(node->in()) << ", static_cast<" << data_type
-               << "*>(shared_mem));\n";
+               << (thread_z ? "true" : "false") << ">(\n";
+      indent() << kTab << gen(node->out()) << ",\n";
+      indent() << kTab << gen(node->in()) << ",\n";
+      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
     } else {
       indent() << gen(node->out()) << "\n";
       indent() << kTab << " = " << gen(node->in()) << ";\n";
@@ -362,25 +399,26 @@ class CudaKernelGenerator : private OptInConstDispatch {
     const auto data_type = node->out()->getDataType().value();
     const auto op_type = node->getReductionOpType();
 
-    const std::string block_result = "block_result";
-
     if (has_block_reduce) {
       if (has_grid_reduce) {
-        indent() << data_type << " " << block_result << ";\n";
+        indent() << data_type << " "
+                 << "block_result"
+                 << ";\n";
       }
-      indent() << "blockReduce< " << (tidx ? "true" : "false") << ", "
+      indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
-               << " >"
-               << "(";
+               << ">(\n";
       if (has_grid_reduce) {
-        code_ << block_result;
+        indent() << kTab << "block_result"
+                 << ",\n";
       } else {
-        code_ << gen(node->out());
+        indent() << kTab << gen(node->out()) << ",\n";
       }
-      code_ << ", " << gen(node->in()) << ", "
-            << genReductionOp(op_type, data_type) << ", threadIdx, blockDim"
-            << ", static_cast<" << data_type << "*>(shared_mem)"
-            << ");\n";
+      indent() << kTab << gen(node->in()) << ",\n";
+      indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
+      indent() << kTab << "threadIdx,\n";
+      indent() << kTab << "blockDim,\n";
+      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
     }
   }
 
@@ -417,21 +455,22 @@ class CudaKernelGenerator : private OptInConstDispatch {
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
-             << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
+             << "reduction::gridReduce<" << (bidx ? "true" : "false") << ", "
              << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false")
              << ", " << (!tidx ? "true" : "false") << ", "
              << (!tidy ? "true" : "false") << ", " << (!tidz ? "true" : "false")
-             << " >(" << gen(rop->out()) << ", ";
+             << ">(\n";
+    indent() << kTab << gen(rop->out()) << ",\n";
     if (domain->hasBlockReduction()) {
-      code_ << "block_result";
+      indent() << kTab << "block_result"
+               << ",\n";
     } else {
-      code_ << gen(rop->in());
+      indent() << kTab << gen(rop->in()) << ",\n";
     }
-    code_ << ", " << genReductionOp(op_type, data_type) << ", &"
-          << gen(work_buffer) << "[0]"
-          << ", " << gen(sync_buffer) << ", static_cast<" << data_type
-          << "*>(shared_mem)"
-          << ");\n";
+    indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
+    indent() << kTab << gen(work_buffer) << ",\n";
+    indent() << kTab << gen(sync_buffer) << ",\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
   }
 
   void handle(const kir::Scope& scope) {
@@ -447,33 +486,34 @@ class CudaKernelGenerator : private OptInConstDispatch {
     }
 
     const auto gen_index = gen(node->index());
-    const auto gen_start = gen(node->iter_domain()->start());
-    const auto gen_extent = gen(node->iter_domain()->extent());
+    const auto gen_start = genInline(node->iter_domain()->start());
+    const auto gen_extent = genInline(node->iter_domain()->extent());
     indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
              << gen_index << " < " << gen_extent << "; ++" << gen_index << ") ";
 
-    startBlock();
+    startBlock(true);
     handle(node->body());
     endBlock();
   }
 
   void handle(const kir::IfThenElse* node) final {
-    indent() << "if (" << gen(node->cond()) << ") ";
+    indent() << "if (" << genInline(node->cond()) << ") ";
 
     // "then" block
-    startBlock();
+    startBlock(true);
     handle(node->thenBody());
 
     // "else" block (optional)
     if (node->hasElse()) {
       endBlock(" else ");
-      startBlock();
+      startBlock(true);
       handle(node->elseBody());
     }
 
     endBlock();
   }
 
+  // TODO(kir): fold initialization into Allocate
   void handle(const kir::Allocate* node) final {
     if (node->buffer()->getValType().value() != ValType::KirTensorView) {
       indent() << node->buffer_type() << " " << gen(node->buffer()) << ";\n";
@@ -502,13 +542,13 @@ class CudaKernelGenerator : private OptInConstDispatch {
                    << " = reinterpret_cast<" << node->buffer_type() << "*>"
                    << "(array + offset);\n";
           // Increment Offset Position
-          indent() << "offset += (" << gen(node->size()) << " * sizeof("
+          indent() << "offset += (" << genInline(node->size()) << " * sizeof("
                    << node->buffer_type() << "));\n";
         }
         break;
       case MemoryType::Local:
         indent() << node->buffer_type() << " " << gen(tv) << "["
-                 << gen(node->size()) << "];\n";
+                 << genInline(node->size()) << "];\n";
         break;
       default:
         TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
@@ -523,6 +563,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
   std::stringstream code_;
   const Kernel* kernel_;
   int block_nest_level_ = 0;
+
+  // TODO(kir): replace with explicit assignment statements
+  bool print_inline_ = false;
 };
 
 } // namespace
