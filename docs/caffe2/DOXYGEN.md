@@ -13,7 +13,7 @@ The doxygen customization includes these files in the doxygen folder:
 * stylesheet.css - doxygen's default CSS; tweaked to fix formatting problems with the custom logo, header, and footer
 * main.css - copied from the caffe2ai CSS, so this should be refreshed after the design changes (this overrides/extends stylesheet.css)
 
-It also extracts info from markdown files found in the source tree. A legacy installation file was in the /docs folder and this was removed. These file show up in the top navigation under “Related Pages”.
+It also extracts info from markdown files found in the source tree. A legacy installation file was in the /docs folder and this was removed. These files show up in the top navigation under “Related Pages”.
 
 The flow to create the API documents is simple now:
 
@@ -35,7 +35,7 @@ SOURCE_BROWSER = YES
 VERBATIM_HEADERS = NO
 SHOW_NAMESPACES = NO for C++ config
 
-Not using this (was in old config file, but seems to be for Latex):
+Not using this (was in the old config file, but seems to be for Latex):
 EXTRA_PACKAGES = amsmath \
 amsfonts \
 xr
