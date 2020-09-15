@@ -1117,7 +1117,7 @@ jobs:
     parameters:
       packages:
         type: string
-        description: "What packages are we pruning? (eg. pytorch, torchvision, torchaudio, etc.)"
+        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
         default: "pytorch"
       channel:
         type: string
