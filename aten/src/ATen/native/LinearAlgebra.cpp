@@ -143,25 +143,39 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 }
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
-  return at::_addr(b_self, vec1, vec2, beta, alpha);
+  Tensor result = at::empty({0}, self.options());
+  at::addr_out(result, self, vec1, vec2, beta, alpha);
+  return result;
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-  return at::_addr_(self, vec1, vec2, beta, alpha);
+  Tensor result = at::addr_out(self, self, vec1, vec2, beta, alpha);
+  return result;
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
+
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
-  return at::_addr_out(result, b_self, vec1, vec2, beta, alpha);
+
+  TORCH_CHECK(result.device() == self.device() &&
+              result.device() == vec1.device() &&
+              result.device() == vec2.device(),
+              "Expected all tensors to be on the same device. Found: ",
+              result.device(), ", ", self.device(), ", ",
+              vec1.device(), " and ", vec2.device());
+  TORCH_CHECK(self.dim() == 2,
+              "2D tensor expected, got ", self.dim(), "D tensor for input");
+  TORCH_CHECK(self.size(0) == vec1.size(0) && self.size(1) == vec2.size(0),
+              "size mismatch",
+              ", input: ", self.sizes(),
+              ", v1: ", vec1.sizes(),
+              ", v2: ", vec2.sizes());
+
+  at::addr_out(result, b_self, vec1, vec2, beta, alpha);
+  return result;
 }
 
 Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
@@ -171,7 +185,7 @@ Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
     result.resize_({ self.size(0), vec2.size(0) });
   }
   // resize_ does the "broadcasting", don't need to broadcast again.
-  return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+  return at::addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
 }
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {

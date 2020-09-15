@@ -246,49 +246,10 @@ void addr_impl_cuda<double>(Tensor &out, const Tensor &self,
 Tensor& addr_out_cuda(Tensor &out, const Tensor& self,
                       const Tensor& vec1, const Tensor& vec2,
                       Scalar beta, Scalar alpha) {
-  TORCH_CHECK(vec1.dim() == 1 && vec2.dim() == 1,
-              "vec1 and vec2 should be 1-dimensional vectors. Got dimensions ",
-              vec1.dim(), " and ", vec2.dim());
-
-  Tensor self_;
-  if (&out != &self) {
-    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
-  } else {
-    self_ = self;
-  }
-
-  TORCH_CHECK(out.device() == self_.device() &&
-              out.device() == vec1.device() &&
-              out.device() == vec2.device(),
-              "Expected all tensors to be on the same device. Found: ",
-              out.device(), ", ", self_.device(), ", ",
-              vec1.device(), " and ", vec2.device());
-  TORCH_CHECK(self_.dim() == 2,
-              "2D tensor expected, got ", self_.dim(), "D tensor for input");
-  TORCH_CHECK(self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
-              "size mismatch",
-              ", input: ", self_.sizes(),
-              ", v1: ", vec1.sizes(),
-              ", v2: ", vec2.sizes());
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self_.scalar_type(), "addr_out_cuda", [&] {
-      addr_impl_cuda<scalar_t>(out, self_, vec1, vec2,
-                               alpha.to<scalar_t>(), beta.to<scalar_t>());
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "addr_out_cuda", [&] {
+    addr_impl_cuda<scalar_t>(out, self, vec1, vec2,
+                             alpha.to<scalar_t>(), beta.to<scalar_t>());
   });
-  return out;
-}
-
-Tensor& addr__cuda(Tensor& self,
-                   const Tensor& vec1, const Tensor& vec2,
-                   Scalar beta, Scalar alpha) {
-  addr_out_cuda(self, self, vec1, vec2, beta, alpha);
-  return self;
-}
-
-Tensor addr_cuda(const Tensor& self,
-                  const Tensor& vec1, const Tensor& vec2,
-                  Scalar beta, Scalar alpha) {
-  Tensor out = at::empty({0}, self.options());
-  addr_out_cuda(out, self, vec1, vec2, beta, alpha);
   return out;
 }
 
