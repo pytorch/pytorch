@@ -234,18 +234,42 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", *graph);
-
-    // Rewrite subgraphs with many MMs into expressions that batch them.
-    BatchMM(graph);
-    GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+    GRAPH_DEBUG("After LowerSimpleTuples\n", *graph);
 
     if (tensorExprFuserEnabled()) {
+      // Remove prim::profile nodes and embed the profile info directly in the
+      // IR in value types. We're doing such transformation as optimizations
+      // that try to merge/fuse nodes in the graph (e.g. BatchMM and GraphFuser)
+      // work worse in the presence of intermittent prim::profile nodes.
+      // Optimizations relying on the type info are also responsible for
+      // inserting proper type checks. Once we're done with these optimizations
+      // we will wipe the tensor type information from the IR, so that it's not
+      // accidentally used by any other pass.
+      RemoveProfileNodesAndSpecializeTypes(graph);
+      GRAPH_DEBUG(
+          "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
+          *graph);
+      // Rewrite subgraphs with many MMs into expressions that batch them.
+      BatchMM(graph);
+      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+
       FuseTensorExprs(graph);
+      GRAPH_DEBUG(
+          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
+
+      // Wipe tensor type info from the IR
+      RemoveTensorTypeSpecializations(graph);
+      GRAPH_DEBUG(
+          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
+          *graph);
     } else {
+      // Rewrite subgraphs with many MMs into expressions that batch them.
+      BatchMM(graph);
+      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+
       FuseGraph(graph, true);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     }
-    GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
 
     // Run custom post-fusion passes
     for (const auto& passPair : getCustomPostPasses()) {
@@ -269,18 +293,42 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", *graph);
-
-    // Rewrite subgraphs with many MMs into expressions that batch them.
-    BatchMM(graph);
-    GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+    GRAPH_DEBUG("After LowerSimpleTuples\n", *graph);
 
     if (tensorExprFuserEnabled()) {
+      // Remove prim::profile nodes and embed the profile info directly in the
+      // IR in value types. We're doing such transformation as optimizations
+      // that try to merge/fuse nodes in the graph (e.g. BatchMM and GraphFuser)
+      // work worse in the presence of intermittent prim::profile nodes.
+      // Optimizations relying on the type info are also responsible for
+      // inserting proper type checks. Once we're done with these optimizations
+      // we will wipe the tensor type information from the IR, so that it's not
+      // accidentally used by any other pass.
+      RemoveProfileNodesAndSpecializeTypes(graph);
+      GRAPH_DEBUG(
+          "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
+          *graph);
+      // Rewrite subgraphs with many MMs into expressions that batch them.
+      BatchMM(graph);
+      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+
       FuseTensorExprs(graph);
+      GRAPH_DEBUG(
+          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
+
+      // Wipe tensor type info from the IR
+      RemoveTensorTypeSpecializations(graph);
+      GRAPH_DEBUG(
+          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
+          *graph);
     } else {
+      // Rewrite subgraphs with many MMs into expressions that batch them.
+      BatchMM(graph);
+      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+
       FuseGraph(graph, true);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     }
-    GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
 
     // Run custom post-fusion passes
     for (const auto& passPair : getCustomPostPasses()) {
@@ -322,7 +370,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    RemoveProfilingNodes(copy);
+    GRAPH_DEBUG(
+        "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
     runNoGradOptimizations(copy);
   }
@@ -412,7 +462,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   if (optimized_plan_) {
-    GRAPH_DUMP("plan already optimized:", graph);
+    GRAPH_DEBUG("plan already optimized:", (*optimized_plan_).graph);
     return *optimized_plan_;
   }
 
@@ -447,8 +497,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   GRAPH_DUMP("Optimized Graph: ", copy);
-  // cache
-  GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
   return *optimized_plan_;
@@ -460,47 +508,6 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   auto opt_plan = *optimized_plan_;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
-}
-
-void replaceBlockWithFallbackGraph(Block* b) {
-  auto graph = std::make_shared<Graph>();
-  auto value_map = [](Value* v) { return v; };
-  graph->block()->cloneFrom(b, value_map);
-  auto fallback = b->owningGraph()->create(
-      prim::FallbackGraph, b->inputs(), b->outputs().size());
-  fallback->g_(attr::Subgraph, graph);
-  b->prependNode(fallback);
-
-  for (size_t i = 0; i < b->outputs().size(); i++) {
-    fallback->output(i)->setType(b->outputs()[i]->type());
-    fallback->output(i)->copyMetadata(b->outputs()[i]);
-    b->replaceOutput(i, fallback->output(i));
-  }
-
-  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
-    it.destroyCurrent();
-  }
-}
-
-static Function* createFallbackPathFunction(
-    Block* b,
-    const std::string& function_name) {
-  auto value_map = [](Value* v) { return v; };
-  auto graph = std::make_shared<Graph>();
-  graph->block()->cloneFrom(b, value_map);
-
-  auto otypes = c10::fmap(
-      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
-  // a GraphFunction call only have one output, so all the outputs
-  // need to be packed into a tuple
-  auto tuple_type = TupleType::create(otypes);
-  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
-  graph->appendNode(return_tuple);
-  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
-    graph->eraseOutput(i);
-  }
-  graph->registerOutput(return_tuple->output());
-  return new GraphFunction(function_name, graph, nullptr);
 }
 
 Node* insertFallbackFunctionCall(
@@ -522,6 +529,27 @@ Node* insertFallbackFunctionCall(
 
   auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
   return fun_unpack_tuple;
+}
+
+Function* createFallbackPathFunction(
+    Block* b,
+    const std::string& function_name) {
+  auto value_map = [](Value* v) { return v; };
+  auto graph = std::make_shared<Graph>();
+  graph->block()->cloneFrom(b, value_map);
+
+  auto otypes = c10::fmap(
+      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
+  // a GraphFunction call only have one output, so all the outputs
+  // need to be packed into a tuple
+  auto tuple_type = TupleType::create(otypes);
+  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
+  graph->appendNode(return_tuple);
+  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
+    graph->eraseOutput(i);
+  }
+  graph->registerOutput(return_tuple->output());
+  return new GraphFunction(function_name, graph, nullptr);
 }
 
 void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(

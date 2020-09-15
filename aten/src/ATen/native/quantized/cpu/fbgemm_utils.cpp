@@ -218,16 +218,9 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
-        /*
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> ConvParamsSerializationType { // __getstate__
           return serialize_conv<kSpatialDim>(params);
-        },
-        */
-        // TODO (#43649): switch this to serialize_conv
-        [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> ConvParamsSerializationTypeLegacy { // __getstate__
-          return serialize_conv_legacy<kSpatialDim>(params);
         },
         // __setstate__ takes c10::IValue because we support parsing historical
         // serialization versions.
@@ -251,8 +244,10 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
     .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
     .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
     .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
+    .def("output_padding", &ConvPackedParamsBase<kSpatialDim>::output_padding)
     .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
-    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups);
+    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
+    .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
   return register_conv_params;
 }
 

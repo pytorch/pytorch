@@ -191,7 +191,7 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
-            is_important=xenial_parent_config.is_important,
+            is_important=False,
         )
 
         configs.append(c)
@@ -263,6 +263,7 @@ def instantiate_configs():
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
+        is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
         parms_list_ignored_for_docker_image = []
@@ -301,6 +302,12 @@ def instantiate_configs():
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
             restrict_phases = ["build", "test1", "test2"]
+
+        if is_onnx:
+            parms_list.append("onnx")
+            python_version = fc.find_prop("pyver")
+            parms_list[0] = fc.find_prop("abbreviated_pyver")
+            restrict_phases = ["build", "ort_test1", "ort_test2"]
 
         if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
@@ -353,7 +360,7 @@ def instantiate_configs():
         ):
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (

@@ -38,6 +38,7 @@ EXTRA_ANALYZER_FLAGS=$@
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
+rm -rf "${BUILD_ROOT}"
 mkdir -p "${BUILD_ROOT}"
 mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
