@@ -88,12 +88,6 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
     *prefix, field = target.split('.')
     for item in prefix:
         t = getattr(to_module, item, None)
-        if from_obj is t:
-            # we have already installed one of its parents
-            # (e.g. target = root.linear.weight, but we have already installed root.linear)
-            # once we install a parent, we no longer need to copy the children
-            # since all the needed properties will already be present
-            return
 
         if t is None:
             t = torch.nn.Module()
