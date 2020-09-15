@@ -6090,9 +6090,6 @@ class TestTorchDeviceType(TestCase):
             matrix_inverse_out = torch.empty(*batches, n, n, dtype=torch.float64, device=device)
             torch.inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-            # second call, now that matrix_inverse_out is transposed
-            torch.inverse(matrix, out=matrix_inverse_out)
-            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
             # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
             if matrix.ndim > 2:
