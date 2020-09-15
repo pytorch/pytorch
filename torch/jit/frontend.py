@@ -190,7 +190,6 @@ def get_jit_def(fn, def_name, self_name=None):
             In this case, the `__name__` attribute of the function object is "_forward",
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
-        parse_defaults: If True, the default values for functions are parsed in included in the result AST.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)

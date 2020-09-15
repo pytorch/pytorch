@@ -226,9 +226,8 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
     return default_values;
 
   // If any default argument type is BroadcastList, the expression
-  // will be default value will be expanded into a list later.
-  // Use their type contained in the list for evaluating defaults
-  // instead.
+  // will be expanded into a list later. Use the type contained in
+  // the list for evaluating defaults instead.
   std::vector<Expr> modified_types;
   modified_types.reserve(default_types.size());
   for (auto& ty : default_types) {
