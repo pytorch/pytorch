@@ -192,7 +192,6 @@ class DistributedDataParallel(Module):
         parameters).
 
     .. warning::
-
         If you plan on using this module with a ``nccl`` backend or a ``gloo``
         backend (that uses Infiniband), together with a DataLoader that uses
         multiple workers, please change the multiprocessing start method to

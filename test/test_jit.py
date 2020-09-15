@@ -2528,7 +2528,7 @@ graph(%Ra, %Rb):
         try:
             subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0")
+            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0") from e
 
     def test_print_op_module(self):
         # Issue #19351: python2 and python3 go through different paths.
@@ -15357,6 +15357,11 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool1d_with_indices',
 }
 
+EXCLUDE_ALIAS = {
+    # aliases, which may appear in method_tests but are tested elsewhere
+    'true_divide',
+}
+
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
     call = get_call(method_name, 'method', actuals, kwargs)
@@ -15525,6 +15530,10 @@ def add_autograd_test(
     # Disable complex tests
     # TODO: Add complex support for jit
     if 'complex' in variant_name:
+        return
+
+    # Skips aliases, which are tested in test_op_aliases.py
+    if name in EXCLUDE_ALIAS:
         return
 
     basic_test_name = 'test_' + name
