@@ -3247,7 +3247,8 @@ class TestONNXRuntime(unittest.TestCase):
                                     })
 
     @disableScriptTest()
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([12])
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
         input = torch.randint(10, (7,))
@@ -3264,7 +3265,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (input))
 
     @disableScriptTest()
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([12])
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -3279,7 +3281,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @disableScriptTest()
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([12])
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
