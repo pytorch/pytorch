@@ -1344,10 +1344,10 @@ AT_ERROR("symeig: MAGMA library not found in "
  */
 static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors) {
   // copy self to pinned CPU memory
-  auto self_working_copy = at::empty(self.sizes(),
-                                     at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
-
-  self_working_copy.transpose_(0, 1); // make it column-ordered, what magmaEig wants
+  auto self_working_copy = at::empty_strided(
+      {n, n}, // square matrix
+      {1, n}, // column-ordered, as magmaEig expects
+      at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
   self_working_copy.copy_(self);
 
   // tensors holding the results
