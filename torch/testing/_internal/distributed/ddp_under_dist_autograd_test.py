@@ -496,9 +496,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
-    @requires_gloo()
-    @dist_init
-    def test_ddp_comparison(self, simulate_uneven_inputs=True):
+    def _run_test_ddp_comparision(self, simulate_uneven_inputs=False):
         gLogger.info(f"Running trainer rank: {self.rank}")
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
@@ -515,15 +513,8 @@ class DdpComparisonTest(RpcAgentTestFixture):
             net
         )
 
-        # ddp_net_local = DistributedDataParallel(
-        #     deepcopy(net)
-        # )
-
-        # num_inputs = 1
-        # if simulate_Un
         # Odd ranks join early if simulate_uneven_inputs.
         num_inputs = 1
-        # simulate_uneven_inputs = False
         if simulate_uneven_inputs:
             if self.rank % 2 == 0:
                 num_inputs += 2
@@ -562,6 +553,17 @@ class DdpComparisonTest(RpcAgentTestFixture):
                         f"and dist autograd: {param.grad} \n---\n {grads_dict[param]} for iteration {i}",
                     )
         dist.destroy_process_group()
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_comparison(self):
+        self._run_test_ddp_comparision()
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_comparison_uneven_inputs(self):
+        # test with simulating uneven inputs in DDP
+        self._run_test_ddp_comparision(simulate_uneven_inputs=True)
 
     @requires_gloo()
     @dist_init
