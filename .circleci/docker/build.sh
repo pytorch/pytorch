@@ -160,7 +160,6 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
-    UBUNTU_VERSION=16.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
@@ -173,6 +172,13 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-py3-clang7-onnx)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -230,7 +236,6 @@ case "$image" in
     VISION=yes
     ;;
   pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
-    UBUNTU_VERSION=18.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
@@ -241,7 +246,6 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
-    UBUNTU_VERSION=18.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.8

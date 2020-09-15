@@ -217,42 +217,6 @@ TypePtr ScriptTypeParser::parseType(const std::string& str) {
   return parseTypeFromExpr(p.parseExp());
 }
 
-bool checkMutableFunctionDefault(const IValue& def) {
-  // TODO: Renable.
-  // if (def.isList() || def.isGenericDict()) {
-  //   return true;
-  // }
-
-  // if (def.isTuple()) {
-  //   for (auto& elem : def.toTuple()->elements()) {
-  //     if(checkMutableFunctionDefault(elem)) {
-  //       return true;
-  //     }
-  //   }
-  // }
-
-  return false;
-}
-
-void checkMutableFunctionDefaults(
-    const SourceRange& range,
-    const std::vector<IValue>& defaults,
-    const std::vector<Ident>& default_names,
-    const std::vector<Expr>& default_types) {
-  TORCH_INTERNAL_ASSERT(defaults.size() == default_names.size());
-  TORCH_INTERNAL_ASSERT(defaults.size() == default_types.size());
-
-  for (size_t i = 0, e = defaults.size(); i < e; ++i) {
-    if (checkMutableFunctionDefault(defaults[i])) {
-      throw ErrorReport(range)
-          << "Mutable default parameters are not supported because Python binds them to the function"
-          << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
-          << " the default parameter within the body of the function. Found "
-          << default_types[i] << " on parameter " << default_names[i].name();
-    }
-  }
-}
-
 std::vector<IValue> ScriptTypeParser::evaluateDefaults(
     const SourceRange& r,
     const std::vector<Expr>& default_types,
@@ -369,8 +333,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
 
   auto default_values =
       evaluateDefaults(decl.range(), default_types, default_exprs);
-  checkMutableFunctionDefaults(
-      decl.range(), default_values, default_names, default_types);
 
   auto defaults_it = default_values.begin();
   for (auto it = params_begin; it != params_end; ++it) {

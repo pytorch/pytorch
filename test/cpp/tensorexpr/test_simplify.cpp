@@ -1009,6 +1009,32 @@ void testSimplifySubs() {
   }
 }
 
+void testSimplifyDiv() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+
+  {
+    ExprHandle body = ExprHandle(0) / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    ExprHandle body = x / 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    ExprHandle body = x / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+}
+
 // Test that mixing ops together simplifies as expected.
 void testSimplifyMultiOp() {
   KernelScope kernel_scope;
@@ -2038,6 +2064,18 @@ void testSimplifyConstantCond() {
     Stmt* simplified = IRSimplifier::simplify(body);
     Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
   }
 }
 

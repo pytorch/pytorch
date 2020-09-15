@@ -2,8 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from collections import defaultdict
 
 import unittest
+import contextlib
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,7 +33,7 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
-FUSION_GROUP = 'tensorexpr::Group'
+FUSION_GROUP = 'prim::TensorExprGroup'
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
@@ -44,13 +46,21 @@ def warmup_forward(f, *args):
 
     return results
 
+@contextlib.contextmanager
+def texpr_reductions_enabled():
+    old = torch._C._jit_set_texpr_reductions_enabled(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_reductions_enabled(old)
+
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
 
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
@@ -69,17 +79,33 @@ class TestTEFuser(JitTestCase):
 
     def assertAllFused(self, graph, except_for=()):
 
-        diff_graphs = [n for n in graph.nodes() if n.kind() == 'prim::DifferentiableGraph']
-        if len(diff_graphs) > 0:
-            self.assertEqual(len(diff_graphs), 1)
-            graph = diff_graphs[0].g('Subgraph')
+        # note this helper collects nodes on 'fast path' only
+        # i.e. the true blocks of specialized checks
+        def get_nodes_and_parents_recursively(block, kind, acc):
+            for node in block.nodes():
+                if node.kind() == kind:
+                    acc[block].append(node)
+                elif node.kind() == 'prim::DifferentiableGraph':
+                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
+                else:
+                    for inner_block in node.blocks():
+                        get_nodes_and_parents_recursively(inner_block, kind, acc)
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
-        # TODO: reenable the checks once we have prim::FallBack nodes:
-        # self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-        #                 'got {}'.format(graph))
-        # self.assertTrue([node.kind() for node in graph.nodes()].count(FUSION_GROUP) == 1)
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+
+        fusion_groups = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
+        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
+                        'got {}'.format(graph))
+
 
     def findFusionGroups(self, graph):
         result = []
@@ -101,6 +127,49 @@ class TestTEFuser(JitTestCase):
         fusion_groups = self.findFusionGroups(graph)
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_simple(self):
+        def func(x):
+            x2 = x * x
+            return x2.sum()
+
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_dim(self):
+        def func(x):
+            return x.sum((0, )) * 2
+
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_keepdim_cast(self):
+        def func(x):
+            return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
+
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
@@ -323,9 +392,30 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
 
+    def test_minmax(self):
+        def tmax(a, b):
+            return torch.max(2 * a, b)
+
+        def tmin(a, b):
+            return torch.min(2 * a, b)
+
+        a = torch.randn(4, 4, dtype=torch.float)
+        b = torch.randn(4, 4, dtype=torch.float)
+        nan = torch.tensor(float('nan'), dtype=torch.float)
+
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for f, inputs, device in product(
+                (tmax, tmin),
+                ([a, b], [a, nan], [b, nan]),
+                devices):
+            inputs = [t.to(device) for t in inputs]
+            s = self.checkScript(f, inputs)
+            self.assertAllFused(s.graph_for(*inputs))
+
     # TODO: reenable the test after backwards passes start working in PE
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -462,9 +552,10 @@ class TestTEFuser(JitTestCase):
         graph = ge_weight_scalar.graph_for(start, end)
         self.assertAllFused(graph)
 
-        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
-        graph = ge_weight_tensor.graph_for(start, end)
-        self.assertAllFused(graph)
+        # TODO: uncomment when TE enables support for scalar tensors
+        # ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        # graph = ge_weight_tensor.graph_for(start, end)
+        # self.assertAllFused(graph)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_cuda(self):
@@ -803,8 +894,6 @@ class TestTEFuser(JitTestCase):
                 raise
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
-    # TODO: reenable once backward pass starts to work
     def test_milstm_cuda(self):
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
@@ -856,8 +945,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    # TODO: reenable the test after backwards passes start working in PE
-    @unittest.skip("temporarily disable")
     def test_erf_cuda(self):
         def fn_test_erf(x):
             return F.relu(torch.erf(x) - torch.erfc(x))
@@ -921,7 +1008,7 @@ class TestTEFuser(JitTestCase):
         assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @unittest.skip("Reenable when TE will add support for 0-dim tensors")
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
@@ -942,7 +1029,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
     # Currently we don't pull constants into fusion groups, because in some
     # cases it could remove the constant from the original graph and now our
     # fusion group needs to return that constant for its other users.
@@ -955,9 +1041,7 @@ class TestTEFuser(JitTestCase):
             y = x + z
             return x * y
 
-        # XXX: right now we only support fusing scalars if
-        # they're constant (#9940)
-        def should_not_fuse(x, z):
+        def should_fuse_scalar(x, z):
             y = x + int(z)
             return x * y
 
@@ -972,19 +1056,17 @@ class TestTEFuser(JitTestCase):
             torch.randn(2, 2, dtype=torch.float, device='cuda'),
             torch.tensor(3., dtype=torch.float, device='cuda'),
         ]
-        ge = self.checkScript(should_not_fuse, inputs)
+        ge = self.checkScript(should_fuse_scalar, inputs)
         # Check that the fused graph computes correct results when the scalar
         # input changes.
         inputs = [
             torch.randn(2, 2, dtype=torch.float, device='cuda'),
             torch.tensor(7., dtype=torch.float, device='cuda'),
         ]
-        self.assertEqual(ge(*inputs), should_not_fuse(*inputs))
-        # XXX: The TE fuser supports fusion of non-constant scalars
-        # self.assertGraphContainsExactly(
-        #     ge.graph_for(*inputs), FUSION_GROUP, 0, consider_subgraphs=True)
+        self.assertEqual(ge(*inputs), should_fuse_scalar(*inputs))
+        # The TE fuser supports fusion of non-constant scalars
         self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), FUSION_GROUP, 0, consider_subgraphs=True)
+            ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_where_and_typing(self):
@@ -1037,6 +1119,122 @@ class TestTEFuser(JitTestCase):
                     old_plans.add(str(backward))
             num_grads = 1 if i > 0 else 0
             self.assertEqual(len([n for n in backward.nodes() if n.kind() == 'aten::_grad_sum_to_size']), num_grads)
+
+    def test_disabled(self):
+        old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+
+        def fn(a):
+            return a ** 2 + a
+
+        x = torch.randn(4, dtype=torch.float, device="cpu")
+        s = self.checkScript(fn, (x,))
+        g = s.graph_for(x)
+        self.assertEqual(len(self.findFusionGroups(g)), 0)
+
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
+
+    def data_for(self, dtype, device="cuda"):
+        v = torch.arange(1, 3, dtype=torch.float, device=device)
+        if dtype == torch.bool:
+            return v > 2
+        elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            return torch.quantize_per_tensor(v, 0.1, 1, dtype=dtype)
+        else:
+            return v.to(dtype)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_unary_ops(self):
+        def apply(fn):
+            return lambda x: fn(2 * x)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            # torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        unary_ops = [
+            torch.sigmoid,
+            torch.reciprocal,
+            torch.neg,
+            torch.relu,
+            torch.log,
+            torch.log10,
+            torch.log2,
+            torch.exp,
+            torch.expm1,
+            torch.erf,
+            torch.erfc,
+            torch.cos,
+            torch.sin,
+            torch.tan,
+            torch.acos,
+            torch.asin,
+            torch.cosh,
+            torch.sinh,
+            torch.atan,
+            torch.tanh,
+            torch.sqrt,
+            torch.rsqrt,
+            torch.abs,
+            torch.ceil,
+            torch.floor,
+            torch.round,
+            torch.trunc,
+            torch.frac,
+        ]
+        devices = ["cuda"]
+        for dtype, op, device in product(dtypes, unary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x,))
+                torch.testing.assert_allclose(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_unsupported_dtypes(self):
+        def fn(x):
+            return x * x + x
+
+        unsupported_dtypes = [
+            torch.bfloat16,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+        ]
+        for dtype in unsupported_dtypes:
+            try:
+                x = self.data_for(dtype, "cuda")
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            t = torch.jit.trace(fn, (x,))
+            self.assertEqual(ref, t(x))
+            self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
 
 if __name__ == '__main__':

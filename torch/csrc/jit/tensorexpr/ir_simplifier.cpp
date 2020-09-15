@@ -949,6 +949,21 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
     return new Div(lhs_new, rhs_new);
   }
 
+  // If the numerator is zero, so is the result.
+  if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    return lhs_new;
+  }
+
+  // If the denominator is one, return numerator.
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    return lhs_new;
+  }
+
+  // If numberator and denominator are equal the result is 1.
+  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+    return getImmediateByType(v->dtype(), 1);
+  }
+
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
     return ret;
   }
@@ -1111,9 +1126,9 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
-      return Stmt::clone(true_new);
+      return true_new ? Stmt::clone(true_new) : nullptr;
     } else {
-      return Stmt::clone(false_new);
+      return false_new ? Stmt::clone(false_new) : nullptr;
     }
   }
 

@@ -45,8 +45,10 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
+
 #include "torch/csrc/jit/api/module.h"
 #include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/runtime/profiling_record.h"
@@ -1196,6 +1198,82 @@ void testThreadLocalDebugInfo() {
   }
 }
 
+void testFallbackGraphs() {
+  static const auto nestGraphIntoFallbackGraph =
+      [](const std::shared_ptr<Graph>& graph) {
+        ProfilingRecord::removeProfileCounter(graph->block());
+        auto fallback =
+            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
+        for (size_t i = 0; i < graph->outputs().size(); i++) {
+          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
+          fallback->output(i)->copyMetadata(graph->outputs()[i]);
+        }
+        for (auto it = graph->block()->nodes().rbegin();
+             it != fallback->iterator();
+             it++) {
+          it.destroyCurrent();
+        }
+      };
+
+  auto x = at::randn({1}, at::kCPU);
+  auto y = at::randn({1}, at::kCPU);
+  auto stack = createStack({x.clone(), y.clone()});
+
+  auto graph_string = R"IR(
+    graph(%0 : Float(1),
+          %1 : Float(1)):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::mul(%2, %0)
+      return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  {
+    Code code(graph, "");
+    InterpreterState interpreter{code};
+    interpreter.run(stack);
+  }
+  at::Tensor et;
+  pop(stack, et);
+  float ef = et.item<float>();
+  {
+    EnableProfilingGuard epg;
+    GraphFunction f("fallbackGraphs", graph, nullptr);
+    for (size_t i = 0; i < getNumProfiledRuns() + 1; i++) {
+      stack.emplace_back(x.clone());
+      stack.emplace_back(y.clone());
+      if (i == getNumProfiledRuns()) {
+        // we will be modifying a profiled graph
+        // before ProfilingGraphExecutor
+        // will optimize it in the next iteration
+        auto opt_graph = lastExecutedOptimizedGraph();
+        // this is safe to do since we are done profiling
+        ProfilingRecord::removeProfileCounter(opt_graph->block());
+        replaceBlockWithFallbackGraph(opt_graph->block(), opt_graph->inputs());
+        auto it = opt_graph->block()->nodes().begin();
+        ASSERT_EQ(it->kind(), prim::FallbackGraph);
+        auto fallback = *it++;
+        ASSERT_EQ(it, opt_graph->block()->nodes().end());
+        ASSERT_TRUE(fallback->hasAttribute(attr::Subgraph));
+        testing::FileCheck()
+            .check("Tensor = aten::mul")
+            ->check("Tensor = aten::mul")
+            ->run(*fallback->g(attr::Subgraph));
+      }
+      f.run(stack);
+      at::Tensor at;
+      pop(stack, at);
+      float af = at.item<float>();
+      ASSERT_EQ(af, ef);
+    }
+
+    auto opt_graph = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("(Tensor) = prim::CallFunction")
+        ->run(*opt_graph);
+  }
+}
+
 void testAutogradProfiler() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -1906,7 +1984,8 @@ void testFutures() {
     int sat1 = 0;
     int sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
-    f1->setError("Failed");
+    f1->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
@@ -1920,8 +1999,9 @@ void testFutures() {
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
-    f1->setErrorIfNeeded("Dup");
-    ASSERT_TRUE(strcmp(f1->error()->what(), "Failed") == 0);
+    f1->setErrorIfNeeded(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Dup")));
+    ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
   }
@@ -2001,7 +2081,8 @@ void testFutures() {
     futures.push_back(s4);
     auto c5 = collectAll(futures);
     ASSERT_FALSE(c5->completed());
-    s4->setError("Failed");
+    s4->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_TRUE(c5->completed());
     ASSERT_EQ(c5->value().toList().size(), 4);
     try {

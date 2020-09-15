@@ -2,91 +2,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import copy
 
-import torch.nn.intrinsic.modules.fused as torch_fused
 import torch.nn as nn
-import torch.nn.intrinsic as nni
 
-def fuse_conv_bn(conv, bn):
-    r"""Given the conv and bn modules, fuses them and returns the fused module
+from .fuser_method_mappings import get_fuser_method
+# for backward compatiblity
+from .fuser_method_mappings import fuse_conv_bn  # noqa: F401
+from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F40
 
-    Args:
-        conv: Module instance of type conv2d/conv3d
-        bn: Spatial BN instance that needs to be fused with the conv
-
-    Examples::
-
-        >>> m1 = nn.Conv2d(10, 20, 3)
-        >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
-    """
-    assert(conv.training == bn.training),\
-        "Conv and BN both must be in the same mode (train or eval)."
-
-    is_3d = isinstance(conv, nn.Conv3d)
-
-    if conv.training:
-        assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
-        assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
-        assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return nni.ConvBn3d(conv, bn) if is_3d \
-            else nni.ConvBn2d(conv, bn)
-    else:
-        return nn.utils.fuse_conv_bn_eval(conv, bn)
-
-def fuse_conv_bn_relu(conv, bn, relu):
-    r"""Given the conv and bn modules, fuses them and returns the fused module
-
-    Args:
-        conv: Module instance of type conv2d/conv3d
-        bn: Spatial BN instance that needs to be fused with the conv
-
-    Examples::
-
-        >>> m1 = nn.Conv2d(10, 20, 3)
-        >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
-    """
-    assert(conv.training == bn.training == relu.training),\
-        "Conv and BN both must be in the same mode (train or eval)."
-    if conv.training:
-        map_to_fused_module_train = {
-            nn.Conv2d: torch_fused.ConvBnReLU2d,
-            nn.Conv3d: torch_fused.ConvBnReLU3d,
-        }
-        assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
-        assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
-        assert bn.track_running_stats, 'Only support fusing BatchNorm with tracking_running_stats set to True'
-        fused_module = map_to_fused_module_train.get(type(conv))
-        if fused_module is not None:
-            return fused_module(conv, bn, relu)
-        else:
-            raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, relu)))
-    else:
-        map_to_fused_module_eval = {
-            nn.Conv1d: torch_fused.ConvReLU1d,
-            nn.Conv2d: torch_fused.ConvReLU2d,
-            nn.Conv3d: torch_fused.ConvReLU3d,
-        }
-        fused_module = map_to_fused_module_eval[type(conv)]
-        if fused_module is not None:
-            return fused_module(nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
-        else:
-            raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
-
-OP_LIST_TO_FUSER_METHOD = {
-    (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
-    (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
-    (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
-    (nn.Conv2d, nn.BatchNorm2d, nn.ReLU): fuse_conv_bn_relu,
-    (nn.Conv3d, nn.BatchNorm3d): fuse_conv_bn,
-    (nn.Conv3d, nn.BatchNorm3d, nn.ReLU): fuse_conv_bn_relu,
-    (nn.Conv1d, nn.ReLU): nni.ConvReLU1d,
-    (nn.Conv2d, nn.ReLU): nni.ConvReLU2d,
-    (nn.Conv3d, nn.ReLU): nni.ConvReLU3d,
-    (nn.Linear, nn.ReLU): nni.LinearReLU,
-    (nn.BatchNorm2d, nn.ReLU): nni.BNReLU2d,
-    (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
-}
+from typing import List, Optional
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
@@ -119,24 +42,26 @@ def fuse_known_modules(mod_list):
     the fused operation. The rest of the elements are set to nn.Identity()
     """
     types = tuple(type(m) for m in mod_list)
-    fuser_method = OP_LIST_TO_FUSER_METHOD.get(types, None)
+    fuser_method = get_fuser_method(types)
     if fuser_method is None:
         raise NotImplementedError("Cannot fuse modules: {}".format(types))
-    new_mod = [None] * len(mod_list)
-    new_mod[0] = fuser_method(*mod_list)
+    new_mod : List[Optional[nn.Module]] = [None] * len(mod_list)
+    fused = fuser_method(*mod_list)
     # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
     # Move pre forward hooks of the base module to resulting fused module
     for handle_id, pre_hook_fn in mod_list[0]._forward_pre_hooks.items():
-        new_mod[0].register_forward_pre_hook(pre_hook_fn)
+        fused.register_forward_pre_hook(pre_hook_fn)
         del mod_list[0]._forward_pre_hooks[handle_id]
     # Move post forward hooks of the last module to resulting fused module
     for handle_id, hook_fn in mod_list[-1]._forward_hooks.items():
-        new_mod[0].register_forward_hook(hook_fn)
+        fused.register_forward_hook(hook_fn)
         del mod_list[-1]._forward_hooks[handle_id]
+    new_mod[0] = fused
 
     for i in range(1, len(mod_list)):
-        new_mod[i] = nn.Identity()
-        new_mod[i].training = mod_list[0].training
+        identity = nn.Identity()
+        identity.training = mod_list[0].training
+        new_mod[i] = identity
 
     return new_mod
 

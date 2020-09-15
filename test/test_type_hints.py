@@ -86,7 +86,7 @@ def get_all_examples():
         if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
-                example_file_lines.append("\n\ndef example_torch_{}():".format(fname))
+                example_file_lines.append(f"\n\ndef example_torch_{fname}():")
                 example_file_lines += e
 
     for fname in dir(torch.Tensor):
@@ -95,7 +95,7 @@ def get_all_examples():
         if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
-                example_file_lines.append("\n\ndef example_torch_tensor_{}():".format(fname))
+                example_file_lines.append(f"\n\ndef example_torch_tensor_{fname}():")
                 example_file_lines += e
 
     return "\n".join(example_file_lines)
@@ -156,7 +156,7 @@ class TestTypeHints(TestCase):
                 os.path.abspath(fn),
             ])
             if result != 0:
-                self.fail("mypy failed:\n{}".format(stdout))
+                self.fail(f"mypy failed:\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_type_hint_examples(self):
@@ -175,7 +175,7 @@ class TestTypeHints(TestCase):
                 example_path,
             ])
             if result != 0:
-                self.fail("mypy failed for exampl {}\n{}".format(example, stdout))
+                self.fail(f"mypy failed for example {example}\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
@@ -215,7 +215,7 @@ class TestTypeHints(TestCase):
         finally:
             os.chdir(cwd)
         if result != 0:
-            self.fail("mypy failed: {}".format(stdout))
+            self.fail(f"mypy failed: {stdout} {stderr}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy_strict(self):
@@ -237,7 +237,7 @@ class TestTypeHints(TestCase):
         finally:
             os.chdir(cwd)
         if result != 0:
-            self.fail("mypy failed: {}".format(stdout))
+            self.fail(f"mypy failed: {stdout} {stderr}")
 
 if __name__ == '__main__':
     run_tests()

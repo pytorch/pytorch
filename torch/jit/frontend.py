@@ -12,7 +12,7 @@ from torch._C._jit_tree_views import (
     TrueLiteral, FalseLiteral, NoneLiteral, Starred,
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
-    SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    SliceExpr, Subscript, TokenKind, TernaryIf, With, WithItem, Property,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -205,13 +205,16 @@ def get_jit_def(fn, def_name, self_name=None):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
-        fn_def.body = unused_fn_def.body
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
+        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
+            raise RuntimeError("Expected a single top-level function")
+        unused_def = unused_fn_def.body[0]
+        fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
             # Replace potentially unsupported type annotations by "Any"
-            arg.annotation = unused_fn_def.args.args[0].annotation
+            arg.annotation = unused_def.args.args[0].annotation
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
@@ -281,6 +284,22 @@ def build_param_list(ctx, py_args, self_name):
     return result
 
 
+def valid_default_value_expr(expr):
+    """
+    Check whether the given default value expression is valid. For it to be valid,
+    it cannot be a list or dict literal (because those are mutable) and cannot be a
+    variable (because those cannot be properly closed over).
+    """
+    is_valid = not (expr.kind() == TokenKind.ListLiteralKind or expr.kind() == TokenKind.DictLiteralKind)
+    is_valid &= not expr.kind() == TokenKind.VarKind
+
+    if expr.kind() == TokenKind.TupleLiteralKind:
+        for elem in expr.inputs():
+            is_valid &= valid_default_value_expr(elem)
+
+    return is_valid
+
+
 def build_param(ctx, py_arg, self_name, kwarg_only, default_value=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
@@ -295,7 +314,10 @@ def build_param(ctx, py_arg, self_name, kwarg_only, default_value=None):
     # Create the appropriate TreeView for the default value if there is one.
     if default_value:
         default_value_expr = build_expr(ctx, default_value)
-        return Param(annotation_expr, default_value_expr, Ident(r, name), kwarg_only)
+        if valid_default_value_expr(default_value_expr):
+            return Param(annotation_expr, default_value_expr, Ident(r, name), kwarg_only)
+        else:
+            raise FrontendError(default_value_expr.range(), f'Invalid default value for argument {name}')
 
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
@@ -578,10 +600,9 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         if op_token is None:
-            err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
-            raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
+            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod

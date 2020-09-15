@@ -2,7 +2,10 @@ import torch
 import unittest
 import operator
 import numbers
+import pickle
+import copy
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
@@ -16,6 +19,10 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+class SimpleTest(torch.nn.Module):
+    def forward(self, x):
+        return torch.relu(x + 3.0)
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -184,8 +191,8 @@ class TestFX(JitTestCase):
         a = resnet(ip)
         b = res_graph(ip)
         c = res_script(ip)
-        assert torch.allclose(a, b)
-        assert torch.allclose(a, c)
+        self.assertEqual(a, b)
+        self.assertEqual(a, c)
 
         quantizer = Quantizer(res_graph)
 
@@ -199,7 +206,7 @@ class TestFX(JitTestCase):
         e = qgraph_script(ip)
 
         assert (a - d).abs().max() < 2
-        assert torch.allclose(d, e)
+        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
@@ -320,10 +327,10 @@ class TestFX(JitTestCase):
             # Add placeholders for fn inputs
             placeholder_nodes = []
             for name in fn_input_names:
-                placeholder_nodes.append(graph.placeholder(name))
+                placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.get_param('interpreter')
+            interpreter_node = graph.create_node('get_param', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -365,6 +372,145 @@ class TestFX(JitTestCase):
         m_g = symbolic_trace(m)
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
+
+    def test_node_tagging(self):
+        class TaggingDelegate(DefaultDelegate):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name)
+                n.tag = 'foo'
+                return n
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = M()
+        g = symbolic_trace(m, TaggingDelegate).graph
+        for n in g.nodes:
+            self.assertTrue(hasattr(n, 'tag'))
+            self.assertEqual(n.tag, 'foo')
+
+    def test_tensor_attribute(self):
+        class TensorAttribute(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tensor = torch.rand(3, 4)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.tensor)
+
+        ta = TensorAttribute()
+        traced = symbolic_trace(ta)
+        traced(torch.rand(4, 4))
+
+        class WrapperForQualname(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ta = TensorAttribute()
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.ta.tensor)
+
+        wfq = WrapperForQualname()
+        traced2 = symbolic_trace(wfq)
+        traced2(torch.rand(4, 4))
+
+    def test_tensor_constant(self):
+        class ConstTensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.linear(x, torch.zeros(3, 4))
+
+        ct = ConstTensor()
+        traced = symbolic_trace(ct)
+        traced(torch.rand(4, 4))
+
+    def test_pickle_graphmodule(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+        x = torch.rand(3, 4)
+        self.assertEqual(loaded(x), traced(x))
+
+    def test_deepcopy_graphmodule_with_transform(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        def transform(traced):
+            new_graph = copy.deepcopy(traced.graph)
+            relu_out = new_graph.create_node(
+                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
+            new_graph.output(relu_out)
+            return GraphModule(traced, new_graph)
+        transformed = transform(traced)
+        copied = copy.deepcopy(transformed)
+        x = torch.randn(3, 4)
+        self.assertEqual(copied(x), transformed(x))
+
+    def test_unpack_list_better_error(self):
+        class SomeArgs(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.rand(3, 4)
+
+        class UnpacksList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sa = SomeArgs()
+
+            def forward(self, x : list):
+                return self.sa(*x)
+
+        ul = UnpacksList()
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+            symbolic_trace(ul)
+
+    def test_unpack_dict_better_error(self):
+        class SomeKwargs(torch.nn.Module):
+            def forward(self, x=3, y=4):
+                return torch.rand(3, 4)
+
+        class UnpacksDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sk = SomeKwargs()
+
+            def forward(self, x : dict):
+                return self.sk(**x)
+
+        ud = UnpacksDict()
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+            symbolic_trace(ud)
+
+    def test_torch_custom_ops(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.sigmoid(a)
+                c = torch.ops.aten.cat([a, b])
+                return torch.ops.aten.cat((c, c))
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+    def test_pretty_print(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        printed = str(traced)
+        assert 'GraphModuleImpl()' in printed
+        assert 'torch.relu' in printed
+
+    def test_pretty_print_graph(self):
+        class KwargPrintTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.squeeze(x + 3.0, dim=2)
+        st = KwargPrintTest()
+        traced = symbolic_trace(st)
+        stringed = str(traced.graph)
+        for s in ['args', 'kwargs', 'uses']:
+            assert s in stringed
 
 
 if __name__ == '__main__':
