@@ -775,7 +775,8 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  TORCH_CHECK(iter.numel() > 0 || std::all_of(dim.begin(),dim.end(),[&](int d){return self.sizes()[d] != 0;}),
+              "operation does not have an identity");
   min_values_stub(iter.device_type(), iter);
   return result;
 }
@@ -788,7 +789,8 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  TORCH_CHECK(iter.numel() > 0 || std::all_of(dim.begin(),dim.end(),[&](int d){return self.sizes()[d] != 0;}),
+              "operation does not have an identity");
   max_values_stub(iter.device_type(), iter);
   return result;
 }
@@ -799,11 +801,11 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(dim.has_value() || self.numel() > 0,
+  TORCH_CHECK(self.numel() > 0 || dim.has_value(),
               "cannot perform reduction function argmax "
               "on a tensor ", self.sizes(), " with no elements because the operation does not have an identity."
               " Try performing reduction over a non-zero dimension.");
-  TORCH_CHECK(dim.has_value() && self.size(dim.value()) != 0,
+  TORCH_CHECK(self.dim() == 0 || !dim.has_value() || self.size(dim.value()) != 0,
               "cannot perform reduction function argmax "
               "on a zero dimension ", dim.value(), " of ", self.sizes(), " because the operation does not have an identity."
               " Try performing reduction over a non-zero dimension.");
@@ -838,11 +840,11 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(dim.has_value() || self.numel() > 0,
+  TORCH_CHECK(self.numel() > 0 || dim.has_value(),
               "cannot perform reduction function argmin "
               "on a tensor ", self.sizes(), " with no elements because the operation does not have an identity."
               " Try performing reduction over a non-zero dimension.");
-  TORCH_CHECK(dim.has_value() && self.size(dim.value()) != 0,
+  TORCH_CHECK(self.dim() == 0 || !dim.has_value() || self.size(dim.value()) != 0,
               "cannot perform reduction function argmin "
               "on a zero dimension ", dim.value(), " of ", self.sizes(), " because the operation does not have an identity."
               " Try performing reduction over a non-zero dimension.");
