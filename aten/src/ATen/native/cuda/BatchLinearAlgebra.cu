@@ -1303,7 +1303,6 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto self_data = self.data_ptr<scalar_t>();
 
-  out_eigvals.resize_({2, n});
   auto out_eigvals_data = out_eigvals.data_ptr<scalar_t>();
   scalar_t *wr = out_eigvals_data;
   scalar_t *wi = out_eigvals_data+n;
@@ -1329,11 +1328,6 @@ AT_ERROR("symeig: MAGMA library not found in "
     magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
     *info_ptr = info;
   }
-
-  // magmaEig returns column-ordered tensors, turn them into row-ordered
-  out_eigvals.transpose_(0, 1);
-  if (jobvr == MagmaVec)
-      out_eigvecs.transpose_(0, 1);
 #endif
 }
 
@@ -1350,10 +1344,11 @@ static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n,
       at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
   self_working_copy.copy_(self);
 
-  // tensors holding the results
-  auto out_eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // tensors holding the results. We use empty_strided to make them column-ordered
+  auto options = self.options().device(at::kCPU).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto out_eigvals = at::empty_strided({n, 2}, {1, n}, options);
   auto out_eigvecs = eigenvectors
-                     ? at::empty({n, n}, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                     ? at::empty_strided({n, n}, {1, n}, options)
                      : Tensor();
 
   int64_t info;
