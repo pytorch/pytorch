@@ -4,6 +4,7 @@ from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
 import keyword
+import re
 
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist
@@ -12,7 +13,10 @@ def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    s = ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    if re.match('[0-9]', s):
+        s = '_' + s
+    return s
 
 def _qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins

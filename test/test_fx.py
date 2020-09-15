@@ -527,7 +527,45 @@ class TestFX(JitTestCase):
         input = torch.rand(3) 
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
+
         self.assertEqual(r, ref) 
+
+    @skipIfNoTorchVision
+    def test_preserve(self):
+        def set_module_attr(root, qualname, value):
+            *prefix, last = qualname.split('.')
+            for atom in prefix:
+                root = getattr(root, atom)
+            setattr(root, last, value)
+
+        def trace_with_hierarchy(root):
+            to_trace = {}  # ordered 
+
+            class HTrace(Tracer):
+                def is_leaf_module(self, mod: torch.nn.Module):
+                    if super().is_leaf_module(mod):
+                        return True
+                    else:
+                        # make this a leaf in the original module,
+                        # but we will replace it with a traced one
+                        to_trace[mod] = True
+                    return True
+            root = HTrace().trace(root)
+            from torch.fx.symbolic_trace import _find_module
+            for submodule in to_trace.keys():
+                target = _find_module(root, submodule)
+                new_submodule = trace_with_hierarchy(submodule)
+                set_module_attr(root, target, new_submodule)
+            return root
+
+        rnet = resnet18()
+        rhier = trace_with_hierarchy(rnet)
+        input = torch.rand(1, 3, 224, 224)
+        self.assertEqual(rnet(input), rhier(input))
+
+
+
+
 
 if __name__ == '__main__':
     run_tests()
