@@ -32,7 +32,8 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "======================================\n" << std::endl;
+              << "======================================\n"
+              << std::endl;
   }
 
   return code;
@@ -53,12 +54,13 @@ void FusionExecutor::debugCompileFusionFromStr(
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "======================================\n" << std::endl;
+              << "======================================\n"
+              << std::endl;
   }
 
   fusion_id_ = id;
   lowered_ = GpuLower(&fusion_);
-  
+
   compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");

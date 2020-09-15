@@ -354,7 +354,7 @@ IfThenElse::IfThenElse(
 
   for (auto* expr : then_body)
     then_body_.push_back(expr);
-    
+
   for (auto* expr : else_body)
     else_body_.push_back(expr);
 }
