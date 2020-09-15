@@ -91,7 +91,7 @@ class TestForeach(TestCase):
         if device == 'cpu':
             if dtype == torch.half:
                 with self.assertRaisesRegex(RuntimeError, r"\"addcmul_cpu_out\" not implemented for \'Half\'"):
-                    self._test_pointwise_op(device, dtype, torch._foreach_addcmul, 
+                    self._test_pointwise_op(device, dtype, torch._foreach_addcmul,
                                             torch._foreach_addcmul_, torch.addcmul)
                 return
 
@@ -100,7 +100,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_addcdiv(self, device, dtype):
         if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "Integer division with addcdiv is no longer supported, and in a future"):
                 self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
             return
@@ -108,7 +108,7 @@ class TestForeach(TestCase):
         if device == 'cpu':
             if dtype == torch.half:
                 with self.assertRaisesRegex(RuntimeError, r"\"addcdiv_cpu_out\" not implemented for \'Half\'"):
-                    self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, 
+                    self._test_pointwise_op(device, dtype, torch._foreach_addcdiv,
                                             torch._foreach_addcdiv_, torch.addcdiv)
                 return
         self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
@@ -131,7 +131,7 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
         if dtype in [torch.bool]:
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "result type Long can't be cast to the desired output type Bool"):
                 torch._foreach_add_(tensors, int_scalar)
         else:
@@ -144,7 +144,7 @@ class TestForeach(TestCase):
         float_scalar = 1.
 
         # float scalar + integral tensor will result in float tensor
-        if dtype in [torch.uint8, torch.int8, torch.int16, 
+        if dtype in [torch.uint8, torch.int8, torch.int16,
                      torch.int32, torch.int64, torch.bool]:
             expected = [torch.ones(10, 10, device=device, dtype=torch.float32) for _ in range(10)]
         else:
@@ -153,7 +153,7 @@ class TestForeach(TestCase):
         res = torch._foreach_add(tensors, float_scalar)
         self.assertEqual(res, expected)
 
-        if dtype in [torch.uint8, torch.int8, torch.int16, 
+        if dtype in [torch.uint8, torch.int8, torch.int16,
                      torch.int32, torch.int64, torch.bool]:
             self.assertRaises(RuntimeError, lambda: torch._foreach_add_(tensors, float_scalar))
         else:
@@ -169,7 +169,7 @@ class TestForeach(TestCase):
         expected = [torch.add(complex_scalar, torch.zeros(10, 10, device=device, dtype=dtype)) for _ in range(10)]
 
         if dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16] and device == 'cuda:0':
-            # value cannot be converted to dtype without overflow: 
+            # value cannot be converted to dtype without overflow:
             self.assertRaises(RuntimeError, lambda: torch._foreach_add_(tensors, complex_scalar))
             self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, complex_scalar))
             return
@@ -198,7 +198,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
-        if dtype == torch.bool: 
+        if dtype == torch.bool:
             return
         tensors = [torch.zeros(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
         expected = [torch.ones(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
@@ -222,14 +222,14 @@ class TestForeach(TestCase):
         expected = [torch.tensor([[[2, 2, 2]], [[2, 2, 2]]], dtype=dtype, device=device)]
 
         # bool tensor + 1 will result in int64 tensor
-        if dtype == torch.bool: 
+        if dtype == torch.bool:
             expected[0] = expected[0].to(torch.int64).add(1)
 
         res = torch._foreach_add(tensors, 1)
         self.assertEqual(res, expected)
 
     def test_bin_op_scalar_with_different_tensor_dtypes(self, device):
-        tensors = [torch.tensor([1.1], dtype=torch.float, device=device), 
+        tensors = [torch.tensor([1.1], dtype=torch.float, device=device),
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
@@ -279,7 +279,7 @@ class TestForeach(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch._foreach_add_([tensor1], [tensor2])
 
-        # Coresponding tensors with different sizes 
+        # Coresponding tensors with different sizes
         tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
         tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
         with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
@@ -311,8 +311,11 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_div_list(self, device, dtype):
         if dtype in torch.testing.integral_types_and(torch.bool):
-            with self.assertRaisesRegex(RuntimeError, "Integer division of tensors using div or / is no longer"):
-                self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
+            if self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
+            else:
+                self.skipTest("Skipped! See https://github.com/pytorch/pytorch/issues/44489")
             return
 
         self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
@@ -321,7 +324,7 @@ class TestForeach(TestCase):
         tensors1 = []
         tensors2 = []
 
-        for bin_op in self.bin_ops: 
+        for bin_op in self.bin_ops:
             # Empty lists
             with self.assertRaises(RuntimeError):
                 bin_op(tensors1, tensors2)
@@ -364,7 +367,7 @@ class TestForeach(TestCase):
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
 
-        # non contiguous 
+        # non contiguous
         tensor1 = torch.randn(5, 2, 1, 3, device=device)[:, 0]
         tensor2 = torch.randn(5, 2, 1, 3, device=device)[:, 0]
         self.assertFalse(tensor1.is_contiguous())
