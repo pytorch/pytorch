@@ -160,6 +160,15 @@ void initDispatchBindings(PyObject* module) {
     }
   });
 
+  m.def("_dispatch_dump_table", [](const char* name) -> std::string {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    if (!op) {
+      return "";
+    } else {
+      return op->dumpComputedTable();
+    }
+  });
+
   m.def("_dispatch_check_invariants", [](const char* name) {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
     if (!op) {

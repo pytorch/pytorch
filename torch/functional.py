@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+import warnings
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -1175,6 +1176,11 @@ else:
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
+    .. warning::
+
+        torch.norm is deprecated and may be removed in a future PyTorch release.
+        Use :func:`torch.linalg.norm` instead.
+
     Args:
         input (Tensor): the input tensor
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
@@ -1232,6 +1238,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
+    warnings.warn((
+        "torch.norm is deprecated and may be removed in a future PyTorch release. "
+        "Use torch.linalg.norm instead."))
+
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(

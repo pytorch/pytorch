@@ -449,6 +449,8 @@ Tensor upsample_trilinear3d_backward_cuda(
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_trilinear3d_backward_cuda");
   auto osize = compute_output_size(input_size, output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);

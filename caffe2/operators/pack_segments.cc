@@ -248,3 +248,23 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  PackSegments,
+  "_caffe2::PackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1, "
+    "bool pad_minf = False, "
+    "bool return_presence_mask = False"
+  ") -> (Tensor packed_tensor, Tensor presence_mask)",
+  caffe2::PackSegmentsOp<caffe2::CPUContext>);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+  UnpackSegments,
+  "_caffe2::UnpackSegments("
+    "Tensor lengths, "
+    "Tensor tensor, "
+    "int max_length = -1"
+  ") -> (Tensor packed_tensor)",
+  caffe2::UnpackSegmentsOp<caffe2::CPUContext>);
