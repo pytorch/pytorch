@@ -1036,69 +1036,6 @@ void testRecordFunction() {
 
   clearCallbacks();
 
-  // START: thread local / global context check callbacks
-  struct TestContext : public ObserverContext {
-    int a{0};
-    std::string b;
-  };
-  ids.clear();
-  { // START: global test
-    const int test_val = 123;
-    const std::string test_str = "test str";
-    addGlobalCallback(RecordFunctionCallback(
-        [test_str, &ids](const RecordFunction& /* unused */) {
-          auto ctx = std::make_unique<TestContext>();
-          ctx->a = test_val;
-          ctx->b = test_str;
-          ids.push_back(1);
-          return ctx;
-        },
-        [test_str](
-            const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
-          auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-          TORCH_CHECK(ctx_ptr != nullptr);
-          TORCH_CHECK(ctx->a == test_val);
-          TORCH_CHECK(ctx->b == test_str);
-        }));
-
-    { RECORD_USER_SCOPE("test"); }
-
-    TORCH_CHECK(ids.size() == 1);
-    TORCH_CHECK(ids[0] == 1);
-    ids.clear();
-  } // END: global test
-  { // START: thread local test
-    auto ctx_th = std::thread([&ids]() {
-      const int test_val = 234;
-      const std::string test_str = "test thread str";
-      addThreadLocalCallback(RecordFunctionCallback(
-          [test_str, &ids](const RecordFunction& /* unused */) {
-            auto ctx = std::make_unique<TestContext>();
-            ctx->a = test_val;
-            ctx->b = test_str;
-            ids.push_back(2);
-            return ctx;
-          },
-          [test_str](
-              const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
-            auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
-            TORCH_CHECK(ctx_ptr != nullptr);
-            TORCH_CHECK(ctx->a == test_val);
-            TORCH_CHECK(ctx->b == test_str);
-          }));
-
-      // Will call both global and thread local callbacks.
-      { RECORD_USER_SCOPE("test_thread"); }
-    });
-    ctx_th.join();
-    TORCH_CHECK(ids.size() == 2);
-    TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
-    TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
-    ids.clear();
-  } // END: thread local test
-
-  clearCallbacks();
-
   // test should_run
 
   bool ran = false;
