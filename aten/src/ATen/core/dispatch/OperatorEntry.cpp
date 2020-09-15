@@ -197,19 +197,18 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 2.1. Use Math kernel if available. For autograd keys, we only use kernel from Math
   //      when there's no direct registration to its corresponding backend key.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
-    if (hasKernelForDispatchKey(DispatchKey::Math)
-        && !(isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
-             && hasKernelForDispatchKey(getBackendKeyFromAutograd(dispatch_key)))) {
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Math)
+      && hasKernelForDispatchKey(DispatchKey::Math)
+      && !(isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
+           && hasKernelForDispatchKey(getBackendKeyFromAutograd(dispatch_key)))) {
       return {getKernelForDispatchKey(DispatchKey::Math), "math kernel"};
     }
   }
 
   // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
-    if (hasKernelForDispatchKey(DispatchKey::Autograd)) {
-      return {getKernelForDispatchKey(DispatchKey::Autograd), "autograd kernel"};
-    }
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd
+      && hasKernelForDispatchKey(DispatchKey::Autograd)) {
+    return {getKernelForDispatchKey(DispatchKey::Autograd), "autograd kernel"};
   }
 
   // 2.3. For autograd backend keys, we use kernel from catchAll if there's no direct

@@ -471,40 +471,6 @@ AutogradCUDA: impl_t_t [autograd kernel]
 AutogradXLA: impl_t_t [autograd kernel]
 ''')
 
-    def test_computed_table_with_autograd(self):
-        global_m = C._dispatch_library("IMPL", "_", "autogradcpu")
-        result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
-        ])
-        state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
-name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
-debug: registered at /dev/null:0
-alias analysis kind: CONSERVATIVE
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-''')
-
-        # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(
-            table,
-            ('CPU', 'CUDA', 'XLA', 'AutogradOther', 'AutogradCPU', 'AutogradCUDA', 'AutogradXLA', 'Meta'))
-
-        self.assertExpectedInline(extracted_table, '''\
-CPU: default_def_name_t_t [catch all]
-CUDA: default_def_name_t_t [catch all]
-XLA: default_def_name_t_t [catch all]
-AutogradOther: impl_t_t [autograd kernel]
-AutogradCPU: impl_t_t [autograd kernel]
-AutogradCUDA: impl_t_t [autograd kernel]
-AutogradXLA: impl_t_t [autograd kernel]
-Meta: default_def_name_t_t [catch all]
-''')
-
     def test_computed_table_with_cpu_autograd_math_catchall(self):
         result = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
