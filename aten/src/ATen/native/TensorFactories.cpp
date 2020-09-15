@@ -276,13 +276,13 @@ Tensor empty_like(
     "the redundant setter.");
 
   TensorOptions options =
-      self.options()	
-          .merge_in(options_)	
+      self.options()
+          .merge_in(options_)
           .merge_in(TensorOptions().memory_format(optional_memory_format));
 
-  TORCH_CHECK(	
-      !(options.layout() != kStrided &&	
-          optional_memory_format.has_value()),	
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
     auto result = at::empty({0}, options); // to be resized

@@ -1629,18 +1629,17 @@ class TestSparse(TestCase):
 
         def _test_empty_like(sparse_tensor):
 
-            for mem_format in [None, torch.preserve_format]:
-                result = torch.empty_like(sparse_tensor, memory_format=mem_format)
-                self.assertTrue(result.is_sparse)
-                assert_sparse_invars(result)
-                self.assertEqual(result.shape, sparse_tensor.shape)
-                self.assertEqual(result.dtype, sparse_tensor.dtype)
-                self.assertEqual(result.device, sparse_tensor.device)
-                self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
-                self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
+            result = torch.empty_like(sparse_tensor)
+            self.assertTrue(result.is_sparse)
+            assert_sparse_invars(result)
+            self.assertEqual(result.shape, sparse_tensor.shape)
+            self.assertEqual(result.dtype, sparse_tensor.dtype)
+            self.assertEqual(result.device, sparse_tensor.device)
+            self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
+            self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
 
-            for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
-                with self.assertRaisesRegex(RuntimeError, "Memory format for sparse tensors must be Preserve"):
+            for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format, torch.preserve_format]:
+                with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
                     result = torch.empty_like(sparse_tensor, memory_format=mem_format)
 
         if not self.is_uncoalesced:
@@ -1649,7 +1648,7 @@ class TestSparse(TestCase):
                 values=torch.tensor([3.0, -4.0, 5.0]),
                 size=[3, ],
                 device=self.device
-            )
+            ).coalesce()
             _test_empty_like(input_coalesced)
 
             # hybrid sparse input
@@ -1658,7 +1657,7 @@ class TestSparse(TestCase):
                 values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
                 size=[4, 5, 2],
                 device=self.device
-            )
+            ).coalesce()
             _test_empty_like(input_coalesced)
 
         if self.is_uncoalesced:
