@@ -12,4 +12,18 @@ call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Minic
 if "%REBUILD%"=="" (
   call conda install -y -q python=%PYTHON_VERSION% numpy cffi pyyaml boto3
   call conda install -y -q -c conda-forge cmake
+  call conda install -y -q -c rdonnelly libuv
 )
+
+:: Get installed libuv path
+@echo off
+FOR /f "tokens=1,2,3* delims=: " %%a IN ('conda info') DO (
+ IF "%%a %%b %%c"=="active env location" SET "active_conda_path=%%d\Library"
+)
+mkdir %active_conda_path%\lib\release
+copy %active_conda_path%\bin\uv.dll %active_conda_path%\lib\release
+copy %active_conda_path%\lib\uv.lib %active_conda_path%\lib\release
+copy %active_conda_path%\lib\uv_a.lib %active_conda_path%\lib\release
+set libuv_ROOT=%active_conda_path%
+@echo on
+echo libuv_ROOT=%active_conda_path%
