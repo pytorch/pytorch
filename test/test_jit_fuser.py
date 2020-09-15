@@ -716,6 +716,8 @@ class TestFuser(JitTestCase):
                                                   "aten::_grad_sum_to_size"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    # By default, on Ampere or later GPUs, LSTM computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
     @with_tf32_off
     def test_lstm_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
@@ -747,6 +749,8 @@ class TestFuser(JitTestCase):
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    # By default, on Ampere or later GPUs, LSTM computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
     @with_tf32_off
     def test_lstm_traced_cuda(self):
         inputs = get_lstm_inputs('cuda')

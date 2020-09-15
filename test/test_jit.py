@@ -1412,7 +1412,7 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @with_tf32_off
+    @with_tf32_off  # We want float tensors to be computed at full precision in order to use the default precision
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
