@@ -170,6 +170,8 @@ namespace jit {
   _(SimplifyIfComponents)                   \
   _(SimplifyOpaqueTerms)                    \
   _(SimplifySymbolicMinMax)                 \
+  _(SimplifyNestedMax)                      \
+  _(SimplifyNestedMin)                      \
   _(SimplifyWontReorderFloat)               \
   _(SimplifyRoundModPattern)                \
   _(SimplifyRoundModPatternFactorization)   \
@@ -247,6 +249,7 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)             \
   _(NormalizeOnNestedInnerLoop)             \
   _(NormalizeAndSplitWithTail)              \
+  _(DetectInlineRankMismatch)               \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
@@ -402,7 +405,10 @@ namespace jit {
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
-  _(CudaPrioritizeDependents)
+  _(CudaPrioritizeDependents)              \
+  _(CudaMaskBlockDim)                      \
+  _(CudaMaskThreadDim)
+// _(CudaMaskBlockAndThreadDim)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
