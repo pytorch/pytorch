@@ -23,6 +23,8 @@ conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 1D convolution over an input signal composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
@@ -32,12 +34,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -65,6 +61,8 @@ conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 2D convolution over an input image composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
 Note:
@@ -74,12 +72,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -108,6 +100,8 @@ conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 3D convolution over an input image composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
@@ -117,12 +111,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -150,6 +138,8 @@ conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Note:
@@ -159,12 +149,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -195,6 +179,8 @@ conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Note:
@@ -204,12 +190,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -242,6 +222,8 @@ conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Note:
@@ -251,12 +233,6 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
-
-Note:
-    When the data type is `torch.float` and the device is an Ampere GPU or newer,
-    this function will automatically uses TF32 tensor core to speedup the computation.
-    This usually results in much faster speed and smaller precision.
-    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -1697,10 +1673,7 @@ def linear(input, weight, bias=None):
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-    .. note:: When the datatype is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`
 
     Shape:
 

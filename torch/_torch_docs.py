@@ -107,12 +107,7 @@ factory_data_common_args = parse_kwargs("""
 """)
 
 tf32_notes = {
-    "tf32_note": """
-.. note:: When the datatype is `torch.float` and the device is an Ampere GPU or newer,
-          this function will automatically uses TF32 tensor core to speedup the computation.
-          This usually results in much faster speed and smaller precision.
-          See :ref:`tf32_on_ampere` for more information.
-"""
+    "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
 add_docstr(torch.abs, r"""
@@ -1010,10 +1005,10 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 .. math::
     \text{out}_i = \text{input}_i \mathbin{@} \text{mat2}_i
 """ + r"""
+{tf32_note}
+
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
-
-{tf32_note}
 
 Args:
     input (Tensor): the first batch of matrices to be multiplied
@@ -4944,11 +4939,11 @@ The behavior depends on the dimensionality of the tensors as follows:
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
   tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
 
+{tf32_note}
+
 .. note::
 
     The 1-dimensional dot product version of this function does not support an :attr:`out` parameter.
-
-{tf32_note}
 
 Arguments:
     input (Tensor): the first tensor to be multiplied
