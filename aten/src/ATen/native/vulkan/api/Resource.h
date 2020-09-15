@@ -158,7 +158,7 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{
-    map(*this),
+    reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator, allocation, Access::Read),
   };
 }
@@ -174,7 +174,7 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
       "Invalid memory access!");
 
   return Data<Pointer>{
-    map(*this),
+    reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator, allocation, kAccess),
   };
 }
