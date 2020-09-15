@@ -108,6 +108,7 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "detach",
     "detach_",
     "stack",
+    "__getitem__",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
