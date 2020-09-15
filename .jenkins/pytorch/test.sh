@@ -338,8 +338,8 @@ test_benchmarks() {
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
-    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
     assert_git_not_dirty
   fi
 }

@@ -134,7 +134,7 @@ class TORCH_API Block : public StmtNode<Block> {
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt wiith existing parent", new_stmt);
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -530,13 +530,12 @@ class TORCH_API LoopOptions {
   }
 
   std::string ToString() const {
-    std::ostringstream oss;
     if (is_gpu_block_index()) {
-      oss << gpu_block_index_str();
+      return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
-      oss << gpu_thread_index_str();
+      return gpu_thread_index_str();
     }
-    return oss.str();
+    return "";
   }
 
   bool isDefault() const {

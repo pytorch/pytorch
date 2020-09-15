@@ -95,7 +95,8 @@ class GraphModule(torch.nn.Module):
 
     def __init__(self, root: torch.nn.Module, graph: Graph):
         super().__init__()
-        self.training = root.training
+        if hasattr(root, 'training'):
+            self.training = root.training
         for node in graph.nodes:
             if node.op in ['get_param', 'call_module']:
                 assert isinstance(node.target, str)
