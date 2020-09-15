@@ -430,6 +430,7 @@ class TensorExprFuser {
     bool changed = false;
     auto reverse_iter = block->nodes().reverse();
     Node* prev_fusion_group = nullptr;
+    const auto static MERGE_TWO = std::getenv("MERGE_TWO");
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
       GRAPH_DEBUG("Considering node:", *n)
@@ -460,30 +461,36 @@ class TensorExprFuser {
       // fusion_groups vector - we will not touch it anymore in this loop.
       // If merging suceeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
-      if (prev_fusion_group) {
-        debugDumpFusionGroup(
-            "Trying to merge into the previous fusion group: ",
-            prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
-          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
+
+      if (MERGE_TWO) {
+        if (prev_fusion_group) {
           debugDumpFusionGroup(
-              "Successfully merged into the previous fusion group: ",
+              "Trying to merge into the previous fusion group: ",
               prev_fusion_group);
+          if (canMerge(prev_fusion_group, fusion_group)) {
+            prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
+            debugDumpFusionGroup(
+                "Successfully merged into the previous fusion group: ",
+                prev_fusion_group);
+          } else {
+            GRAPH_DEBUG("Cannot merge into the previous fusion group");
+            fusion_groups.push_back(prev_fusion_group);
+            prev_fusion_group = fusion_group;
+          }
         } else {
-          GRAPH_DEBUG("Cannot merge into the previous fusion group");
-          fusion_groups.push_back(prev_fusion_group);
           prev_fusion_group = fusion_group;
         }
+        it = prev_fusion_group->reverseIterator();
+        it++;
       } else {
-        prev_fusion_group = fusion_group;
+        fusion_groups.push_back(fusion_group);
+        it = fusion_group->reverseIterator();
       }
-      it = prev_fusion_group->reverseIterator();
-      it++;
     }
 
     // We were adding groups into the vector lagging by one - catch up with
     // adding the last one
-    if (prev_fusion_group) {
+    if (prev_fusion_group && !MERGE_TWO) {
       fusion_groups.push_back(prev_fusion_group);
     }
     return changed;
