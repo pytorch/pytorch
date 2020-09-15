@@ -1574,7 +1574,6 @@ instantiate_device_type_tests(
     globals(),
     # Excluding ROCM
     except_for='cuda' if TEST_WITH_ROCM else None,
-    only_for=['cuda', 'cpu'],
 )
 
 if __name__ == '__main__':
