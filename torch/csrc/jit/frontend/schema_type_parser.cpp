@@ -194,8 +194,8 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   //   Float(10, *, 20, device=cuda:1)
   //   Float(requires_grad=1)
   std::vector<c10::optional<int64_t>> dims;
-  bool seen_strides = false;
   std::vector<int64_t> strides;
+  bool seen_strides = false;
   parseList(TK_NOTHING, ',', ')', [&] {
     // Extra handling for options like 'device' and 'requires_grad'
     if (L.cur().kind == TK_IDENT) {
@@ -220,6 +220,17 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         }
         return;
       }
+      if (field == "strides") {
+        seen_strides = true;
+        L.expect('=');
+        parseList('[', ',', ']', [&] {
+          const std::string& num = L.expect(TK_NUMBER).text();
+          std::string::size_type num_len;
+          size_t stride = c10::stoi(num, &num_len);
+          strides.push_back(stride);
+        });
+        return;
+      }
       throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
     }
     if (device.has_value() || requires_grad.has_value()) {
@@ -241,14 +252,6 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
     dims.emplace_back(dim);
-    if (seen_strides || L.cur().kind == ':') {
-      L.expect(':');
-      seen_strides = true;
-      const std::string& num = L.expect(TK_NUMBER).text();
-      std::string::size_type num_len;
-      size_t stride = c10::stoi(num, &num_len);
-      strides.push_back(stride);
-    }
   });
   if (seen_strides) {
     at::IntArrayRef strides_ref(strides);

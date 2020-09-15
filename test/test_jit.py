@@ -1305,7 +1305,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1, device=cpu)").run(str(graph))
+        FileCheck().check("Double(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -9721,13 +9721,13 @@ a")
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1:3, 3:1, requires_grad=0, device=cpu)").run(cm.forward.graph)
+        FileCheck().check("Double(1, 3, strides=[3, 1], requires_grad=0, device=cpu)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
         # when tensor is loaded as constant it isnt specialized
         cm_load = torch.jit.load(buffer)
-        FileCheck().check_not("Double(1, 3)").run(cm_load.forward.graph)
+        FileCheck().check_not("Double(1, strides=[3])").run(cm_load.forward.graph)
 
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
@@ -10265,7 +10265,7 @@ a")
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2:4, 4:1, requires_grad=0, device=cpu)").run(str(foo.graph))
+        FileCheck().check("Double(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
@@ -10550,8 +10550,8 @@ a")
         out = fn()
         self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
-                   .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(fn.graph_for())
+        FileCheck().check("Double(3, 4, strides=[4, 1], requires_grad=0, device=cpu)") \
+                   .check_not("Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(fn.graph_for())
 
         @torch.jit.script
         def randint():
@@ -10561,8 +10561,8 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(1:2, 2:1, requires_grad=0, device=cpu)") \
-                   .check_not("Float(1:2, 2:1, requires_grad=0, device=cpu)").run(randint.graph_for())
+        FileCheck().check("Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu)") \
+                   .check_not("Float(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
@@ -15275,21 +15275,6 @@ a")
         wrapped_loaded = Wrapper(inner_module_loaded)
         self.assertEqual(wrapped(torch.ones(1)), wrapped_loaded(torch.ones(1)))
 
-    def test_interpret_graph(self):
-        def fn(x):
-            return x.unfold(0, 1, 1)
-
-        graph_str = """
-        graph(%a : Tensor, %b : Tensor):
-          %c : Tensor = aten::mul(%a, %b)
-          return (%c)
-        """
-        graph = parse_ir(graph_str)
-        a = torch.rand(10)
-        b = torch.rand(10)
-        test = torch._C._jit_interpret_graph(graph, (a, b))
-        ref = a * b
-        self.assertEqual(test, ref)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
