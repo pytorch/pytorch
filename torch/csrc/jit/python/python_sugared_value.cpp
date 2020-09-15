@@ -573,6 +573,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr;
   }
 
+  // Check if it's a property.
+  auto prop =
+      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+  if (prop) {
+    return MethodValue(self_, prop->getter->name())
+        .call(loc, m, {}, {}, /*n_binders=*/1);
+  }
+
   // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {

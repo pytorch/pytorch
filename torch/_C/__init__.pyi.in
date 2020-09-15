@@ -411,6 +411,9 @@ class PyTorchFileWriter(object):
     def write_end_of_file(self) -> None: ...
     ...
 
+# Defined in torch/csrc/jit/python/python_custome_class.cpp
+def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
+
 # Defined in torch/csrc/Generator.cpp
 class Generator(object):
     device: _device

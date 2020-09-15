@@ -292,8 +292,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \
