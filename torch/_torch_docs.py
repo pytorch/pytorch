@@ -4338,17 +4338,13 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each maximum value found
 (argmax).
 
-.. warning::
-    ``indices`` does not necessarily contain the first occurrence of each
-    maximal value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
-
 If ``keepdim`` is ``True``, the output tensors are of the same size
 as ``input`` except in the dimension ``dim`` where they are of size 1.
 Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than ``input``.
+
+.. note:: If there are multiple maximal values in a reduced row then
+          the indices of the first maximal value are returned.
 
 Args:
     {input}
@@ -4702,17 +4698,13 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each minimum value found
 (argmin).
 
-.. warning::
-    ``indices`` does not necessarily contain the first occurrence of each
-    minimal value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
-
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the output tensors having 1 fewer dimension than :attr:`input`.
+
+.. note:: If there are multiple minimal values in a reduced row then
+          the indices of the first minimal value are returned.
 
 Args:
     {input}
