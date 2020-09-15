@@ -1,6 +1,7 @@
 import collections
 import io
 import tempfile
+from typing import NamedTuple
 import unittest
 import sys
 from itertools import repeat, chain, product
@@ -14,6 +15,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
+from torch.nn.parallel import scatter_gather
 from torch._six import inf, nan, container_abcs
 
 from test_torch import AbstractTestCases
@@ -2395,11 +2397,20 @@ t2.start()
                             "{} not found as an attribute on either Tensor or the requested module {}".format(
                             op, module))
 
+            # Accounts for ops that return tuples and other non-Tensors.
+            # For example, lstm_cell returns a tuple and equal returns bool.
+            def compare(first, second):
+                if isinstance(first, torch.Tensor):
+                    return torch.equal(first, second)
+                elif isinstance(first, container_abcs.Iterable):
+                    return all(compare(f, s) for f, s in zip(first, second))
+                else:
+                    return first == second
+
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
-                comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
-                    else (output == output_method)
+                comparison = compare(output, output_method)
                 self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
@@ -2413,8 +2424,7 @@ t2.start()
                 else:
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
-                comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
-                    else (output_to_compare == control)
+                comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
@@ -3040,6 +3050,35 @@ class TestCudaComm(TestCase):
             else:
                 with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
                     torch.addmm(s, m1, m2)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_scatter_namedtuple(self):
+        # tests ability to scatter namedtuples and retrieve a list where each
+        # element is of the expected namedtuple type.
+        TestNamedTupleInput_0 = collections.namedtuple("NamedTuple", ("a", "b"))
+        inp = TestNamedTupleInput_0(
+            torch.rand(10, device=0),
+            torch.rand(10, device=0),
+        )
+        num_gpus = torch.cuda.device_count()
+        target_gpus = [torch.device(i) for i in range(num_gpus)]
+        scatter_out = scatter_gather.scatter(inp, target_gpus)
+
+        for x in scatter_out:
+            self.assertTrue(isinstance(x, type(inp)))
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        inp = TestNamedTupleInput_1(
+            torch.rand(10, device=0),
+            torch.rand(10, device=0)
+        )
+
+        scatter_out = scatter_gather.scatter(inp, target_gpus)
+        for x in scatter_out:
+            self.assertTrue(isinstance(x, type(inp)))
 
 
 if __name__ == '__main__':

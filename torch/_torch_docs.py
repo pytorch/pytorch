@@ -2653,6 +2653,27 @@ Example::
     tensor([ 1.,  2.])
 """.format(**common_args))
 
+add_docstr(torch.exp2,
+           r"""
+exp2(input, *, out=None) -> Tensor
+
+Computes the base two exponential function of :attr:`input`.
+
+.. math::
+    y_{i} = 2^{x_{i}}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+    tensor([ 1.,  2.,  8., 16.])
+""".format(**common_args))
+
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor
@@ -2939,6 +2960,12 @@ Example::
     tensor([[True, True], [False, True]])
 """.format(**common_args))
 
+add_docstr(torch.greater_equal, r"""
+greater_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.ge`.
+""")
+
 add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
@@ -3115,6 +3142,12 @@ Example::
     tensor([[False, True], [False, False]])
 """.format(**common_args))
 
+add_docstr(torch.greater, r"""
+greater(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.gt`.
+""")
+
 add_docstr(torch.histc,
            r"""
 histc(input, bins=100, min=0, max=0, *, out=None) -> Tensor
@@ -3168,6 +3201,29 @@ Example::
 
     >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
     tensor([5.0000, 5.6569, 6.4031])
+
+""".format(**common_args))
+
+add_docstr(torch.i0,
+           r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
 
 """.format(**common_args))
 
@@ -3546,6 +3602,12 @@ Example::
     tensor([[True, False], [True, True]])
 """.format(**common_args))
 
+add_docstr(torch.less_equal, r"""
+less_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.le`.
+""")
+
 add_docstr(torch.lerp,
            r"""
 lerp(input, end, weight, *, out=None)
@@ -3602,21 +3664,33 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
-add_docstr(torch.linspace,
-           r"""
-linspace(start, end, steps=100, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
+add_docstr(torch.linspace, r"""
+linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a one-dimensional tensor of :attr:`steps`
-equally spaced points between :attr:`start` and :attr:`end`.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
-The output tensor is 1-D of size :attr:`steps`.
+.. math::
+    (\text{start},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \ldots,
+    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{end})
+""" + """
+
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`. Default: ``100``.
+    steps (int): size of the constructed tensor
     {out}
     {dtype}
     {layout}
@@ -3911,23 +3985,37 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
-add_docstr(torch.logspace,
-           """
-logspace(start, end, steps=100, base=10.0, *, \
+# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
+add_docstr(torch.logspace, """
+logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
-Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced with base :attr:`base` between
-:math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
 
-The output tensor is 1-D of size :attr:`steps`.
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
+spaced from :math:`{{\text{{base}}}}^{{\text{{start}}}}` to
+:math:`{{\text{{base}}}}^{{\text{{end}}}}`, inclusive, on a logarithmic scale
+with base :attr:`base`. That is, the values are:
+
+.. math::
+    (\text{base}^{\text{start}},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \ldots,
+    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{\text{end}})
+""" + """
+
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
+    with 100 elements. Note that this behavior is not reflected in the
+    documented function signature and should not be relied on. In a future
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
+    runtime error.
 
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
-    steps (int): number of points to sample between :attr:`start`
-        and :attr:`end`. Default: ``100``.
+    steps (int): size of the constructed tensor
     base (float): base of the logarithm function. Default: ``10.0``.
     {out}
     {dtype}
@@ -4073,6 +4161,12 @@ Example::
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, False], [True, False]])
 """.format(**common_args))
+
+add_docstr(torch.less, r"""
+less(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.lt`.
+""")
 
 add_docstr(torch.lu_solve,
            r"""
@@ -5177,6 +5271,12 @@ Example::
     tensor([[False, True], [True, False]])
 """.format(**common_args))
 
+add_docstr(torch.not_equal, r"""
+not_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.ne`.
+""")
+
 add_docstr(torch.neg,
            r"""
 neg(input, *, out=None) -> Tensor
@@ -5246,6 +5346,8 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
 
     See below for more details on the two behaviors.
 
+    When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
+    host-device synchronization.
 
 **When** :attr:`as_tuple` **is ``False`` (default)**:
 
@@ -5830,9 +5932,9 @@ The Heaviside step function is defined as:
 
 .. math::
     \text{{heaviside}}(input, values) = \begin{cases}
-        \0, & \text{if input < 0}\\
-        \values, & \text{if input == 0}\\
-        \1, & \text{if input > 0}
+        0, & \text{if input < 0}\\
+        values, & \text{if input == 0}\\
+        1, & \text{if input > 0}
     \end{cases}
 """ + r"""
 
@@ -6755,8 +6857,7 @@ Example::
     torch.Size([2, 2, 1, 2])
 """.format(**common_args))
 
-add_docstr(torch.std,
-           r"""
+add_docstr(torch.std, r"""
 std(input, unbiased=True) -> Tensor
 
 Returns the standard-deviation of all elements in the :attr:`input` tensor.
@@ -6776,7 +6877,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -6792,6 +6893,8 @@ Args:
     {dim}
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
+
+Keyword args:
     {out}
 
 Example::
@@ -7828,8 +7931,7 @@ Example::
             [ 4]])
 """.format(**common_args))
 
-add_docstr(torch.var,
-           r"""
+add_docstr(torch.var, r"""
 var(input, unbiased=True) -> Tensor
 
 Returns the variance of all elements in the :attr:`input` tensor.
@@ -7850,7 +7952,7 @@ Example::
     tensor(0.2455)
 
 
-.. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: var(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -7863,8 +7965,10 @@ biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
+
+Keyword args:
     {out}
 
 Example::

@@ -1752,15 +1752,9 @@ def to(g, self, *args):
 
 
 def repeat(g, self, repeats):
-    if not sym_help._is_value(repeats):
-        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-    const_repeats = sym_help._maybe_get_const(repeats, 'is')
-
-    if self.isCompleteTensor() and not sym_help._is_value(const_repeats):
-        sizes = self.type().sizes()
-        diff_dims = len(const_repeats) - len(sizes)
-        if diff_dims > 0:
-            self = view(g, self, [1] * diff_dims + sizes)
+    dtype = 4  # int64
+    shape_ = ones_like(g, repeats, dtype)
+    self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
 
 
