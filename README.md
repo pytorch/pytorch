@@ -87,7 +87,7 @@ You get the best of speed and flexibility for your crazy research.
 
 ### Python First
 
-PyTorch is not a Python binding into a monolithic C++ framework.
+PyTorch is not a Python binding into a static C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
