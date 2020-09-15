@@ -712,7 +712,7 @@ void testMergeSymbolicBounds() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Z, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Z, 1)");
   ASSERT_EQ(pair.second, "Y");
 
   // If either side is only one apart, they must be adjacent.
@@ -733,7 +733,7 @@ void testMergeSymbolicBounds() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Z, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Z, 1)");
   ASSERT_EQ(pair.second, "Y");
 
   // If either side is 2 apart, they may not be overlapping.
@@ -812,7 +812,7 @@ void testMergeSymbolicAdjacent() {
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
   ASSERT_EQ(pair.first, "5");
-  ASSERT_EQ(pair.second, "Max(Y, X, 1)");
+  ASSERT_EQ(pair.second, "Max(X, Y, 1)");
 
   info.clear();
   info[a.data()].push_back({kLoad, {X.node()}, {new IntImm(6)}});
@@ -820,7 +820,7 @@ void testMergeSymbolicAdjacent() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Y, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Y, 1)");
   ASSERT_EQ(pair.second, "6");
 }
 

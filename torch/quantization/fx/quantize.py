@@ -1,13 +1,4 @@
 import torch
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from ..quantization_mappings import (
-    get_qat_module_mappings,
-)
-
 from torch.fx import (
     GraphModule,
     Proxy,
@@ -18,6 +9,17 @@ from torch.fx.graph import (
     Node,
     map_arg,
 )
+
+from torch.quantization import (
+    propagate_qconfig_,
+    convert,
+)
+
+from ..quantization_mappings import (
+    get_qat_module_mappings,
+)
+
+from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
@@ -130,6 +132,7 @@ WEIGHT_INDEX_DICT = {
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
+    torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
 }
 
@@ -356,7 +359,8 @@ class Quantizer:
             if n.name not in env:
                 assert n.name in quant_env, \
                     'trying to load float node but did not find node:' + n.name + \
-                    ' in quantized environment:' + str(quant_env)
+                    ' in quantized or non quantized environment, env: ' + str(env) + \
+                    ' quant_env:' + str(quant_env)
                 env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
@@ -429,20 +433,25 @@ class Quantizer:
         for node in model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
-                result = obj.convert(self, node, load_arg)
-                quantized = True
-                # Need to get correct quantized/non-quantized state for the output of CopyNode
-                if isinstance(obj, CopyNode):
-                    assert node.op in [
-                        'call_module',
-                        'call_function',
-                        'call_method'], \
-                        'CopyNode of type ' + node.op + ' is not handled'
-                    quantized = is_quantized(node.args[0])
-
-                # output of dynamic quantization is not quantized
-                if self.is_dynamic_quant:
+                if qconfig is None:
+                    result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
+                else:
+                    result = obj.convert(self, node, load_arg)
+                    # Need to get correct quantized/non-quantized state for the output of CopyNode
+                    if isinstance(obj, CopyNode):
+                        assert node.op in [
+                            'call_module',
+                            'call_function',
+                            'call_method'], \
+                            'CopyNode of type ' + node.op + ' is not handled'
+                        quantized = is_quantized(node.args[0])
+                    else:
+                        quantized = True
+
+                    # output of dynamic quantization is not quantized
+                    if self.is_dynamic_quant:
+                        quantized = False
 
                 if quantized:
                     quant_env[node.name] = result
@@ -457,6 +466,15 @@ class Quantizer:
                 if node.target.split('.')[-1].startswith('activation_post_process_'):
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
+                    if observer_module.dtype == torch.float16:
+                        # activations are not quantized for
+                        # fp16 dynamic quantization
+                        # copy the activaiton_post_process node here
+                        # since we may need it when we insert prepack
+                        # op for weight of linear, this will be removed
+                        # later in a separate pass
+                        env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+                        continue
                     if prev_node.name in quant_env:
                         # if previous node is already quantized, we'll just remove the activation_post_process
                         quant_env[node.name] = quant_env[prev_node.name]
@@ -469,8 +487,22 @@ class Quantizer:
                     continue
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+        self.quantized_graph.output(map_arg(model.graph.result, load_non_quantized))
 
-        self.quantized_graph.output(load_non_quantized(model.graph.result))
+        # remove activation post process
+        act_post_process_removed_graph = Graph()
+        env = {}
+
+        def load_arg(a):
+            return map_arg(a, lambda node: env[node.name])
+        for node in self.quantized_graph.nodes:
+            if node.op == 'call_module' and \
+               node.target.split('.')[-1].startswith('activation_post_process_'):
+                # remove activation post process
+                env[node.name] = env[node.args[0].name]
+            else:
+                env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
+        act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
         to_be_removed = []
         for name, _ in model.named_modules():
@@ -478,7 +510,8 @@ class Quantizer:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
-        model = GraphModule(model, self.quantized_graph)
+        _remove_qconfig(model)
+        model = GraphModule(model, act_post_process_removed_graph)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the graph module
