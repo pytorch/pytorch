@@ -23,25 +23,6 @@ struct id_int_lt {
   }
 };
 
-// Simply grabs all exprs needed to produce provided outputs.
-class Exprs : public IterVisitor {
- private:
-  std::vector<Expr*> exprs;
-  void handle(Expr* e) override {
-    exprs.push_back(e);
-  }
-
- public:
-  static std::vector<Expr*> getFrom(std::vector<Val*> outputs) {
-    if (outputs.empty())
-      return std::vector<Expr*>();
-
-    Exprs inst;
-    inst.traverseFrom(outputs[0]->fusion(), outputs);
-    return inst.exprs;
-  }
-};
-
 } // namespace
 
 // Uses the history of _target_domain, and replays that history using the
@@ -71,7 +52,6 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
   // Transform dispatch
   void handle(Expr* e) override;
 
-  // TODO: HANDLE RFACTOR DOMAINS
   // We're going to replay this split operation on the corresponding ID
   void handle(Split* s) override;
 
@@ -113,6 +93,8 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
 };
 
 /*
+ * Motivation:
+ *
  * Consider the following program:
  *
  * T1[I0, R1] = T0[I0, I1]
@@ -145,6 +127,9 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * RFactor roots are mapped to intermediate IterDomains  in the target and start
  * replay from there.
  *
+ *
+ * SHORT DESCRIPTION:
+ *
  * This class will validate/do the above. It will also run through
  * transformations in target according to replay_map. If equal transformations
  * already exist in replay_domain history, we will not redo those
@@ -152,13 +137,14 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * existing transformations. This later part is the "best effort" replay. Though
  * we include rfactor replay and validation here.
  *
- * SHORT DESCRIPTION:
- *
  * Given an Expr in target_domain, check if its inputs are in replay_map. If so,
  * check if the mapped domain in replay_map are recorded to be transformed by an
  * equivelent operation in replay_domain's history. If so, "forward" the
  * operation and update replay_map to the outputs of target_domain's output(s),
  * to the output of the equivlent expr's outputs in relpay_domain's history.
+ *
+ * replay_map maps root IDs in the history of target_domain to root IDs in the
+ * history replay_domain
  */
 
 class TORCH_CUDA_API BestEffortReplay {
@@ -171,16 +157,21 @@ class TORCH_CUDA_API BestEffortReplay {
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,
-      std::unordered_map<IterDomain*, IterDomain*> replay_map);
+      std::unordered_map<IterDomain*, IterDomain*> replay_map,
+      bool forward_bcast_mismatch = false);
 
+  // Return iter domain map from target_domain IDs to their "replayed"
+  // replay_domain IDs. If not in map, was not replayed.
   const std::unordered_map<IterDomain*, IterDomain*>& getReplay() const {
     return id_map_;
   }
 
+  // ids in replay that did not have matching transforms in target_domain
   const std::unordered_map<IterDomain*, size_t>& getUnorderedLeafIDs() {
     return leaf_ids_;
   }
 
+  // Returned ordered set of IDs in getUnorderedLeafIDs
   std::vector<IterDomain*> getLeafIDs() {
     std::set<std::pair<IterDomain*, size_t>, id_int_lt> ordered_set;
     for (auto entry : leaf_ids_)
@@ -195,6 +186,12 @@ class TORCH_CUDA_API BestEffortReplay {
         [](std::pair<IterDomain*, size_t> entry) { return entry.first; });
     return leaf_vec_;
   }
+
+  // Find the first position i where td1[i] is not the same as td2[i]. "Same"
+  // means the DAG and input IDs to generate td1[i] and td2[i] are the same.
+  static int findFirstMismatchedID(
+      const TensorDomain* td1,
+      const TensorDomain* td2);
 };
 
 } // namespace fuser

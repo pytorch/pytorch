@@ -154,7 +154,6 @@ def load_aten_declarations(path):
         if has_tensoroptions_argument(declaration):
             declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
-        # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):
             declaration['type_wrapper_name'] = "{}_{}".format(
                 declaration['name'], declaration['overload_name'])

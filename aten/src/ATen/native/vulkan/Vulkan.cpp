@@ -829,10 +829,10 @@ void ComputeUnit::createComputePipeline(
 void ComputeUnit::createComputePipelineCompile(
     const std::string& glslSrc,
     const VkPipelineCache pipelineCache,
-    const VkDescriptorSetLayout& descrSetLayout,
+    const VkDescriptorSetLayout descrSetLayout,
     const WorkGroupSize workGroupSize) {
   shaderc::Compiler compiler{};
-  shaderc::CompileOptions options;
+  shaderc::CompileOptions options{};
 #ifdef DEBUG
   options.SetGenerateDebugInfo();
 #endif

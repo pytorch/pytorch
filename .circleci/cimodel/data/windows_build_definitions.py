@@ -96,11 +96,14 @@ class WindowsJob:
 
 
 class VcSpec:
-    def __init__(self, year, version_elements=None):
+    def __init__(self, year, version_elements=None, hide_version=False):
         self.year = year
         self.version_elements = version_elements or []
+        self.hide_version = hide_version
 
     def get_elements(self):
+        if self.hide_version:
+            return [self.prefixed_year()]
         return [self.prefixed_year()] + self.version_elements
 
     def get_product(self):
@@ -113,7 +116,7 @@ class VcSpec:
         return "vs" + str(self.year)
 
     def render(self):
-        return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
+        return "_".join(self.get_elements())
 
 def FalsePred(_):
     return False
@@ -121,20 +124,23 @@ def FalsePred(_):
 def TruePred(_):
     return True
 
+# MKLDNN compilation fails with VC-19.27
+_VC2019 = VcSpec(2019, ["14", "26"], hide_version=True)
+
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
-    WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(None, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(2, _VC2019, CudaVersion(10, 1)),
     # VS2019 CUDA-11.0
-    WindowsJob(None, VcSpec(2019), CudaVersion(11, 0)),
-    WindowsJob(1, VcSpec(2019), CudaVersion(11, 0)),
-    WindowsJob(2, VcSpec(2019), CudaVersion(11, 0)),
+    WindowsJob(None, _VC2019, CudaVersion(11, 0)),
+    WindowsJob(1, _VC2019, CudaVersion(11, 0), master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, CudaVersion(11, 0), master_only_pred=TruePred),
     # VS2019 CPU-only
-    WindowsJob(None, VcSpec(2019), None),
-    WindowsJob(1, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    WindowsJob(None, _VC2019, None),
+    WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 

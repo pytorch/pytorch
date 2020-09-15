@@ -64,7 +64,7 @@ The semantics are as follows:
 GraphModule automatically generates Python code for the operations it symbolically observed:
 
 ```
-print(gm.src)
+print(gm.code)
 ```
 
 ```
@@ -86,4 +86,7 @@ Because this code is valid PyTorch code, the resulting `GraphModule` can be used
 '''
 
 from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace
+from .symbolic_trace import symbolic_trace, DefaultDelegate
+from .graph import Graph, map_arg
+from .node import Node
+from .proxy import Proxy

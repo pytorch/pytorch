@@ -32,6 +32,9 @@ SystemEnv = namedtuple('SystemEnv', [
     'pip_version',  # 'pip' or 'pip3'
     'pip_packages',
     'conda_packages',
+    'hip_compiled_version',
+    'hip_runtime_version',
+    'miopen_runtime_version',
 ])
 
 
@@ -39,11 +42,11 @@ def run(command):
     """Returns (return-code, stdout, stderr)"""
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True)
-    output, err = p.communicate()
+    raw_output, raw_err = p.communicate()
     rc = p.returncode
     enc = locale.getpreferredencoding()
-    output = output.decode(enc)
-    err = err.decode(enc)
+    output = raw_output.decode(enc)
+    err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -103,7 +106,7 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
-    if get_platform() == 'darwin':
+    if get_platform() == 'darwin' or torch.version.hip is not None:
         if TORCH_AVAILABLE and torch.cuda.is_available():
             return torch.cuda.get_device_name(None)
         return None
@@ -142,15 +145,15 @@ def get_cudnn_version(run_lambda):
         if l is not None and os.path.isfile(l):
             return os.path.realpath(l)
         return None
-    files = set()
+    files_set = set()
     for fn in out.split('\n'):
         fn = os.path.realpath(fn)  # eliminate symbolic links
         if os.path.isfile(fn):
-            files.add(fn)
-    if not files:
+            files_set.add(fn)
+    if not files_set:
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files))
+    files = list(sorted(files_set))
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
@@ -265,22 +268,44 @@ def get_env_info():
 
     if TORCH_AVAILABLE:
         version_str = torch.__version__
-        debug_mode_str = torch.version.debug
-        cuda_available_str = torch.cuda.is_available()
+        debug_mode_str = str(torch.version.debug)
+        cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+
+    if torch.version.hip is None:  # cuda version
+        gpu_info = dict(
+            is_cuda_available=cuda_available_str,
+            cuda_compiled_version=cuda_version_str,
+            cuda_runtime_version=get_running_cuda_version(run_lambda),
+            nvidia_gpu_models=get_gpu_info(run_lambda),
+            nvidia_driver_version=get_nvidia_driver_version(run_lambda),
+            cudnn_version=get_cudnn_version(run_lambda),
+            hip_compiled_version='N/A',
+            hip_runtime_version='N/A',
+            miopen_runtime_version='N/A',
+        )
+    else:  # HIP version
+        cfg = torch._C._show_config().split('\n')
+        hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'HIP Runtime' in s][0]
+        miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'MIOpen' in s][0]
+        gpu_info = dict(
+            is_cuda_available=cuda_available_str,
+            cuda_compiled_version='N/A',
+            hip_compiled_version=torch.version.hip,
+            hip_runtime_version=hip_runtime_version,
+            miopen_runtime_version=miopen_runtime_version,
+            cuda_runtime_version='N/A',
+            nvidia_gpu_models=get_gpu_info(run_lambda),
+            nvidia_driver_version=get_nvidia_driver_version(run_lambda),
+            cudnn_version='N/A',
+        )
 
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
         python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
-        is_cuda_available=cuda_available_str,
-        cuda_compiled_version=cuda_version_str,
-        cuda_runtime_version=get_running_cuda_version(run_lambda),
-        nvidia_gpu_models=get_gpu_info(run_lambda),
-        nvidia_driver_version=get_nvidia_driver_version(run_lambda),
-        cudnn_version=get_cudnn_version(run_lambda),
         pip_version=pip_version,
         pip_packages=pip_list_output,
         conda_packages=get_conda_packages(run_lambda),
@@ -288,12 +313,14 @@ def get_env_info():
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
+        **gpu_info
     )
 
 env_info_fmt = """
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
+ROCM used to build PyTorch: {hip_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}
@@ -306,6 +333,8 @@ CUDA runtime version: {cuda_runtime_version}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
+HIP runtime version: {hip_runtime_version}
+MIOpen runtime version: {miopen_runtime_version}
 
 Versions of relevant libraries:
 {pip_packages}

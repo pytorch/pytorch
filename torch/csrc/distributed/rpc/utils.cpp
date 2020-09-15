@@ -55,6 +55,15 @@ void processRemoteProfiledEvents(
   // Add event list to the thread local profiler.
   torch::autograd::profiler::addEventList(std::move(events));
 }
+
+inline c10::Device indexToDevice(c10::DeviceIndex index) {
+  if (index == -1) {
+    return c10::Device(at::kCPU);
+  } else {
+    return c10::Device(at::kCUDA, index);
+  }
+}
+
 } // namespace
 
 const std::string kRPCErrorPrefix = std::string("RPCErr");
@@ -472,15 +481,18 @@ constexpr int kTpMessagePickleIdx = 3;
 } // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    Message&& rpcMessage) {
+    Message&& rpcMessage,
+    std::vector<c10::DeviceIndex> deviceIndices) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
   // Metadata
   buffers.type = std::make_unique<MessageType>(rpcMessage.type());
   buffers.id = std::make_unique<int64_t>(rpcMessage.id());
+  // kTpMessageTypeIdx = 0
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
+  // kTpMessageIdIdx = 1
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
@@ -490,11 +502,22 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   // it uses non-const pointers even though it doesn't modify them when writing.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  // kTpMessagePayloadIdx = 2
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
   // Tensors
-  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  if (deviceIndices.empty()) {
+    buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  } else {
+    std::vector<torch::Tensor> tensors;
+    tensors.reserve(rpcMessage.tensors().size());
+    for (const auto& tensor : rpcMessage.tensors()) {
+      tensors.emplace_back(tensor.cpu());
+    }
+    buffers.tensors = cloneSparseTensors(tensors).vec();
+  }
+
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(
         buffers.pickle.end(),
@@ -505,25 +528,31 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.protocol();
   pickler.pushIValue(buffers.tensors);
   pickler.stop();
+  // kTpMessagePickleIdx = 3
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
-  for (const auto& tensor : pickler.tensorData()) {
-    const auto& tensorData = jit::getWriteableTensorData(tensor);
+  const auto& tensorDataVec = pickler.tensorData();
+  for (size_t i = 0; i < tensorDataVec.size(); ++i) {
+    const auto& tensorData =
+        jit::getWriteableTensorData(tensorDataVec[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
+    std::string metadata =
+        deviceIndices.empty() ? "" : std::to_string(deviceIndices[i]);
+
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
-      tpMessage.tensors.push_back(
-          tensorpipe::Message::Tensor{storageData.data(), storageData.size()});
+      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+          storageData.data(), storageData.size(), std::move(metadata)});
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
       // TensorPipe uses the same Message class for both reading and writing, so
       // it uses non-const ptrs even though it doesn't modify them when writing.
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
-      tpMessage.tensors.push_back(
-          tensorpipe::Message::Tensor{tensorPtr, tensorData.sizeInBytes()});
+      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+          tensorPtr, tensorData.sizeInBytes(), std::move(metadata)});
     }
   }
 
@@ -560,7 +589,6 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
   tpMessage.payloads[kTpMessageIdIdx].data = buffers.id.get();
 
   // FIXME The two resizes below zero out the vectors, which is not needed.
-
   buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
   tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
 
@@ -568,7 +596,8 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
-    buffers.tensors.push_back(at::getCPUAllocator()->allocate(tensor.length));
+    buffers.tensors.emplace_back(
+        at::getCPUAllocator()->allocate(tensor.length));
     tensor.data = buffers.tensors.back().get();
   }
 
@@ -604,6 +633,24 @@ Message tensorpipeDeserialize(
   auto ival = unpickler.parse_ivalue();
   for (auto&& t : ival.toTensorList()) {
     tensors.emplace_back(std::move(t));
+  }
+
+  // NB: This is a temporary solution. When TensorPipe Tensor.data can point to
+  // a CUDA memory address, we should directly use CUDACachingAllocator to
+  // create CUDA buffers in tensorpipeAllocate.
+  for (size_t i = 0; i < message.tensors.size(); ++i) {
+    auto& tensor = message.tensors[i];
+    if (!tensor.metadata.empty()) {
+      TORCH_INTERNAL_ASSERT(
+          message.tensors.size() == tensors.size(),
+          "Number of device indices must match the number of tensors in the "
+          "RPC message. But got ",
+          tensors.size(),
+          " tensors with ",
+          message.tensors.size(),
+          " device indices.");
+      tensors[i] = tensors[i].to(indexToDevice(std::stoi(tensor.metadata)));
+    }
   }
 
   return Message(
