@@ -18,7 +18,7 @@ class PYBIND11_EXPORT PyRRef {
   // for more explanations.
   explicit PyRRef(const py::object& value, const py::object& type_hint);
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
-  ~PyRRef() noexcept;
+  ~PyRRef();
 
   bool isOwner() const;
   bool confirmedByOwner() const;
