@@ -324,19 +324,33 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::BinaryOp* node) final {
-    if (!print_inline_) {
+    const auto op_type = node->getBinaryOpType();
+    if (print_inline_) {
+      // Inline expression: `lhs op rhs`
+      code_ << genBinaryOp(op_type, gen(node->lhs()), gen(node->rhs()));
+    } else {
       indent() << gen(node->out());
-      if (!node->out()->isScalar()) {
-        code_ << "\n";
-        indent() << kTab;
+      if (node->out()->isScalar()) {
+        // Single line: `out = lhs op rhs;`
+        code_ << " = "
+              << genBinaryOp(op_type, gen(node->lhs()), gen(node->rhs()));
+      } else {
+        // Split TensorView expressions across multiple lines:
+        //
+        // out
+        //    =  lhs
+        //    op rhs;
+        //
+        if (auto op = inline_op_str(op_type)) {
+          code_ << "\n";
+          indent() << kTab << "= " << gen(node->lhs()) << "\n";
+          indent() << kTab << *op << " " << gen(node->rhs());
+        } else {
+          code_ << " = " << op_type << "(\n";
+          indent() << kTab << gen(node->lhs()) << ",\n";
+          indent() << kTab << gen(node->rhs()) << ")";
+        }
       }
-      code_ << " = ";
-    }
-
-    code_ << genBinaryOp(
-        node->getBinaryOpType(), gen(node->lhs()), gen(node->rhs()));
-
-    if (!print_inline_) {
       code_ << ";\n";
     }
   }

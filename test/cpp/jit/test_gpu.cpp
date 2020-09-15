@@ -1121,19 +1121,23 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
   if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
     for(size_t i6 = 0; i6 < 1; ++i6) {
       T2[i6]
-         = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)] * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+        = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
+        * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
       T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-         = T2[i6] * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+        = T2[i6]
+        * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
     }
   } else {
     for(size_t i6 = 0; i6 < 1; ++i6) {
       if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
         T2[i6]
-           = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)] * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+          = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
+          * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
       }
       if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
         T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-           = T2[i6] * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+          = T2[i6]
+          * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
       }
     }
   }
@@ -5947,9 +5951,6 @@ void testGPU_FusionSmemDynamicPwiseMulSymbolicArg() {
   tv4->axis(4)->parallelize(ParallelType::BIDx);
   tv6->axis(4)->parallelize(ParallelType::BIDx);
   tv5->axis(3)->parallelize(ParallelType::BIDx);
-
-  fusion.printMath();
-  fusion.printKernel();
 
   constexpr int M = 31, K = 65, N = 33;
 
