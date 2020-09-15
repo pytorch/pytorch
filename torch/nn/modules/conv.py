@@ -178,6 +178,11 @@ class Conv1d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -328,6 +333,12 @@ class Conv2d(_ConvNd):
         a performance cost) by setting ``torch.backends.cudnn.deterministic =
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
 
     Args:
@@ -482,6 +493,12 @@ class Conv3d(_ConvNd):
         a performance cost) by setting ``torch.backends.cudnn.deterministic =
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
 
     Args:
@@ -678,6 +695,12 @@ class ConvTranspose1d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -817,6 +840,11 @@ class ConvTranspose2d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -982,6 +1010,11 @@ class ConvTranspose3d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        When the data type is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image

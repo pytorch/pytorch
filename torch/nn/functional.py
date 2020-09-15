@@ -33,6 +33,12 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
@@ -69,6 +75,11 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -107,6 +118,12 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
@@ -142,6 +159,12 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
+
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -181,6 +204,12 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
+
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -222,6 +251,12 @@ Note:
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
+
+Note:
+    When the data type is `torch.float` and the device is an Ampere GPU or newer,
+    this function will automatically uses TF32 tensor core to speedup the computation.
+    This usually results in much faster speed and smaller precision.
+    See :ref:`tf32_on_ampere` for more information.
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -1661,6 +1696,11 @@ def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+
+    .. note:: When the datatype is `torch.float` and the device is an Ampere GPU or newer,
+        this function will automatically uses TF32 tensor core to speedup the computation.
+        This usually results in much faster speed and smaller precision.
+        See :ref:`tf32_on_ampere` for more information.
 
     Shape:
 
