@@ -216,7 +216,6 @@ void FixupONNXLoopNodeInputs(Node* node) {
     InsertCastForCond(next_cond_val, graph, sub_block->return_node());
 }
 
-
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
