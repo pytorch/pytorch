@@ -19,6 +19,7 @@ from torch.quantization import (
     convert_static_fx,
     quantize_static_fx,
     quantize_dynamic_fx,
+    prepare_qat_fx,
 )
 
 from torch.quantization import (
@@ -395,7 +396,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # symbolically trace
         model = symbolic_trace(model)
-        model = prepare_fx(model, qconfig_dict)
+        model = prepare_qat_fx(model, qconfig_dict)
 
         # ensure scripting works
         scripted = torch.jit.script(model)
