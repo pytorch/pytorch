@@ -1044,11 +1044,26 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
 
-def _add_block(node, input_node, op_name, **kwargs):
-    new_block = node.addBlock()
-    new_node = new_block.addNode(input_node, op_name)
+
+def _add_block(node):
+    return node.addBlock()
+
+
+def _add_node_to_block(block, op_name, *input_nodes, **kwargs):
+    new_node = block.addNode(op_name, [input for input in input_nodes])
     for k, v in kwargs.items():
         _add_attribute(new_node, k, v, False)
+    return new_node.output()
+
+
+def _add_input_to_block(block):
+    return block.addInputToBlock()
+
+
+def _add_output_to_block(block, value):
+    new_output = block.registerOutput(value)
+    return new_output
+
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at

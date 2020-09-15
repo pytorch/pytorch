@@ -468,9 +468,13 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
       .def("paramNode", [](Block& b) { return b.param_node(); })
-      .def("addNode", [](Block& b, Value& input, const char* str) {
-        return addNodeToBlock(&b, &input, Symbol::fromQualString(str));
-      });
+      .def("addNode", [](Block& b, const char* str, const std::vector<Value*>& inputs) {
+        return addNodeToBlock(&b, Symbol::fromQualString(str), inputs);
+      })
+      .def("addInputToBlock", [](Block& b) {
+        return addInputToBlock(&b);
+      })
+      .def("registerOutput", [](Block& b, Value* value) { return b.registerOutput(value); });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")

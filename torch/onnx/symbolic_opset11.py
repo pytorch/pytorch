@@ -529,7 +529,6 @@ def squeeze(g, self, dim=None):
         return g.op("Squeeze", self)
 
     dim = sym_help._get_const(dim, 'i', 'dim')
-
     # create 'cond' node (condition is shape[i]==1)
     dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
     size = sym_help._size_helper(g, self, dim_constant)
@@ -538,9 +537,14 @@ def squeeze(g, self, dim=None):
     # create the 'If' node and add the 'then' and 'else' blocks to it.
     if_node_outputs = g.op("If", cond)
     if_node = if_node_outputs.node()
-    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=[dim])
-    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
+    if_block = torch.onnx.utils._add_block(if_node)
+    squeeze_ = torch.onnx.utils._add_node_to_block(if_block, "onnx::Squeeze", self, axes_i=[dim])
+    torch.onnx.utils._add_output_to_block(if_block, squeeze_)
+    else_block = torch.onnx.utils._add_block(if_node)
+    identity_ = torch.onnx.utils._add_node_to_block(else_block, "onnx::Identity", self)
+    torch.onnx.utils._add_output_to_block(else_block, identity_)
     return if_node_outputs
+
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
@@ -723,3 +727,68 @@ def flatten(g, input, start_dim, end_dim):
         end_dim = dim + end_dim
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
+
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse,
+                  per_sample_weights,
+                  include_last_offset):
+    if scale_grad_by_freq and sym_help._training_mode:
+        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+
+    loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    zero = g.op("Constant", value_t=torch.tensor([0]))
+
+    indices_len = g.op("Unsqueeze",
+                       sym_help._size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
+                       axes_i=[0])
+    if not include_last_offset:
+        offsets = [offsets, indices_len]
+        offsets = g.op("Concat", *offsets, axis_i=0)
+
+    # Offsets holds the starting index position of each bag. So we create a list of the indices slices (determined by
+    # offsets) and gather those indices in indices_row. Then we use this subset of indices to gather from embeddings.
+    # The embeddings output is a loop scan output, so we can avoid creating a sequence and inserting elements in.
+    offsets_starts = sym_help._slice_helper(g, offsets, axes=[0], starts=[0], ends=[-1], steps=[1])
+    offsets_ends = sym_help._slice_helper(g, offsets, axes=[0], starts=[1], ends=[maxsize], steps=[1])
+
+    loop_len = sym_help._size_helper(g, offsets_ends, g.op("Constant", value_t=torch.tensor(0)))
+    loop = g.op("Loop", loop_len, loop_condition)
+
+    new_block = _add_block(loop.node())
+    block_input_iter = _add_input_to_block(new_block)
+
+    indices_start = _add_node_to_block(new_block, "onnx::Gather", offsets_starts, block_input_iter, axis_i=0)
+    indices_end = _add_node_to_block(new_block, "onnx::Gather", offsets_ends, block_input_iter, axis_i=0)
+    indices_start = _add_node_to_block(new_block, "onnx::Unsqueeze", indices_start, axes_i=[0])
+    indices_end = _add_node_to_block(new_block, "onnx::Unsqueeze", indices_end, axes_i=[0])
+
+    indices_row = _add_node_to_block(new_block, "onnx::Slice", indices, indices_start, indices_end, zero)
+    embeddings = _add_node_to_block(new_block, "onnx::Gather", embedding_matrix, indices_row, axis_i=0)
+    if not sym_help._is_none(per_sample_weights):
+        per_sample_weights_row = _add_node_to_block(new_block, "onnx::Slice", per_sample_weights,
+                                                    indices_start,
+                                                    indices_end,
+                                                    zero)
+        per_sample_weights_row = _add_node_to_block(new_block, "onnx::Unsqueeze", per_sample_weights_row, axes_i=[1])
+        embeddings = _add_node_to_block(new_block, "onnx::Mul", embeddings, per_sample_weights_row)
+    if mode == 0:
+        embeddings = _add_node_to_block(new_block, "onnx::ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+    elif mode == 1:
+        embeddings = _add_node_to_block(new_block, "onnx::ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+    else:
+        embeddings = _add_node_to_block(new_block, "onnx::ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+
+    _add_output_to_block(new_block, loop_condition)
+    _add_output_to_block(new_block, embeddings)
+    # This pass does all required type casting for loop inputs (condition and iter)
+    torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
+
+    # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+    # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
+    return loop.node().output(), None, None, None
