@@ -360,6 +360,8 @@ INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 
 namespace blas_impl {
 
+// this is the fallback implementation of sger/dger routines
+// sger is to accelerate float inputs, while dger is for double inputs
 template <typename scalar_t>
 void addr_naive(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda) {
   for (int64_t j = 0; j < n; j++) {
@@ -370,6 +372,8 @@ void addr_naive(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx,
   }
 }
 
+// blas routines sger and dger can only handle the float and double numbers
+// return false for other dtypes so that fallback implementation could be triggered
 template <typename scalar_t>
 bool addr_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
   return false;
@@ -410,7 +414,7 @@ void addr_fast_path(int m, int n, double alpha, double *x, int incx, double *y, 
 
 template<typename scalar_t>
 void addr_impl(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda) {
-  if(n == 1) {
+  if (n == 1) {
     lda = m;
   }
   if (blas_impl::addr_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
@@ -418,11 +422,11 @@ void addr_impl(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, 
       lda >= std::max<int64_t>(1L, m),
       "lda should be at least max(1, ", m, "), but have ", lda
     );
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_m = static_cast<int32_t>(m);
+    int i_n = static_cast<int32_t>(n);
+    int i_lda = static_cast<int32_t>(lda);
+    int i_incx = static_cast<int32_t>(incx);
+    int i_incy = static_cast<int32_t>(incy);
     blas_impl::addr_fast_path<scalar_t>(i_m, i_n, alpha, x, i_incx, y, i_incy, a, i_lda);
   } else {
     blas_impl::addr_naive(m, n, alpha, x, incx, y, incy, a, lda);
