@@ -87,7 +87,7 @@ class TestTEFuser(JitTestCase):
                     acc[block].append(node)
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
-                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or 
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
                                                     node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
@@ -889,7 +889,7 @@ class TestTEFuser(JitTestCase):
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
                               'because the kernels sometimes trigger bugs in compilers '
                               '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
+                raise unittest.SkipTest('Failed to compile') from e
             else:
                 raise
 
@@ -1008,13 +1008,13 @@ class TestTEFuser(JitTestCase):
         assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @unittest.skip("Reenable when TE will add support for 0-dim tensors")
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
 
-        x = torch.tensor([0.1, 0.1], dtype=torch.float, device='cpu')
-        y = torch.tensor([1, 1], dtype=torch.float, device='cpu')
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(1, dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
@@ -1134,25 +1134,19 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
+    def data_for(self, dtype, device="cuda"):
+        v = torch.arange(1, 3, dtype=torch.float, device=device)
+        if dtype == torch.bool:
+            return v > 2
+        elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            return torch.quantize_per_tensor(v, 0.1, 1, dtype=dtype)
+        else:
+            return v.to(dtype)
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(2 * x)
-
-        def rand(dtype, device="cuda"):
-            shape = (4, 4)
-            if dtype == torch.bool:
-                return torch.rand(shape, dtype=torch.float32, device=device) > 0.5
-            elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
-                return torch.quantize_per_tensor(torch.rand(shape, dtype=torch.float32, device=device), .01, 1, dtype=dtype)
-            elif dtype.is_complex:
-                return torch.rand(shape, dtype=dtype, device=device)
-            elif dtype.is_floating_point:
-                return torch.rand(shape, dtype=dtype, device=device)
-            else:
-                # dtype is an integer.
-                return torch.randint(0, 100, shape, dtype=dtype, device=device)
-            raise RuntimeError("Unhandled dtype")
 
         dtypes = [
             torch.int8,
@@ -1160,29 +1154,78 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # torch.float16,
             torch.float32,
             torch.float64,
-            torch.bfloat16,
             torch.bool,
-            torch.complex32,
-            # torch.complex64,
-            # torch.complex128,
-            # torch.qint8,
-            # torch.quint8,
-            # torch.qint32,
         ]
         unary_ops = [
             torch.sigmoid,
             torch.reciprocal,
+            torch.neg,
+            torch.relu,
+            torch.log,
+            torch.log10,
+            torch.log2,
+            torch.exp,
+            torch.expm1,
+            torch.erf,
+            torch.erfc,
+            torch.cos,
+            torch.sin,
+            torch.tan,
+            torch.acos,
+            torch.asin,
+            torch.cosh,
+            torch.sinh,
+            torch.atan,
+            torch.tanh,
+            torch.sqrt,
+            torch.rsqrt,
+            torch.abs,
+            torch.ceil,
+            torch.floor,
+            torch.round,
+            torch.trunc,
+            torch.frac,
         ]
-        devices = [
-            "cuda",
-        ]
+        devices = ["cuda"]
         for dtype, op, device in product(dtypes, unary_ops, devices):
             try:
-                x = rand(dtype, device)
+                x = self.data_for(dtype, device)
                 fn = apply(op)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x,))
+                torch.testing.assert_allclose(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_unsupported_dtypes(self):
+        def fn(x):
+            return x * x + x
+
+        unsupported_dtypes = [
+            torch.bfloat16,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+        ]
+        for dtype in unsupported_dtypes:
+            try:
+                x = self.data_for(dtype, "cuda")
                 ref = fn(x)
             except Exception:
                 # If eager mode doesn't support a dtype/op/device combo,
@@ -1191,7 +1234,8 @@ class TestTEFuser(JitTestCase):
                 continue
             t = torch.jit.trace(fn, (x,))
             self.assertEqual(ref, t(x))
-            self.assertAllFused(t.graph_for(x))
+            self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
+
 
 if __name__ == '__main__':
     run_tests()
