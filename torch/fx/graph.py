@@ -78,7 +78,7 @@ class Graph:
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
-                    name: Optional[str] = None):
+                    name: Optional[str] = None) -> Node:
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
@@ -87,6 +87,31 @@ class Graph:
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
         self.nodes.append(n)
         return n
+
+    # sugar for above when you know the op
+    def placeholder(self, name: str) -> Node:
+        return self.create_node('placeholder', name)
+
+    def get_param(self, name: str) -> Node:
+        return self.create_node('get_param', name)
+
+    def call_module(self, 
+                    module_name: str, 
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_module', module_name, args, kwargs)
+
+    def call_method(self, 
+                    method_name: str, 
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_method', method_name, args, kwargs)
+
+    def call_function(self, 
+                      the_function: Callable[..., Any], 
+                      args: Optional[Tuple[Argument, ...]] = None,
+                      kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_function', the_function, args, kwargs)
 
     def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
@@ -115,6 +140,7 @@ class Graph:
             if _is_magic(op):
                 op = op[2:-2]
         op = op.replace('.', '_')
+        op = op.replace('*', '')
         op = snake_case(op)
 
         if op not in self._used_names:
@@ -135,6 +161,9 @@ class Graph:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
+                raw_name = node.target.replace('*', '')
+                if raw_name != node.name:
+                    body.append(f'{node.name} = {raw_name}\n')
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
