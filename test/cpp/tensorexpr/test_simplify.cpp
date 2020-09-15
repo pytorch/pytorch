@@ -46,6 +46,24 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->name_hint(), name);          \
   }
 
+#define IS_BINOP_W_VARS(T, node, name, v1, v2) \
+  const T* name = nullptr;                     \
+  {                                            \
+    name = dynamic_cast<const T*>(node);       \
+    ASSERT_NE(nullptr, name);                  \
+    IS_VAR_WITH_NAME(name->lhs(), v1);         \
+    IS_VAR_WITH_NAME(name->rhs(), v2);         \
+  }
+
+#define IS_BINOP_W_CONST(T, node, name, v, c) \
+  const T* name = nullptr;                    \
+  {                                           \
+    name = dynamic_cast<const T*>(node);      \
+    ASSERT_NE(nullptr, name);                 \
+    IS_VAR_WITH_NAME(name->lhs(), v);         \
+    IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
+  }
+
 void testConstantFoldSimple() {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -1398,6 +1416,612 @@ void testSimplifySymbolicMinMax() {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE(Max, simplified.node());
+  }
+}
+
+void testSimplifyNestedMax() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+
+  {
+    // Max(x + y, x + y) => x + y
+    ExprHandle body = Max::make(x + y, x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+  }
+
+  {
+    // Max(x + y, Max(x + y, z)) => Max(y + x, z)
+    ExprHandle body = Max::make(x + y, Max::make(x + y, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(x + y, Max(z, x + y)) => Max(y + x, z)
+    ExprHandle body = Max::make(x + y, Max::make(z, x + y, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x + y, z), x + y) => Max(y + x, z)
+    ExprHandle body = Max::make(Max::make(x + y, z, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(z, x + y), x + y) => Max(y + x, z)
+    ExprHandle body = Max::make(Max::make(z, x + y, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x, y), x) => Max(Max(x, y), x)
+    // Nested Max ops with different propagate_nans should not be simplified.
+    ExprHandle body = Max::make(Max::make(x, y, true), x, false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Max, max->lhs(), max1, "x", "y");
+    ASSERT_TRUE(max1->propagate_nans());
+    IS_VAR_WITH_NAME(max->rhs(), "x");
+    ASSERT_FALSE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(x, y, true), Min::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(x, y), Min(z, x)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(x, y, true), Min::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(x, z)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(z, x)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(z, x)) => Max(Min(x, z), Min(x, y))
+    // When all the ops in the pattern do not have the same propagate_nans,
+    // it should not be simplified.
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(z, x, false), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "z");
+    ASSERT_FALSE(min1->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "y");
+    ASSERT_TRUE(min2->propagate_nans());
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(5, Max(x, 8)) => Max(x, 8)
+    ExprHandle body = Max::make(5, Max::make(x, 8, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(8, Max(x, 5)) => Max(x, 8)
+    ExprHandle body = Max::make(8, Max::make(x, 5, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Max(x, 8), 5) => Max(x, 8)
+    ExprHandle body = Max::make(Max::make(x, 8, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Max(x, 5), 8) => Max(x, 8)
+    ExprHandle body = Max::make(Max::make(x, 5, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(5, Max(x, Max(y, Max(z, 8)))) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        5, Max::make(x, Max::make(y, Max::make(z, 8, true), true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(8, Max(Max(y, Max(z, 5)), x)) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        8, Max::make(Max::make(y, Max::make(z, 5, true), true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(5, Max(Max(Max(z, 8), y), x)) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        5, Max::make(Max::make(Max::make(z, 8, true), y, true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x, Max(y, Max(5, z))), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(x, Max::make(y, Max::make(5, z, true), true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(y, Max(8, z)), x), 5) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(Max(5, z), y), x), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(Max(z, 5), y), x), 8) => Max(Max(x, Max(Max(z, 5), y)), 8)
+    // Do not simplify when all the Max ops do not have the same
+    // propagate_nans.
+    ExprHandle body = Max::make(
+        Max::make(Max::make(Max::make(z, 5, true), y, false), x, true),
+        8,
+        false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_VAR_WITH_NAME(max2->lhs(), "x");
+    IS_NODE_WITH_NAME(Max, max2->rhs(), max3);
+    IS_BINOP_W_CONST(Max, max3->lhs(), max4, "z", 5);
+    ASSERT_TRUE(max4->propagate_nans());
+    IS_VAR_WITH_NAME(max3->rhs(), "y");
+    ASSERT_FALSE(max3->propagate_nans());
+    ASSERT_TRUE(max2->propagate_nans());
+    IS_IMM_WITH_VAL(Int, max1->rhs(), 8);
+    ASSERT_FALSE(max1->propagate_nans());
+  }
+
+  {
+    // Max(8, Max(Max(x, 5), Max(y, z))) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        8, Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(x, 5), Max(y, z)), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+}
+
+void testSimplifyNestedMin() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+
+  {
+    // Min(x + y, x + y) => x + y
+    ExprHandle body = Min::make(x + y, x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+  }
+
+  {
+    // Min(x + y, Min(x + y, z)) => Min(y + x, z)
+    ExprHandle body = Min::make(x + y, Min::make(x + y, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(x + y, Min(z, x + y)) => Min(y + x, z)
+    ExprHandle body = Min::make(x + y, Min::make(z, x + y, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x + y, z), x + y) => Min(y + x, z)
+    ExprHandle body = Min::make(Min::make(x + y, z, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(z, x + y), x + y) => Min(y + x, z)
+    ExprHandle body = Min::make(Min::make(z, x + y, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x, y), x) => Min(Min(x, y), x)
+    // Nested Min ops with different propagate_nans should not be simplified.
+    ExprHandle body = Min::make(Min::make(x, y, true), x, false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_BINOP_W_VARS(Min, min1->lhs(), min2, "x", "y");
+    ASSERT_TRUE(min2->propagate_nans());
+    IS_VAR_WITH_NAME(min1->rhs(), "x");
+    ASSERT_FALSE(min1->propagate_nans());
+  }
+
+  {
+    // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(x, y, true), Max::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(x, y), Max(z, x)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(x, y, true), Max::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(x, z)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(z, x)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(z, x)) => Min(Max(x, z), Max(x, y))
+    // When all the ops in the pattern do not have the same propagate_nans,
+    // it should not be simplified.
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(z, x, false), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "z");
+    ASSERT_FALSE(max1->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "y");
+    ASSERT_TRUE(max2->propagate_nans());
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(5, Min(x, 8)) => Min(x, 8)
+    ExprHandle body = Min::make(5, Min::make(x, 8, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(8, Min(x, 5)) => Min(x, 8)
+    ExprHandle body = Min::make(8, Min::make(x, 5, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Min(x, 8), 5) => Min(x, 8)
+    ExprHandle body = Min::make(Min::make(x, 8, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Min(x, 5), 8) => Min(x, 8)
+    ExprHandle body = Min::make(Min::make(x, 5, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(5, Min(x, Min(y, Min(z, 8)))) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(x, Min::make(y, Min::make(z, 8, true), true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(5, Min(Min(y, Min(z, 8)), x)) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(5, Min(Min(Min(z, 8), y), x)) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x, Min(y, Min(8, z))), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(x, Min::make(y, Min::make(8, z, true), true), true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(y, Min(8, z)), x), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(Min(8, z), y), x), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(x, Min(Min(z, 5), y)), 8)
+    // Do not simplify when all the Min ops do not have the same
+    // propagate_nans.
+    ExprHandle body = Min::make(
+        Min::make(Min::make(Min::make(z, 5, true), y, false), x, true),
+        8,
+        false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_VAR_WITH_NAME(min2->lhs(), "x");
+    IS_NODE_WITH_NAME(Min, min2->rhs(), min3);
+    IS_BINOP_W_CONST(Min, min3->lhs(), min4, "z", 5);
+    ASSERT_TRUE(min4->propagate_nans());
+    IS_VAR_WITH_NAME(min3->rhs(), "y");
+    ASSERT_FALSE(min3->propagate_nans());
+    ASSERT_TRUE(min2->propagate_nans());
+    IS_IMM_WITH_VAL(Int, min1->rhs(), 8);
+    ASSERT_FALSE(min1->propagate_nans());
+  }
+
+  {
+    // Min(8, Min(Min(x, 5), Min(y, z))) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        8, Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(x, 5), Min(y, z)), 8) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
   }
 }
 
