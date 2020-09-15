@@ -7,7 +7,7 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
+from torch.jit.frontend import get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
