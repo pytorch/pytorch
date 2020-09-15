@@ -47,21 +47,21 @@ void foreach_binary_op_(TensorList tensors, ScalarList scalars) {
 void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, ScalarList scalars) {                 \
     check_foreach_api_restrictions(tensors, scalars);                                                          \
                                                                                                                \
-    if (!can_use_fast_route(tensors, scalars[0])) {                                                            \
+    if (!can_use_fast_route(tensors, scalars)) {                                                               \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                  \
     }                                                                                                          \
                                                                                                                \
-    foreach_binary_op_<OP>(tensors, scalars);                                                               \
+    foreach_binary_op_<OP>(tensors, scalars);                                                                  \
 }                                                                                                              \
                                                                                                                \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, ScalarList scalars) {   \
     check_foreach_api_restrictions(tensors, scalars);                                                          \
                                                                                                                \
-    if (!can_use_fast_route(tensors, scalars[0])) {                                                            \
+    if (!can_use_fast_route(tensors, scalars)) {                                                               \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                   \
     }                                                                                                          \
                                                                                                                \
-    return foreach_binary_op<OP>(tensors, scalars);                                                         \
+    return foreach_binary_op<OP>(tensors, scalars);                                                            \
 }
 
 FOREACH_BINARY_OP_SCALARLIST(add, std::plus);

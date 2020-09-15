@@ -117,7 +117,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
   }
   type_ = it->second;
- 
+
   auto eq = name_str.find('=');
   if (eq != std::string::npos) {
     name = name_str.substr(0, eq);
@@ -392,12 +392,11 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
-    case ParameterType::COMPLEX: 
+    case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
       // fallthrough
-    
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;

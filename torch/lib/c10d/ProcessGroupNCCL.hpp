@@ -106,6 +106,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // and False otherwise.
     bool timedOut();
 
+    std::vector<at::Tensor> result() override;
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;

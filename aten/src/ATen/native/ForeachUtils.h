@@ -40,7 +40,6 @@ void check_foreach_api_restrictions(TensorList tensors, ScalarList scalars) {
 
   for (int i = 0; i < tensors.size(); i++) {
     TORCH_CHECK(tensors[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    //TORCH_CHECK(scalars[i].type() == expected_dtype, "All scalars in the scalar list must have the same dtype as correcponding tensor. Expected ", expected_dtype, ", got ", scalars[i].type());
   }
 }
 
@@ -83,6 +82,47 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
 
     // integral scalar + boolean tensor will result in integral tensor 
     if (scalar.isIntegral(/*includeBool*/ false) && t.dtype() == at::kBool) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool can_use_fast_route(TensorList tensors, ScalarList scalars) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+  auto expected_device = tensors[0].device();
+
+  for (int i = 0; i < tensors.size(); i++) {
+    if (tensors[i].device() != expected_device) {
+      return false;
+    }
+
+    if (tensors[i].layout() != at::kStrided) {
+      return false;
+    }
+
+    if (tensors[i].device() != expected_device) {
+      return false;
+    }
+
+    if (!tensors[i].is_non_overlapping_and_dense()) {
+      return false;
+    }
+
+    // complex scalar + integral or boolean tensor will result in complex tensor
+    if (scalars[i].isComplex() && at::isIntegralType(tensors[i].scalar_type(), /*includeBool*/ true)) {
+      return false;
+    }
+
+    // float scalar + integral or boolean tensor will result in float tensor
+    if (scalars[i].isFloatingPoint() && at::isIntegralType(tensors[i].scalar_type(), /*includeBool*/ true)) {
+      return false;
+    }
+
+    // integral scalar + boolean tensor will result in integral tensor 
+    if (scalars[i].isIntegral(/*includeBool*/ false) && tensors[i].dtype() == at::kBool) {
       return false;
     }
   }

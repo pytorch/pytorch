@@ -99,8 +99,6 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             return "IntArrayRef"
         elif str(t.elem) == 'Tensor':
             return "TensorList"
-        elif str(t.elem) == 'Scalar':
-            return "ScalarList"
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
