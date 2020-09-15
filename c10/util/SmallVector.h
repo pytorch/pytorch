@@ -378,9 +378,6 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
 
 /// This class consists of common code factored out of the SmallVector class to
 /// reduce code duplication based on the SmallVector 'N' template parameter.
-/// Warning: C10_IS_TRIVIALLY_COPYABLE may not always detect non-POD
-/// type correctly. For example, std::unique_ptr may be treated as POD and cause
-/// memory leaks.
 template <typename T>
 class SmallVectorImpl
     : public SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)> {
