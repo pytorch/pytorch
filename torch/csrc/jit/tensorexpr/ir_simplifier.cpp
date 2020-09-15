@@ -696,18 +696,27 @@ const Expr* PolynomialTransformer::isRoundOff(
     return nullptr;
   }
 
-  if (hasher_.hash(div->rhs()) == hasher_.hash(other)) {
-    // If the denominator is equal to the other, then yes it's a RoundOff.
-    return new RoundOff(div->lhs(), rhs);
+  const Expr* denom = div->rhs();
+
+  if (const Term* denomTerm = dynamic_cast<const Term*>(denom)) {
+    if (immediateEquals(denomTerm->scalar(), 1) &&
+        denomTerm->variables().size() == 1) {
+      denom = denomTerm->variables()[0];
+    }
   }
 
-  if (div->rhs()->isConstant() && other->isConstant()) {
-    if (immediateEquals(div->rhs(), 0) || immediateEquals(other, 0)) {
+  if (hasher_.hash(denom) == hasher_.hash(other)) {
+    // If the denominator is equal to the other, then yes it's a RoundOff.
+    return new RoundOff(div->lhs(), div->rhs());
+  }
+
+  if (denom->isConstant() && other->isConstant()) {
+    if (immediateEquals(denom, 0) || immediateEquals(other, 0)) {
       return nullptr;
     }
     // If they are both scalar we may be able to find a common factor.
-    if (immediateEquals(evaluateOp(new Mod(other, div->rhs())), 0)) {
-      Expr* scalar = evaluateOp(new Div(other, div->rhs()));
+    if (immediateEquals(evaluateOp(new Mod(other, denom)), 0)) {
+      Expr* scalar = evaluateOp(new Div(other, denom));
       Expr* newDenom = evaluateOp(new Div(other, scalar));
       return new Term(hasher_, scalar, new RoundOff(div->lhs(), newDenom));
     }
@@ -793,6 +802,11 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   // Catch cases of rounding (Div(A/B) * B).
   if (auto* ret = isRoundOff(lhs_new, rhs_new)) {
     return ret;
+  } else if (auto* ret = isRoundOff(v->lhs(), v->rhs())) {
+    // We can break the Round + Mod pattern via factorization of the Div, so
+    // check whether it would have worked on the unsimplified tree. If so, we
+    // need to simplify again.
+    return ret->accept_mutator(this);
   }
 
   const Polynomial* lhsPoly = dynamic_cast<const Polynomial*>(lhs_new);
@@ -935,11 +949,86 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
     return new Div(lhs_new, rhs_new);
   }
 
+  // If the numerator is zero, so is the result.
+  if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    return lhs_new;
+  }
+
+  // If the denominator is one, return numerator.
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    return lhs_new;
+  }
+
+  // If numberator and denominator are equal the result is 1.
+  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+    return getImmediateByType(v->dtype(), 1);
+  }
+
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
     return ret;
   }
 
   return new Div(lhs_new, rhs_new);
+}
+
+const Expr* PolynomialTransformer::mutate(const Max* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Max(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Max(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) > 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
+const Expr* PolynomialTransformer::mutate(const Min* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Min(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Min(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) < 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
+const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+  const Expr* retval1_new = v->ret_val1()->accept_mutator(this);
+  const Expr* retval2_new = v->ret_val2()->accept_mutator(this);
+  const Expr* v_new = new CompareSelect(
+      lhs_new, rhs_new, retval1_new, retval2_new, v->compare_select_op());
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(v_new);
+  }
+
+  return v_new;
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1025,7 +1114,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const Cond* v) {
+Stmt* IRSimplifierBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1037,9 +1126,9 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
-      return Stmt::clone(true_new);
+      return true_new ? Stmt::clone(true_new) : nullptr;
     } else {
-      return Stmt::clone(false_new);
+      return false_new ? Stmt::clone(false_new) : nullptr;
     }
   }
 
@@ -1047,6 +1136,15 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   if (true_new && false_new &&
       hasher_.hash(true_new) == hasher_.hash(false_new)) {
     return Stmt::clone(true_new);
+  }
+
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
   }
 
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
@@ -1063,7 +1161,7 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const For* v) {
+Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1092,6 +1190,12 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
     return new Block({});
   }
 
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+  }
+
   if (var == var_new && start == start_new && stop == stop_new &&
       body == body_new) {
     return (Stmt*)v;
@@ -1102,8 +1206,7 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* PolynomialTransformer::mutate(const Block* v) {
-  auto vars = v->varBindings();
+Stmt* IRSimplifierBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
@@ -1112,10 +1215,6 @@ Stmt* PolynomialTransformer::mutate(const Block* v) {
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
-      for (auto& pair : subBlock->varBindings()) {
-        vars.emplace_back(pair.first, pair.second);
-      }
-
       for (Block::iterator I = subBlock->begin(), E = subBlock->end();
            I != E;) {
         // Be careful to avoid invalidating the iterator.
@@ -1128,7 +1227,7 @@ Stmt* PolynomialTransformer::mutate(const Block* v) {
     }
   }
 
-  return new Block(vars, stmts);
+  return new Block(stmts);
 }
 
 // TermExpander
@@ -1468,6 +1567,65 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
       new Div(v->lhs(), v->rhs()),
       v->rhs());
   return term->accept_mutator(this);
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Var* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  bool any_change = buffer_var_new == buffer_var_old;
+
+  const Expr* flattened = getImmediateByType(kInt, 1);
+  std::vector<const Expr*> dims_old = v->dims();
+  std::vector<const Expr*> dims_new(dims_old.size());
+  for (size_t i = 0; i < dims_old.size(); i++) {
+    dims_new[i] = dims_old[i]->accept_mutator(this);
+    any_change |= (dims_new[i] == dims_old[i]);
+    flattened = new Mul(flattened, dims_new[i]);
+  }
+
+  // Safe to do this as there can't be an Allocate inside an Allocate:
+  flattened = IRSimplifier::simplify(flattened);
+
+  if (flattened->isConstant() && immediateEquals(flattened, 0)) {
+    eliminated_allocations_.insert(buffer_var_new);
+    return nullptr;
+  }
+
+  if (!any_change) {
+    return (Stmt*)v;
+  }
+
+  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+}
+
+Stmt* TermExpander::mutate(const Free* v) {
+  const Expr* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+
+  if (eliminated_allocations_.count(buffer_var_new)) {
+    eliminated_allocations_.erase(buffer_var_new);
+    return nullptr;
+  }
+
+  if (buffer_var_new == buffer_var_old) {
+    return (Stmt*)v;
+  }
+
+  return new Free(buffer_var_new);
+}
+
+bool exprEquals(const Expr* A, const Expr* B) {
+  try {
+    const Expr* diff = IRSimplifier::simplify(new Sub(A, B));
+    if (!diff->isConstant()) {
+      return false;
+    }
+    return immediateEquals(diff, 0);
+  } catch (std::exception& e) {
+    return false;
+  }
 }
 
 } // namespace tensorexpr

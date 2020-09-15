@@ -287,7 +287,6 @@ class Vectorizer : public IRMutator {
 
   bool vectorize_inputs(std::vector<const Expr*>& inputs) {
     bool any_vectorized = false;
-    bool all_vectorized = true;
     std::vector<const Expr*> new_inputs;
 
     // Attempt to vectorize each input.
@@ -296,8 +295,6 @@ class Vectorizer : public IRMutator {
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
-      } else {
-        all_vectorized = false;
       }
     }
 
@@ -571,9 +568,16 @@ class RandomInliner : public FunctionInliner {
       b = new Block({s});
     }
 
+    // Make sure theres something in the block, will be simplified out later.
+    if (b->empty()) {
+      b->append_stmt(new Block({}));
+    }
+
+    Stmt* first = b->stmts().front();
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
+      b->insert_stmt_before(
+          new Let(v, new Intrinsics(kRand, v->dtype())), first);
     }
     random_vars_.clear();
     return b;
@@ -712,10 +716,6 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
   if (f->ndim() == 0) {
     return body;
-  }
-
-  if (f->ndim() == 0) {
-    throw malformed_input("Tensor lowered to zero dimensions");
   }
 
   const Expr* initializer = t->initializer();
@@ -906,16 +906,100 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor >= size_val) {
+      *head = f;
+      *tail = nullptr;
+      return;
+    }
+  }
+
+  if (!f) {
+    throw malformed_input("sliceHead attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceHead attempted on loop with no parent", p);
+  }
+
+  const Expr* head_end =
+      new Min(new Add(f->start(), new IntImm(factor)), f->stop(), true);
+  *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
+  *tail = new For(
+      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
+    LoopNest::normalize(*tail, tail);
+  }
+
+  // TODO: record history of transformations
+}
+
+void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor >= size_val) {
+      *head = nullptr;
+      *tail = f;
+      return;
+    }
+  }
+
+  if (!f) {
+    throw malformed_input("sliceTail attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceTail attempted on loop with no parent", p);
+  }
+
+  const Expr* tail_start =
+      new Max(f->start(), new Sub(f->stop(), new IntImm(factor)), true);
+  *head = new For(
+      f->var(),
+      f->start(),
+      tail_start,
+      Stmt::clone(f->body()),
+      f->loop_options());
+  *tail = new For(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
+    LoopNest::normalize(*head, head);
+  }
+
+  // TODO: record history of transformations
+}
+
 void LoopNest::splitWithTail(
     For* f,
     int factor,
     For** outer,
     For** inner,
     For** tail) {
-  Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
-  } else if (!p) {
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 
@@ -949,7 +1033,8 @@ void LoopNest::splitWithTail(
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1023,7 +1108,8 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1085,7 +1171,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block(inner->body()->varBindings(), {});
+  Block* body = new Block({});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
@@ -1145,12 +1231,6 @@ void LoopNest::reorderAxis(For* a, For* b) {
     }
   }
 
-  // If the top level is now empty, eliminate it.
-  if (before->body()->nstmts() == 0) {
-    root->remove_stmt(before);
-    before = nullptr;
-  }
-
   // now we can actually reorder the chosen axes.
   std::swap(internal_axes.front(), internal_axes.back());
 
@@ -1160,11 +1240,80 @@ void LoopNest::reorderAxis(For* a, For* b) {
   }
 
   // Append the new statements to the root of the tree.
-  root->append_stmt(newInner);
+  if (before->body()->nstmts() == 0) {
+    // If the top level is now empty, eliminate it.
+    root->replace_stmt(before, newInner);
+  } else {
+    root->insert_stmt_after(newInner, before);
+  }
+
   if (after) {
-    root->append_stmt(after);
+    root->insert_stmt_after(after, newInner);
   }
 } // namespace tensorexpr
+
+void LoopNest::unroll(For* f, Stmt** unrolled) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!f) {
+    throw malformed_input("unroll attempted on null loop");
+  } else if (!p) {
+    throw malformed_input("unroll attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+  }
+  if (!f->stop()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+  }
+
+  std::vector<Stmt*> unrolled_stmts;
+  int start_val = immediateAs<int>(f->start());
+  int stop_val = immediateAs<int>(f->stop());
+  for (int current = start_val; current < stop_val; ++current) {
+    for (const auto stmt : f->body()->stmts()) {
+      auto stmt_copy = Stmt::clone(stmt);
+      unrolled_stmts.push_back(Substitute(
+          stmt_copy,
+          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+    }
+  }
+  *unrolled = new Block(unrolled_stmts);
+  *unrolled = IRSimplifier::simplify(*unrolled);
+
+  p->replace_stmt(f, *unrolled);
+}
+
+void LoopNest::normalize(For* f, For** normalized) {
+  if (!f) {
+    throw malformed_input("normalize attempted on null loop");
+  }
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("normalize attempted on loop with no parent");
+  }
+
+  if (f->start()->isConstant()) {
+    int start_idx = immediateAs<int>(f->start());
+    if (start_idx == 0) {
+      // No need to normalize in this case.
+      *normalized = f;
+      return;
+    }
+  }
+
+  auto for_body_normalized = Substitute(
+      Stmt::clone(f->body()),
+      {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
+  *normalized = For::make(
+      VarHandle(f->var()),
+      ExprHandle(0),
+      ExprHandle(f->stop()) - ExprHandle(f->start()),
+      for_body_normalized,
+      f->loop_options());
+
+  p->replace_stmt(f, *normalized);
+}
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
@@ -1175,7 +1324,8 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return std::vector<For*>(result.rbegin(), result.rend());
+  std::reverse(result.begin(), result.end());
+  return result;
 }
 
 void LoopNest::setGPUBlockIndex(For* f, int block_index) {
@@ -1184,6 +1334,12 @@ void LoopNest::setGPUBlockIndex(For* f, int block_index) {
 
 void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
   f->set_gpu_thread_index(thread_index);
+}
+
+void LoopNest::setBufferMap(
+    For* f,
+    const std::unordered_map<std::string, const Buf*>& map) {
+  f->set_buffer_map(map);
 }
 
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
@@ -1386,10 +1542,13 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // exit early.
   TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == st->buf()) {
-      store_bounds_info = p;
-      found = true;
+  for (const auto& pair : loop_bounds_info) {
+    const Buf* buf = pair.first;
+    for (const TensorAccessBoundsInfo& p : pair.second) {
+      if (buf == st->buf()) {
+        store_bounds_info = p;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -1452,8 +1611,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   f->body()->prepend_stmt(bd);
 
   // Rewrite accesses to producer in consumer with accesses to temp
-  LoopComputeAtRewriter lr(
-      store_bounds_info.buf, temp_buf, store_bounds_info.start);
+  LoopComputeAtRewriter lr(st->buf(), temp_buf, store_bounds_info.start);
   Stmt* new_f = f->accept_mutator(&lr);
   if (f != new_f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
@@ -1467,18 +1625,22 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
 class SwapReduce : public IRMutator {
  public:
-  SwapReduce(ReduceOp* new_reduce) : new_reduce_(new_reduce) {}
+  SwapReduce(const ReduceOp* old_reduce, ReduceOp* new_reduce)
+      : old_reduce_(old_reduce), new_reduce_(new_reduce) {}
 
   Stmt* mutate(const Store* v) override {
-    if (dynamic_cast<const ReduceOp*>(v->value())) {
-      auto buf = new_reduce_->accumulator();
-      return new Store(
-          buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+    if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
+      if (op == old_reduce_) {
+        auto buf = new_reduce_->accumulator();
+        return new Store(
+            buf, new_reduce_->output_args(), new_reduce_, new IntImm(1));
+      }
     }
     return IRMutator::mutate(v);
   }
 
  private:
+  const ReduceOp* old_reduce_;
   ReduceOp* new_reduce_;
 };
 
@@ -1524,18 +1686,21 @@ void LoopNest::rfactor(
                                       reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
-  std::vector<const For*> init_loops;
+  std::vector<const For*> output_loops;
+  bool output_contains_target = false;
 
   while (st) {
     if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
-        init_loops.push_back(f);
+      } else if (target_for && !output_contains_target) {
+        output_loops.push_back(target_for);
+        output_contains_target = true;
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
       } else {
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
 
       if (reduce_args.empty()) {
@@ -1626,14 +1791,17 @@ void LoopNest::rfactor(
   // variables) with a reduce over only its var by replacing the reduction op
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
-  SwapReduce sr(first_reduce);
-  auto root_block = dynamic_cast<Block*>(root_stmt());
-  auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
+  SwapReduce sr(reduce_op, first_reduce);
+  Block* root_block = dynamic_cast<Block*>(root_stmt());
+  Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
     return;
   }
-  Stmt* new_root_for = root_for->accept_mutator(&sr);
+  For* new_root_for = dynamic_cast<For*>(root_for->accept_mutator(&sr));
+  if (!new_root_for) {
+    std::cerr << "Couldn't find new root for in rfactor\n";
+  }
   auto res = parent_block->replace_stmt(root_for, new_root_for);
   if (!res) {
     std::cerr << "Couldn't find target loop within parent block of loop nest\n";
@@ -1654,11 +1822,15 @@ void LoopNest::rfactor(
         new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
 
     // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* il : init_loops) {
-      init_stmt = il->cloneWithNewBody(init_stmt);
+    for (auto* ol : output_loops) {
+      init_stmt = ol->cloneWithNewBody(init_stmt);
     }
 
-    parent_block->prepend_stmt(init_stmt);
+    if (output_contains_target) {
+      parent_block->insert_stmt_before(init_stmt, new_root_for);
+    } else {
+      new_root_for->body()->prepend_stmt(init_stmt);
+    }
   } else {
     // We may support this but not possible now.
     throw std::runtime_error("can't rfactor reduction with no initializer\n");
@@ -1672,38 +1844,61 @@ void LoopNest::rfactor(
     insertion_point->append_stmt(
         new Store(second_buf, second_indices, second_reduce, new IntImm(1)));
   } else {
-    For* new_for = new For(
-        target_for->var(),
-        target_for->start(),
-        target_for->stop(),
-        new Store(second_buf, second_indices, second_reduce, new IntImm(1)),
-        target_for->loop_options());
+    Stmt* body_stmt =
+        new Store(second_buf, second_indices, second_reduce, new IntImm(1));
+
+    for (auto* il : output_loops) {
+      body_stmt = il->cloneWithNewBody(body_stmt);
+    }
     if (insertion_point) {
-      insertion_point->append_stmt(new_for);
+      insertion_point->append_stmt(body_stmt);
     } else {
-      parent_block->append_stmt(new_for);
+      if (output_contains_target) {
+        parent_block->insert_stmt_after(body_stmt, new_root_for);
+      } else {
+        new_root_for->body()->append_stmt(body_stmt);
+      }
     }
   }
 
   auto loop_bounds_info = inferBounds(root_stmt_);
-  found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == tmp_buf) {
-      found = true;
-      std::vector<const Expr*> dims;
-      for (size_t i = 0; i < p.start.size(); i++) {
-        const Expr* dim = IRSimplifier::simplify(
-            new Add(new Sub(p.stop[i], p.start[i]), new IntImm(1)));
-        dims.push_back(dim);
-      }
-      tmp_buf->set_dims(dims);
-    }
-  }
-  if (!found) {
+  auto bounds_it = loop_bounds_info.find(tmp_buf);
+  if (bounds_it == loop_bounds_info.end()) {
     throw std::runtime_error(
         "Hit undefined behavior in rfactor -- couldn't infer bounds.");
   }
 
+  std::vector<const Expr*> starts;
+  std::vector<const Expr*> stops;
+
+  // Find the safe size of the temprorary buffer by determining the outer
+  // extents of a union of all bounds.
+  for (const TensorAccessBoundsInfo& p : bounds_it->second) {
+    for (size_t i = 0; i < p.start.size(); i++) {
+      if (starts.size() <= i) {
+        starts.push_back(p.start[i]);
+      } else {
+        starts[i] =
+            IRSimplifier::simplify(new Min(starts[i], p.start[i], true));
+      }
+
+      if (stops.size() <= i) {
+        stops.push_back(p.stop[i]);
+      } else {
+        stops[i] = IRSimplifier::simplify(new Max(stops[i], p.stop[i], true));
+      }
+    }
+  }
+
+  std::vector<const Expr*> tmp_dims;
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
+
+    tmp_dims.push_back(dim);
+  }
+
+  tmp_buf->set_dims(tmp_dims);
   temp_bufs_.emplace_back(tmp_buf);
 }
 

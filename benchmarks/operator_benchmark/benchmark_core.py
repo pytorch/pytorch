@@ -12,9 +12,8 @@ import copy
 import ast
 
 # needs to be imported after torch
-import cpp_extension # noqa
+import torch.utils.cpp_extension as cpp_extension # noqa
 
-import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 

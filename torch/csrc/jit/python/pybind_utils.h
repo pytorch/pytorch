@@ -2,8 +2,10 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -71,8 +73,23 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
+
+  bool done() {
+    return fut->completed();
+  }
+
+  py::object value() {
+    // acquiring GIL as toPyObject creates new py::object
+    // without grabbing the GIL.
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(fut->value());
+    if (unwrap_func) {
+      (*unwrap_func)(py_obj);
+    }
+    return py_obj;
+  }
 
   py::object wait() {
     fut->wait();
@@ -83,16 +100,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return value();
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
@@ -136,6 +144,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().
@@ -169,7 +185,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 // locations in libtorch code rather than user code.
 
 inline std::shared_ptr<CompilationUnit> get_python_cu() {
-  return py::module::import("torch.jit")
+  return py::module::import("torch.jit._state")
       .attr("_python_cu")
       .cast<std::shared_ptr<CompilationUnit>>();
 }
@@ -274,12 +290,22 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   }
 
+  auto enum_type = py::module::import("enum").attr("Enum");
+  py::bool_ isEnumValue = py::isinstance(input, enum_type);
+  if (py::cast<bool>(isEnumValue)) {
+    auto enum_class = input.attr("__class__");
+    auto enum_type = py::cast<TypePtr>(
+        py::module::import("torch.jit.annotations")
+            .attr("try_ann_to_type")(enum_class, SourceRange()));
+    return InferredType(enum_type);
+  }
+
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    py::str qualifiedName = py::module::import("torch.jit")
+    py::str qualifiedName = py::module::import("torch._jit_internal")
                                 .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit")
+    auto pyClass = py::module::import("torch.jit._state")
                        .attr("_get_script_class")(qualifiedName);
     if (!pyClass.is_none()) {
       auto cu = get_python_cu();
@@ -343,9 +369,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_key) {
         return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
-            key_type->python_str(),
+            key_type->repr_str(),
             " and ",
-            (entry_key_type_match.type())->python_str()));
+            (entry_key_type_match.type())->repr_str()));
       }
 
       // Try to infer the value type and unify it with the existing one
@@ -358,9 +384,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_value) {
         return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
-            value_type->python_str(),
+            value_type->repr_str(),
             " and ",
-            (entry_value_type_match.type())->python_str()));
+            (entry_value_type_match.type())->repr_str()));
       }
 
       key_type = *unified_key;
@@ -387,9 +413,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_type) {
         return InferredType(c10::str(
             "List inputs to traced functions must have consistent element type. Found ",
-            element_type->python_str(),
+            element_type->repr_str(),
             " and ",
-            (element_type_match.type())->python_str()));
+            (element_type_match.type())->repr_str()));
       }
       element_type = *unified_type;
     }
@@ -445,7 +471,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
   TORCH_CHECK(
       isTraceableType(info.type()),
       "Type '",
-      info.type()->python_str(),
+      info.type()->repr_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
   return info.toTuple()->elements();
@@ -534,7 +560,7 @@ inline IValue toIValue(
             "Object ",
             py::str(obj),
             " had a different number of elements than type ",
-            type->python_str()));
+            type->repr_str()));
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
@@ -559,8 +585,8 @@ inline IValue toIValue(
           if (!N || !py::isinstance<py::int_>(obj)) {
             return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
-            double value = py::cast<int64_t>(obj);
-            c10::List<double> repeated;
+            int64_t value = py::cast<int64_t>(obj);
+            c10::List<int64_t> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);
@@ -640,7 +666,7 @@ inline IValue toIValue(
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch.jit")
+        py::str qualified_name = py::module::import("torch._jit_internal")
                                      .attr("_qualified_name")(obj.get_type());
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
@@ -661,7 +687,7 @@ inline IValue toIValue(
             "Object ",
             py::str(obj),
             " is not compatible with interface ",
-            interfaceType->python_str(),
+            interfaceType->repr_str(),
             "\n",
             why_not.str()));
       }
@@ -686,7 +712,7 @@ inline IValue toIValue(
         return py::cast<double>(obj);
       } else {
         throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
+            c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
       }
     }
     case TypeKind::RRefType: {
@@ -710,15 +736,25 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
+    case TypeKind::AnyEnumType:
       break;
+    case TypeKind::EnumType:
+      EnumTypePtr enum_type = type->expect<EnumType>();
+      py::object py_obj = py::reinterpret_borrow<py::object>(obj);
+      std::string name = py::cast<std::string>(obj.attr("name"));
+      IValue value = toIValue(obj.attr("value"), enum_type->getValueType(), {});
+      auto enum_holder =
+          c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
+      return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(
-      "toIValue() cannot handle converting to type: ", type->python_str()));
+      "toIValue() cannot handle converting to type: ", type->repr_str()));
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -789,6 +825,19 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
+inline py::object getScriptedClassOrError(const std::string& name) {
+  auto py_class = py::module::import("torch.jit._state")
+                      .attr("_get_script_class")(name.c_str());
+  if (py_class.is_none()) {
+    std::stringstream err;
+    err << "Unknown reference to ScriptClass ";
+    err << name;
+    err << ". (Did you forget to import it?)";
+    throw std::runtime_error(err.str());
+  }
+  return py_class;
+}
+
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -831,7 +880,7 @@ inline py::object toPyObject(IValue ivalue) {
       auto fieldNames = fmap(
           tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
-      return py::module::import("torch.jit")
+      return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
@@ -867,15 +916,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass =
-        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
-    if (pyClass.is_none()) {
-      std::stringstream err;
-      err << "Unknown reference to ScriptClass ";
-      err << obj->name();
-      err << ". Did you forget to import it?)";
-      throw std::runtime_error(err.str());
-    }
+    auto pyClass = getScriptedClassOrError(obj->name());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -894,6 +935,12 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(ivalue.toCapsule());
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    auto qualified_class_name = enum_holder->qualifiedClassName();
+
+    auto py_class = getScriptedClassOrError(qualified_class_name);
+    return py_class.attr(enum_holder->name().c_str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
@@ -1134,7 +1181,9 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
-    op.getOperation()(stack);
+
+    pybind11::gil_scoped_release no_gil_guard;
+    op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -1155,7 +1204,9 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
-    found_op->getOperation()(stack);
+
+    pybind11::gil_scoped_release no_gil_guard;
+    found_op->getOperation()(&stack);
   }
 
   return createPyObjectForStack(std::move(stack));

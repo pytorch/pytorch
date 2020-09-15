@@ -42,7 +42,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     Arguments:
         model (torch.nn.Module): the model to be exported.
-        args (tuple of arguments): the inputs to
+        args (tuple of arguments or torch.Tensor): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
             invocation of the model.  Any non-Tensor arguments will
             be hard-coded into the exported model; any Tensor arguments
@@ -75,10 +75,54 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
-            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
-            OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
-            OperatorExportTypes.RAW: export raw ir.
+            OperatorExportTypes.ONNX: All ops are exported as regular ONNX ops
+            (with ONNX namespace).
+            OperatorExportTypes.ONNX_ATEN: All ops are exported as ATen ops
+            (with aten namespace).
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: If an ATen op is not supported
+            in ONNX or its symbolic is missing, fall back on ATen op. Registered ops
+            are exported to ONNX regularly.
+            Example graph::
+
+                graph(%0 : Float)::
+                  %3 : int = prim::Constant[value=0]()
+                  %4 : Float = aten::triu(%0, %3) # missing op
+                  %5 : Float = aten::mul(%4, %0) # registered op
+                  return (%5)
+
+            is exported as::
+
+                graph(%0 : Float)::
+                  %1 : Long() = onnx::Constant[value={0}]()
+                  %2 : Float = aten::ATen[operator="triu"](%0, %1)  # missing op
+                  %3 : Float = onnx::Mul(%2, %0) # registered op
+                  return (%3)
+
+            In the above example, aten::triu is not supported in ONNX, hence
+            exporter falls back on this op.
+            OperatorExportTypes.RAW: Export raw ir.
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
+            Example graph::
+
+                graph(%x.1 : Long(1:1))::
+                  %1 : None = prim::Constant()
+                  %2 : Tensor = aten::sum(%x.1, %1)
+                  %y.1 : Tensor[] = prim::ListConstruct(%2)
+                  return (%y.1)
+
+            is exported as::
+
+                graph(%x.1 : Long(1:1))::
+                  %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
+                  %y.1 : Long() = prim::ListConstruct(%1)
+                  return (%y.1)
+
+            In the above example, prim::ListConstruct is not supported, hence
+            exporter falls through.
+
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
@@ -115,33 +159,47 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                 and shape(input_2) = ('b', 4)
                 and shape(output)  = ('b', 'd', 5)
 
-            Then dynamic axes can be defined either as:
-                (a). ONLY INDICES:
-                    dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
+            Then `dynamic axes` can be defined either as:
 
-                    where automatic names will be generated for exported dynamic axes
+            1. ONLY INDICES::
 
-                (b). INDICES WITH CORRESPONDING NAMES:
-                    dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'},
-                    'input_2':{0:'batch'},
-                    'output':{0:'batch', 1:'detections'}
+                ``dynamic_axes = {'input_1':[0, 2, 3],
+                                  'input_2':[0],
+                                  'output':[0, 1]}``
+                where automatic names will be generated for exported dynamic axes
 
-                    where provided names will be applied to exported dynamic axes
+            2. INDICES WITH CORRESPONDING NAMES::
 
-                (c). MIXED MODE OF (a) and (b)
-                    dynamic_axes = {'input_1':[0, 2, 3], 'input_2':{0:'batch'}, 'output':[0,1]}
-        keep_initializers_as_inputs (bool, default None): If True, all the initializers
-            (typically corresponding to parameters) in the exported graph will also be
-            added as inputs to the graph. If False, then initializers are not added as
-            inputs to the graph, and only the non-parameter inputs are added as inputs.
-            This may allow for better optimizations (such as constant folding etc.) by
-            backends/runtimes that execute these graphs. If unspecified (default None),
-            then the behavior is chosen automatically as follows. If operator_export_type
-            is OperatorExportTypes.ONNX, the behavior is equivalent to setting this
-            argument to False. For other values of operator_export_type, the behavior is
-            equivalent to setting this argument to True. Note that for ONNX opset version < 9,
-            initializers MUST be part of graph inputs. Therefore, if opset_version argument is
-            set to a 8 or lower, this argument will be ignored.
+                ``dynamic_axes = {'input_1':{0:'batch',
+                                             1:'width',
+                                             2:'height'},
+                                  'input_2':{0:'batch'},
+                                  'output':{0:'batch',
+                                            1:'detections'}``
+                where provided names will be applied to exported dynamic axes
+
+            3. MIXED MODE OF (1) and (2)::
+
+                ``dynamic_axes = {'input_1':[0, 2, 3],
+                                  'input_2':{0:'batch'},
+                                  'output':[0,1]}``
+
+        keep_initializers_as_inputs (bool, default None): If True, all the
+            initializers (typically corresponding to parameters) in the
+            exported graph will also be added as inputs to the graph. If False,
+            then initializers are not added as inputs to the graph, and only
+            the non-parameter inputs are added as inputs.
+
+            This may allow for better optimizations (such as constant folding
+            etc.) by backends/runtimes that execute these graphs. If
+            unspecified (default None), then the behavior is chosen
+            automatically as follows. If operator_export_type is
+            OperatorExportTypes.ONNX, the behavior is equivalent to setting
+            this argument to False. For other values of operator_export_type,
+            the behavior is equivalent to setting this argument to True. Note
+            that for ONNX opset version < 9, initializers MUST be part of graph
+            inputs. Therefore, if opset_version argument is set to a 8 or
+            lower, this argument will be ignored.
         custom_opsets (dict<string, int>, default empty dict): A dictionary to indicate
             custom opset domain and version at export. If model contains a custom opset,
             it is optional to specify the domain and opset version in the dictionary:
@@ -171,6 +229,72 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
                         custom_opsets, enable_onnx_checker, use_external_data_format)
 
+
+def _diagnose_export(*args, **kwargs):
+    r"""
+    This diagnostic tool runs your model with operator_export_type set to
+    OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of 
+    all the ops that are not supported/implemented by the current exporter
+
+    Arguments:
+        model (torch.nn.Module): the model to be exported.
+        args (tuple of arguments or torch.Tensor): the inputs to
+            the model, e.g., such that ``model(*args)`` is a valid
+            invocation of the model.  Any non-Tensor arguments will
+            be hard-coded into the exported model; any Tensor arguments
+            will become inputs of the exported model, in the order they
+            occur in args.  If args is a Tensor, this is equivalent
+            to having called it with a 1-ary tuple of that Tensor.
+            (Note: passing keyword arguments to the model is not currently
+            supported.  Give us a shout if you need it.)
+        f: a file-like object (has to implement fileno that returns a file descriptor)
+            or a string containing a file name.  A binary Protobuf will be written
+            to this file.
+        input_names(list of strings, default empty list): names to assign to the
+            input nodes of the graph, in order
+        output_names(list of strings, default empty list): names to assign to the
+            output nodes of the graph, in order
+        opset_version (int, default is 9): by default we export the model to the
+            opset version of the onnx submodule. Since ONNX's latest opset may
+            evolve before next stable release, by default we export to one stable
+            opset version. Right now, supported stable opset version is 9.
+            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            which are defined in torch/onnx/symbolic_helper.py
+        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
+            a dictionary to specify dynamic axes of input/output, such that:
+            - KEY:  input and/or output names
+            - VALUE: index of dynamic axes for given key and potentially the name to be used for
+            exported dynamic axes. Similar behavior to dyanmic axes argument in export
+
+        operator_export_type is set to OperatorExportTypes.ONNX_FALLTHROUGH by default
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
+            Example graph::
+
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    %4 : None = prim::Constant()
+                    %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                    return (%5)
+
+            is exported as::
+
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    %4 : None = prim::Constant()
+                    %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                    return (%5)
+
+            In the above example, aten::add with alpha != 1 is not supported and aten::cumsum in not
+            implemented in opset 9, hence exporter falls through and provides a list of unsupported ops, 
+            the result being:
+                Unsupported ops : [aten:add, aten:cumsum]
+    """
+    from torch.onnx import utils
+    result = utils._diagnose_export(*args, **kwargs)
+    return result
 
 def export_to_pretty_string(*args, **kwargs):
     from torch.onnx import utils

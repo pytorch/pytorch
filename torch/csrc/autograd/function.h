@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -35,6 +36,16 @@ using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
+
+// Guard that sets and restores the evaluating node
+class NodeGuard {
+ public:
+  explicit NodeGuard(std::shared_ptr<Node> node);
+  ~NodeGuard();
+
+ private:
+  std::shared_ptr<Node> last_evaluating_node_;
+};
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
@@ -96,11 +107,17 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
+
+      // If anomaly mode is enabled and graph is constructed, then assign the
+      // currently evaluating node as the parent of this node.
+      // A parent is a Node where this Node is created.
+      // We are tracking the parents to track multiple backward operations.
+      assign_parent();
     }
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
+      : Node(at::sequence_number::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -221,6 +238,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
+  // assigning a node as a parent to this node
+  void assign_parent();
+
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
@@ -331,11 +351,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  static uint64_t peek_at_next_sequence_nr();
-
  protected:
-  static uint64_t& get_next_sequence_nr();
-
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 
@@ -412,6 +428,13 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable& variable) {
     if (variable.defined()) {
       next_edges.push_back(impl::gradient_edge(variable));
+    } else {
+      next_edges.emplace_back();
+    }
+  }
+  void operator()(const c10::optional<Variable>& variable) {
+    if (variable.has_value() && variable->defined()) {
+      next_edges.push_back(impl::gradient_edge(*variable));
     } else {
       next_edges.emplace_back();
     }

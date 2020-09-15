@@ -36,7 +36,7 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
@@ -48,7 +48,7 @@ static void import_libs(
 void testClassImport() {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
@@ -83,7 +83,7 @@ void testClassImport() {
 void testScriptObject() {
   Module m1("m1");
   Module m2("m2");
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
@@ -144,7 +144,7 @@ class FooBar1234(Module):
 
 void testSaveLoadTorchbind() {
   auto cu1 = std::make_shared<CompilationUnit>();
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,

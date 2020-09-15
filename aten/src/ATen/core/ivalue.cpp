@@ -1,9 +1,10 @@
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/function.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
-#include <ATen/core/Dict.h>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -17,7 +18,7 @@ bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
 
 namespace ivalue {
 
-// This is in ivalue.cpp because we need to access Type::python_str, which
+// This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
 void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // NB: doing pointer comparison here
@@ -25,9 +26,9 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // Type's, this needs to be changed!
   TORCH_CHECK(actual_type == expected_type,
               "Tried to convert an IValue of type ",
-              actual_type->python_str(),
+              actual_type->repr_str(),
               " to custom class type ",
-              expected_type->python_str());
+              expected_type->repr_str());
 }
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
@@ -51,6 +52,18 @@ TupleTypePtr Tuple::type() const {
         fmap(elements_, [&](const IValue& v) { return v.type(); }));
   }
   return type_;
+}
+
+bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
+  return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
+}
+
+const std::string ivalue::EnumHolder::qualifiedClassName() const {
+  return type_->qualifiedClassName().qualifiedName();
+}
+
+const std::string ivalue::EnumHolder::unqualifiedClassName() const {
+  return type_->qualifiedClassName().name();
 }
 
 } // namespace ivalue
@@ -78,7 +91,7 @@ TypePtr IValue::type() const {
     case Tag::GenericList:
       return ListType::create(toList().elementType());
     case Tag::Future:
-      return toFuture()->type();
+      return FutureType::create(toFuture()->elementType());
     case Tag::RRef:
       return RRefType::create(toRRef()->type());
     case Tag::Device:
@@ -95,9 +108,53 @@ TypePtr IValue::type() const {
       return toTuple()->type();
     case Tag::Generator:
       return GeneratorType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::Enum:
+      return toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+}
+
+void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+  if (visitor(*this)) {
+    // Short cut.
+    return;
+  }
+  switch (this->tag) {
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.visit(visitor);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().visit(visitor);
+        pair.key().visit(visitor);
+      }
+      break;
+    case Tag::Object: {
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
+        attribute.visit(visitor);
+      }
+      break;
+    }
+    default:
+      break;
+ }
 }
 
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
@@ -222,7 +279,10 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::PyObject:
     case Tag::Capsule:
     case Tag::Generator:
+    case Tag::Quantizer:
       return ptrEqual(lhs, rhs);
+    case Tag::Enum:
+      return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
@@ -290,7 +350,7 @@ std::ostream& printMaybeAnnotatedList(
   auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
-    out << "annotate(" << the_list.type()->python_str() << ", ";
+    out << "annotate(" << the_list.type()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
@@ -331,7 +391,7 @@ std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->cast<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type()->python_str() << ",";
+    out << "annotate(" << the_dict.type()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);
@@ -359,7 +419,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
+      if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
           return out << i << ".";
@@ -393,9 +453,19 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
+    case IValue::Tag::Enum: {
+      auto enum_holder = v.toEnumHolder();
+      return out << enum_holder->qualifiedClassName() << "." <<
+          enum_holder->name();
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
+}
+
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
@@ -454,12 +524,20 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
     case IValue::Tag::Generator:
       return out << "Generator";
+    case IValue::Tag::Quantizer:
+      return out << "Quantizer";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
     }
+    case IValue::Tag::Enum: {
+      auto enum_holder = v.toEnumHolder();
+      return out << "Enum<" << enum_holder->unqualifiedClassName() << "." <<
+          enum_holder->name() << ">";
+    }
+
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
@@ -516,18 +594,28 @@ IValue IValue::deepcopy(
     }
       break;
     case IValue::Tag::Object: {
-      copy = IValue(toObject()->deepcopy(memo));
-      break;
+      auto class_type = type()->expect<ClassType>();
+      if (class_type->hasMethod("__getstate__") &&
+          class_type->hasMethod("__setstate__")) {
+        copy = ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), type()),
+            class_type->numAttributes());
+        auto state = class_type->getMethod("__getstate__")({*this});
+        class_type->getMethod("__setstate__")({copy, std::move(state)});
+      } else {
+        copy = IValue(toObject()->deepcopy(memo));
+      }
+    } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
-    case IValue::Tag::Uninitialized:
+    case IValue::Tag::Uninitialized: {
       copy = *this;
-      break;
-    default:
+    } break;
+    default: {
       AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
@@ -579,7 +667,21 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (size_t i = 0; i < slots_.size(); ++i) {
+    if (slots_[i].type() == c10::CapsuleType::get()) {
+      // If we've gotten here, it means that we have *not* copied this
+      // class via __getstate__ and __setstate__. That fact and the
+      // fact that we have a Capsule attribute mean that this is a
+      // custom C++ class without serialization methods defined.
+      std::stringstream err;
+      err << "Cannot serialize custom bound C++ class";
+      if (auto qualname = type()->name()) {
+        err << " " << qualname->qualifiedName();
+      }
+      err << ". Please define serialization methods via def_pickle() for "
+            "this class.";
+      AT_ERROR(err.str());
+    }
     object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
@@ -593,8 +695,8 @@ StrongTypePtr::StrongTypePtr(
   TORCH_INTERNAL_ASSERT(type_);
 }
 
-std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
+ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
     return tmap;
 }
 
@@ -604,4 +706,80 @@ getClassConverter() {
       classConverter;
   return classConverter;
 }
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
+        : remaining(srcs.size()),
+          srcFutures(std::move(srcs)),
+          asIvalue(srcFutures),
+          dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
+    std::atomic<int32_t> remaining{0};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    IValue asIvalue;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+
+  auto ctx = std::make_shared<Ctx>(std::move(srcs));
+  std::function<void()> func = [ctx]() {
+    if (--ctx->remaining == 0) {
+      ctx->dstFuture->markCompleted(ctx->asIvalue);
+    }
+  };
+  if (ctx->srcFutures.size() == 0) {
+    ctx->dstFuture->markCompleted(ctx->asIvalue);
+  } else {
+    auto typePtr = ctx->srcFutures.get(0)->elementType();
+    for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
+      ctx->srcFutures.get(i)->addCallback(func);
+    }
+  }
+  return ctx->dstFuture;
+}
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  if (srcs.empty()) {
+    auto res = make_intrusive<ivalue::Future>(NoneType::get());
+    res->markCompleted();
+    return res;
+  }
+  TypePtr typePtr = srcs.get(0)->elementType();
+  for (size_t i = 0, tot = srcs.size(); i < tot; ++i) {
+    if (srcs.get(i)->completed()) {
+      return srcs.get(i);
+    }
+    TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
+  }
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr)
+        : srcFutures(std::move(srcs)),
+          dstFuture(make_intrusive<ivalue::Future>(typePtr)) {}
+    std::atomic<bool> done{false};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr);
+  std::function<void(size_t)> func = [ctx](size_t index) {
+    if (!ctx->done.exchange(true)) {
+      intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
+      intrusive_ptr<ivalue::Future> src = ctx->srcFutures.get(index);
+      ctx->dstFuture.reset(); // Once future is satisfied, remove refs.
+      ctx->srcFutures =
+          List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
+      if (src->hasError()) {
+        dst->setError(src->exception_ptr());
+      } else {
+        dst->markCompleted(src->constValue());
+      }
+    }
+  };
+  for (size_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
+  }
+  return ctx->dstFuture;
+}
+
 } // namespace c10

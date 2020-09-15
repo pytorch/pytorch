@@ -9,18 +9,18 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           Storage::use_byte_size_t(),
-          dtype,
           0,
           at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)),
           nullptr,
           false),
-      DispatchKey::MSNPU);
+      DispatchKey::MSNPU,
+      dtype);
   // This is a hack to workaround the shape checks in _convolution.
   tensor_impl->set_sizes_contiguous(size);
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options) {
+Tensor empty_override(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
   return get_tensor(options.dtype(), size);
 }
@@ -31,7 +31,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 }
 
 Tensor fake_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   test_int = 2;

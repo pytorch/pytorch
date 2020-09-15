@@ -46,7 +46,7 @@ void rshift_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cuda", [&]() {
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return static_cast<std::make_unsigned_t<scalar_t>>(a) >> b;
+          return a >> b;
       });
     });
   }

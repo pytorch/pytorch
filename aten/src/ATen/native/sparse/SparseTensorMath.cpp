@@ -346,10 +346,37 @@ SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor
 // --------------------------------------------------------------------
 
 // Only supports floating point, FYI
-Tensor norm_sparse(const SparseTensor& self, Scalar value) {
+Tensor norm_sparse(const SparseTensor& self, Scalar p) {
   AT_ASSERT(self.is_sparse());
+  return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
+}
 
-  return self.coalesce()._values().norm(value);
+Tensor norm_sparse(const SparseTensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+  AT_ASSERT(self.is_sparse());
+  if (dim.size() > 0) {
+    // Only full reductions are supported, so check if that is the case
+    int64_t ndim = self.dim();
+    bool passed_full_reduction_check = ndim == dim.size();
+    if (passed_full_reduction_check) {
+      auto dim_ = dim.vec();
+      maybe_wrap_dims(dim_, ndim);
+      std::vector<bool> dims_check(ndim, false);
+      // Need to check for duplicates, and fail if any are found
+      for (auto dim_ind : dim_) {
+        if (dims_check[dim_ind]) {
+          passed_full_reduction_check = false;
+          break;
+        }
+        dims_check[dim_ind] = true;
+      }
+    }
+    TORCH_CHECK(passed_full_reduction_check,
+      "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
+  }
+  TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
+  TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
+  auto p_ = p.value_or(2.0);
+  return self.coalesce()._values().norm(p_);
 }
 
 // --------------------------------------------------------------------

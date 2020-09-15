@@ -43,6 +43,12 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
     wstart = max(wstart, 0);
     hend = min(hend, height);
     wend = min(wend, width);
+
+    if (hstart >= hend || wstart >= wend) {
+      top_data[index] = scalar_t(0);
+      continue;
+    }
+
     accscalar_t aveval = accscalar_t(0);
     const scalar_t* const bottom_slice = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; ++h) {
@@ -86,6 +92,12 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     wstart = max(wstart, 0);
     hend = min(hend, height);
     wend = min(wend, width);
+
+    if (hstart >= hend || wstart >= wend) {
+      top_data[index] = scalar_t(0);
+      continue;
+    }
+
     accscalar_t aveval = accscalar_t(0);
     const scalar_t* const bottom_slice = bottom_data + n * channels * height * width + c;
     for (int h = hstart; h < hend; ++h) {
@@ -141,6 +153,11 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
         wstart = max(wstart, 0);
         hend = min(hend, height);
         wend = min(wend, width);
+
+        if (hstart >= hend || wstart >= wend) {
+          continue;
+        }
+
         int divide_factor;
         if (use_divisor) {
           divide_factor = divisor_override;
@@ -191,6 +208,11 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
         wstart = max(wstart, 0);
         hend = min(hend, height);
         wend = min(wend, width);
+
+        if (hstart >= hend || wstart >= wend) {
+          continue;
+        }
+
         int divide_factor;
         if (use_divisor) {
           divide_factor = divisor_override;

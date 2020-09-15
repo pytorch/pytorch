@@ -26,12 +26,13 @@ constexpr int ALIGN_BYTES = 16;
 template<typename T, typename AccumT, typename OutT>
 struct LogSoftMaxForwardEpilogue {
   __device__ __forceinline__ LogSoftMaxForwardEpilogue(AccumT max_input, AccumT sum)
-    : logsum(max_input + std::log(sum)) {}
+    : max_input(max_input),  logsum(std::log(sum)) {}
 
   __device__ __forceinline__ OutT operator()(T input) const {
-    return static_cast<OutT>(input - logsum);
+    return static_cast<OutT>(input - max_input - logsum);
 }
 
+  const AccumT max_input;
   const AccumT logsum;
 };
 
@@ -126,8 +127,8 @@ void SpatialSoftMax_getLaunchSizes(
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
-#ifdef __HIP_PLATFORM_HCC__
-  // XXX HIP function signature is not compatible yet.
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+  // HIP function signature is not compatible yet.
   uint32_t max_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
                                                 k, block_threads, smem_size);
@@ -683,7 +684,9 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
 
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
-  if (half_to_float) AT_ASSERTM(input_.scalar_type() == ScalarType::Half,"conversion is supported for Half type only");
+  if (half_to_float) {
+    TORCH_CHECK(input_.scalar_type() == ScalarType::Half, "conversion is supported for Half type only");
+  }
   auto input = input_.contiguous();
   Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float), LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
@@ -869,7 +872,8 @@ Tensor log_softmax_cuda(const Tensor &input, const int64_t dim, const bool half_
 Tensor log_softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-     AT_ASSERTM((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
+     TORCH_CHECK((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half),
+                 "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   return host_softmax_backward<LogSoftMaxBackwardEpilogue,true>(grad, output, dim, half_to_float);
 }
@@ -881,7 +885,8 @@ Tensor softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_f
 Tensor softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-     AT_ASSERTM((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
+     TORCH_CHECK((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half),
+                 "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
   return host_softmax_backward<SoftMaxBackwardEpilogue,false>(tmp, output, dim, half_to_float);

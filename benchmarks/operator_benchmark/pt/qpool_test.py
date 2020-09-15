@@ -10,12 +10,12 @@ import operator_benchmark as op_bench
 # 2D pooling will have input matrix of rank 3 or 4
 qpool2d_long_configs = op_bench.config_list(
     attrs=(
-       #  C    H    W   k       s       p
-       (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
-       (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
-       # VGG16 pools with original input shape: (-1, 3, 224, 224)
-       ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
-       (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
+        #  C    H    W   k       s       p
+        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
+        (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
+        (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
     ),
     attr_names=('C', 'H', 'W',   # Input layout
                 'k', 's', 'p'),  # Pooling parameters

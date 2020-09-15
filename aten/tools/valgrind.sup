@@ -32,3 +32,11 @@
    obj:*/lib*/libomp.so*
    ...
 }
+
+{
+   ignore_memmove_source_destination_overlap
+   Memcheck:Overlap
+   fun:__memcpy_chk
+   fun:cpuinfo_linux_parse_cpulist
+   ...
+}

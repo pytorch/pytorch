@@ -40,6 +40,7 @@ static inline T pooling_output_shape_pad_lr(
 template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
+    TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
@@ -106,18 +107,9 @@ max_pool2d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
   check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
 
-  // different CUDA/CPU behavior from TH
-  if (cuda) {
-    check_dim_size(indices, 4, 0, nbatch);
-    check_dim_size(indices, 4, 1, nOutputPlane);
-    check_dim_size(indices, 4, 2, outputHeight);
-    check_dim_size(indices, 4, 3, outputWidth);
-  }
-  else {
-    check_dim_size(indices, ndim, ndim-3, nOutputPlane);
-    check_dim_size(indices, ndim, ndim-2, outputHeight);
-    check_dim_size(indices, ndim, ndim-1, outputWidth);
-  }
+  check_dim_size(indices, ndim, ndim-3, nOutputPlane);
+  check_dim_size(indices, ndim, ndim-2, outputHeight);
+  check_dim_size(indices, ndim, ndim-1, outputWidth);
 }
 
 // AveragePool2d (backward)

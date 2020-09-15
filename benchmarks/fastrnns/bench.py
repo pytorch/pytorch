@@ -6,7 +6,9 @@ import gc
 import sys
 import json
 import copy
+import time
 
+from .fuser import set_fuser
 from .runner import get_nn_runners
 
 
@@ -41,16 +43,33 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
         items.append(fit_str(to_str(thing)))
     return sep.join(items)
 
+# shim for torch.cuda.Event when running on cpu
+class Event(object):
+    def __init__(self, enable_timing):
+        pass
+
+    def record(self):
+        self.time = time.perf_counter()
+
+    def elapsed_time(self, end_event):
+        assert isinstance(end_event, Event)
+        return end_event.time - self.time
+
 
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
                miniBatch=64, device='cuda', seed=None):
     def train_batch(modeldef):
         # CUDA events for timing
-        fwd_start_event = torch.cuda.Event(enable_timing=True)
-        fwd_end_event = torch.cuda.Event(enable_timing=True)
-        bwd_start_event = torch.cuda.Event(enable_timing=True)
-        bwd_end_event = torch.cuda.Event(enable_timing=True)
+        if device == 'cuda':
+            timer_class = torch.cuda.Event
+        else:
+            timer_class = Event
+
+        fwd_start_event = timer_class(enable_timing=True)
+        fwd_end_event = timer_class(enable_timing=True)
+        bwd_start_event = timer_class(enable_timing=True)
+        bwd_end_event = timer_class(enable_timing=True)
 
         gc.collect()
 
@@ -78,13 +97,13 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
                 assert param.grad is not None
                 param.grad.data.zero_()
 
-        torch.cuda.synchronize()
+        if device == 'cuda':
+            torch.cuda.synchronize()
 
         fwd_time = fwd_start_event.elapsed_time(fwd_end_event)
         bwd_time = bwd_start_event.elapsed_time(bwd_end_event)
         return fwd_time, bwd_time
 
-    assert device == 'cuda'
     creator_args = creator_args = {
         'seqLength': seqLength, 'numLayers': numLayers,
         'inputSize': inputSize, 'hiddenSize': hiddenSize,
@@ -208,37 +227,7 @@ if __name__ == '__main__':
     parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
 
     args = parser.parse_args()
-    assert args.fuser in ['te', 'old', 'none']
-    if args.fuser == 'te':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_set_bailout_depth(20)
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(True)
-    elif args.fuser == 'old':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-    elif args.fuser == 'none':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-
-    # --executor overrides settings of --fuser
-    if args.executor == 'profiling':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_set_bailout_depth(20)
-    elif args.executor == 'simple':
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_profiling_mode(False)
-    elif args.executor == 'legacy':
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
+    set_fuser(args.fuser, args.executor)
 
     if args.cuda_pointwise_loop_level:
         torch._C._jit_set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)

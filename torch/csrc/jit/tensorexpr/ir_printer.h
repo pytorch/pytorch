@@ -43,18 +43,21 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
   void visit(const BaseCallNode* v) override;
+  void visit(const FunctionCall* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
   void visit(const RoundOff* v) override;
   void visit(const ReduceOp* v) override;
 
   void visit(const AtomicAdd* v) override;
+  void visit(const SyncThreads* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;
   void visit(const Block* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
+  void visit(const Let* v) override;
 
   std::ostream& os() {
     return printer_os_;

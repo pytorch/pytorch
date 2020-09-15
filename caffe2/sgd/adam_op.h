@@ -295,8 +295,9 @@ class SparseAdamOp final : public Operator<Context> {
     const auto rho_inf = T(2.) / (T(1.) - beta2_) - T(1.);
     const auto rho_t = rho_inf -
         T(2.) * t * std::pow(beta2_, t) / (T(1.) - std::pow(beta2_, t));
-    const auto r_correction =
-        std::sqrt(rho_inf / ((rho_inf - T(4.)) * (rho_inf - T(2.))));
+    const T r_correction = enableRAdam_
+        ? std::sqrt(rho_inf / ((rho_inf - T(4.)) * (rho_inf - T(2.))))
+        : 0;
 
     auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;

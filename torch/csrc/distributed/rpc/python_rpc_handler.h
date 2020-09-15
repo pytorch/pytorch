@@ -27,7 +27,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   static PythonRpcHandler& getInstance();
 
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUdf(py::object&& pythonUdf);
+  py::object runPythonUdf(const py::object& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -39,6 +39,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   void handleException(const py::object& obj);
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
+  // Check if obj is an RemoteException instance.
+  bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
@@ -71,6 +73,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   const RRefProxyFunctions& getRRefProxyFunctions() const;
 
  private:
+  void init();
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
@@ -103,6 +106,12 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
+
+  // Indicates whether or not we have properly initialized the handler.
+  bool initialized_;
+
+  // Lock to protect initialization.
+  std::mutex init_lock_;
 };
 
 } // namespace rpc

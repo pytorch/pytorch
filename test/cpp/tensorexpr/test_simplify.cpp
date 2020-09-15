@@ -3,7 +3,6 @@
 #include "test/cpp/tensorexpr/test_utils.h"
 #include "torch/csrc/jit/tensorexpr/hash_provider.h"
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 
 #include <cmath>
@@ -198,6 +197,122 @@ void testConstantFoldWithVar() {
   }
 }
 
+void testConditionalSelectFoldSimple() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(4.0f);
+  ExprHandle c(3.0f);
+  {
+    ExprHandle f = (a > b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a < b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a == c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a != c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldTwoLayer() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(2.0f);
+  ExprHandle c(2.0f);
+  ExprHandle d(1.0f);
+  {
+    ExprHandle f = (a + b < c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a + b > c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d == b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d != b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldWithVar() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle f = x < 4.f;
+
+  ExprHandle newF = IRSimplifier::simplify(f);
+  const IntImm* folded = newF.AsNode<IntImm>();
+  ASSERT_EQ(folded, nullptr);
+
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(5.f));
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
 void testUnFoldableExpr() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -382,6 +497,49 @@ void testHashLargeExpression() {
   ASSERT_NE(hash_r, hash_t);
   ASSERT_NE(hash_r, hash_f);
   ASSERT_NE(hash_t, hash_f);
+}
+
+void testHashForLoopOptions() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto for_stmt = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_X);
+  auto hash_block_idx = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_NE(hash_before, hash_block_idx);
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_UNSET);
+  auto hash_reset = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_EQ(hash_before, hash_reset);
+  for_stmt->set_gpu_thread_index(LoopOptions::IDX_X);
+  auto hash_thread_idx = hasher.hash(for_stmt);
+
+  ASSERT_NE(hash_before, hash_thread_idx);
+  ASSERT_NE(hash_block_idx, hash_thread_idx);
 }
 
 /// (2 + x) + 4 => x + 6
@@ -851,6 +1009,32 @@ void testSimplifySubs() {
   }
 }
 
+void testSimplifyDiv() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+
+  {
+    ExprHandle body = ExprHandle(0) / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    ExprHandle body = x / 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    ExprHandle body = x / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+}
+
 // Test that mixing ops together simplifies as expected.
 void testSimplifyMultiOp() {
   KernelScope kernel_scope;
@@ -1181,6 +1365,42 @@ void testSimplifyOpaqueTerms() {
   }
 }
 
+void testSimplifySymbolicMinMax() {
+  KernelScope kernel_scope;
+
+  {
+    // Minimum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Min::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 3);
+  }
+
+  {
+    // Maximum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 7);
+  }
+
+  {
+    // Can't simplify multiples because of signedness of variable component.
+    // TODO: maybe we could for unsigned types?
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x * 3, x * 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE(Max, simplified.node());
+  }
+}
+
 void testSimplifyWontReorderFloat() {
   KernelScope kernel_scope;
 
@@ -1306,12 +1526,33 @@ void testSimplifyRoundModPattern() {
   }
 
   {
+    // Reverse order.
+    // x%y + (x/y)*y => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x % y) + ((x / y) * y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
     // Non opaque denominator.
     // (x / (4+y)) * (4+y)) + (x % (y + 4)) => x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     ExprHandle body = ((x / (ExprHandle(4) + y)) * (ExprHandle(4) + y)) +
         (x % (y + ExprHandle(4)));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Reverse order.
+    // (x % (y + 4)) + (x / (4+y)) * (4+y)) => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x % (y + ExprHandle(4))) +
+        ((x / (ExprHandle(4) + y)) * (ExprHandle(4) + y));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
@@ -1352,6 +1593,35 @@ void testSimplifyRoundModPattern() {
     IS_NODE_WITH_NAME(Div, simplified.node(), div);
     IS_VAR_WITH_NAME(div->lhs(), "x");
     IS_IMM_WITH_VAL(Int, div->rhs(), 2);
+  }
+
+  {
+    // Numerator and denominator.
+    // ((2*x)/(2*y) * (2*y)) + ((2*x) % (2*y)) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        (((ExprHandle(2) * x) / (ExprHandle(2) * y)) * (ExprHandle(2) * y)) +
+        ((ExprHandle(2) * x) % (ExprHandle(2) * y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    // Reverse order.
+    // ((2*x) % (2*y)) + ((2*x)/(2*y) * (2*y)) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((ExprHandle(2) * x) % (ExprHandle(2) * y)) +
+        (((ExprHandle(2) * x) / (ExprHandle(2) * y)) * (ExprHandle(2) * y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
   }
 
   {
@@ -1544,6 +1814,26 @@ void testSimplifyRoundModPatternMultivar() {
     IS_NODE_WITH_NAME(Mod, add->rhs(), zMod);
     IS_VAR_WITH_NAME(zMod->lhs(), "z");
     IS_IMM_WITH_VAL(Int, zMod->rhs(), 8);
+  }
+
+  {
+    // Compound.
+    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)  => x + (z + 512 *
+    // y).
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+
+    ExprHandle body = x + (z + ExprHandle(512) * y) % ExprHandle(16) +
+        ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Add, add->rhs(), add2);
+    IS_VAR_WITH_NAME(add2->lhs(), "z");
+    IS_NODE_WITH_NAME(Mul, add2->rhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 512);
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 }
 
@@ -1774,6 +2064,46 @@ void testSimplifyConstantCond() {
     Stmt* simplified = IRSimplifier::simplify(body);
     Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(false).node(), new Block({}), nullptr);
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
+
+  {
+    Stmt* cond = new Cond(ExprHandle(true).node(), nullptr, new Block({}));
+    Stmt* simplified = IRSimplifier::simplify(cond);
+    ASSERT_EQ(simplified, nullptr);
+  }
+}
+
+void testSimplifyEliminateEmptyCond() {
+  KernelScope kernel_scope;
+  // If the branches are empty in different ways, eliminate.
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* true_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), true_val, nullptr);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* false_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), nullptr, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
@@ -2039,6 +2369,23 @@ void testSimplifyForCleansUp() {
   }
 }
 
+void testSimplifyEliminateEmptyFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      VarHandle loopVar("loopVar", kInt);
+      last = For::make(loopVar, 0, 10, last);
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
 void testSimplifyFlattenBlock() {
   KernelScope kernel_scope;
 
@@ -2121,6 +2468,80 @@ void testSimplifyFlattenBlock() {
     Stmt* simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
+void testSimplifyEliminateZeroLengthAlloc() {
+  KernelScope kernel_scope;
+
+  {
+    // Simple positive case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {0});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 0);
+  }
+
+  {
+    // Simple negative case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {2});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+  }
+
+  {
+    // Finds right Alloc/Free.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {2});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+    IS_NODE_WITH_NAME(Allocate, block2->stmts().front(), simplified_alloc);
+    IS_VAR_WITH_NAME(simplified_alloc->buffer_var(), "y");
+    IS_NODE_WITH_NAME(Free, block2->stmts().back(), simplified_free);
+    ASSERT_EQ(simplified_alloc->buffer_var(), simplified_free->buffer_var());
+  }
+
+  {
+    // Dynamic shape.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {z});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
   }
 }
 

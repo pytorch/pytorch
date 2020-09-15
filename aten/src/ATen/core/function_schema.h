@@ -27,15 +27,13 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      bool is_inferred_type = false)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        is_inferred_type_(is_inferred_type) {
+        alias_info_(std::move(alias_info)) {
   }
   const std::string& name() const {
     return name_;
@@ -56,7 +54,14 @@ struct Argument {
     return alias_info_;
   }
   bool is_inferred_type() const {
-    return is_inferred_type_;
+    bool is_inferred_type = false;
+    TORCH_INTERNAL_ASSERT(type_);
+    if (auto pt = type_->cast<TensorType>()) {
+      if (pt->isInferredType()) {
+        is_inferred_type = true;
+      }
+    }
+    return is_inferred_type;
   }
 
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
@@ -70,7 +75,7 @@ struct Argument {
     }
     return c10::str(
         "Expected a value of type '",
-        type()->python_str(),
+        type()->repr_str(),
         "' for argument '",
         name(),
         "' but instead found type '",
@@ -105,7 +110,6 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
-  bool is_inferred_type_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
@@ -353,43 +357,44 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 // print out Argument, which is compatible with FunctionSchema parser
 // full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  bool optional_type = arg.type()->kind() == OptionalType::Kind;
+
   // for adjusting the ? position.
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  std::stringstream oss;
-  if (auto list = arg.type()->cast<c10::ListType>()) {
-    oss << list->getElementType()->str();
-    oss << "[";
-    if (arg.N()) {
-      oss << *arg.N();
-    }
-    oss << "]";
+  auto type = arg.type();
+  bool is_opt = type->kind() == OptionalType::Kind;
+  auto unopt_type = is_opt ? type->cast<OptionalType>()->getElementType() : type;
+
+  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+    // sized lists get size N from arg, not type
+    auto list = unopt_type->cast<c10::ListType>();
+    out << list->getElementType()->str() << "[" << *arg.N() << "]";
   } else {
-    oss << arg.type()->str();
+    out << unopt_type->str();
   }
-  if (optional_type) {
-    oss.seekp(oss.str().size() - 1);
-  }
+
   if (arg.alias_info()) {
-    oss << arg.alias_info().value();
+    out << arg.alias_info().value();
   }
-  if (optional_type) {
-    oss << "?";
+
+  if (is_opt) {
+    out << "?";
   }
-  out << oss.str();
+
   if (!arg.name().empty()) {
     out << " " << arg.name();
   }
+
   if (arg.default_value()) {
     out << "=";
-    if (arg.type()->kind() == c10::TypeKind::StringType) {
-        printQuotedString(out, arg.default_value().value().toStringRef());
+    if (type->kind() == c10::TypeKind::StringType) {
+      printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();
     }
   }
+
   return out;
 }
 

@@ -10,6 +10,7 @@ import gzip
 import copy
 import pickle
 import shutil
+import pathlib
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -85,17 +86,17 @@ class SerializationMixin(object):
         return b
 
     def _test_serialization_assert(self, b, c):
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
         for i in range(4):
@@ -274,6 +275,45 @@ class SerializationMixin(object):
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_sparse(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"tensor": x}, f.name)
+            y = torch.load(f.name)
+            self.assertEqual(x, y["tensor"])
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_sparse_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_indices = self.tensor._indices().clone()
+                invalid_indices[0][0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_indices,
+                            self.tensor._values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f.name)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "size is inconsistent with indices"):
+                y = torch.load(f.name)
+
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
         device_obj = [torch.device(d) for d in device_str]
@@ -288,17 +328,17 @@ class SerializationMixin(object):
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
         c = torch.load(path)
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
         class OldTensorBase(object):
@@ -472,6 +512,7 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+
     def test_serialization_storage_slice(self):
         # Generated using:
         #
@@ -541,6 +582,18 @@ class serialization_method(object):
 
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
+
+class TestBothSerialization(TestCase, SerializationMixin):
+    def test_serialization_new_format_old_format_compat(self):
+        x = [torch.ones(200, 200) for i in range(30)]
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
+        x_new_load = torch.load("big_tensor.zip")
+        self.assertEqual(x, x_new_load)
+
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
+        x_old_load = torch.load("big_tensor.zip")
+        self.assertEqual(x_old_load, x_new_load)
+        os.remove("big_tensor.zip")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -659,6 +712,31 @@ class TestSerialization(TestCase, SerializationMixin):
             test(f.name)
 
         test(io.BytesIO())
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile_actually_jit(self):
+        with tempfile.NamedTemporaryFile() as f:
+            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
+            f.seek(0)
+            torch.load(f)
+
+    # Ensure large zip64 serialization works properly
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_pathlike_serialization(self):
+        model = torch.nn.Conv2d(20, 3200, kernel_size=3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            path = pathlib.Path(f.name)
+            torch.save(model, path)
+            torch.load(path)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

@@ -10,6 +10,9 @@ from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
+
+    _version = 2
+
     def __init__(self,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride,
@@ -32,7 +35,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
-        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -93,7 +95,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         return super(_ConvBnNd, self).extra_repr()
 
     def forward(self, input):
-        return self.activation_post_process(self._forward(input))
+        return self._forward(input)
 
     def train(self, mode=True):
         """
@@ -106,6 +108,49 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             for module in self.children():
                 module.train(mode)
         return self
+
+    # ===== Serialization version history =====
+    #
+    # Version 1/None
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- gamma : Tensor
+    #   |--- beta : Tensor
+    #   |--- running_mean : Tensor
+    #   |--- running_var : Tensor
+    #   |--- num_batches_tracked : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- bn : Module
+    #        |--- weight : Tensor (moved from v1.self.gamma)
+    #        |--- bias : Tensor (moved from v1.self.beta)
+    #        |--- running_mean : Tensor (moved from v1.self.running_mean)
+    #        |--- running_var : Tensor (moved from v1.self.running_var)
+    #        |--- num_batches_tracked : Tensor (moved from v1.self.num_batches_tracked)
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        if version is None or version == 1:
+            # BN related parameters and buffers were moved into the BN module for v2
+            v2_to_v1_names = {
+                'bn.weight': 'gamma',
+                'bn.bias': 'beta',
+                'bn.running_mean': 'running_mean',
+                'bn.running_var': 'running_var',
+                'bn.num_batches_tracked': 'num_batches_tracked',
+            }
+            for v2_name, v1_name in v2_to_v1_names.items():
+                if prefix + v1_name in state_dict:
+                    state_dict[prefix + v2_name] = state_dict[prefix + v1_name]
+                    state_dict.pop(prefix + v1_name)
+                elif strict:
+                    missing_keys.append(prefix + v2_name)
+
+        super(_ConvBnNd, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -140,7 +185,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
-    attached with FakeQuantize modules for both output activation and weight,
+    attached with FakeQuantize modules for weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
@@ -153,7 +198,6 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 
     Attributes:
         freeze_bn:
-        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -184,7 +228,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 class ConvBnReLU2d(ConvBn2d):
     r"""
     A ConvBnReLU2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
-    attached with FakeQuantize modules for both output activation and weight,
+    attached with FakeQuantize modules for weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
@@ -196,8 +240,6 @@ class ConvBnReLU2d(ConvBn2d):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
         weight_fake_quant: fake quant module for weight
 
     """
@@ -224,7 +266,7 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
+        return F.relu(ConvBn2d._forward(self, input))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -233,14 +275,13 @@ class ConvBnReLU2d(ConvBn2d):
 class ConvReLU2d(nnqat.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
-    FakeQuantize modules for both output activation and weight for
+    FakeQuantize modules for weight for
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv2d` and
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
-        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -256,12 +297,11 @@ class ConvReLU2d(nnqat.Conv2d):
                                          qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight))))
+        return F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

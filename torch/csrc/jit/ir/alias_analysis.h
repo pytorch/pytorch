@@ -211,7 +211,7 @@ class AliasDb {
   Element* getOrCreateElement(const Value* value);
 
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
-  bool functionalNonAliasingListUse(const Use& use) const;
+  bool functionalNonEscapingListUse(const Use& use) const;
 
   bool isContainerType(const TypePtr& type) const;
 

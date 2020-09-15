@@ -12,7 +12,8 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-struct RegisterInterface {
+class RegisterInterface {
+ public:
   RegisterInterface() {
     auto ptr = getFuserInterface();
     ptr->fn_compile_n_ = &compileCudaFusionGroup;

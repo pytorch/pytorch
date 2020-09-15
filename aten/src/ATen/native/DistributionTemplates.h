@@ -3,8 +3,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/ComplexHelper.h>
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
@@ -198,8 +198,7 @@ template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   if (self.is_complex()) {
-    // note: float_tensor lives only as long as the self tensor lives
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
     // is half of the input variance
     normal_kernel<RNG>()(float_tensor, mean, std/(std::sqrt(2)), gen);
@@ -275,7 +274,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto float_tensor = at::view_as_real(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "check_uniform_bounds", [&] {
@@ -337,8 +336,36 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
   return self;
 }
 
+// ==================================================== Bernoulli =====================================================
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  NoNamesGuard guard;
+  at::assert_no_internal_overlap(self);
+  bernoulli_tensor_kernel<RNG>()(self, p_, gen);
+  return self;
+}
+
+template<template<typename> class bernoulli_scalar_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  at::assert_no_internal_overlap(self);
+  bernoulli_scalar_kernel<RNG>()(self, p, gen);
+  return self;
+}
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+  // result.resize_as_(self) requires self to have same dtype as result, so we
+  // use resize_ instead.
+  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
+  result.resize_(self.sizes());
+  bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
+  namedinference::propagate_names(result, self);
+  return result;
+}
+
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 
 }}}
-

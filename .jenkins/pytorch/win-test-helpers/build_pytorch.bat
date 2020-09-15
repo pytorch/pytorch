@@ -21,8 +21,8 @@ call %INSTALLER_DIR%\install_sccache.bat
 call %INSTALLER_DIR%\install_miniconda3.bat
 
 
-:: Install ninja
-if "%REBUILD%"=="" ( pip install -q ninja )
+:: Install ninja and other deps
+if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses )
 
 git submodule sync --recursive
 git submodule update --init --recursive
@@ -39,6 +39,7 @@ popd
 
 if "%CUDA_VERSION%" == "9" goto cuda_build_9
 if "%CUDA_VERSION%" == "10" goto cuda_build_10
+if "%CUDA_VERSION%" == "11" goto cuda_build_11
 goto cuda_build_end
 
 :cuda_build_9
@@ -52,6 +53,13 @@ goto cuda_build_common
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_11
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
+set CUDA_PATH_V11_0=%CUDA_PATH%
 
 goto cuda_build_common
 
@@ -121,7 +129,7 @@ python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && python %SCRIPT_HELPERS_DIR%\upload_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
 

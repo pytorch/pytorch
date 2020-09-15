@@ -10,7 +10,7 @@ class SobolEngine(object):
     This implementation of an engine for Sobol sequences is capable of
     sampling sequences up to a maximum dimension of 1111. It uses direction
     numbers to generate these sequences, and these numbers have been adapted
-    from `here <http://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
+    from `here <https://web.maths.unsw.edu.au/~fkuo/sobol/joe-kuo-old.1111>`_.
 
     References:
       - Art B. Owen. Scrambling Sobol and Niederreiter-Xing points.
@@ -45,7 +45,7 @@ class SobolEngine(object):
     def __init__(self, dimension, scramble=False, seed=None):
         if dimension > self.MAXDIM or dimension < 1:
             raise ValueError("Supported range of dimensionality "
-                             "for SobolEngine is [1, {}]".format(self.MAXDIM))
+                             f"for SobolEngine is [1, {self.MAXDIM}]")
 
         self.seed = seed
         self.scramble = scramble
@@ -120,9 +120,9 @@ class SobolEngine(object):
         return self
 
     def __repr__(self):
-        fmt_string = ['dimension={}'.format(self.dimension)]
+        fmt_string = [f'dimension={self.dimension}']
         if self.scramble:
             fmt_string += ['scramble=True']
         if self.seed is not None:
-            fmt_string += ['seed={}'.format(self.seed)]
+            fmt_string += [f'seed={self.seed}']
         return self.__class__.__name__ + '(' + ', '.join(fmt_string) + ')'

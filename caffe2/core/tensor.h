@@ -69,9 +69,9 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            Storage::create_legacy(device, TypeMeta()),
-            c10::computeDispatchKey(at::device(device).layout(at::kStrided)))) {
-  }
+            Storage::create_legacy(device),
+            c10::computeDispatchKey(at::device(device).layout(at::kStrided)),
+            TypeMeta())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -153,7 +153,7 @@ class CAFFE2_API Tensor final {
         storage_initialized(),
         "Cloning a tensor that has no content and has size > 0");
     // set_storage already sets data_type_ of TensorImpl
-    x.impl_->set_storage(storage());
+    x.impl_->set_storage_and_dtype(storage(), impl_->dtype());
     x.impl_->set_storage_offset(impl_->storage_offset());
     x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
@@ -286,21 +286,21 @@ class CAFFE2_API Tensor final {
   template <typename T>
   void ShareExternalPointer(
       T* src,
-      size_t capacity = 0,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
-    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), capacity, d);
+    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), nbytes, d);
   }
 
   template <typename T>
-  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) const {
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t nbytes = 0) const {
     ShareExternalPointer(
-        std::move(data_ptr), caffe2::TypeMeta::Make<T>(), capacity);
+        std::move(data_ptr), caffe2::TypeMeta::Make<T>(), nbytes);
   }
 
   void ShareExternalPointer(
       void* src,
       const TypeMeta& data_type,
-      size_t capacity = 0,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
     CAFFE_ENFORCE_WITH_CALLER(
         impl_->is_contiguous(),
@@ -310,14 +310,14 @@ class CAFFE2_API Tensor final {
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     impl_.get()->ShareExternalPointer(
-        at::DataPtr(src, src, d, impl_->device_type()), data_type, capacity);
+        at::DataPtr(src, src, d, impl_->device_type()), data_type, nbytes);
   }
 
   void ShareExternalPointer(
       at::DataPtr&& data_ptr,
       const TypeMeta& data_type,
-      size_t capacity) {
-    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+      size_t nbytes) {
+    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, nbytes);
   }
 
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
@@ -463,7 +463,7 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   inline bool IsType() const {
-    return impl_->storage().IsType<T>();
+    return impl_->dtype().Match<T>();
   }
 
   /**

@@ -269,7 +269,7 @@ void THCTensor_(mode)(THCState *state,
         break;
       case 1:
       default:
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
     }
     THCudaCheck(cudaGetLastError());
 

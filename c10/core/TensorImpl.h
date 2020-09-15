@@ -134,7 +134,7 @@ struct TensorImpl;
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
   virtual bool requires_grad() const = 0;
-  virtual at::Tensor& grad() = 0;
+  virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
 };
@@ -319,7 +319,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
    */
-  TensorImpl(Storage&& storage, DispatchKeySet);
+  TensorImpl(
+      Storage&& storage,
+      DispatchKeySet,
+      const caffe2::TypeMeta& data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
@@ -328,8 +331,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
-  TensorImpl(Storage&& storage, DispatchKey dispatch_key)
-    : TensorImpl(std::move(storage), DispatchKeySet(dispatch_key)) {}
+  TensorImpl(
+      Storage&& storage,
+      DispatchKey dispatch_key,
+      const caffe2::TypeMeta& data_type)
+      : TensorImpl(
+            std::move(storage),
+            DispatchKeySet(dispatch_key),
+            data_type) {}
   TensorImpl(DispatchKey dispatch_key, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl(DispatchKeySet(dispatch_key), data_type, device_opt) {}
 
@@ -434,6 +443,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
+  bool is_meta() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::Meta);
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
@@ -449,6 +463,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_mkldnn() const {
     return key_set_.has(DispatchKey::MkldnnCPU);
+  }
+
+  bool is_vulkan() const {
+    return key_set_.has(DispatchKey::Vulkan);
+  }
+
+  // TODO: remove this once we don't automatically enabled Autograd dispatch keys
+  //       in TensorImpl constructor.
+  // DON'T USE THIS API!! It's only created for testing purpose in
+  // file aten/src/ATen/core/boxing/impl/test_helpers.h
+  void remove_autograd_key() {
+    key_set_ = key_set_ - getRuntimeDispatchKeySet(DispatchKey::Autograd);
   }
 
   int64_t get_device() const {
@@ -557,7 +583,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  at::Tensor& grad();
+  at::Tensor& mutable_grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
@@ -591,7 +617,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
-        storage_.IsType<T>(),
+        data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         caffe2::TypeMeta::TypeName<T>(),
         ", while tensor contains ",
@@ -826,6 +852,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
+    if (named_tensor_meta_ == nullptr) {
+      key_set_ = key_set_.remove(DispatchKey::Named);
+    } else {
+      key_set_ = key_set_.add(DispatchKey::Named);
+    }
   }
 
   /**
@@ -901,7 +932,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), key_set_);
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(storage()), key_set_, data_type_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -1150,7 +1182,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = Storage::create_legacy(storage_.device(), data_type_);
+    storage_ = Storage::create_legacy(storage_.device());
     storage_offset_ = 0;
   }
 
@@ -1210,7 +1242,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     if (storage_.unique()) {
       storage_.UniqueStorageShareExternalPointer(
-          std::move(data_ptr), data_type, size_bytes);
+          std::move(data_ptr), size_bytes);
       data_type_ = data_type;
       device_opt_ = storage_.device();
       storage_offset_ = 0;
@@ -1218,7 +1250,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // Create a new Storage
       storage_ = Storage(
           Storage::use_byte_size_t(),
-          data_type,
           size_bytes,
           std::move(data_ptr),
           /*allocator=*/nullptr,
@@ -1247,13 +1278,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
-      if (storage_.unique()) {
-        storage_.set_dtype(meta);
-      } else {
-        if (data_type_ != meta) {
-          storage_ = Storage::create_legacy(storage_.device(), meta);
-        }
-      }
       data_type_ = meta;
       // NB: device is not changed
 
@@ -1304,7 +1328,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    if (storage_initialized() && storage_.IsType<T>()) {
+    if (storage_initialized() && data_type_.Match<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
@@ -1333,11 +1357,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return data_type_ != caffe2::TypeMeta();
   }
 
-  void set_storage(at::Storage storage) {
+  void set_storage_keep_dtype(at::Storage storage) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
-    data_type_ = storage_.dtype();
     device_opt_ = storage_.device();
+  }
+
+  void set_storage_and_dtype(
+      at::Storage storage,
+      const caffe2::TypeMeta& data_type) {
+    set_storage_keep_dtype(storage);
+    data_type_ = data_type;
   }
 
   /**
@@ -1637,6 +1667,8 @@ protected:
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you

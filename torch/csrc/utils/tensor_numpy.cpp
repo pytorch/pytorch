@@ -17,7 +17,7 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-    throw std::runtime_error("PyTorch was compiled without NumPy support");
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 }}
 #else
@@ -84,10 +84,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert %s layout tensor to numpy."
         "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
   }
-  if (tensor.requires_grad()) {
+  if (at::GradMode::is_enabled() && tensor.requires_grad()) {
     throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
+        "Can't call numpy() on Tensor that requires grad. "
+        "Use tensor.detach().numpy() instead.");
   }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
@@ -247,7 +247,8 @@ bool is_numpy_int(PyObject* obj) {
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return is_numpy_int(obj) || PyArray_IsScalar(obj, Floating);
+  return is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
+         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating);
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {

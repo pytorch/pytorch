@@ -59,6 +59,15 @@ class _ContextMethodMixin(object):
         """
         self.non_differentiable = args
 
+    def set_materialize_grads(self, value):
+        r"""Sets whether to materialize output grad tensors. Default is true.
+
+        **This should be called only from inside the** :func:`forward` **method**
+
+        If true, undefined output grad tensors will be expanded to tensors full
+        of zeros prior to calling the :func:`backward` method.
+        """
+        self.materialize_grads = value
 
 class _HookMixin(object):
 
@@ -109,6 +118,9 @@ class FunctionMeta(type):
 
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
     r"""Records operation history and defines formulas for differentiating ops.
+
+    See the Note on extending the autograd engine for more details on how to use
+    this class: https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd
 
     Every operation performed on :class:`Tensor` s creates a new function
     object, that performs the computation, and records that it happened.

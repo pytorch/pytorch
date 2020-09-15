@@ -138,6 +138,8 @@ Windows
 ~~~~~~~
 
 -  Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
+-  Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
+-  Teng Gao (`smartcat2010 <https://github.com/smartcat2010>`__)
 
 PowerPC
 ~~~~~~~
@@ -158,6 +160,7 @@ XLA
 TorchServe
 ~~~~~~~~~~
 
+- Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
 - Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
 - Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
 - Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)

@@ -5,13 +5,13 @@ import unittest
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 workspace.GlobalInit(
     [
@@ -24,7 +24,7 @@ workspace.GlobalInit(
 GLOW_MATMUL_ATOL = 1e-5
 GLOW_MATMUL_RTOL = 1e-3
 
-class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
+class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
     @given(
         seed=st.integers(0, 65535),
         num_rows=st.integers(2, 20),
@@ -32,10 +32,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
         batch_size=st.integers(1, 5),
         max_weight=st.integers(0, 100),
     )
-    @unittest.skip(
-        reason="This test fails with Intel NNPI 0.5.2.5 release"
-    )
-    def test_slws_fused_8bit_rowwise_acc32_nnpi(self, seed, num_rows, embedding_dim, batch_size, max_weight):
+    @settings(deadline=None)
+    def test_slws_fused_8bit_rowwise_acc32_nnpi(
+        self, seed, num_rows, embedding_dim, batch_size, max_weight
+    ):
         workspace.GlobalInit(
             [
                 "caffe2",
@@ -92,7 +92,9 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
         workspace.FeedBlob("data", data)
         workspace.RunOperatorOnce(
             core.CreateOperator(
-                "FloatToFused8BitRowwiseQuantized", ["data"], ["quantized_data"]
+                "FloatToFused8BitRowwiseQuantized",
+                ["data"],
+                ["quantized_data"]
             )
         )
         onnxified_net = onnxifi_caffe2_net(
@@ -124,6 +126,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
             print_test_debug_info(
                 "test_slws_fused_8bit_rowwise_acc32_nnpi",
                 {
+                    "seed": seed,
+                    "num_rows": num_rows,
+                    "embedding_dim": embedding_dim,
+                    "batch_size": batch_size,
                     "indices": indices,
                     "data": data.shape,
                     "lengths": lengths,
@@ -138,9 +144,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
 
 
     @given(seed=st.integers(0, 65535))
-    @unittest.skip(
-        reason="This test fails with Intel NNPI 0.5.2.5 release"
-    )
+    @settings(deadline=None)
     def test_small_sls_acc32(self, seed):
         workspace.GlobalInit(
             [
@@ -235,6 +239,9 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
                 "test_small_sls_acc32",
                 {
                     "seed": seed,
+                    "num_rows": num_rows,
+                    "embedding_dim": embedding_dim,
+                    "batch_size": batch_size,
                     "indices": indices,
                     "data": data,
                     "quantized_data": quantized_data,
@@ -247,7 +254,6 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
                 },
             )
             assert 0
-
 
 
 if __name__ == '__main__':

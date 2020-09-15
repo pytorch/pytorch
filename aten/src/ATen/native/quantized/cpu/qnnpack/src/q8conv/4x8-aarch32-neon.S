@@ -65,23 +65,31 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     LDR ip, [sp, 4]
     PUSH {r4, r5, r6, r7, r8, r9, r10, r11}
 
+    # Load params:
+    # - r9 = params
+    LDR r9, [sp, 52]
+
     VPUSH {d8-d15}
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
-    # Load params:
-    # - r9 = params
-    LDR r9, [sp, 116]
 
+    # Load a
+    # - r8 = a
+    LDR r8, [sp, 96]
     # Load output channel index
     LDR r5, [sp, 112]
+    ADD r7, r9, 4
     # Load pointer to per channel zero points array
-    LDR r4, [r9], 4
+    LDR r4, [r9], 8
+    # Load pointer to per channel requant scale
+    # add 8 bytes to get to vfmax
+    LDR r11, [r9], 8
+    # Load a_zero_point:
+    # - d14 = a_zero_point
+    VLD1.8 {d14[]}, [r7]
     # Byte offset of output channel index for requant scale.
     LSL r6, r5, 2
-    # Load pointer to per channel requant scale
-    # Register offset, load r9+4
-    LDR r11, [r9, 4]
     # Add offset to the base pointer
     ADD r5, r4, r5
 
@@ -92,9 +100,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VMOV.I32 q10, q8
     # q11 := vacc1x4567
     VMOV.I32 q11, q9
-    # Load a
-    # - r8 = a
-    LDR r8, [sp, 96]
     # q12 := vacc2x0123
     VMOV.I32 q12, q8
     # q13 := vacc2x4567
@@ -105,11 +110,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # - d15 = b_zero_point
     VLD1.8 {d15}, [r5]
 
-    # Load a_zero_point:
-    # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r9]
-    # add 12 bytes to get to vfmax
-    ADD r9, r9, 12
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
 

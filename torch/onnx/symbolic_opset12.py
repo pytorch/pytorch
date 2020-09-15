@@ -10,10 +10,6 @@ from torch.onnx.symbolic_helper import parse_args, _parse_arg
 
 # This file exports ONNX ops for opset 12
 
-black_listed_operators = [
-    "ArgMin", "ArgMax"
-]
-
 @parse_args('s', 'v')
 def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
@@ -62,26 +58,37 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
+def celu(g, self, alpha):
+    alpha = sym_help._maybe_get_const(alpha, 'f')
+    # if the input is of type double cast it to float
+    if self.type().scalarType() == 'Double':
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        out = g.op("Celu", self, alpha_f=alpha)
+        return g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Double'])
+
+    return g.op("Celu", self, alpha_f=alpha)
+
+
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
         flattened = reshape(g, input, (-1,))
-        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
-        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False)
 
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
         flattened = reshape(g, input, (-1,))
-        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
-        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False)
 
 
 def pow(g, self, exponent):

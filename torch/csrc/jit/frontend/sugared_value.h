@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -65,6 +66,11 @@ struct TORCH_API SugaredValue
       Function& m,
       const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
+  }
+
+  // TODO @wconstab refactor to use ModuleValue::asTuple instead of new API
+  virtual SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asType(
@@ -147,7 +153,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
-    ss << "value of type '" << value_->type()->python_str() << "'";
+    ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
   Value* asValue(const SourceRange& range, Function& m) override {
@@ -248,7 +254,10 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
-      throw ErrorReport(loc) << "Expected integer literal for index";
+      throw ErrorReport(loc)
+          << "Expected integer literal for index. "
+          << "ModuleList/Sequential indexing is only supported with integer literals. "
+          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): ...'";
     }
     auto index = toIValue(idx)->toInt();
     int64_t adj_index =
@@ -507,6 +516,36 @@ struct TORCH_API CastValue : public BuiltinFunction {
   TypePtr type_;
 };
 
+struct TORCH_API TensorCastValue : public SugaredValue {
+  TensorCastValue(at::ScalarType type, NamedValue self)
+      : dtype_(type), self_(std::move(self)) {}
+
+  std::string kind() const override {
+    return "Cast";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    TORCH_INTERNAL_ASSERT(inputs.size() == 0 && attributes.size() == 0);
+    Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
+    std::vector<NamedValue> kwargs{self_,
+                                   NamedValue(loc, "dtype", dtype_const)};
+    Value* casted_val = m.graph()->insert(
+        /*opname=*/Symbol::fromQualString("aten::to"),
+        /*args=*/inputs,
+        /*kwargs=*/kwargs,
+        /*range=*/loc);
+    return std::make_shared<SimpleValue>(casted_val);
+  }
+
+  at::ScalarType dtype_;
+  NamedValue self_;
+};
+
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
@@ -669,5 +708,70 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
+
+// This is not a SimpleValue so it can not pass through the code paths that
+// expect a SimpleValue as a sugared value.
+struct TORCH_API ExceptionMessageValue : public SugaredValue {
+  explicit ExceptionMessageValue(Value* value) : value_(value) {}
+
+  std::string kind() const override {
+    return "exception message";
+  }
+
+  Value* getValue() {
+    return value_;
+  }
+
+  Value* value_;
+};
+
+struct TORCH_API ExceptionValue : public SugaredValue {
+  explicit ExceptionValue(const std::string& message) : message_(message) {}
+
+  std::string kind() const override {
+    return "exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> /*attributes*/,
+      size_t /*n_binders*/) override {
+    auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
+    for (auto& input : inputs) {
+      auto input_str = input.value(*m.graph());
+      if (!input_str->type()->isSubtypeOf(StringType::get())) {
+        input_str =
+            emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
+      }
+      exception_message = emitBuiltinCall(
+          loc, *m.graph(), aten::add, {exception_message, input_str}, {});
+    }
+    return std::make_shared<ExceptionMessageValue>(exception_message);
+  }
+
+  std::string message_;
+};
+
+struct TORCH_API SugaredEnumClass : public SugaredValue {
+  explicit SugaredEnumClass(EnumTypePtr enum_type)
+      : enum_type_(std::move(enum_type)) {}
+
+  std::string kind() const override {
+    return "EnumClass";
+  }
+
+  SugaredValuePtr attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
+
+ private:
+  EnumTypePtr enum_type_;
+};
+
 } // namespace jit
 } // namespace torch

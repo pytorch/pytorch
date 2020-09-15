@@ -7,7 +7,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
-#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -28,10 +27,16 @@ void trigamma_kernel_cuda(TensorIterator& iter) {
 }
 
 void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
-  switch (n) {
-    case 0: digamma_kernel_cuda(iter); break;
-    case 1: trigamma_kernel_cuda(iter); break;
-    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
+  if (n == 0) {
+    digamma_kernel_cuda(iter);
+  } else if (n == 1) {
+    trigamma_kernel_cuda(iter);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "polygamma_cuda", [&]() {
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return calc_polygamma(int(n), a);
+      });
+    });
   }
 }
 

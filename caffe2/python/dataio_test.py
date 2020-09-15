@@ -381,6 +381,7 @@ class TestDBFileReader(TestCase):
 
         return ws.blobs[str(dst_ds.content().label())].fetch()
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def test_cached_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
@@ -420,6 +421,7 @@ class TestDBFileReader(TestCase):
 
         self._delete_path(db_path)
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def test_db_file_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)

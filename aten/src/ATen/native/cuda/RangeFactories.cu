@@ -49,8 +49,16 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for linspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -66,7 +74,8 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
+      // Cast `end` and `start` to `float`, since range can be larger than scalar_t for integral types
+      float step = (static_cast<float>(scalar_end) - static_cast<float>(scalar_start)) / (steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -77,7 +86,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
@@ -92,7 +101,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 
@@ -100,8 +109,16 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   return result;
 }
 
-Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
+Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for logspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -143,7 +160,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 

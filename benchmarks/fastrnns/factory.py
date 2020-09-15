@@ -48,8 +48,8 @@ def simple_backward_setup(output, seed=None):
     return output, grad_output
 
 
-def simple_backward(output, grad_output):
-    return output.backward(grad_output)
+def simple_backward(output, grad_output, **kwargs):
+    return output.backward(grad_output, **kwargs)
 
 
 def pytorch_lstm_creator(**kwargs):

@@ -112,6 +112,10 @@ ExprHandle tanh(const ExprHandle& v) {
   return Intrinsics::make(kTanh, v);
 }
 
+ExprHandle sigmoid(const ExprHandle& v) {
+  return Intrinsics::make(kSigmoid, v);
+}
+
 ExprHandle exp(const ExprHandle& v) {
   return Intrinsics::make(kExp, v);
 }

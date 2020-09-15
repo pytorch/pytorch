@@ -31,7 +31,7 @@
 //    If it is not, you must report that the storage is dead.
 //
 
-TH_CPP_API THStorage* THStorage_new(caffe2::TypeMeta data_type);
+TH_CPP_API THStorage* THStorage_new();
 
 TH_API void THStorage_retain(THStorage *storage);
 TH_API void THStorage_resizeBytes(THStorage* storage, ptrdiff_t size_bytes);

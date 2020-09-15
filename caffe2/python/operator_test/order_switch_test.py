@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, utils
-from hypothesis import given
+from hypothesis import given, settings
 
 
 class OrderSwitchOpsTest(hu.HypothesisTestCase):
@@ -12,6 +12,7 @@ class OrderSwitchOpsTest(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN"]),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_nchw2nhwc(self, X, engine, gc, dc):
         op = core.CreateOperator("NCHW2NHWC", ["X"], ["Y"], engine=engine)
 
@@ -27,6 +28,7 @@ class OrderSwitchOpsTest(hu.HypothesisTestCase):
         engine=st.sampled_from(["", "CUDNN"]),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_nhwc2nchw(self, X, engine, gc, dc):
         op = core.CreateOperator("NHWC2NCHW", ["X"], ["Y"], engine=engine)
 

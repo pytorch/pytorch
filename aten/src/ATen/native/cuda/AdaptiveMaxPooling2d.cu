@@ -76,8 +76,8 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output + oh*osizeW + ow;
       int64_t *ptr_ind = indices + oh*osizeW + ow;
-      int argmax = -1;
-      T max = THCNumerics<T>::min();
+      int argmax = istartH * isizeW + istartW;
+      T max = at::numeric_limits<T>::lower_bound(); // -Infinity
       int ih, iw;
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
@@ -451,6 +451,8 @@ Tensor& adaptive_max_pool2d_backward_out_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_out_cuda");
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -464,6 +466,8 @@ Tensor adaptive_max_pool2d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,

@@ -26,7 +26,7 @@ def calculate_ap(predictions, labels):
 
 class TestAPMeterOps(hu.HypothesisTestCase):
     @given(predictions=hu.arrays(dims=[10, 3],
-           elements=st.floats(allow_nan=False,
+           elements=hu.floats(allow_nan=False,
                               allow_infinity=False,
                               min_value=0.1,
                               max_value=1)),
@@ -54,7 +54,7 @@ class TestAPMeterOps(hu.HypothesisTestCase):
             reference=op_ref)
 
     @given(predictions=hu.arrays(dims=[10, 3],
-           elements=st.floats(allow_nan=False,
+           elements=hu.floats(allow_nan=False,
                               allow_infinity=False,
                               min_value=0.1,
                               max_value=1)),

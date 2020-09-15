@@ -6,6 +6,7 @@ import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
+from sys import maxsize
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
@@ -138,6 +139,8 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = g.op("Unsqueeze", starts, axes_i=[0])
         ends = g.op("Unsqueeze", ends, axes_i=[0])
+        if isinstance(axes, int):
+            axes = g.op("Constant", value_t=torch.tensor(axes))
         axes = g.op("Unsqueeze", axes, axes_i=[0])
     else:
         assert len(starts) == len(ends)
@@ -155,10 +158,21 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
+    else:
+        raise NotImplementedError("Unknown aten::slice signature")
+
+    step = sym_help._parse_arg(step, 'i')
     if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
+       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
     else:
         start = [sym_help._parse_arg(start, 'i')]
@@ -178,3 +192,96 @@ def flip(g, input, dims):
 
 def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
+
+
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse,
+                  per_sample_weights,
+                  include_last_offset):
+    if scale_grad_by_freq and sym_help._training_mode:
+        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+
+    from torch.onnx.symbolic_opset9 import size, div, select
+
+    # Check if initial indices was 2D. In functional.py:
+    # offsets is set to torch.arange(0, indices.numel(), indices.size(1))
+    # Then indices is reshaped to 1D: indices.reshape(-1)
+    if len(list(indices.node().inputs())) > 0 and indices.node().inputs().__next__().type().sizes() is not None \
+            and len(indices.node().inputs().__next__().type().sizes()) == 2:
+        # Assert include_last_offset is False
+        assert not include_last_offset
+        embeddings = g.op("Gather", embedding_matrix, indices)
+        dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
+        dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
+        dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
+
+        shape = [dim_0, dim_1, dim_2]
+        shape = g.op("Concat", *shape, axis_i=0)
+
+        if not sym_help._is_none(per_sample_weights):
+            per_sample_weights = g.op("Unsqueeze", per_sample_weights, axes_i=[1])
+            embeddings = g.op("Mul", embeddings, per_sample_weights)
+
+        embeddings = g.op("Reshape", embeddings, shape)
+        if mode == 0:
+            embeddings = g.op("ReduceSum", embeddings, axes_i=[1], keepdims_i=0)
+        elif mode == 1:
+            embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
+        else:
+            embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
+        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.          
+        return embeddings, None, None, None
+    elif offsets.type().sizes() is not None:
+        if include_last_offset:
+            offset_len = offsets.type().sizes()[0] - 1
+            offsets_extended = offsets
+        else:
+            offset_len = offsets.type().sizes()[0]
+            offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
+            offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
+        list_ = []
+        for i in range(offset_len):
+            start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
+            end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
+            axes_ = g.op("Constant", value_t=torch.tensor([0]))
+            indices_row = g.op("Slice", indices, start_, end_, axes_)
+
+            embeddings = g.op("Gather", embedding_matrix, indices_row)
+            if not sym_help._is_none(per_sample_weights):
+                per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
+                per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+                embeddings = g.op("Mul", embeddings, per_sample_weights_row)
+            if mode == 0:
+                embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+            elif mode == 1:
+                embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+            else:
+                embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+
+            embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
+            list_.append(embeddings)
+
+        output = g.op("Concat", *list_, axis_i=0)
+        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
+        return output, None, None, None
+    else:
+        return sym_help._onnx_unsupported('embedding_bag with unknown shape of indices')
+
+
+@parse_args('v', 't', 'i', 'i', 'i')
+def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
+    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+        raise RuntimeError(
+            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
+    scale = scale.float().data  # Avoid exporter generating double type
+    zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
+    zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
+    return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)

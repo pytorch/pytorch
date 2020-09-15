@@ -14,21 +14,24 @@ void initCudartBindings(PyObject* module) {
 
   auto cudart = m.def_submodule("_cudart", "libcudart.so bindings");
 
+  // By splitting the names of these objects into two literals we prevent the
+  // HIP rewrite rules from changing these names when building with HIP.
+
 #ifndef __HIP_PLATFORM_HCC__
-  py::enum_<cudaOutputMode_t>(cudart, "cudaOutputMode")
+  py::enum_<cudaOutputMode_t>(cudart, "cuda" "OutputMode")
       .value("KeyValuePair", cudaKeyValuePair)
       .value("CSV", cudaCSV);
 #endif
 
-  py::enum_<cudaError_t>(cudart, "cudaError")
+  py::enum_<cudaError_t>(cudart, "cuda" "Error")
       .value("success", cudaSuccess);
 
-  cudart.def("cudaGetErrorString", cudaGetErrorString);
-  cudart.def("cudaProfilerStart", cudaProfilerStart);
-  cudart.def("cudaProfilerStop", cudaProfilerStop);
-  cudart.def("cudaHostRegister", cudaHostRegister);
+  cudart.def("cuda" "GetErrorString", cudaGetErrorString);
+  cudart.def("cuda" "ProfilerStart", cudaProfilerStart);
+  cudart.def("cuda" "ProfilerStop", cudaProfilerStop);
+  cudart.def("cuda" "HostRegister", cudaHostRegister);
 #ifndef __HIP_PLATFORM_HCC__
-  cudart.def("cudaProfilerInitialize", cudaProfilerInitialize);
+  cudart.def("cuda" "ProfilerInitialize", cudaProfilerInitialize);
 #endif
 }
 

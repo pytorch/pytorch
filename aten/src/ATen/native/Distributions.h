@@ -44,7 +44,7 @@ namespace {
 #if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
-#define isnan std::isnan
+using std::isnan;
 #endif
 
 // Here sampler_t should be function type scalar_t(void). For gpu
@@ -201,15 +201,15 @@ C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t,
     us = 0.5 - compat_abs(U);
     k = static_cast<scalar_t>(compat_floor((2 * a / us + b) * U + c));
 
+    // Reject non-sensical answers.
+    if (k < 0 || k > count) {
+      continue;
+    }
     // Region for which the box is tight, and we can return our calculated value.
     // This should happen 0.86 * v_r times. In the limit as n * p is large,
     // the acceptance rate converges to ~79% (and in the lower regime it is ~24%).
     if (us >= 0.07 && V <= v_r) {
       return k;
-    }
-    // Reject non-sensical answers.
-    if (k < 0 || k > count) {
-      continue;
     }
 
     // This deviates from Hormann's BTRS algorithm, as there is a log missing.
@@ -259,11 +259,8 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
 }
 
 /*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
- *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library] in ATen/native/Math.h.
  */
 template<typename scalar_t, typename accscalar_t>
 C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {

@@ -41,7 +41,7 @@ def OpAlmostEqual(op_a, op_b, ignore_fields=None):
 
     op_a = clean_op(op_a)
     op_b = clean_op(op_b)
-    return op_a == op_b
+    return op_a == op_b or str(op_a) == str(op_b)
 
 
 def CaffeBlobToNumpyArray(blob):

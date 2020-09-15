@@ -13,6 +13,7 @@ from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -23,6 +24,9 @@ from quantization.test_quantized_module import TestDynamicQuantizedModule  # noq
 
 # Quantization Aware Training
 from quantization.test_qat_module import TestQATModule  # noqa: F401
+
+# Quantization specific fusion passes
+from quantization.test_fusion_passes import TestFusionPasses  # noqa: F401
 
 # Module
 # TODO: merge the fake quant per tensor and per channel test cases
@@ -41,22 +45,36 @@ from quantization.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
-# TODO: move to test_quantize_script
-from quantization.test_quantize import TestGraphModePostTrainingStatic  # noqa: F401
+
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
 from quantization.test_quantize import TestModelNumerics  # noqa: F401
+from quantization.test_quantize import TestQuantizeONNXExport  # noqa: F401
+from quantization.test_quantize import TestDeprecatedJitQuantized  # noqa: F401
+
 # 2. Graph mode quantization
-from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
-from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
-from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeJit  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeJitPasses  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeJitOps  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
+
+# 3. GraphModule based graph mode quantization
+from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
+from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
+
+# Equalization
+from quantization.test_equalize import TestEqualizeEager  # noqa: F401
+# Bias Correction
+from quantization.test_bias_correction import TestBiasCorrection  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()

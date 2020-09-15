@@ -8,8 +8,7 @@ import unittest
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core
 from caffe2.proto import caffe2_pb2
-from hypothesis import given
-from hypothesis import assume
+from hypothesis import assume, given, settings
 
 
 class TestResize(hu.HypothesisTestCase):
@@ -22,6 +21,7 @@ class TestResize(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            **hu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_nearest(self, height_scale, width_scale, height, width,
                      num_channels, batch_size, seed, order,
                      gc, dc):
@@ -138,6 +138,7 @@ class TestResize(hu.HypothesisTestCase):
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_nearest_onnx(self, height_scale, width_scale, height, width,
                           num_channels, batch_size, seed, order,
                           gc, dc):

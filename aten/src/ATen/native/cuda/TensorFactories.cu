@@ -55,13 +55,13 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
-      dtype,
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA);
+  auto tensor =
+      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);

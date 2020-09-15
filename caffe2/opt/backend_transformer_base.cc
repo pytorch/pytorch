@@ -123,7 +123,7 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     NetDef* pred_net,
     const ShapeInfoMap& shape_hints_mapped,
     const BoundShapeSpec& spec) {
-  ShapeInfoMap shape_map = shape_hints_mapped;
+  ShapeInfoMap shape_map;
 
   // Populate shapes from workplace
   const std::vector<std::string> ws_blobs = ws->Blobs();
@@ -132,6 +132,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     if (shape_info.dimTypeIsSet()) {
       shape_map.emplace(s, shape_info);
     }
+  }
+  for (const auto& s : shape_hints_mapped) {
+    shape_map.insert(s);
   }
   auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
   eng->InferBoundShapeAndType(*pred_net, shape_map, ws);

@@ -299,15 +299,10 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
       auto el = it->second;
-      // Add all memory locations this element may alias.
-      ret |= memoryDAG_->getMemoryLocations(el);
 
-      // We also consider memory locations of contained values to be "read".
-      for (const auto& type : input->type()->containedTypes()) {
-        if (auto wildcard = getWildcard(type)) {
-          ret |= memoryDAG_->getMemoryLocations(wildcard);
-        }
-      }
+      // Add all memory locations this element may alias and their contained
+      // elements
+      memoryDAG_->collectAllContainedMemoryLocations(el, ret);
     }
   }
 
@@ -477,15 +472,20 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
+    case prim::FallbackGraph:
       return analyzeSubgraph(node);
     case prim::fork:
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
     case prim::rpc_async:
+    case prim::rpc_sync:
+    case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    // TODO: think more about TensorExpr alias correctness
+    case prim::TensorExprGroup:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -508,9 +508,12 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr &&
-          node->input()->type()->expect<ClassType>()->is_module())
-        return analyzeCreator(node);
+      if (isFrozen_ && node->kind() == prim::GetAttr) {
+        auto& ty = node->input()->type();
+        if (ty->expect<ClassType>()->is_module()) {
+          return analyzeCreator(node);
+        }
+      }
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -520,11 +523,17 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
+    case prim::profile_optional:
     case prim::profile:
-      if (node->inputs().size() > 0) {
-        makePointerTo(node->output(), node->inputs().at(0));
+      makePointerTo(node->output(), node->inputs().at(0));
+      return;
+    case prim::TypeCheck: {
+      auto num_inputs = node->inputs().size();
+      for (size_t i = 0; i < num_inputs; i++) {
+        makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
+    }
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
@@ -535,6 +544,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return;
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::Enter:
+    case prim::Exit:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
@@ -863,45 +874,42 @@ void AliasDb::analyzeConservative(Node* node) {
   }
 }
 
-bool AliasDb::functionalNonAliasingListUse(const Use& use) const {
+bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);
 
   // only consider aten op uses of lists
-  if (!n->kind().is_aten() || !container->type()->cast<ListType>()) {
+  if (!container->type()->cast<ListType>()) {
     return false;
   }
 
-  // we are looking ahead to a use that we have not analyzed yet,
-  // and there isn't a great way of checking for aliasing dependence
-  // of a node without constructing an alias db. so in order to check,
-  // copy the single use as a singleton subgraph, and analyze the node
-  // within the subgraph
+  /*
+  in the general case, we consider any Value that enters another container as
+  entering the heap, and thus aliasing all other heap values of the same type.
+  the advantage of this approach are:
+  - there are many composite list/container ops that would be tricky to
+  schematize if we did something more complicated
+  - limits the size of the AliasDb, because a container of size 10 only contains
+  1 memory dag element instead of 10
+  - we do not need to worry about adding contained elements to the wildcard set
+  when a container escapes the graph.
+  The downside of this approach is we are unable to handle the common case of a
+  list constructed and passed into an aten op. Here, optimize for a set of
+  common ops where the output does not alias the list or the list elements
+  */
 
-  WithInsertPoint guard(n);
-  auto g = n->owningGraph();
-  auto clone =
-      g->insertNode(g->createClone(n, [](Value* v) -> Value* { return v; }));
-
-  auto subgraph_node = SubgraphUtils::createSingletonSubgraph(
-      clone, Symbol::fromQualString("prim::TempGraph"));
-  auto subgraph = subgraph_node->g(attr::Subgraph);
-
-  // subgraph outputs are added to the wildcard set, so we need to remove them
-  // first
-  while (subgraph->outputs().size()) {
-    subgraph->eraseOutput(0);
+  switch (use.user->kind()) {
+    case aten::cat:
+    case aten::broadcast_tensors:
+    case aten::stack:
+    case aten::vstack:
+    case aten::hstack:
+    case aten::dstack:
+      return true;
   }
-  AliasDb db(subgraph);
 
-  auto singleton_node = subgraph->block()->nodes().end()->prev();
-  bool functional_non_aliasing_use =
-      !db.mayContainAlias(
-          singleton_node->inputs().at(offset), singleton_node->outputs()) &&
-      !db.hasWriters(singleton_node->inputs().at(offset));
-  subgraph_node->destroy();
-  return functional_non_aliasing_use;
+  return false;
 }
 
 // List or dict or tuple: construct: create an aliasing element for the actual
@@ -927,7 +935,7 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   // doesn't alias the input, then we can add all inputs to the list's
   // contained elements instead of the wildcard set.
   if (container->uses().size() == 1 &&
-      functionalNonAliasingListUse(container->uses().at(0))) {
+      functionalNonEscapingListUse(container->uses().at(0))) {
     giveFreshAlias(container, false);
     for (Value* v : node->inputs()) {
       addToContainedElements(v, container);
@@ -1141,9 +1149,9 @@ void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
       *unshapedType(existing->type()) == *unshapedType(new_value->type()),
       "Types must be strictly equal if you are replacing aliasing information. ",
       "Got existing: '",
-      existing->type()->python_str(),
+      existing->type()->repr_str(),
       "', new_value: '",
-      new_value->type()->python_str(),
+      new_value->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(existing)) {
     return;
@@ -1159,9 +1167,9 @@ void AliasDb::copyValue(Value* from, Value* to) {
       *unshapedType(from->type()) == *unshapedType(to->type()),
       "Types must be strictly equal if you are copying aliasing information. ",
       "Got from: '",
-      from->type()->python_str(),
+      from->type()->repr_str(),
       "', to: '",
-      to->type()->python_str(),
+      to->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(to)) {
     return;
@@ -1408,8 +1416,28 @@ bool AliasDb::tryMove(
   }
 
   auto curNode = toMove->next_in_graph[direction];
+
+  bool toMoveIsOnMoveSide =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+
+  if (toMoveIsOnMoveSide && curNode == movePoint) {
+    return true;
+  }
+
+  // it is never valid to move reorder a node with side effects
+  if (toMove->hasSideEffects() ||
+      (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
+    return false;
+  }
+
   // Move forward one node at a time
   while (curNode != movePoint) {
+    // never valid to reorder around a node with side effects
+    if (curNode->hasSideEffects()) {
+      return false;
+    }
+
     if (workingSet.dependsOn(curNode)) {
       // If we can't move past this node, add it to the working set
       workingSet.add(curNode);
@@ -1597,8 +1625,8 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->debugName() << " of type "
-         << v->type()->python_str() << " wasn't found in the element map.\n"
+      ss << "Value %" << v->debugName() << " of type " << v->type()->repr_str()
+         << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }
   }

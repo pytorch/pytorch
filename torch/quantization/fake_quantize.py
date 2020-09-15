@@ -59,22 +59,30 @@ class FakeQuantize(Module):
         self.register_buffer('zero_point', torch.tensor([0]))
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
-        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
+        self.ch_axis = self.activation_post_process.ch_axis \
+            if hasattr(self.activation_post_process, 'ch_axis') else -1
 
+    @torch.jit.export
     def enable_fake_quant(self, enabled=True):
+        # type: (bool) -> FakeQuantize
         self.fake_quant_enabled[0] = 1 if enabled else 0
         return self
 
+    @torch.jit.export
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
+    @torch.jit.export
     def enable_observer(self, enabled=True):
+        # type: (bool) -> FakeQuantize
         self.observer_enabled[0] = 1 if enabled else 0
         return self
 
+    @torch.jit.export
     def disable_observer(self):
         return self.enable_observer(False)
 
+    @torch.jit.export
     def calculate_qparams(self):
         return self.activation_post_process.calculate_qparams()
 
@@ -100,11 +108,14 @@ class FakeQuantize(Module):
 
     with_args = classmethod(_with_args)
 
+    @torch.jit.export
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={},\
-            scale={}, zero_point={}'.format(
+            quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, \
+        scale={}, zero_point={}'.format(
             self.fake_quant_enabled, self.observer_enabled,
-            self.scale, self.zero_point)
+            self.quant_min, self.quant_max,
+            self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually

@@ -4,9 +4,11 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
@@ -15,7 +17,10 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
+#include <thrust/transform.h>
 #include <THC/THCAtomics.cuh>
+
+#include <cub/cub.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -424,6 +429,8 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("index_add_cuda_");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};
@@ -445,6 +452,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   TORCH_CHECK(self.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(source.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+
+  at::assert_no_internal_overlap(self);
+  at::assert_no_partial_overlap(self, index);
+  at::assert_no_partial_overlap(self, source);
 
   // The `source` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
@@ -567,5 +578,356 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
 #undef LARGE_INDEX
 }
 
-} //at
-} //native
+namespace {
+// We prefer this kernel to avoid reloading index points if the number
+// of indices is a small number.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is large, then the
+// indexSelectLargeIndex kernel is a better choice to increase
+// parallelism.
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+__global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
+                                      cuda::detail::TensorInfo<T, IndexType> src,
+                                      cuda::detail::TensorInfo<int64_t, IndexType> indices,
+                                      int dstSelectDim,
+                                      int srcSelectDim,
+                                      IndexType innerSize,
+                                      int64_t srcSelectDimSize) {
+  // In order to avoid reloading the index that we are copying, load
+  // it once to handle all of the points that are being selected, so
+  // it can be reused as much as possible. This kernel is chosen when
+  // this is a good choice (small number of chosen indices), since
+  // re-accessing indices in addition to src elements can be slow.
+  for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
+    IndexType srcIndex =
+      indices.data[cuda::detail::IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
+    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
+
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
+      dstOffset += dstIndex * dst.strides[dstSelectDim];
+
+      IndexType srcOffset =
+        cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcSelectDim];
+
+      dst.data[dstOffset] = src.data[srcOffset];
+    }
+  }
+}
+
+// We prefer this kernel to balance parallelism across index points,
+// if there are a large number of indices.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is small, then the
+// indexSelectSmallIndex kernel is a better choice to reduce memory
+// accesses.
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
+__global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
+                                      cuda::detail::TensorInfo<T, IndexType> src,
+                                      cuda::detail::TensorInfo<int64_t, IndexType> indices,
+                                      int dstSelectDim,
+                                      int srcSelectDim,
+                                      IndexType totalSize,
+                                      IndexType innerSize,
+                                      int64_t srcSelectDimSize) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
+
+    IndexType srcIndex =
+      indices.data[cuda::detail::IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
+    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
+
+    IndexType dstOffset =
+      cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstSelectDim];
+
+    IndexType srcOffset =
+      cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcSelectDim];
+
+    dst.data[dstOffset] = src.data[srcOffset];
+  }
+}
+
+namespace {
+
+// When using a 0-dim scalar tensor, we need the legacy (THC) semantics of
+// TensorInfo: Pretend that the scalar tensor is in fact a one-element vector.
+template <typename T, typename IndexType>
+cuda::detail::TensorInfo<T, IndexType>
+tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
+  if (ti.dims == 0) {
+    ti.dims = 1;
+    ti.sizes[0] = 1;
+    ti.strides[0] = 1;
+  }
+  return ti;
+}
+
+}
+
+template<typename scalar_t>
+void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
+                                const Tensor& index) {
+  ptrdiff_t numIndices = index.numel();
+
+  int selfDims = self.dim() == 0 ? 1 : self.dim();
+
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  TORCH_CHECK(index.dim() <= 1,
+             "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
+
+  std::vector<int64_t> newSize = self.sizes().vec();
+  if (self.dim() > 0) {
+    newSize[dim] = numIndices;
+  }
+  at::native::resize_(out, newSize, {});
+
+  ptrdiff_t outTotalSize = out.numel();
+  if (outTotalSize == 0) {
+    return;
+  }
+
+  bool indContig = index.is_contiguous();
+
+  // The `self` is partitioned into two parts:
+  // -the size of each slice we are indexing, which is the
+  // total size of the tensor ignoring dimension `dim`;
+  // -the number of indices we are choosing, which is the total size
+  // of the tensor `indices`.
+  int64_t selfSelectDimSize = self.dim() == 0 ? 1 : self.size(dim);
+  ptrdiff_t sliceSize = outTotalSize / numIndices;
+
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+  indexSelectSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
+      outInfo, selfInfo, indicesInfo,                            \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize), \
+      selfSelectDimSize);
+
+#define LARGE_INDEX(TENSOR_TYPE, TYPE,                           \
+                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
+  indexSelectLargeIndex<TENSOR_TYPE, TYPE,                       \
+                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
+      outInfo, selfInfo, indicesInfo,                             \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize), \
+      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
+      selfSelectDimSize);
+
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
+
+  dim3 largeIndexGrid(std::min(THCCeilDiv(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(outTotalSize, (ptrdiff_t)128));
+  if (cuda::detail::canUse32BitIndexMath(out) &&
+      cuda::detail::canUse32BitIndexMath(self) &&
+      cuda::detail::canUse32BitIndexMath(index)) {
+    auto outInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, unsigned int>(out));
+    int outSelectDim = outInfo.collapseDims(dim);
+    outInfo.reduceDim(outSelectDim);
+
+    auto  selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, unsigned int>(self));
+    int selfSelectDim = selfInfo.collapseDims(dim);
+    selfInfo.reduceDim(selfSelectDim);
+
+    auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<int64_t, unsigned int>(index));
+    indicesInfo.collapseDims();
+
+    // A reasonable choice for when to have each thread iterate over
+    // indices to choose
+    if (numIndices <= 16) {
+      if (outInfo.dims == 1 && selfInfo.dims == 1 && indContig) {
+        SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
+      } else if (outInfo.dims == 2 && selfInfo.dims == 2 && indContig) {
+        SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
+      } else if (outInfo.dims == 3 && selfInfo.dims == 3 && indContig) {
+        SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
+      } else {
+        SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
+      }
+    } else {
+      bool indexIsMajor = indexShouldBeMajor(outInfo, outSelectDim);
+
+      if (outInfo.dims == 1 && selfInfo.dims == 1 && indContig) {
+        LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
+      } else if (outInfo.dims == 2 && selfInfo.dims == 2 && indContig) {
+        if (indexIsMajor) {
+          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
+        } else {
+          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
+        }
+      } else if (outInfo.dims == 3 && selfInfo.dims == 3 && indContig) {
+        if (indexIsMajor) {
+          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
+        } else {
+          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
+        }
+      } else {
+        LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
+      }
+    }
+  } else {
+    auto outInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, uint64_t>(out));
+    int outSelectDim = outInfo.collapseDims(dim);
+    outInfo.reduceDim(outSelectDim);
+
+    auto selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, uint64_t>(self));
+    int selfSelectDim = selfInfo.collapseDims(dim);
+    selfInfo.reduceDim(selfSelectDim);
+
+    auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<int64_t, uint64_t>(index));
+    indicesInfo.collapseDims();
+
+    LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
+  }
+#undef SMALL_INDEX
+#undef LARGE_INDEX
+}
+} // anonymous namespace
+
+Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
+                              const Tensor& index) {
+  static constexpr string_view DIM_WARNING =
+    "Tensor too large or too many (> 25) dimensions";
+
+  TORCH_CHECK(at::cuda::check_device({out, self, index}),
+              "Input, output and indices must be on the current device");
+  at::assert_no_internal_overlap(out);
+
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
+  TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
+
+#if defined(__HIP_PLATFORM_HCC__)
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      out.scalar_type(), "index_select_cuda",
+      [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+#else // __HIP_PLATFORM_HCC__
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      at::ScalarType::Half, at::ScalarType::Bool,
+      out.scalar_type(), "index_select_cuda",
+      [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+#endif // __HIP_PLATFORM_HCC__
+
+  return out;
+}
+
+Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
+  Tensor out = at::empty({0}, self.options());
+  index_select_out_cuda(out, self, dim, index);
+  return out;
+}
+
+template<typename T>
+struct NonZeroOp
+{
+    __host__ __device__ __forceinline__ bool operator()(const T& a) const {
+      return (a!=T(0));
+    }
+};
+
+template<typename scalar_t>
+void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
+  Tensor self_ = self.contiguous();
+  int N = self_.numel();
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+// compute number of nonzero elements
+  size_t temp_storage_bytes=0;
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto num_nonzeros = allocator.allocate(sizeof(int));
+  cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, scalar_t*> itr(self_.data_ptr<scalar_t>(), NonZeroOp<scalar_t>());
+  cub::DeviceReduce::Sum(nullptr, temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
+  auto temp_storage = allocator.allocate(temp_storage_bytes);
+  cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
+  int num_nonzeros_h;
+  C10_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
+  //need to synchronize to make sure data is available on the host
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  //expected output size is num_nonzeros x ndim
+  //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
+  //we are able to directly use passed output with this size and strides, and we can also (per contract)
+  //resize passed output with incorrect sizes anyway we want.
+  //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.
+  bool need_to_copy = out.dim() == 2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
+  at::Tensor out_temp = need_to_copy ?
+    at::native::empty_cuda({self.dim(), num_nonzeros_h}, out.options()) :
+    out.resize_({self.dim(), num_nonzeros_h});
+  //Scalars are expected to produce output of size (1,0), so we can't write to it
+  if (self.dim() > 0) {
+    cub::CountingInputIterator<int64_t> counting_itr(0);
+    temp_storage_bytes = 0;
+    cub::DeviceSelect::Flagged(nullptr, temp_storage_bytes, counting_itr, itr,
+      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+    temp_storage = allocator.allocate(temp_storage_bytes);
+    cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
+      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+    if (num_nonzeros_h > 0 && self.dim() > 1){
+        int64_t div = 1;
+        auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+        for (int dim = self.dim()-1; dim >= 0; dim--){
+            int64_t dim_size = self.sizes()[dim];
+            thrust::transform(
+              thrust::cuda::par(thrust_allocator).on(stream),
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>()),
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>()) + num_nonzeros_h,
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>()) + num_nonzeros_h * dim,
+              [=] C10_HOST_DEVICE (const int64_t val) {return (val/div) % dim_size;}
+            );
+            div *= dim_size;
+        }
+    }
+  }
+  if (need_to_copy) {
+    out.copy_(out_temp.t());
+  } else {
+    //transpose out so it is correct size
+    Tensor out_ = out_temp.t();
+    out.set_(out_);
+  }
+}
+
+Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
+  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
+  file a support request");
+  TORCH_CHECK(out.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
+  TORCH_CHECK(self.device() == out.device(), "expected self and out to be on the same device, but got out on ",
+  out.device(), " and self on ", self.device());
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+    self.scalar_type(), "nonzero_cuda",
+    [&] {nonzero_cuda_out_impl<scalar_t>(self, out);});
+  return out;
+}
+
+Tensor nonzero_cuda(const Tensor& self){
+  Tensor out = at::native::empty_cuda({0}, self.options().dtype(kLong));
+  return nonzero_out_cuda(out, self);
+}
+
+
+} // native
+} // at

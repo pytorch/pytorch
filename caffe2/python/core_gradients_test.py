@@ -4,13 +4,13 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from future.utils import bytes_to_native_str
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace
-from caffe2.python.core import CreateOperator, GradientRegistry
+from caffe2.python.core import CreateOperator, GradientRegistry, IR
 
 import numpy as np
 
@@ -98,6 +98,7 @@ class TestGradientCalculation(test_util.TestCase):
     @given(device_option=st.sampled_from([
         None,
         core.DeviceOption(workspace.GpuDeviceType, 1)]))
+    @settings(deadline=10000)
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -283,6 +284,7 @@ class TestGradientCalculation(test_util.TestCase):
     @given(device_option=st.sampled_from([
         None,
         core.DeviceOption(workspace.GpuDeviceType, 1)]))
+    @settings(deadline=10000)
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 
@@ -387,6 +389,57 @@ class TestGradientCalculation(test_util.TestCase):
         gradients, _ = GradientRegistry.GetBackwardPass(
             operators, {'out': 'out_grad'})
         self.assertOperatorListEqual(gradients, desired_grad_operators)
+
+    def testMultiUseInputAutoGenSumDevice(self):
+        parallel_tag = "parallelize:shard_by_1"
+        split_op_device_option_clear_auto_gen_sum = core.DeviceOption(
+            caffe2_pb2.CPU,
+            extra_info=[
+                parallel_tag,
+                "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG),
+            ]
+        )
+        split_op_device_option_no_clear_auto_gen_sum = core.DeviceOption(
+            caffe2_pb2.CPU,
+            extra_info=[parallel_tag]
+        )
+        operators_clear_auto_gen_sum = [
+            CreateOperator(
+                'Direct', 'in', 'hidden1',
+                device_option=split_op_device_option_clear_auto_gen_sum
+            ),
+            CreateOperator(
+                'Direct', 'in', 'hidden2',
+                device_option=split_op_device_option_clear_auto_gen_sum
+            ),
+            CreateOperator('Direct', ['hidden1', 'hidden2'], 'out'),
+        ]
+        gradients_clear_auto_gen_sum, _ = GradientRegistry.GetBackwardPass(
+            operators_clear_auto_gen_sum, {'out': 'out_grad'})
+        self.assertEqual(gradients_clear_auto_gen_sum[-1].type, "Sum")
+        self.assertNotIn(
+            parallel_tag,
+            gradients_clear_auto_gen_sum[-1].device_option.extra_info
+        )
+
+        operators_no_clear_auto_gen_sum = [
+            CreateOperator(
+                'Direct', 'in', 'hidden1',
+                device_option=split_op_device_option_no_clear_auto_gen_sum
+            ),
+            CreateOperator(
+                'Direct', 'in', 'hidden2',
+                device_option=split_op_device_option_no_clear_auto_gen_sum
+            ),
+            CreateOperator('Direct', ['hidden1', 'hidden2'], 'out'),
+        ]
+        gradients_no_clear_auto_gen_sum, _ = GradientRegistry.GetBackwardPass(
+            operators_no_clear_auto_gen_sum, {'out': 'out_grad'})
+        self.assertEqual(gradients_clear_auto_gen_sum[-1].type, "Sum")
+        self.assertIn(
+            parallel_tag,
+            gradients_no_clear_auto_gen_sum[-1].device_option.extra_info
+        )
 
     def testMultiUseInputAndMultipleVersionsBig(self):
         """Test gradient for the following case:

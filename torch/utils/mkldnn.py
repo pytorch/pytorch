@@ -104,12 +104,34 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
+class MkldnnConv3d(_MkldnnConvNd):
+    def __init__(self, dense_module):
+        super(MkldnnConv3d, self).__init__(dense_module)
 
-class MkldnnBatchNorm2d(torch.jit.ScriptModule):
+        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
+            dense_module.weight.to_mkldnn(),
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups))
+
+    @torch.jit.script_method
+    def __setstate__(self, state):
+        self.weight = torch._C._nn.mkldnn_reorder_conv3d_weight(
+            state[0].to_mkldnn(),
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups)
+        self.bias = state[1].to_mkldnn()
+        self.training = state[2]
+
+
+class MkldnnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
     def __init__(self, dense_module):
-        super(MkldnnBatchNorm2d, self).__init__()
+        super(MkldnnBatchNorm, self).__init__()
 
         assert(not dense_module.training)
         assert(dense_module.track_running_stats)
@@ -165,8 +187,10 @@ def to_mkldnn(module):
             return MkldnnConv1d(m)
         elif isinstance(m, torch.nn.Conv2d):
             return MkldnnConv2d(m)
-        elif isinstance(m, torch.nn.BatchNorm2d):
-            return MkldnnBatchNorm2d(m)
+        elif isinstance(m, torch.nn.Conv3d):
+            return MkldnnConv3d(m)
+        elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+            return MkldnnBatchNorm(m)
         else:
             return m
 

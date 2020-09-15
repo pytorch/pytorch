@@ -1,5 +1,4 @@
 import io
-import warnings
 
 import torch
 from ._utils import _type, _cuda
@@ -11,7 +10,7 @@ class _StorageBase(object):
 
     def __str__(self):
         content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
-        return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
+        return content + f'\n[{torch.typename(self)} of size {len(self)}]'
 
     def __repr__(self):
         return str(self)
@@ -31,9 +30,8 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
-        warnings.warn("pickle support for Storage will be removed in 1.5. Use `torch.save` instead", FutureWarning)
         b = io.BytesIO()
-        torch.save(self, b)
+        torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
@@ -104,8 +102,7 @@ class _StorageBase(object):
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
-            raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
-                            .format(self.type()))
+            raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
         import torch.cuda
         allocator = torch.cuda._host_allocator()
         return type(self)(self.size(), allocator=allocator).copy_(self)

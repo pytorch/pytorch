@@ -1,12 +1,13 @@
 import os
 import sys
 import inspect
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
+from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -237,12 +238,26 @@ class TestList(JitTestCase):
 
         self.checkScript(test_equality, (), optimize=True)
 
+        def test_equality_str():
+            a = ["foo", "bar"]
+            b = ["foo", "bar"]
+            return a == b
+
+        self.checkScript(test_equality_str, (), optimize=True)
+
         def test_inequality():
             a = [1, 2, 3]
             b = [1, 2, 3]
             return a != b
 
-        self.checkScript(test_equality, (), optimize=True)
+        self.checkScript(test_inequality, (), optimize=True)
+
+        def test_inequality_str():
+            a = ["foo", "bar"]
+            b = ["foo", "bar", "food"]
+            return a != b
+
+        self.checkScript(test_inequality_str, (), optimize=True)
 
         def test_non_equality():
             a = [1, 2, 3]
@@ -356,52 +371,6 @@ class TestList(JitTestCase):
             return a, b
 
         self.checkScript(test_sorted_copy, ())
-
-    def test_list_non_aliasing_use(self):
-        # naively, we would consider x to alias input because it
-        # enters the heap via list.
-        # however, as an optimization, we observe that y is only used
-        # once in a non-aliasing op (outputs have no alias relation to y)
-        # we can thus add x to y's contained elements instead of the heap
-        # and not consider input to alias x
-
-        @torch.jit.script
-        def foo(input):
-            x = torch.tensor([1, 2, 3, 4])
-            y = [x, x]
-            input.add_(1)
-            print(torch.cat(y))
-
-        self.run_pass('constant_propagation', foo.graph)
-        FileCheck().check_not("ListConstruct").run(foo.graph)
-
-        # here, broadcast_tensors output does alias input so we default
-        # back to adding y to the heap
-
-        @torch.jit.script
-        def foo(input):
-            x = torch.tensor([1, 2, 3, 4])
-            y = [x, x]
-            input.add_(1)
-            print(torch.broadcast_tensors(y))
-
-        self.run_pass('constant_propagation', foo.graph)
-        FileCheck().check("ListConstruct").run(foo.graph)
-
-        # only consider list construct optimization for use in aten ops
-        # here, y is used in an if statement
-
-        @torch.jit.script
-        def foo(input, cond: bool, li: List[torch.Tensor]):
-            x = torch.tensor([1, 2, 3, 4])
-            y = [x, x]
-            if cond:
-                li = y
-            input.add_(1)
-            print(li)
-
-        self.run_pass('constant_propagation', foo.graph)
-        FileCheck().check("ListConstruct").run(foo.graph)
 
     def test_list_slice(self):
         def test_regular_slice():
@@ -755,6 +724,13 @@ class TestList(JitTestCase):
             return a == [1, 2, 4]
         self.checkScript(test_list_remove, ())
 
+        def test_str_list_remove():
+            a = ["foo", "bar"]
+            a.remove("foo")
+
+            return a == ["bar"]
+        self.checkScript(test_str_list_remove, ())
+
     def test_list_index_not_existing(self):
         @torch.jit.script
         def list_index_not_existing():
@@ -773,6 +749,13 @@ class TestList(JitTestCase):
 
             return i == 2
         self.checkScript(list_index, ())
+
+        def list_str_index():
+            a = ["foo", "bar"]
+            i = a.index("bar")
+
+            return i == 1
+        self.checkScript(list_str_index, ())
 
     def test_tensor_list_index(self):
         def tensor_list_index():
@@ -800,6 +783,13 @@ class TestList(JitTestCase):
 
             return i == 3
         self.checkScript(list_count, ())
+
+        def list_str_count():
+            a = ["foo", "bar", "foo"]
+            i = a.count("foo")
+
+            return i == 2
+        self.checkScript(list_str_count, ())
 
     def test_list_count_not_existing(self):
         def list_count_not_existing():
@@ -1079,14 +1069,17 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Expected type hint for result of tolist()"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            r"Expected type hint for result of tolist()",
+            "x.tolist("
         ):
             self.checkScript(to_list_missing_type_annotation, (torch.randn(5),))
 
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
             r"Return value was annotated as having type List\[float\] but is actually of type float",
+            "return li"
         ):
             self.checkScript(to_list_incorrect_type_annotation, (torch.randn(5),))
 
@@ -1158,6 +1151,9 @@ class TestDict(JitTestCase):
 
     def dict2(self):
         return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
+
+    def dict_bool(self):
+        return {True: 1}
 
     def test_del(self):
         def inputs():
@@ -1283,6 +1279,7 @@ class TestDict(JitTestCase):
             a['b'] -= 12
             a['c'] *= 122
             a['c'] /= 2
+            a['c'] %= 2
             return a
 
         def aug_assign_dict_prim(a):
@@ -1291,6 +1288,7 @@ class TestDict(JitTestCase):
             a['b'] -= 2.4
             a['c'] *= 3.0
             a['c'] /= 2.0
+            a['c'] %= 2.0
             return a
 
         self.checkScript(aug_assign_dict_tensor, (self.dict(),))
@@ -1338,6 +1336,21 @@ class TestDict(JitTestCase):
 
         self.checkScript(get, (self.dict(), 'a'))
         self.checkScript(get, (self.dict(), "doesn't exist"))
+
+    def test_get_boolkey(self):
+        def get(x, key):
+            # type: (Dict[bool, int], bool) -> Optional[int]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict_bool(), True))
+        self.checkScript(get, (self.dict_bool(), False))
+
+        def get_default(x, key):
+            # type: (Dict[bool, int], bool) -> int
+            return x.get(key, 42)
+
+        self.checkScript(get_default, (self.dict_bool(), True))
+        self.checkScript(get_default, (self.dict_bool(), False))
 
     def test_basic(self):
         def simple(x):
@@ -1484,6 +1497,15 @@ class TestDict(JitTestCase):
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
         test_func(test_dict_constructor, ())
+
+        def test_dict_initializer_list():
+            a = {"1": torch.tensor(1), "2": torch.tensor(2)}
+            output_order = []
+            for key in a:
+                output_order.append(a[key])
+            return output_order
+
+        test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
             a = dict()

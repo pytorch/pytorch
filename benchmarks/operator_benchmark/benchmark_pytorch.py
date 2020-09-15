@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import time
 import json
 import torch
-import cpp_extension # noqa
+import torch.utils.cpp_extension as cpp_extension # noqa
 
 
 """PyTorch performance microbenchmarks.

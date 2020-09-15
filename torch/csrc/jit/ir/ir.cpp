@@ -93,8 +93,10 @@ std::ostream& operator<<(
       out << l.delim;
     }
     printValueRef(out, n);
-    out << " : ";
-    out << *n->type();
+    if (c10::type_verbosity() >= c10::TypeVerbosity::Type) {
+      out << " : ";
+      out << *n->type();
+    }
   }
   return out;
 }
@@ -1049,11 +1051,13 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
-    case prim::profile:
     case prim::BailOut:
-    case prim::Guard:
     case prim::rpc_async: // It represents RPC message sent.
+    case prim::rpc_sync: // It represents RPC message sent.
+    case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+    case prim::Enter:
+    case prim::Exit:
       return true;
   }
 
@@ -1595,15 +1599,30 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
   return n;
 }
 
+Node* Graph::createEnumName(Value* e) {
+  e->type()->expect<EnumType>();
+  assert(e->type()->cast<EnumType>());
+  auto n = create(prim::EnumName, {e});
+  n->output()->setType(StringType::get());
+  return n;
+}
+
+Node* Graph::createEnumValue(Value* e) {
+  auto enum_type = e->type()->expect<EnumType>();
+  auto n = create(prim::EnumValue, {e});
+  n->output()->setType(enum_type->getValueType());
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
         v->type()->isSubtypeOf(elem_type),
         "Expected a list element that subtypes '",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         "' but got an element of type '",
-        v->type()->python_str(),
+        v->type()->repr_str(),
         "'");
   }
   n->output()->setType(ListType::create(elem_type));
@@ -1716,7 +1735,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
   } else {
     TORCH_CHECK(
         false,
-        ptr->python_str(),
+        ptr->repr_str(),
         " is not one of the supported element types for tolist: int, float, bool");
   }
 
@@ -1956,8 +1975,19 @@ void ProfileOp::cloneFrom(Node* other_) {
   auto other = other_->cast<ProfileOp>();
   this->callback_ = other->getCallback();
 }
+
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+void ProfileOptionalOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOptionalOp>();
+  this->callback_ = other->getCallback();
+}
+
+Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
+  return new ProfileOptionalOp(g, {nullptr});
 }
 
 TypePtr NamedValue::type() const {
@@ -1969,6 +1999,7 @@ TypePtr NamedValue::type() const {
 }
 
 constexpr Symbol ProfileOp::Kind;
+constexpr Symbol ProfileOptionalOp::Kind;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {

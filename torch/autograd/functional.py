@@ -565,32 +565,39 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector for which the vector Hessian product is computed. Must be the
-            same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
-            containing a single ``1``.
-        create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
+        v (tuple of Tensors or Tensor): The vector for which the vector Hessian
+            product is computed. Must be the same size as the input of
+            ``func``. This argument is optional when ``func``'s input contains
+            a single element and (if it is not provided) will be set as a
+            Tensor containing a single ``1``.
+        create_graph (bool, optional): If ``True``, both the output and result
+            will be computed in a differentiable way. Note that when ``strict``
+            is ``False``, the result can not require gradients or be
+            disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             vhp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
-        vhp (tuple of Tensors or Tensor): result of the dot product with the same shape
-            as the inputs.
-    Example::
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
+            vhp (tuple of Tensors or Tensor): result of the dot product with the
+            same shape as the inputs.
+
+    Example:
+
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
         >>> vhp(pow_reducer, inputs, v)
-       (tensor(0.5591),
-        tensor([[1.0689, 1.2431],
-                [3.0989, 4.4456]]))
+        (tensor(0.5591),
+         tensor([[1.0689, 1.2431],
+                 [3.0989, 4.4456]]))
         >>> vhp(pow_reducer, inputs, v, create_graph=True)
         (tensor(0.5591, grad_fn=<SumBackward0>),
          tensor([[1.0689, 1.2431],

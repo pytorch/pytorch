@@ -9,6 +9,7 @@
 ## PyTorch
 
 .coverage
+coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
@@ -25,8 +26,10 @@
 aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
+benchmarks/.data
 caffe2/cpp_test/
 dist/
+docs/cpp/src
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
@@ -38,7 +41,7 @@ test/cpp/api/mnist
 test/custom_operator/model.pt
 test/data/legacy_modules.t7
 test/data/*.pt
-test/backward_compatibility/new_schemas.txt
+test/backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
@@ -47,13 +50,15 @@ test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
-torch/__init__.pyi
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
+torch/_VF.pyi
 torch/nn/functional.pyi
-torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
+# Listed manually because some files in this directory are not generated
+torch/testing/_internal/generated/annotated_fn_args.py
+torch/testing/_internal/data/*.pt
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
@@ -104,9 +109,6 @@ env
 
 # macOS dir files
 .DS_Store
-
-# Symbolic files
-tools/shared/cwrap_common.py
 
 # Ninja files
 .ninja_deps
