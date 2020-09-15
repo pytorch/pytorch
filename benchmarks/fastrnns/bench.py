@@ -58,7 +58,7 @@ class Event(object):
 
 def trainbench(name, rnn_creator, nloops=100, warmup=10,
                seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
-               miniBatch=64, device='cuda', seed=None):
+               miniBatch=64, device='cuda', seed=None, time_warmup=0):
     def train_batch(modeldef):
         # CUDA events for timing
         if device == 'cuda':
@@ -112,10 +112,14 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
 
     modeldef = rnn_creator(**creator_args)
 
-    [train_batch(modeldef) for _ in range(warmup)]
+    [train_batch(modeldef) for _ in range(warmup - 1)]
+    warmupResults = [train_batch(modeldef)]
 
-    results = [train_batch(modeldef) for _ in range(nloops)]
-    fwd_times, bwd_times = zip(*results)
+    if time_warmup != 0:
+        fwd_times, bwd_times = zip(*warmupResults)
+    else:
+        results = [train_batch(modeldef) for _ in range(nloops)]
+        fwd_times, bwd_times = zip(*results)
 
     fwd_times = torch.tensor(fwd_times)
     bwd_times = torch.tensor(bwd_times)
@@ -225,7 +229,8 @@ if __name__ == '__main__':
     parser.add_argument('--cuda_pointwise_loop_level', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_count', default=None, type=int)
     parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
-
+    parser.add_argument('--time_warmup', default='0', type=int,
+                        help='Only time warm up time')
     args = parser.parse_args()
     set_fuser(args.fuser, args.executor)
 
