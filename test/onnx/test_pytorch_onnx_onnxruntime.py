@@ -837,6 +837,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(ArithmeticModule(), x)
 
+    # NOTE: floor division tests currently restrict themselves to only
+    #   test positive division. PyTorch's floor division was previously
+    #   implemented incorrectly and would truncate, not floor, the result
+    #   of the division. For example, -5 // 3 = -2, but, historically,
+    #   torch.floor_divide(-5, 3) = -1.
+    # This behavior has been fixed in PyTorch but the update has not been
+    #   applied to ONNX export yet. See https://github.com/pytorch/pytorch/issues/44692.
     def test_floor_div(self):
         class FloorDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -847,7 +854,7 @@ class TestONNXRuntime(unittest.TestCase):
                     x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
                     x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
 
-        x = torch.randn(2, 3, 4)
+        x = torch.randn(2, 3, 4).clamp_(1e-5, float('inf'))
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
@@ -857,8 +864,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return x // 3, x // 2., x // y
 
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
+        x = torch.randn(2, 3, 4).clamp_(1e-5, float('inf'))
+        y = torch.randn(2, 3, 4).clamp_(1e-5, float('inf'))
         self.run_test(FloorDivModule(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -2690,7 +2697,7 @@ class TestONNXRuntime(unittest.TestCase):
         class LenListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                return torch.ones(len(input.shape)) 
+                return torch.ones(len(input.shape))
 
         x = torch.randn(4, 5)
         self.run_test(LenListModel(), x)

@@ -14213,27 +14213,68 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
-    # binary operations with CUDA tensors.
+    # binary operations with CUDA tensors, and that the results are
+    # consistent with Python's operators.
     @onlyCUDA
     def test_cuda_cpu_scalar_binary_ops(self, device):
         val_scalar = math.pi
         val_tensor = torch.tensor(val_scalar)
-        for op in (operator.add, torch.add,
-                   operator.sub, torch.sub,
-                   operator.mul, torch.mul,
-                   operator.truediv, torch.true_divide,
-                   operator.floordiv, torch.floor_divide):
-            for tensor_val in (1, (1,)):
-                t_cuda = torch.tensor(tensor_val, device=device)
-                t_cpu = t_cuda.cpu()
-                for val in (val_scalar, val_tensor):
-                    cpu_result = op(t_cpu, val)
-                    cuda_result = op(t_cuda, val)
-                    self.assertEqual(cpu_result, cuda_result)
+        for ops in ((operator.add, torch.add),
+                    (operator.sub, torch.sub),
+                    (operator.mul, torch.mul),
+                    (operator.truediv, torch.true_divide),
+                    (operator.floordiv, torch.floor_divide)):
+            python_op, torch_op = ops
 
-                    reverse_cpu_result = op(val, t_cpu)
-                    reverse_cuda_result = op(val, t_cuda)
-                    self.assertEqual(reverse_cpu_result, reverse_cuda_result)
+            for _ in range(30):
+                # Samples values and ensures no zeros to avoid division by
+                #   zero errors. Further, because Python math is
+                #   so precise this rounds to only 3 decimal places to compare
+                #   with PyTorch. torch.floor_divide is especially sensitive
+                #   to very small division computation errors.
+                a = round(random.uniform(-15, 15))
+                b = round(random.uniform(-15, 15))
+                a = a if a != 0 else 1
+                b = b if b != 0 else 1
+
+                # Computes in double since Python math is high precision
+                a_tensor = torch.tensor(a, device=device, dtype=torch.double)
+                b_tensor = torch.tensor(b, device=device, dtype=torch.double)
+
+                a_tensor_cpu = a_tensor.cpu()
+                b_tensor_cpu = b_tensor.cpu()
+
+                vals = (a, b, a_tensor, b_tensor, a_tensor_cpu, b_tensor_cpu)
+
+                for args in product(vals, vals):
+                    first, second = args
+
+                    first_scalar = first if not isinstance(first, torch.Tensor) else first.item()
+                    second_scalar = second if not isinstance(second, torch.Tensor) else second.item()
+                    expected = python_op(first_scalar, second_scalar)
+
+                    # Skips floor division where division is inaccurate
+                    # NOTE: division is Python is very accurate,
+                    #   compared to division in PyTorch. For example,
+                    #   torch.tensor(6.247, device='cuda', dtype=torch.float64) / 6.247
+                    #   produces
+                    #   tensor(0.99999999999999988898, device='cuda:0', dtype=torch.float64)
+                    #   on Colab. When reviewing floor division, this is an absolute error
+                    #   of 1, since PyTorch's floor division result will be zero
+                    #   and Python's will be 1.
+                    #   This block of code detects when Python and
+                    #   PyTorch's division disagree on their results' floors and
+                    #   skips testing floor division in those cases.
+                    if torch_op is torch.floor_divide:
+                        expected_div = first_scalar / second_scalar
+                        actual_div = first / second
+                        if isinstance(actual_div, torch.Tensor):
+                            actual_div = actual_div.item()
+                        if math.floor(expected_div) != math.floor(actual_div):
+                            continue
+
+                    self.assertEqual(expected, python_op(first, second))
+                    self.assertEqual(expected, torch_op(first, second))
 
     @onlyCUDA
     def test_ceil_out_mismatch(self, device):

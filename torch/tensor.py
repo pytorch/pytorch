@@ -541,8 +541,9 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         result = other / self
         if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+            return result.floor_()
+        result_type = torch.result_type(self, other)
+        return result.to(result_type)
 
     __neg__ = _C._TensorBase.neg
 

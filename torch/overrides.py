@@ -178,9 +178,6 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
-        torch._c_style_div,
-        Tensor._c_style_div,
-        Tensor._c_style_div_,
     }
 
 
@@ -324,6 +321,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, out=None: -1,
+        torch.Tensor._c_style_div_: lambda input, other, out=None: -1,
         torch.dot: lambda mat1, mat2: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,

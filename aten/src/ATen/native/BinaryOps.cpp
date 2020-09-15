@@ -196,22 +196,50 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 //   C++ is equivalent to torch.trunc(torch.true_divide(a, b)), while
 //   floor division is equivalent to torch.floor(torch.true_divide(a, b)).
 //   For example, in Python -5 // 2 = -3, while in C++ -5 / 2 = -2.
-// NOTE: floor divide, like Python and NumPy's floor divide, participates in
-//   type promotion.
+// NOTE: floor_divide, like Python and NumPy's floor_div(ide), participates in
+//   type promotion. However, unlike true_divide it does not always promote
+//   to a float type. This requires special dtype handling.
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  // Computes the output dtype
+  auto result_dtype = at::native::result_type(TensorList{self, other});
+  auto true_divide_out_type = result_dtype;
+  if (c10::isIntegralType(result_dtype, /*include_bool=*/true)) {
+    true_divide_out_type = typeMetaToScalarType(at::get_default_dtype());
+  }
+
+  // Uses the given result if true_divide can accept it as an out= argument
+  if (canCast(true_divide_out_type, result.scalar_type())) {
+    return at::true_divide_out(result, self, other).floor_();
+  }
+
+  // Validates safe casting
+  TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
+    "result type ", result_dtype, " can't be cast to the "
+    "desired output type ", result.scalar_type());
+
   const auto r = self.true_divide(other).floor_();
   resize_output(result, r.sizes().vec());
   result.copy_(r);
   return result;
 }
 
+// NOTE: this cannot just call floor_divide_out without preparing the
+//   result tensor properly.
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
   const auto result_dtype = at::native::result_type(TensorList{self, other});
   return self.true_divide(other).floor_().to(result_dtype);
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {
-  return native::floor_divide_out(self, self, other);
+  return at::floor_divide_out(self, self, other);
+}
+
+Tensor floor_divide(const Tensor& self, Scalar other) {
+  return self.floor_divide(wrapped_scalar_tensor(other));
+}
+
+Tensor& floor_divide_(Tensor& self, Scalar other) {
+  return self.floor_divide_(wrapped_scalar_tensor(other));
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -810,14 +838,6 @@ Tensor min(const Tensor& self, const Tensor& other) {
   return at::minimum(self, other);
 }
 
-Tensor floor_divide(const Tensor& self, Scalar other) {
-  return at::floor_divide(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& floor_divide_(Tensor& self, Scalar other) {
-  return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
-}
-
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
@@ -1001,29 +1021,16 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
   m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
-// Implements C++-like division. Performs true division with float input(s),
+// Implements C-style division. Performs true division with float input(s),
 //   and integer division with integer inputs. Note that integer division is
 //   not equivalent to floor division. Integer division truncates its
 //   quotient while floor division, as the name suggests, floors it.
-Tensor _c_style_div(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& _c_style_div_(Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(self, self, other);
+// NOTE: this function is intended for internal use only.
+Tensor& _c_style_div_(Tensor& self, Scalar other) {
+  const auto tensor_other = wrapped_scalar_tensor(other);
+  auto iter = TensorIterator::binary_op(self, self, tensor_other);
   div_stub(iter.device_type(), iter);
   return self;
-}
-
-Tensor _c_style_div(const Tensor& self, Scalar other) {
-  return self._c_style_div(wrapped_scalar_tensor(other)); // redispatch!
-}
-
-Tensor& _c_style_div_(Tensor& self, Scalar other) {
-  return self._c_style_div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
 } // namespace native

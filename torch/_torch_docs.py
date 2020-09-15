@@ -2721,15 +2721,15 @@ Computes the floor of :attr:`input` divided by :attr:`other`.
 
 .. math::
     \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
-
 """ + r"""
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-.. note:: Floor division in PyTorch is like floor division in Python
-          and Numpy. It is different from integer division in C++, which
-          truncates the quotient instead of taking its floor.
+.. note:: `torch.floor_divide` performs floor division as in Python and NumPy.
+          This differs from integer division in C and C++, which truncates
+          instead of flooring the quotient.
+          E.g. in Python, -5 // 2 == -3, but in C++ -5 // 2 = -2.
 
 Args:
     input (Tensor): the dividend
