@@ -250,6 +250,11 @@ private:
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
+
+  // Whether there's kernel directly registered to dispatch_key
+  bool hasKernelForDispatchKey(DispatchKey dispatch_key) const;
+  // Retrieves AnnotatedKernel at kernels_.at(dispatch_key).front()
+  const AnnotatedKernel& getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl

@@ -2,6 +2,8 @@
 
 namespace c10 {
 
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradCPU,
   DispatchKey::AutogradCUDA,
@@ -12,7 +14,8 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradOther,
 });
 
-constexpr DispatchKeySet math_dispatch_keyset = DispatchKeySet({
+// backend_dispatch_keyset should include all runtime backend keys.
+constexpr DispatchKeySet backend_dispatch_keyset = DispatchKeySet({
   DispatchKey::CPU,
   DispatchKey::CUDA,
   DispatchKey::HIP,
@@ -36,15 +39,11 @@ constexpr DispatchKeySet math_dispatch_keyset = DispatchKeySet({
   DispatchKey::PrivateUse1,
   DispatchKey::PrivateUse2,
   DispatchKey::PrivateUse3,
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
 });
 
+// math_dispatch_keyset contains all keys in backend_dispatch_keyset and autograd_dispatch_keyset
+// Alias key DispatchKey::Math maps to math_dispatch_keyset.
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset;
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   switch (t) {
@@ -52,72 +51,9 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return autograd_dispatch_keyset;
     case DispatchKey::Math:
       return math_dispatch_keyset;
-    case DispatchKey::Undefined:
-     return DispatchKeySet();
    default:
      return DispatchKeySet(t);
   }
-}
-
-template <std::size_t... Is>
-constexpr auto make_array_from_sequence(std::index_sequence<Is...>) {
-  return std::array<DispatchKey, sizeof...(Is)>{static_cast<DispatchKey>(Is)...};
-}
-
-constexpr auto runtime_dispatch_keys = make_array_from_sequence(
-  std::make_index_sequence<static_cast<uint8_t>(DispatchKey::NumDispatchKeys)>{});
-
-// Create singleton for alias keys separately to make sure we don't
-// accidentally support DispatchKey::NumDispatchKeys in std::array.
-constexpr std::array<DispatchKey, 7> autograd_dispatch_keys {
-    DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA,
-    DispatchKey::AutogradPrivateUse1, DispatchKey::AutogradPrivateUse2,
-    DispatchKey::AutogradPrivateUse3, DispatchKey::AutogradOther};
-
-constexpr std::array<DispatchKey, 30> math_dispatch_keys {
-  DispatchKey::CPU,
-  DispatchKey::CUDA,
-  DispatchKey::HIP,
-  DispatchKey::FPGA,
-  DispatchKey::MSNPU,
-  DispatchKey::XLA,
-  DispatchKey::Vulkan,
-  DispatchKey::MKLDNN,
-  DispatchKey::OpenGL,
-  DispatchKey::OpenCL,
-  DispatchKey::IDEEP,
-  DispatchKey::QuantizedCPU,
-  DispatchKey::QuantizedCUDA,
-  DispatchKey::ComplexCPU,
-  DispatchKey::ComplexCUDA,
-  DispatchKey::CustomRNGKeyId,
-  DispatchKey::MkldnnCPU,
-  DispatchKey::SparseCPU,
-  DispatchKey::SparseCUDA,
-  DispatchKey::SparseHIP,
-  DispatchKey::PrivateUse1,
-  DispatchKey::PrivateUse2,
-  DispatchKey::PrivateUse3,
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther};
-
-ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k) {
-  if (isAliasDispatchKey(k)) {
-    switch (k) {
-      case DispatchKey::Autograd:
-        return autograd_dispatch_keys;
-      case DispatchKey::Math:
-        return math_dispatch_keys;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "Unable to resolve alias dispatch key");
-    }
-  }
-  return c10::ArrayRef<DispatchKey>(runtime_dispatch_keys).slice(static_cast<uint8_t>(k), 1);
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
