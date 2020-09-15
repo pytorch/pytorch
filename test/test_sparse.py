@@ -1256,7 +1256,7 @@ class TestSparse(TestCase):
             ({'dtype': torch.double, 'p': 'fro'},
              ValueError, r'dtype argument is not supported in frobenius norm'),
             ({'dtype': torch.double, 'p': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument") 
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
         ]
         x = self._gen_sparse(3, 10, 100)[0]
         for kwargs, err, msg in kwarg_error_pairs:
@@ -1373,14 +1373,6 @@ class TestSparse(TestCase):
         y2 = x1.clone()
         y2.div_(37.5)
         expected = self.safeToDense(x1) / 37.5
-        self.assertEqual(self.safeToDense(y1), expected)
-        self.assertEqual(self.safeToDense(y2), expected)
-
-        y1 = torch.true_divide(x1, 37.5)
-        y2 = x1.clone()
-        if y2.dtype.is_floating_point or y2.dtype.is_complex:
-            y2.true_divide_(37.5)
-        expected = torch.true_divide(self.safeToDense(x1), 37.5)
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
@@ -1620,8 +1612,8 @@ class TestSparse(TestCase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
         sparse_tensor, _, _ = self._gen_sparse(len([2, 3, 4]), 9, [2, 3, 4] + [3, 4, 5, 6])
-        for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format]:
-            with self.assertRaisesRegex(RuntimeError, "Memory format for sparse tensors must be Preserve"):
+        for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format, torch.preserve_format]:
+            with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
                 result = torch.zeros_like(sparse_tensor, memory_format=mem_format)
 
     def test_empty_like(self):
@@ -2435,15 +2427,6 @@ class TestSparse(TestCase):
         self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
-
-    def test_true_divide_by_sparse_error(self):
-        def fn():
-            x = torch.tensor(1., device=self.device).to_sparse()
-            y = torch.tensor(1., device=self.device).to_sparse()
-            torch.true_divide(x, y)
-
-        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
-                               fn)
 
     def test_floor_divide_by_sparse_error(self):
         self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',

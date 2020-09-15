@@ -275,27 +275,21 @@ Tensor empty_like(
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
 
-  TensorOptions options = self.options().merge_in(options_);
+  TensorOptions options =
+      self.options()	
+          .merge_in(options_)	
+          .merge_in(TensorOptions().memory_format(optional_memory_format));
 
+  TORCH_CHECK(	
+      !(options.layout() != kStrided &&	
+          optional_memory_format.has_value()),	
+      "memory format option is only supported by strided tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
-    if (optional_memory_format.has_value()) {
-      TORCH_CHECK(
-        optional_memory_format == MemoryFormat::Preserve,
-        "Memory format for sparse tensors must be Preserve, got ",
-        *optional_memory_format);
-    }
     auto result = at::empty({0}, options); // to be resized
     result.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
     return result;
   }
-
-  options = options.merge_in(TensorOptions().memory_format(optional_memory_format));
-
-  TORCH_CHECK(
-      !(options.layout() != kStrided &&
-          optional_memory_format.has_value()),
-      "memory format option is only supported by strided tensors");
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
@@ -485,10 +479,11 @@ Tensor new_full(
 Tensor linspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     const TensorOptions& options) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -497,10 +492,12 @@ Tensor linspace(
 Tensor logspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
@@ -863,12 +860,9 @@ Tensor zeros_like(
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
-    if (optional_memory_format.has_value()) {
-      TORCH_CHECK(
-        optional_memory_format == MemoryFormat::Preserve,
-        "Memory format for sparse tensors must be Preserve, got ",
-        *optional_memory_format);
-    }
+    TORCH_CHECK(
+        !(optional_memory_format.has_value()),
+        "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
