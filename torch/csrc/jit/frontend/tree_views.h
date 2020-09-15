@@ -371,6 +371,9 @@ struct Param : public TreeView {
   Param withType(const Maybe<Expr>& typ) const {
     return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
+  Param withDefault(const Maybe<Expr>& def) const {
+    return Param::create(range(), ident(), type(), def, kwarg_only());
+  }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
