@@ -72,6 +72,7 @@ _(aten, _embedding_bag_sparse_backward) \
 _(aten, _erf) \
 _(aten, _erfc) \
 _(aten, _exp) \
+_(aten, _exp2) \
 _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
@@ -291,8 +292,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \

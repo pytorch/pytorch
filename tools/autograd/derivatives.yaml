@@ -436,6 +436,9 @@
 - name: exp(Tensor self) -> Tensor
   self: grad * result
 
+- name: exp2(Tensor self) -> Tensor
+  self: grad * result * M_LN2
+
 - name: expm1(Tensor self) -> Tensor
   self: grad * (result + 1)
 
@@ -1058,15 +1061,6 @@
 - name: triu(Tensor self, int diagonal=0) -> Tensor
   self: grad.triu(diagonal)
 
-  # Note: true_divide uses the division operator for backward
-  # since grad is always a floating tensor.
-- name: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad / other
-  other: -grad * self / (other * other)
-
-- name: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad / other
-
 - name: trunc(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
@@ -1202,6 +1196,7 @@
 
 - name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: l1_loss_backward(grad, self, target, reduction)
+  target: l1_loss_backward(grad, target, self, reduction)
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
@@ -1225,6 +1220,7 @@
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction)
+  target: smooth_l1_loss_backward(grad, target, self, reduction)
 
 - name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: soft_margin_loss_backward(grad, self, target, reduction)
@@ -1520,6 +1516,7 @@
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: l1_loss_double_backward_grad_output(grad, self, target, reduction)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
+  target: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
@@ -1592,6 +1589,7 @@
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
+  target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold, output)

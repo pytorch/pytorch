@@ -3879,7 +3879,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(2, 3, 4),
-        target_size=(2, 3, 4),
+        target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
     ),
@@ -4101,7 +4101,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(5, 10),
-        target_size=(5, 10),
+        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
@@ -4277,7 +4277,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
         desc='scalar',
     ),
@@ -4343,7 +4343,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
@@ -5067,23 +5067,18 @@ class CriterionTest(InputVariableMixin, TestBase):
             return
 
         test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
-        self._do_extra_tests(test_case, module, input, target)
 
-    def _do_extra_tests(self, test_case, module, input, target):
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
-            inputs = (input,) + params
+            inputs = (input,) + params + (target,)
 
-            def apply_fn(input, *params):
+            def apply_fn(input, target, *params):
                 return module(input, target)
         else:
-            inputs = input + params
+            inputs = input + params + (target,)
 
-            def apply_fn(input1, input2, *params):
+            def apply_fn(input1, input2, target, *params):
                 return module(input1, input2, target)
-
-        if target.requires_grad:
-            inputs = inputs + (target,)
 
         gradcheck(apply_fn, inputs)
 
