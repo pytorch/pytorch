@@ -1116,28 +1116,24 @@ void testGPU_FusionParser() {
   // 1. this can be moved to a dedicated "golden" file
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
-__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
+__global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   float T2[1];
-  if ( ( ( ( ( ( blockIdx.x * 1 ) + ( 1 - 1 ) ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-    for(size_t i6 = 0; i6 < 1; ++i6 ) {
-      T2[ i6 ]
-         = T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
-         * T1[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
-      T3[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
-         = T2[ i6 ]
-         * T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
+  if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
+    for(size_t i6 = 0; i6 < 1; ++i6) {
+      T2[i6]
+         = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)] * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+      T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
+         = T2[i6] * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
     }
   } else {
-    for(size_t i6 = 0; i6 < 1; ++i6 ) {
-      if ( ( ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-        T2[ i6 ]
-           = T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
-           * T1[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
+    for(size_t i6 = 0; i6 < 1; ++i6) {
+      if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
+        T2[i6]
+           = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)] * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
       }
-      if ( ( ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-        T3[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
-           = T2[ i6 ]
-           * T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
+      if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
+        T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
+           = T2[i6] * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
       }
     }
   }
@@ -2339,7 +2335,7 @@ void test_op(
       gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
   std::vector<at::Tensor> output_vect = {output};
   cudaDeviceSynchronize();
-  if (fusion.hasRNG())
+  if (fusion.isStochastic())
     at::manual_seed(0);
 
   torch::jit::fuser::cuda::FusionExecutor fe;
@@ -2347,7 +2343,7 @@ void test_op(
   fe.runFusion(aten_inputs_ivalues, output_vect);
   cudaDeviceSynchronize();
 
-  if (fusion.hasRNG())
+  if (fusion.isStochastic())
     at::manual_seed(0);
   at::Tensor ref_output = af(aten_inputs);
   cudaDeviceSynchronize(); // This sync shouldn't be necessary;

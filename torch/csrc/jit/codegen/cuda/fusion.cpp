@@ -522,7 +522,7 @@ StmtNameType Fusion::getExprName() {
 }
 
 // Indicate to kernel to set itself up to generate random numbers
-bool Fusion::hasRNG() {
+bool Fusion::isStochastic() {
   for (auto expr : exprs(true))
     if (expr->getExprType() == ExprType::UnaryOp)
       if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
@@ -530,7 +530,6 @@ bool Fusion::hasRNG() {
   return false;
 }
 
-// Indicate to kernel to set itself up to generate random numbers
 bool Fusion::hasReduction() {
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
@@ -582,32 +581,6 @@ bool Fusion::hasBroadcast() {
           return true;
 
   return false;
-}
-
-DataType Fusion::getMaximumSmemDataType() {
-  DataType result = DataType::Null;
-  unsigned max_size = 0;
-  for (auto expr : exprs(true)) {
-    for (auto out : expr->outputs()) {
-      if (out->getValType() == ValType::TensorView) {
-        auto tv = out->as<TensorView>();
-        bool hasWorkspace = tv->hasBlockReduction() || tv->hasGridReduction();
-        bool hasDynamic = tv->getMemoryType() == MemoryType::Shared;
-        if (hasWorkspace || hasDynamic) {
-          auto data_type = tv->getDataType();
-          if (data_type.has_value()) {
-            unsigned size = dataTypeSize(data_type.value());
-            if (size > max_size) {
-              max_size = size;
-              result = data_type.value();
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return result;
 }
 
 std::vector<Val*> Fusion::getTerminatingOutputs() {

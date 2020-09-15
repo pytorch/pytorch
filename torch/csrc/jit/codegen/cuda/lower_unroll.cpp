@@ -78,7 +78,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   // Get the loop nest for the unrolled path
   kir::ForLoop* unrolled_loop_nest = scope_utils::cloneLoopNest(fl, unroll_ite);
 
-  unroll_ite->body().push_back(unrolled_loop_nest);
+  unroll_ite->thenBody().push_back(unrolled_loop_nest);
 
   // Loop nest for inlined path
   kir::ForLoop* inlined_loop = scope_utils::cloneLoopNest(fl, unroll_ite);

@@ -94,8 +94,7 @@ void GpuLower::lower() {
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
-  // Run our passes keeping the lowered expressions and forwarding
-  // them.
+  // Run our passes keeping the lowered expressions and forwarding them
   const auto lowered_exprs =
       LoopNestGenerator::loweredExprs(fusion_, preds, fusion_->exprs(true));
 
@@ -106,7 +105,15 @@ void GpuLower::lower() {
       IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 
   // We now have the lowered expressions, store the final lowered Kernel IR
-  kernel_ = std::make_unique<Kernel>(indexed_loops);
+  kernel_ = std::make_unique<Kernel>(indexed_loops, preds);
+
+  // Set the kernel inputs & outputs
+  for (auto input : fusion_->inputs()) {
+    kernel_->addInput(kir::lowerValue(input));
+  }
+  for (auto output : fusion_->outputs()) {
+    kernel_->addOutput(kir::lowerValue(output));
+  }
 }
 
 Kernel* GpuLower::kernel() const {

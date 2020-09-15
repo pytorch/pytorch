@@ -168,14 +168,14 @@ class TORCH_CUDA_API Fusion final {
   Expr* origin(const Val* val) const;
 
   // Indicate to kernel to set itself up to generate random numbers
-  bool hasRNG();
+  bool isStochastic();
 
+  // TODO(kir): revisit to see how many of these are still needed
   bool hasReduction();
   bool hasBlockReduction();
   bool hasGridReduction();
   bool hasBlockBroadcast();
   bool hasBroadcast();
-  DataType getMaximumSmemDataType();
   size_t gridReductionTempBufferSize();
 
   const auto& inputs() const {

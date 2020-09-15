@@ -243,6 +243,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
@@ -269,6 +270,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   IterDomain* axis(int i) const;
 
+  // TODO(kir): overloading non-static and static methods is not a good idea
   static std::vector<IterDomain*> noReductions(const std::vector<IterDomain*>&);
   static std::vector<IterDomain*> noBroadcasts(const std::vector<IterDomain*>&);
 
@@ -289,7 +291,7 @@ class TORCH_CUDA_API TensorView : public Val {
     return domain_;
   }
 
-  MemoryType getMemoryType() const {
+  MemoryType memoryType() const {
     return memory_type_;
   }
 
@@ -438,8 +440,6 @@ class TORCH_CUDA_API TensorIndex : public Val {
     return indices_.size();
   }
 
-  // i here is int, as we want to accept negative value and ::size_type can be a
-  // uint.
   Val* index(int i) const;
 
   const std::vector<Val*>& indices() const {
@@ -576,6 +576,9 @@ class TORCH_CUDA_API Scope {
 // in its body are considered inside the scope of the for loop. In the future
 // the implementation should look quite different so that we can do proper
 // dependency annalysis like in Fusion.
+//
+// TODO(kir): this is not a real expression
+//
 class TORCH_CUDA_API ForLoop : public Expr {
  public:
   explicit ForLoop(
@@ -596,7 +599,7 @@ class TORCH_CUDA_API ForLoop : public Expr {
     return body_;
   }
 
-  const Scope& constBody() const {
+  const Scope& body() const {
     return body_;
   }
 
@@ -617,11 +620,14 @@ class TORCH_CUDA_API ForLoop : public Expr {
 // are considered inside the scope of the if statement. In the future the
 // implementation should look quite different so that we can do proper
 // dependency annalysis like in Fusion.
+//
+// TODO(kir): this is not a real expression
+//
 class TORCH_CUDA_API IfThenElse : public Expr {
  public:
   explicit IfThenElse(
       Bool* cond,
-      const std::vector<Expr*>& if_body = {},
+      const std::vector<Expr*>& then_body = {},
       const std::vector<Expr*>& else_body = {},
       Expr* parent_scope = nullptr);
 
@@ -629,19 +635,18 @@ class TORCH_CUDA_API IfThenElse : public Expr {
     return cond_;
   }
 
-  const Scope& constBody() const {
-    return body_;
+  Scope& thenBody() {
+    return then_body_;
   }
-
-  const Scope& constElseBody() const {
-    return else_body_;
-  }
-
-  Scope& body() {
-    return body_;
+  const Scope& thenBody() const {
+    return then_body_;
   }
 
   Scope& elseBody() {
+    return else_body_;
+  }
+
+  const Scope& elseBody() const {
     return else_body_;
   }
 
@@ -657,7 +662,7 @@ class TORCH_CUDA_API IfThenElse : public Expr {
 
  private:
   Bool* const cond_ = nullptr;
-  Scope body_;
+  Scope then_body_;
   Scope else_body_;
   Expr* parent_scope_ = nullptr;
 };

@@ -182,6 +182,7 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
   }
 }
 
+// TODO(kir): revisit this - can we build it from the kernel IR?
 ThreadPredicateMap::ThreadPredicateMap(Fusion* _fusion) : fusion_(_fusion) {
   // Initialize mapping for input tensors
   for (auto inp : fusion_->inputs()) {

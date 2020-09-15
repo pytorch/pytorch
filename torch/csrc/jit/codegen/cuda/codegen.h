@@ -3,7 +3,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <string>
 
@@ -12,6 +11,7 @@ namespace jit {
 namespace fuser {
 namespace codegen {
 
+//! Generates a CUDA kernel definition for the given kernel
 TORCH_CUDA_API std::string generateCudaKernel(
     const Kernel* kernel,
     const std::string& kernel_name = "CUDAGeneratedKernel");

@@ -61,7 +61,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   // Create the allocation node
   const auto lowered_tv = new kir::TensorView(tv);
   const auto alloc =
-      new kir::Allocate(lowered_tv, lowered_tv->getMemoryType(), size);
+      new kir::Allocate(lowered_tv, lowered_tv->memoryType(), size);
 
   // Track Shared Memory Allocation Nodes
   if (tv->getMemoryType() == MemoryType::Shared) {
@@ -102,10 +102,11 @@ void LoopNestGenerator::popFor() {
 }
 
 void LoopNestGenerator::pushBack(Expr* expr) {
-  if (for_loops.size() == 0)
+  if (for_loops.size() == 0) {
     lowered_exprs.push_back(expr);
-  else
+  } else {
     scope_utils::pushBack(for_loops.back(), expr);
+  }
 }
 
 // Update for loop structure based on this TensorView, if there's an allocation

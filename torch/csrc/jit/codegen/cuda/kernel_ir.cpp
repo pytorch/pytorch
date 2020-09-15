@@ -120,6 +120,12 @@ bool TensorDomain::hasGridReduction() const {
   });
 }
 
+bool TensorDomain::hasBlockBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isThreadDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }
@@ -339,15 +345,16 @@ void ForLoop::setParentScope(Expr* scope) {
 
 IfThenElse::IfThenElse(
     Bool* cond,
-    const std::vector<Expr*>& if_body,
+    const std::vector<Expr*>& then_body,
     const std::vector<Expr*>& else_body,
     Expr* parent_scope)
     : Expr(ExprType::IfThenElse), cond_{cond}, parent_scope_(parent_scope) {
   addInput(cond);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 
-  for (auto* expr : if_body)
-    body_.push_back(expr);
+  for (auto* expr : then_body)
+    then_body_.push_back(expr);
+
   for (auto* expr : else_body)
     else_body_.push_back(expr);
 }
@@ -388,7 +395,7 @@ Allocate::Allocate(
     TORCH_INTERNAL_ASSERT(
         buffer_->getValType().value() == ValType::KirTensorView);
     TORCH_INTERNAL_ASSERT(
-        buffer_->as<TensorView>()->getMemoryType() == memory_type_);
+        buffer_->as<TensorView>()->memoryType() == memory_type_);
     const auto domain = buffer_->as<TensorView>()->domain();
     size_ = domain->nDims() == 0 ? new Int(1) : domain->axis(0)->extent();
     for (size_t i = 1; i < domain->nDims(); i++) {
@@ -430,13 +437,14 @@ GridReduction::GridReduction(
 
 std::string GridReduction::getPredicateFlagName(const TensorView* val) {
   std::stringstream ss;
-  ss << "T" << val->name() << "pred";
+  ss << "T" << val->name() << "_pred";
   return ss.str();
 }
 
+// TODO(kir): remove this
 std::string GridReduction::getPredicateFlagName(const fuser::TensorView* val) {
   std::stringstream ss;
-  ss << "T" << val->name() << "pred";
+  ss << "T" << val->name() << "_pred";
   return ss.str();
 }
 

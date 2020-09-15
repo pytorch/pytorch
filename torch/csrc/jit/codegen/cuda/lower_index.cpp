@@ -33,10 +33,11 @@ Val* IndexLowering::lowerOutput(Expr* expr) const {
 }
 
 void IndexLowering::pushBack(Expr* expr) {
-  if (active_scope == nullptr)
+  if (active_scope == nullptr) {
     lowered_exprs.push_back(expr);
-  else
+  } else {
     active_scope->push_back(expr);
+  }
 }
 
 void IndexLowering::handle(kir::IfThenElse* ite) {
@@ -46,9 +47,9 @@ void IndexLowering::handle(kir::IfThenElse* ite) {
   auto new_ite = new kir::IfThenElse(ite->cond(), {}, {}, prev_scope_expr);
   pushBack(new_ite);
   active_scope_expr = new_ite;
-  active_scope = &new_ite->body();
+  active_scope = &new_ite->thenBody();
 
-  for (auto expr : ite->body().exprs()) {
+  for (auto expr : ite->thenBody().exprs()) {
     OptInDispatch::handle(expr);
   }
 
@@ -82,42 +83,39 @@ void IndexLowering::handle(kir::ForLoop* fl) {
 }
 
 void IndexLowering::handle(UnaryOp* uop) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(uop)) {
-    pushBack(uop);
-    return;
+  if (ir_utils::isTVOp(uop)) {
+    const auto in = lowerOperand(uop->in(), uop->out());
+    const auto out = lowerOutput(uop);
+    pushBack(new kir::UnaryOp(uop->getUnaryOpType(), out, in));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(kir::lowerValue(uop->out())->getOrigin());
   }
-
-  const auto in = lowerOperand(uop->in(), uop->out());
-  const auto out = lowerOutput(uop);
-  pushBack(new kir::UnaryOp(uop->getUnaryOpType(), out, in));
 }
 
 void IndexLowering::handle(BinaryOp* bop) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(bop)) {
-    pushBack(bop);
-    return;
+  if (ir_utils::isTVOp(bop)) {
+    const auto lhs = lowerOperand(bop->lhs(), bop->out());
+    const auto rhs = lowerOperand(bop->rhs(), bop->out());
+    const auto out = lowerOutput(bop);
+    pushBack(new kir::BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(kir::lowerValue(bop->out())->getOrigin());
   }
-
-  const auto lhs = lowerOperand(bop->lhs(), bop->out());
-  const auto rhs = lowerOperand(bop->rhs(), bop->out());
-  const auto out = lowerOutput(bop);
-  pushBack(new kir::BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
 }
 
 void IndexLowering::handle(TernaryOp* top) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(top)) {
-    pushBack(top);
-    return;
+  if (ir_utils::isTVOp(top)) {
+    const auto in1 = lowerOperand(top->in1(), top->out());
+    const auto in2 = lowerOperand(top->in2(), top->out());
+    const auto in3 = lowerOperand(top->in3(), top->out());
+    const auto out = lowerOutput(top);
+    pushBack(new kir::TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(kir::lowerValue(top->out())->getOrigin());
   }
-
-  const auto in1 = lowerOperand(top->in1(), top->out());
-  const auto in2 = lowerOperand(top->in2(), top->out());
-  const auto in3 = lowerOperand(top->in3(), top->out());
-  const auto out = lowerOutput(top);
-  pushBack(new kir::TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
 }
 
 namespace {

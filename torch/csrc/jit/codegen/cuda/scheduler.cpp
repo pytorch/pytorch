@@ -87,7 +87,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
   // basis.
   TORCH_INTERNAL_ASSERT(
       !fusion->hasReduction(), "This scheduler only handles pointwise ops.");
-  const bool disable_unroll = fusion->hasRNG();
+  const bool disable_unroll = fusion->isStochastic();
   bool fcd_reduction = false;
 
   for (auto out_val : fusion->outputs()) {

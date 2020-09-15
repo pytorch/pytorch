@@ -32,7 +32,8 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "=====*===============================" << std::endl;
+              << "======================================\n"
+              << std::endl;
   }
 
   return code;
@@ -53,12 +54,13 @@ void FusionExecutor::debugCompileFusionFromStr(
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
-              << "=====*===============================" << std::endl;
+              << "======================================\n"
+              << std::endl;
   }
 
   fusion_id_ = id;
-  has_random_ = fusion->hasRNG();
   lowered_ = GpuLower(&fusion_);
+
   compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");
@@ -87,19 +89,20 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   setUsedTVs();
 
   fusion_id_ = ++fusion_id_counter_;
-  has_random_ = fusion->hasRNG();
-  has_block_reductions = fusion_.hasBlockReduction();
-  has_grid_reductions = fusion_.hasGridReduction();
-  has_block_broadcasts = fusion_.hasBlockBroadcast();
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
   const auto kernel_code = codegen::generateCudaKernel(kernel, kernelName());
   const auto structured_code = getStructuredCode(kernel_code);
 
-  if (kernel->staticAllocations().size() > 0) {
+  const auto& kernel_summary = kernel->summary();
+  has_block_reductions = kernel_summary.has_block_reductions;
+  has_grid_reductions = kernel_summary.has_grid_reductions;
+  has_block_broadcasts = kernel_summary.has_block_broadcasts;
+
+  if (!kernel_summary.static_smem_allocations.empty()) {
     StatefulExpressionEvaluator static_evaluator(&fusion_);
-    unsigned static_smem_size =
-        computeSharedMemory(static_evaluator, kernel->staticAllocations());
+    unsigned static_smem_size = computeSharedMemory(
+        static_evaluator, kernel_summary.static_smem_allocations);
     TORCH_INTERNAL_ASSERT(
         static_smem_size < max_device_smem,
         "The static shared memory allocation is larger than available memory.");
@@ -246,23 +249,27 @@ LaunchParams FusionExecutor::computeLaunchParams(
     }
   }
 
+  const auto kernel = lowered_.kernel();
+  const auto& kernel_summary = kernel->summary();
+
   // Calculate Dynamic Shared Memory Size
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   if (has_block_reductions || has_grid_reductions || has_block_broadcasts) {
     // Not using nThreads here since it does not handle uninitialized value
     reduction_broadcast_workspace =
-        dataTypeSize(fusion_.getMaximumSmemDataType()) * launch_params.bdimx() *
-        launch_params.bdimy() * launch_params.bdimz();
+        dataTypeSize(kernel_summary.largest_smem_data_type) *
+        launch_params.bdimx() * launch_params.bdimy() * launch_params.bdimz();
   }
 
-  const auto kernel = lowered_.kernel();
-
   const uint64_t dynamic_smem_size = computeSharedMemory(
-      see, kernel->dynamicAllocations(), true, reduction_broadcast_workspace);
+      see,
+      kernel_summary.dynamic_smem_allocations,
+      true,
+      reduction_broadcast_workspace);
 
   const uint64_t static_smem_size =
-      computeSharedMemory(see, kernel->staticAllocations());
+      computeSharedMemory(see, kernel_summary.static_smem_allocations);
 
   TORCH_INTERNAL_ASSERT(
       (dynamic_smem_size + static_smem_size) < max_device_smem,
@@ -275,7 +282,8 @@ LaunchParams FusionExecutor::computeLaunchParams(
 FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     StatefulExpressionEvaluator& see) {
   GlobalBuffers global_buffers;
-  for (auto alloc : lowered_.kernel()->globalAllocations()) {
+  const auto& kernel_summary = lowered_.kernel()->summary();
+  for (auto alloc : kernel_summary.global_allocations) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
@@ -395,7 +403,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(evaluator);
 
-    if (has_random_) {
+    if (lowered_.kernel()->summary().is_stochastic) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
@@ -436,7 +444,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   kernel_arguments.push(alloced_outputs);
   kernel_arguments.push(global_buffers.empty_buffers);
   kernel_arguments.push(global_buffers.zero_buffers);
-  if (has_random_) {
+  if (lowered_.kernel()->summary().is_stochastic) {
     kernel_arguments.appendPhiloxRNGSeed(rand_offset);
   }
 
