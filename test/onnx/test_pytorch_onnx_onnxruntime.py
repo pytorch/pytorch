@@ -3007,6 +3007,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 3)
         self.run_test(List(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):
         class Emtpy(torch.nn.Module):
             def forward(self, x):
