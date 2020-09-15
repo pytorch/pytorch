@@ -449,24 +449,6 @@ class AbstractTestCases:
                                    [0, 1, 1],
                                    [1, 1, 1]]))
 
-        @slowTest
-        def test_mv(self) -> None:
-            def _test_mv(m1: torch.Tensor, v1: torch.Tensor) -> None:
-                res1 = torch.mv(m1, v1)
-                res2 = res1.clone().zero_()
-                for i, j in iter_indices(m1):
-                    res2[i] += m1[i][j] * v1[j]
-
-                self.assertEqual(res1, res2, atol=1e-5, rtol=0)
-
-            _test_mv(torch.randn(100, 100, dtype=torch.float32), torch.randn(100, dtype=torch.float32))
-            _test_mv(torch.randn(100, 100, dtype=torch.float64), torch.randn(100, dtype=torch.float64))
-            _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
-            _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
-            _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
-            _test_mv(torch.randn(100, 100, dtype=torch.cfloat), torch.randn(100, dtype=torch.cfloat))
-            _test_mv(torch.randn(100, 100, dtype=torch.cdouble), torch.randn(100, dtype=torch.cdouble))
-
         def test_numpy_args(self):
             x1 = torch.randn(10)
             x2 = torch.randn(10)
@@ -16418,32 +16400,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m in ms:
             for v in vs:
                 self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
-        # # have to use torch.randn(...).to(bfloat16) instead of
-        # # torch.randn(..., dtype=bfloat16). randn does not support
-        # # bfloat16 yet.
-        # t = torch.randn(10, device=device).to(dtype)
-        # m = torch.randn(10, 100, device=device).to(dtype)
-        # v = torch.randn(100, device=device).to(dtype)
-        # self._test_addmm_addmv(torch.addmv, t, m, v)
-
-        # # Test 0-strided
-        # t = torch.randn(1, device=device).to(dtype).expand(10)
-        # m = torch.randn(10, 1, device=device).to(dtype).expand(10, 100)
-        # v = torch.randn(100, device=device).to(dtype)
-        # self._test_addmm_addmv(torch.addmv, t, m, v)
-
-        # # Test beta=0, v=nan
-        # t = torch.full((10,), math.nan, device=device).to(dtype)
-        # m = torch.randn(10, 100, device=device).to(dtype)
-        # v = torch.randn(100, device=device).to(dtype)
-        # self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
-
-        # # Test beta=0, v=nan, 0-strided v
-        # t = torch.full((10,), math.nan, device=device).to(dtype)
-        # m = torch.randn(10, 10, device=device).to(dtype)
-        # v = torch.randn(1, device=device).to(dtype).expand(10)
-        # self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
-        # self._test_addmm_addmv(torch.addmv, t, m.t(), v, beta=0)
 
     @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
                     + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
