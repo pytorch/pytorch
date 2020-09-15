@@ -255,13 +255,13 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
 }
 
 Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
-  auto result = grad / other.conj();
+  auto out = grad / other.conj();
   return correct_dtype_gradients(self_st, out);
 }
 
 Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
-  auto result = -grad * ((self / other) / other).conj();
-  return correct_dtype_gradients(other, result);
+  auto out = -grad * ((self / other) / other).conj();
+  return correct_dtype_gradients(other, out);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {

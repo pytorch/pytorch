@@ -488,6 +488,7 @@ def method_tests():
         ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, ''),
         ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar'),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
+        ('add', (S, S, S), (torch.randn(S, S, S, dtype=torch.cdouble),), 'complex_input_imaginary', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
         ('add', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
@@ -495,6 +496,7 @@ def method_tests():
         ('add', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
         ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
+        ('add', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
         ('asinh', (S, S, S), NO_ARGS, ''),
         ('asinh', (), NO_ARGS, 'scalar'),
@@ -502,7 +504,10 @@ def method_tests():
         ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar'),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
+        ('__radd__', (S, S, S), (3.14j,), 'imaginary_constant', (True, 'aten::add')),
+        ('__radd__', (), (3.14j,), 'imaginary_scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
+        ('sub', (S, S, S), (torch.randn(S, S, S, dtype=torch.cdouble),), 'complex_input_imaginary', (True,)),
         ('sub', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('sub', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
         ('sub', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
@@ -513,6 +518,7 @@ def method_tests():
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
         ('mul', (S, S, S), ((S, S, S),), '', (True,)),
+        ('mul', (S, S, S), (torch.randn((S, S, S), dtype=torch.cdouble),), 'complex_input_imaginary', (True,)),
         ('mul', (), ((),), 'scalar', (True,)),
         ('mul', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('mul', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -521,9 +527,8 @@ def method_tests():
         ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('mul', (S, S, S), (3.14,), 'constant', (True,)),
         ('mul', (), (3.14,), 'scalar_constant', (True,)),
-        # TODO(@anjali411): enable these tests
-        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
-        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
+        ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
+        ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -1399,9 +1404,6 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
                 arg = arg.double()
             if arg.dtype == torch.cfloat:
                 arg = arg.to(torch.cdouble)
-            if arg.is_complex() != dtype.is_complex:
-                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
-                                   "which is not supported for now")
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
             v = maybe_non_contig(arg).detach().to(device=device).clone()
             v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())

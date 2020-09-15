@@ -4688,8 +4688,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'atan'] + separate_complex_tests
+                'eq_', 'ne_', 'add', '__radd__', 'sub', '__rsub__','sum', 'conj', 'sin', 'cos',
+                'mul', 'sinh', 'cosh', '__rmul__', 'atan'] + separate_complex_tests
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']
@@ -4813,7 +4813,8 @@ def add_test(
                                         'broadcast_all' in test_name or
                                         'atanh' in test_name or
                                         'acosh' in test_name or
-                                        'asinh' in test_name)
+                                        'asinh' in test_name or
+                                        'imaginary' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -4859,7 +4860,7 @@ def add_test(
                 check(name)
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
-                broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+                broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name or 'imaginary' in test_name
                 if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                     check(inplace_name)
 
