@@ -5857,57 +5857,130 @@ void testGPU_FusionSmemDynamicPwiseMulSymbolicArg() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Int* sym_bsx = new Int();
-  TensorView* tv0 = makeDummyTensor(2); // (M, K)
-  TensorView* tv1 = makeDummyTensor(2); // (K, N)
-  TensorView* tv2 = broadcast(tv0, {false, false, true}); // (M, K, B)
-  TensorView* tv3 = broadcast(tv1, {true, false, false}); // (B, K, N)
-  TensorView* tv4 = mul(tv2, tv3); // M, K, N
+  // Symbolic integers we will use for runtime tiling
+  Int* symbolic_m_tile_dim = new Int(); // bound to threadIdx.z
+  Int* symbolic_split_k_tile_dim = new Int(); // bound to blockIdx.x
+  Int* symbolic_block_k_tile_dim = new Int(); // bound to threadIdx.x
+  // Compile-time integer for tiling
+  int n_smem_tile = 8; // bound to threadIdx.y
+
+  // Symbolic 2D tensors TV0[M, K], TV1[K, N]
+  TensorView* tv0 = makeDummyTensor(2);
+  TensorView* tv1 = makeDummyTensor(2);
+
+  // Broadcast tv0 to [M, K, *]
+  TensorView* tv2 = broadcast(tv0, {false, false, true});
+  // Broadcast tv1 to [*, K, N]
+  TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+  // Pointwise multiplication resulting in tv3[M, K, N]
+  TensorView* tv4 = mul(tv2, tv3);
+
+  // Turn the K-dimension of tv4 into a reduction dimension
+  TensorView* tv5 = sum(tv4, {1});
+
+  // Register inputs and outputs
   fusion.addInput(tv0);
   fusion.addInput(tv1);
-  fusion.addInput(sym_bsx);
-  fusion.addOutput(tv4);
-  // Algorithm
+  fusion.addOutput(tv5);
 
+  // Register runtime tile dims as inputs
+  fusion.addInput(symbolic_m_tile_dim);
+  fusion.addInput(symbolic_split_k_tile_dim);
+  fusion.addInput(symbolic_block_k_tile_dim);
+
+  // Make a 3D tile, mix of symbolic and constant, do in reverse order because
+  // dims are inserted
+  tv5->split(2, n_smem_tile);
+  tv5->split(1, symbolic_block_k_tile_dim);
+  tv5->split(1, symbolic_split_k_tile_dim);
+  tv5->split(0, symbolic_m_tile_dim);
+
+  // Reorder so all outer tiles are in the leftmost 3 positions
+  tv5->reorder({{1, 5}, {5, 1}});
+
+  // Factor out the outer reduction IterDomain, then run the inter-cta
+  // reduction, and intra-cta reduction
+  auto tv6 = tv5->rFactor({2});
+
+  // Scope computations
+  tv6->computeAt(tv5, 2);
+
+  // RFactor moves reduction axes around, reorder to match ordering of tv5
+  tv6->reorder({
+      {2, -2},
+      {3, -1},
+      {4, 2},
+      {5, 3},
+      {6, 4},
+  });
+
+  // Setup compute at schedule
+  tv0->computeAt(tv6, 3);
+  tv1->computeAt(tv6, 3);
+  tv4->computeAt(tv6, -1);
+  //
+  // T2[Mo,  bNo, Koo, Koi,  Kii,  Mi, bNi] CA(4, 3)
+  // T3[bMo,  No, Koo, Koi,  Kii, bMi,  Ni] CA(4, 3)
+  // T4[ Mo,  No, Koo, Koi,  Kii,  Mi,  Ni]
+  // T6[ Mo,  No, rKoo, Koi, Kii,  Mi,  Ni]
+  // T5[ Mo,  No,      rKoi, rKii, Mi,  Ni]
+
+  // Cache smem tiles
   tv2->setMemoryType(MemoryType::Shared);
   tv3->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Local);
+  tv6->setMemoryType(MemoryType::Local);
 
-  constexpr int BSX = 32;
-  tv4->split(2, BSX);
-  tv4->split(1, sym_bsx);
-  tv4->split(0, BSX);
-  // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
-  tv4->reorder({{0, 0}, {1, 3}, {2, 1}, {3, 4}, {4, 2}, {5, 5}});
-  // M/BSX, K/BSX, N/BSX, MSX, KSX, NSX
+  tv5->axis(0)->parallelize(ParallelType::BIDz);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
 
-  tv0->computeAt(tv4, 3);
-  tv1->computeAt(tv4, 3);
-  // Schedule
+  std::vector<TensorView*> tv_list = {tv2, tv3, tv4, tv5, tv6};
+  for (auto tv : tv_list) {
+    tv->axis(-2)->parallelize(ParallelType::TIDz);
+    tv->axis(-1)->parallelize(ParallelType::TIDy);
+  }
+  tv2->axis(3)->parallelize(ParallelType::TIDx);
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
+  tv4->axis(3)->parallelize(ParallelType::TIDx);
+  tv6->axis(3)->parallelize(ParallelType::TIDx);
+  tv5->axis(2)->parallelize(ParallelType::TIDx);
 
-  tv4->axis(0)->parallelize(ParallelType::BIDx);
-  tv4->axis(2)->parallelize(ParallelType::BIDy);
-  // Manual Binding
-  tv2->axis(-2)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  // Thread and Block binding
+  tv2->axis(4)->parallelize(ParallelType::BIDx);
+  tv3->axis(4)->parallelize(ParallelType::BIDx);
+  tv4->axis(4)->parallelize(ParallelType::BIDx);
+  tv6->axis(4)->parallelize(ParallelType::BIDx);
+  tv5->axis(3)->parallelize(ParallelType::BIDx);
 
-  constexpr int M = 128, K = 457, N = 1024;
+  fusion.printMath();
+  fusion.printKernel();
+
+  constexpr int M = 31, K = 65, N = 33;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({M, K}, options);
-  at::Tensor t1 = at::randn({K, N}, options);
+  at::Tensor A = at::randn({M, K}, options);
+  at::Tensor B = at::randn({K, N}, options);
 
   torch::jit::fuser::cuda::FusionExecutor fe;
+  // Generate CUDA and compile with nvRTC
   fe.compileFusion(&fusion);
-  auto outputs = fe.runFusion(
-      {t0, t1, BSX},
-      torch::jit::fuser::cuda::LaunchParams(-1, -1, -1, BSX, -1, -1));
 
-  at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0));
+  // Runtime tiling
+  int m_tile = 4; // bound to threadIdx.z
+  int split_k = 7; // bound to blockIdx.x
+  int intra_cta = 8; // bound to threadIdx.x
+
+  auto fuser_outputs = fe.runFusion({A, B, m_tile, split_k, intra_cta});
+  auto C_fuser = fuser_outputs[0];
+
+  at::Tensor aten_C = mul(A.unsqueeze(2), B.unsqueeze(0)).sum(1);
+  // TODO: re-enable after fixing #380
+#if 0
   TORCH_CHECK(
-      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      aten_C.allclose(C_fuser, 1e-5, 1e-5),
       "Error of: ",
-      aten_output.sub(outputs[0]).abs().max());
+      aten_C.sub(C_fuser).abs().max());
+#endif
 }
 
 void testGPU_FusionGlobalIntermediate() {

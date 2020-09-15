@@ -238,6 +238,7 @@ void IndexCompute::handle(Split* split) {
 
   if (outer_zero && inner_zero) {
     index_map_[in_id] = new kir::Int(0);
+    extent_map_[in_id] = new kir::Int(0);
   } else if (outer_zero) {
     index_map_[in_id] = inner_ind;
     zero_merged_in_.emplace(in_id);
@@ -249,6 +250,11 @@ void IndexCompute::handle(Split* split) {
   } else {
     index_map_[in_id] =
         kir::addExpr(kir::mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
+    if (extent_map_.find(outer_id) != extent_map_.end() ||
+        extent_map_.find(inner_id) != extent_map_.end()) {
+      extent_map_[in_id] =
+          kir::mulExpr(getExtent(outer_id), getExtent(inner_id));
+    }
   }
 }
 

@@ -64,21 +64,18 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
       new kir::Allocate(lowered_tv, lowered_tv->getMemoryType(), size);
 
   // Track Shared Memory Allocation Nodes
-  bool hasDynamicSmemAlloc = false;
   if (tv->getMemoryType() == MemoryType::Shared) {
     if (!size->isConstScalar()) {
-      hasDynamicSmemAlloc = true;
       dynamic_smem_.push_front(alloc);
+      return nullptr;
     }
   }
 
   // Place the allocation
-  if (!hasDynamicSmemAlloc) {
-    if (alloc_loop != nullptr) {
-      alloc_loop->body().insert(0, alloc);
-    } else {
-      lowered_exprs.insert(lowered_exprs.begin(), alloc);
-    }
+  if (alloc_loop != nullptr) {
+    alloc_loop->body().insert(0, alloc);
+  } else {
+    lowered_exprs.insert(lowered_exprs.begin(), alloc);
   }
 
   return alloc;
@@ -349,8 +346,9 @@ void LoopNestGenerator::handle(Expr* expr) {
   //  If this is a reduction, initialize the output (open for loops to inner
   //  most, predicate, initialize, place next after allocation if exists, close
   //  to computeAt)
-  if (out->hasReduction())
+  if (out->hasReduction()) {
     initReduction(out, expr->as<ReductionOp>()->init(), alloc_expr);
+  }
 
   //  Place the expression
   pushBack(expr);
