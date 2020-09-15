@@ -16405,6 +16405,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         v = torch.randn(100, device=device).to(dtype)
         self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
+        # Test beta=0, v=nan, 0-strided v
+        t = torch.full((10,), math.nan, device=device).to(dtype)
+        m = torch.randn(10, 10, device=device).to(dtype)
+        v = torch.randn(1, device=device).to(dtype).expand(10)
+        self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+        self._test_addmm_addmv(torch.addmv, t, m.t(), v, beta=0)
+
     @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
                     + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
     @dtypes(torch.float, torch.double)
@@ -18227,16 +18234,6 @@ else:
         x = (x * random.randint(10, 100)).tolist()
 
         self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
-
-    @onlyCUDA
-    @tf32_on_and_off(0.005)
-    def test_mv_stride_0(self, device):
-        # Reference: https://github.com/pytorch/pytorch/issues/38315
-        mat = torch.randn(2, 2, device=device)
-        vec = torch.tensor(2., device=device).expand(2)
-        mat_cpu = mat.cpu()
-        vec_cpu = vec.cpu()
-        self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64)

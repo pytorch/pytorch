@@ -191,12 +191,15 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
       }
     }
   } else {
-    if (beta != scalar_t(1)) scal<scalar_t>(m, beta, y, incy);
+    if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
     for (int64_t j = 0; j < n; j++) {
       scalar_t *column_ = a + lda * j;
       scalar_t z = alpha * x[j * incx];
       for (int64_t i = 0; i < m; i++) {
+        if (j==0 && beta==scalar_t(0)) {
+         y[i * incy] = scalar_t(0);
+        }
         y[i * incy] += z * column_[i];
       }
     }
