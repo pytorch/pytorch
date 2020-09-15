@@ -4984,9 +4984,9 @@ void testGPU_FusionReductionScheduler() {
   // Apply reduction heuristic
   const at::ArrayRef<c10::IValue> inputs({input});
 
-  TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs, tv1, {}),
-      "Reduction schedule was not generated!");
+  const auto rparams = cuda::getReductionHeuristics(&fusion, inputs, tv1);
+  TORCH_CHECK(rparams.has_value(), "Reduction heuristics was not generated!");
+  cuda::scheduleReduction(&fusion, rparams.value(), tv1, {});
 
   cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -5077,9 +5077,9 @@ void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
   // Apply reduction heuristic
   const at::ArrayRef<c10::IValue> inputs({input});
 
-  TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs, tv1, {}),
-      "Reduction schedule was not generated!");
+  const auto rparams = cuda::getReductionHeuristics(&fusion, inputs, tv1);
+  TORCH_CHECK(rparams.has_value(), "Reduction heuristics was not generated!");
+  cuda::scheduleReduction(&fusion, rparams.value(), tv1, {});
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -5115,9 +5115,9 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::randn(tensor_dims_in, options);
 
-  TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, {input}, tv1, {}),
-      "Reduction schedule was not generated!");
+  const auto rparams = cuda::getReductionHeuristics(&fusion, {input}, tv1);
+  TORCH_CHECK(rparams.has_value(), "Reduction heuristics was not generated!");
+  cuda::scheduleReduction(&fusion, rparams.value(), tv1, {});
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -5184,9 +5184,12 @@ void testGPU_FusionReductionSchedulerDimShmoo() {
           if (fp16) {
             outputs_of_red.push_back(tv1_cast);
           }
-          c10::optional<cuda::ReductionParams> rparams =
-              cuda::scheduleReduction(&fusion, inputs, tv1, outputs_of_red);
-          TORCH_CHECK(rparams != c10::nullopt, "Reduction is not found!");
+          const auto rparams =
+              cuda::getReductionHeuristics(&fusion, inputs, tv1);
+          TORCH_CHECK(
+              rparams.has_value(), "Reduction heuristics was not generated!");
+          cuda::scheduleReduction(
+              &fusion, rparams.value(), tv1, outputs_of_red);
 
           torch::jit::fuser::cuda::FusionExecutor fe;
           fe.compileFusion(&fusion);
@@ -6699,9 +6702,9 @@ void testGPU_FusionReductionHalf() {
       at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
   at::Tensor input = at::randn({8, 8, 16}, options);
 
-  TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, {input}, tv3, {tv4}),
-      "Reduction schedule was not generated!");
+  const auto rparams = cuda::getReductionHeuristics(&fusion, {input}, tv3);
+  TORCH_CHECK(rparams.has_value(), "Reduction heuristics was not generated!");
+  cuda::scheduleReduction(&fusion, rparams.value(), tv3, {tv4});
 
   cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);

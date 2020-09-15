@@ -51,9 +51,14 @@ class ReductionParamsHash {
   }
 };
 
-TORCH_CUDA_API c10::optional<ReductionParams> scheduleReduction(
+TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
+    TensorView* red_tv);
+
+TORCH_CUDA_API void scheduleReduction(
+    Fusion* fusion,
+    const ReductionParams& rparams,
     TensorView* red_tv,
     std::vector<TensorView*> outs_of_red);
 
