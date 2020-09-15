@@ -706,9 +706,6 @@ static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
   if (_is_basic_python_type(tp)) {
     return py::object();
   }
-  if(PyObject_HasAttrString(obj, name) == 0){
-    return py::object();
-  }
   return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
 
