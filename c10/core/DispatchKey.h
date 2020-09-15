@@ -332,7 +332,7 @@ constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
 inline bool isAliasDispatchKey(DispatchKey k) {
-  return k == DispatchKey::Autograd || k == DispatchKey::Math;
+  return k > DispatchKey::NumDispatchKeys && k <= DispatchKey::EndOfAliasKeys;
 }
 } // namespace c10
 
