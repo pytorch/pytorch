@@ -1050,7 +1050,7 @@ def _add_block(node):
 
 
 def _add_node_to_block(block, op_name, *input_nodes, **kwargs):
-    new_node = block.addNode(op_name, [input for input in input_nodes])
+    new_node = block.addNode(op_name, list(input_nodes))
     for k, v in kwargs.items():
         _add_attribute(new_node, k, v, False)
     return new_node.output()
