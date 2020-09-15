@@ -134,13 +134,23 @@ class GraphModule(torch.nn.Module):
                     assert isinstance(node.target, str)
                     _copy_attr(root, self, node.target)
         elif isinstance(root, dict):
+            targets_to_copy = []
             for node in graph.nodes:
                 if node.op in ['get_param', 'call_module']:
                     assert isinstance(node.target, str)
                     if node.target not in root:
                         raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
                                            ' but that target was not provided in `root`!')
-                    _assign_attr(root[node.target], self, node.target)
+                    targets_to_copy.append(node.target)
+            # Sort targets in ascending order of the # of atoms.
+            # This will ensure that less deeply nested attributes are assigned
+            # before more deeply nested attributes. For example, foo.bar
+            # will be assigned before foo.bar.baz. Otherwise, we might assign
+            # the user-provided `foo.bar` and wipe out the previously-assigned
+            # `foo.bar.baz`
+            targets_to_copy.sort(key=lambda t: t.count('.'))
+            for target_to_copy in targets_to_copy:
+                _assign_attr(root[target_to_copy], self, target_to_copy)
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
