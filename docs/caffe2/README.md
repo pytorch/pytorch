@@ -8,7 +8,7 @@ Caffe2 docs are split up into three areas:
 
 ## Docs Maintenance Setup
 
-You need to have access to the master branch to generate the docs from source and you need access to the gh-pages branch to publish them. Since you often want the files simultaneously and since the folder structures between master and gh-pages differ so greatly, it is advised to clone each branch to different folders. Otherwise if you switch back and forth between gh-pages and master within the same local repo, you'll end up seeing folders in branches that shouldn't be there, and it can get really confusing once you start running Doxygen and generating thousands of new files.
+You need to have access to the master branch to generate the docs from the source and you need access to the gh-pages branch to publish them. Since you often want the files simultaneously and since the folder structures between master and gh-pages differ so greatly, it is advised to clone each branch to different folders. Otherwise, if you switch back and forth between gh-pages and master within the same local repo, you'll end up seeing folders in branches that shouldn't be there, and it can get really confusing once you start running Doxygen and generating thousands of new files.
 
 ```
 cd ~
@@ -26,7 +26,7 @@ To update the operator catalog, a script must be run on the master branch and co
 
 ## Generating API Docs with Doxygen
 
-Support for generating the docs has been included in the CMake build process, but it is turned off by default. To trigger building of the docs use:
+Support for generating the docs has been included in the CMake build process, but it is turned off by default. To trigger the building of the docs use:
 
 1. `cd ~/c2master`
 2. `mkdir build && cd build`
@@ -70,7 +70,7 @@ The Doxygen customization includes these files in the doxygen folder:
 * stylesheet.css - Doxygen's default CSS; tweaked to fix formatting problems with the custom logo, header, and footer
 * main.css - copied from the caffe2ai CSS, so this should be refreshed after the design changes (this overrides/extends stylesheet.css)
 
-It also extracts info from markdown files found in the source tree. A legacy installation file was in the /docs folder and this was removed. These file show up in the top navigation under “Related Pages”.
+It also extracts info from markdown files found in the source tree. A legacy installation file was in the /docs folder and this was removed. These files show up in the top navigation under “Related Pages”.
 
 ### Scripts for Adding the Doxygen Preamble and Publishing the Docs
 
@@ -107,12 +107,12 @@ You will not be able to `git push` to `gh-pages` until you have switched auth me
 git remote set-url origin git@github.com:caffe2/caffe2.git
 ```
 
-Doxygen will tend to change and remove a lot of file and a simple copy can leave files behind that shouldn't be there anymore, so it is advised to delete the old doxygen-c and doxygen-python folders first. Copy the new files to the root folder of the gh-pages branch, making sure before you commit, you `git add` the deleted files, the new files, and the modified files. Then `git push` will push these changes without the need for a PR.
+Doxygen will tend to change and remove a lot of files and a simple copy can leave files behind that shouldn't be there anymore, so it is advised to delete the old doxygen-c and doxygen-python folders first. Copy the new files to the root folder of the gh-pages branch, making sure before you commit, you `git add` the deleted files, the new files, and the modified files. Then `git push` will push these changes without the need for a PR.
 
 ### Maintaining the Doxygen Configs
 
 Each of the config files is customized differently and these changes are mentioned further below. A more common update though is the `EXCLUDE` config which is used to exclude whole directories and individual files. As new folders and special files are added it may make sense to update this so Python's API isn't including a bunch of new C++ info. You also end up with some third party files that you probably don't want to include in the docs.
-`FILE_PATTERNS` is supposed to prevent the Python & C++ docs from getting mixed up, but a combination of `FILE_PATTERNS` and `EXCLUDE` seems have worked best.
+`FILE_PATTERNS` is supposed to prevent the Python & C++ docs from getting mixed up, but a combination of `FILE_PATTERNS` and `EXCLUDE` seems to have worked best.
 
 Settings that were customized:
 
@@ -169,7 +169,7 @@ To link up the `docid: applications-of-deep-learning` markdown file to the navig
 
 ### TODO:
 
-In the future it would be ideal to expand these Operator Catalogue scripts to provide documentation for all C++ operators and Python modules. Instead it focuses on a subset of operators only, so in the interim Doxygen is used to backfill this gap.
+In the future, it would be ideal to expand these Operator Catalogue scripts to provide documentation for all C++ operators and Python modules. Instead, it focuses on a subset of operators only, so in the interim Doxygen is used to backfill this gap.
 
 Additionally, the operators-catalogue.md file that is generated is quite large and difficult to search, so breaking it up and adding categories to the Schema of the operators would be very helpful.
 
