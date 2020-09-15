@@ -1159,12 +1159,12 @@ else:
 
     @overload  # noqa: 749
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-        # type: (Tensor, Any, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+        # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
     @overload  # noqa: 749
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-        # type: (Tensor, Any, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+        # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
     @overload  # noqa: 749
@@ -1175,13 +1175,17 @@ else:
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
+
     .. warning::
+
         torch.norm is deprecated and may be removed in a future PyTorch release.
         Use :func:`torch.linalg.norm` instead.
+
     Args:
         input (Tensor): the input tensor
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
+
             =====  ============================  ==========================
             ord    matrix norm                   vector norm
             =====  ============================  ==========================
@@ -1190,6 +1194,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             'nuc'  nuclear norm                  --
             Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
             =====  ============================  ==========================
+
         dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
             vector norm will be calculated, if it is 2-tuple of ints, matrix norm
             will be calculated. If the value is None, matrix norm will be calculated
@@ -1205,7 +1210,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
+
+
     Example::
+
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
@@ -1246,10 +1254,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if isinstance(p, str):
             if p == "fro":
                 return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)  # type: ignore
-        if isinstance(p, int):
-            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
-            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
-        if isinstance(p, float):
+        if not isinstance(p, str):
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
 
@@ -1289,8 +1294,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 else:
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
-
-    if isinstance(p, int):
+    else:
         if _dim is None:
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
 
@@ -1304,24 +1308,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)  # type: ignore
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
-
-    if isinstance(p, float):
-        if _dim is None:
-            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
-
-        if out is None:
-            if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim)  # type: ignore
-            else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)  # type: ignore
-        else:
-            if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)  # type: ignore
-            else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
-
-    raise RuntimeError('Unknown norm type')
-
 
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed

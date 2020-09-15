@@ -192,11 +192,53 @@ c10::optional<IValue> tryCalculateDefaultParam(
     return c10::nullopt;
   }
 }
+
+// Determine whether or not the type of the default value expression matches the
+// given type. This is done by creating a small graph with the default value
+// expression and attempting to compile and run it with the type as the return
+// type of this subgraph.
+bool annotationAndDefaultTypesMatch(
+    const Expr& type,
+    const Expr& default_value,
+    ResolutionCallback rcb) {
+  // Set up the graph.
+  auto range = type.range();
+  auto blank_decl = Decl::create(
+      range, List<Param>::create(range, {}), Maybe<Expr>::create(range, type));
+  auto ret = Return::create(range, default_value);
+  auto def = Def::create(
+      range,
+      Ident::create(range, "default"),
+      blank_decl,
+      List<Stmt>::create(range, {ret}));
+
+  try {
+    CompilationUnit cu;
+    cu.define(
+        c10::nullopt,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        {def},
+        {pythonResolver(std::move(rcb))},
+        nullptr);
+
+    Stack stack;
+    GraphOptimizerEnabledGuard guard(false);
+    cu.get_function(def.name().name()).run(stack);
+  } catch (...) {
+    // If an exception is thrown, that means there was a type mismatch.
+    return false;
+  }
+
+  // If the graph compiled and ran successfully, the types must match.
+  return true;
+}
 } // namespace
 
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
-    const Decl& impl_decl) {
+    const Decl& impl_decl,
+    ResolutionCallback rcb) {
   std::vector<Param> adjusted_params;
   const auto& overload_params = overload_decl.params();
   const auto& impl_params = impl_decl.params();
@@ -246,31 +288,27 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
         // Case 2: The parameter is annotated with a type on the overload and
         // there is a default value on the implementation.
       } else if (overload_type.present() && impl_default.present()) {
-        auto overload_ty = Var(overload_type.get());
-        // Type on overload is float and default value is a float literal.
-        bool float_and_const = impl_default.get().kind() == TK_CONST &&
-            Const(impl_default.get()).isFloatingPoint() &&
-            overload_ty.name().name() == FloatType::get()->annotation_str();
-        // Type on overload is int and default value is an int literal.
-        bool int_and_const = impl_default.get().kind() == TK_CONST &&
-            Const(impl_default.get()).isIntegral() &&
-            overload_ty.name().name() == IntType::get()->annotation_str();
-        // Type on overload is str and default value is a string literal.
-        bool str_and_literal = impl_default.get().kind() == TK_STRINGLITERAL &&
-            overload_ty.name().name() == StringType::get()->annotation_str();
-        // If any of the three things above is true, the default value needs to
-        // be copied from the implementation.
-        if (float_and_const || int_and_const || str_and_literal) {
-          add_default = true;
-        }
+        add_default = annotationAndDefaultTypesMatch(
+            overload_type.get(), impl_default.get(), rcb);
       }
     }
 
+    // Check if a default value needs to be stripped from an overload due to a
+    // type mismatch.
+    bool strip_default = false;
+    if (!add_default && overload_default.present() && overload_type.present()) {
+      strip_default = !annotationAndDefaultTypesMatch(
+          overload_type.get(), overload_default.get(), rcb);
+    }
+
     // Add overloaded param with default from implementation if necessary.
-    if (!add_default) {
-      adjusted_params.push_back(overload_params[i]);
-    } else {
+    if (add_default) {
       adjusted_params.push_back(overload_params[i].withDefault(impl_default));
+    } else if (strip_default) {
+      adjusted_params.push_back(
+          overload_params[i].withDefault(Maybe<Expr>::create(SourceRange())));
+    } else {
+      adjusted_params.push_back(overload_params[i]);
     }
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
@@ -299,7 +337,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
-      overload_decl, implementation_def.decl());
+      overload_decl, implementation_def.decl(), rcb);
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
