@@ -17860,6 +17860,25 @@ else:
         res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
         self.assertEqual(res6, res2 * .1 + .5 * res.sum(0)),
 
+    def test_baddbmm_contiguous(self, device):
+        num_batches = 10
+        M, N, O = 12, 8, 5
+        b1 = torch.randn(num_batches, M, N, device=device)
+        b2 = torch.randn(num_batches, N, O, device=device)
+        res = torch.bmm(b1, b2)
+        swap_dims = [
+            [0, 0],
+            [0, 1],
+            [0, 2],
+            [1, 2]
+        ]
+        for b1_swap_dims in swap_dims:
+            for b2_swap_dims in swap_dims:
+                b1_noncontig = b1.transpose(*b1_swap_dims).contiguous().transpose(*b1_swap_dims)
+                b2_noncontig = b2.transpose(*b2_swap_dims).contiguous().transpose(*b2_swap_dims)
+                res_noncontig = torch.bmm(b1_noncontig, b2_noncontig)
+                self.assertEqual(res_noncontig, res)
+
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_baddbmm(self, device, dtype):

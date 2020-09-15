@@ -14,6 +14,7 @@
  */
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/BFloat16.h>
 
 namespace at {
 namespace cuda {
@@ -68,6 +69,41 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
+
+#define CUDABLAS_GEMM_BATCHED_ARGTYPES(Dtype) \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha, \
+      const Dtype *a[], int64_t lda, const Dtype *b[], int64_t ldb, Dtype beta, \
+      Dtype *c[], int64_t ldc, int64_t batchCount
+
+template <typename Dtype>
+inline void gemmBatched(CUDABLAS_GEMM_BATCHED_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::gemmBatched: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void gemmBatched<float>(CUDABLAS_GEMM_BATCHED_ARGTYPES(float));
+template <>
+void gemmBatched<double>(CUDABLAS_GEMM_BATCHED_ARGTYPES(double));
+
+#define CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(Dtype) \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha, \
+      const Dtype *a, int64_t lda, int64_t strideA, \
+      const Dtype *b, int64_t ldb, int64_t strideB, Dtype beta, \
+      Dtype *c, int64_t ldc, int64_t strideC, int64_t batchCount
+
+template <typename Dtype>
+inline void gemmStridedBatched(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::gemmStridedBatched: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void gemmStridedBatched<float>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(float));
+template <>
+void gemmStridedBatched<double>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(double));
+template <>
+void gemmStridedBatched<at::Half>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(at::Half));
+template <>
+void gemmStridedBatched<at::BFloat16>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(at::BFloat16));
 
 /* LEVEL 2 BLAS FUNCTIONS */
 

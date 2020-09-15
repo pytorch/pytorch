@@ -6,24 +6,21 @@
 namespace at { namespace native {
 
 Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  return legacy::cuda::_th_baddbmm(b_self, batch1, batch2, beta, alpha);
-}
-
-Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
-  return legacy::cuda::_th_baddbmm_out(result, b_self, batch1, batch2, beta, alpha);
+  Tensor result = at::empty({0}, self.options());
+  return baddbmm_out_cuda(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
-  result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
-  return legacy::cuda::_th_bmm_out(result, batch1, batch2);
+Tensor& bmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& mat2) {
+  result.resize_({ self.size(0), self.size(1), mat2.size(2) });
+  auto dispatch_scalar_type = self.scalar_type();
+  checked_dense_tensor_unwrap(result, "result", 0, "bmm_out", false, DeviceType::CUDA, dispatch_scalar_type);
+  checked_dense_tensor_unwrap(self, "self", 1, "bmm_out", false, DeviceType::CUDA, dispatch_scalar_type);
+  checked_dense_tensor_unwrap(mat2, "mat2", 2, "bmm_out", false, DeviceType::CUDA, dispatch_scalar_type);
+  return at::baddbmm_out(result, result, self, mat2, 0, 1);
 }
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
@@ -162,6 +159,297 @@ Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
     Tensor& result = addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(out, mat1, mat2, self);
+  return out;
+}
+
+template <typename scalar_t>
+__global__ void createBatchGemmBuffer3(const scalar_t** buffer1, const scalar_t ** buffer2, const scalar_t ** buffer3, scalar_t* data1,
+                                       scalar_t * data2, scalar_t * data3, int64_t stride1, int64_t stride2, int64_t stride3, int64_t num_batches) {
+  const int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < num_batches) {
+    buffer1[idx] = data1 + idx * stride1;
+    buffer2[idx] = data2 + idx * stride2;
+    buffer3[idx] = data3 + idx * stride3;
+  }
+}
+
+template <typename scalar_t>
+inline void baddbmm_out_cuda_kernel(
+    Tensor& result_,
+    Tensor& batch1_,
+    Tensor& batch2_,
+    Scalar beta,
+    Scalar alpha,
+    bool transpose_result,
+    char transpose_batch1,
+    char transpose_batch2,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    int64_t num_batches) {
+#if (CUDA_VERSION < 8000) && !defined(__HIP_PLATFORM_HCC__)
+  int64_t matrices_size = num_batches * sizeof(scalar_t*);
+  TensorOptions options = TensorOptions().dtype(at::ScalarType::Byte).device(self.device());
+  Tensor d_matrices1 = at::empty({matrices_size}, options);
+  Tensor d_matrices2 = at::empty({matrices_size}, options);
+  Tensor d_result_matrices = at::empty({matrices_size}, options);
+  const int64_t block = 512;
+  const int64_t grid = (num_batches + block - 1) / block;
+
+  createBatchGemmBuffer3<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    reinterpret_cast<const scalar_t**>(d_matrices1.data<scalar_t>()),
+    reinterpret_cast<const scalar_t**>(d_matrices2.data<scalar_t>()),
+    reinterpret_cast<const scalar_t**>(d_result_matrices.data<scalar_t>()),
+    batch1_.data<scalar_t>(),
+    batch2_.data<scalar_t>(),
+    result_.data<scalar_t>(),
+    batch1_.stride(0), batch2_.stride(0), result_.stride(0), num_batches);
+
+  at::cuda::blas::gemmBatched<scalar_t>(
+    transpose_batch1,
+    transpose_batch2,
+    result_.size(transpose_result ? 2 : 1),
+    result_.size(transpose_result ? 1 : 2),
+    batch1_.size(transpose_result ? 1 : 2),
+    alpha.to<scalar_t>(),
+    reinterpret_cast<const scalar_t**>(d_matrices1.data<scalar_t>()), lda,
+    reinterpret_cast<const scalar_t**>(d_matrices2.data<scalar_t>()), ldb,
+    beta.to<scalar_t>(),
+    reinterpret_cast<scalar_t**>(d_result_matrices.data<scalar_t>()), ldc,
+    num_batches);
+#else
+  at::cuda::blas::gemmStridedBatched<scalar_t>(
+    transpose_batch1,
+    transpose_batch2,
+    result_.size(transpose_result ? 2 : 1),
+    result_.size(transpose_result ? 1 : 2),
+    batch1_.size(transpose_result ? 1 : 2),
+    alpha.to<scalar_t>(),
+    batch1_.data<scalar_t>(), lda, batch1_.stride(0),
+    batch2_.data<scalar_t>(), ldb, batch2_.stride(0),
+    beta.to<scalar_t>(),
+    result_.data<scalar_t>(), ldc, result_.stride(0),
+    num_batches);
+#endif // CUDA_VERSION
+}
+
+template <>
+void baddbmm_out_cuda_kernel<at::Half>(
+    Tensor& result_,
+    Tensor& batch1_,
+    Tensor& batch2_,
+    Scalar beta,
+    Scalar alpha,
+    bool transpose_result,
+    char transpose_batch1,
+    char transpose_batch2,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    int64_t num_batches) {
+  typedef at::Half scalar_t;
+#if (CUDA_VERSION < 9010) && !defined(__HIP_PLATFORM_HCC__)
+  for (int64_t i = 0; i < num_batches; ++i) {
+    at::cuda::blas::gemm<scalar_t>(
+      transpose_batch1,
+      transpose_batch2,
+      result_.size(transpose_result ? 2 : 1),
+      result_.size(transpose_result ? 1 : 2),
+      batch1_.size(transpose_result ? 1 : 2),
+      alpha.to<scalar_t>(),
+      batch1_.data<scalar_t>() + i * batch1_.stride(0), lda,
+      batch2_.data<scalar_t>() + i * batch2_.stride(0), ldb,
+      beta.to<scalar_t>(),
+      result_.data<scalar_t>() + i * result_.stride(0), ldc);
+  }
+#else
+#if !defined(__HIP_PLATFORM_HCC__)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major >= 5){
+#endif
+  at::cuda::blas::gemmStridedBatched<scalar_t>(
+    transpose_batch1,
+    transpose_batch2,
+    result_.size(transpose_result ? 2 : 1),
+    result_.size(transpose_result ? 1 : 2),
+    batch1_.size(transpose_result ? 1 : 2),
+    alpha.to<scalar_t>(),
+    batch1_.data<scalar_t>(), lda, batch1_.stride(0),
+    batch2_.data<scalar_t>(), ldb, batch2_.stride(0),
+    beta.to<scalar_t>(),
+    result_.data<scalar_t>(), ldc, result_.stride(0),
+    num_batches);
+#if !defined(__HIP_PLATFORM_HCC__)
+  } else {
+    for (int64_t i = 0; i < num_batches; ++i) {
+      at::cuda::blas::gemm<scalar_t>(
+        transpose_batch1,
+        transpose_batch2,
+        result_.size(transpose_result ? 2 : 1),
+        result_.size(transpose_result ? 1 : 2),
+        batch1_.size(transpose_result ? 1 : 2),
+        alpha.to<scalar_t>(),
+        batch1_.data<scalar_t>() + i * batch1_.stride(0), lda,
+        batch2_.data<scalar_t>() + i * batch2_.stride(0), ldb,
+        beta.to<scalar_t>(),
+        result_.data<scalar_t>() + i * result_.stride(0), ldc);
+    }
+  }
+#endif
+#endif // CUDA_VERSION
+}
+
+template <>
+void baddbmm_out_cuda_kernel<at::BFloat16>(
+    Tensor& result_,
+    Tensor& batch1_,
+    Tensor& batch2_,
+    Scalar beta,
+    Scalar alpha,
+    bool transpose_result,
+    char transpose_batch1,
+    char transpose_batch2,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc,
+    int64_t num_batches) {
+  typedef at::BFloat16 scalar_t;
+#if defined(__HIP_PLATFORM_HCC__)
+  at::cuda::blas::gemmStridedBatched<scalar_t>(
+    transpose_batch1,
+    transpose_batch2,
+    result_.size(transpose_result ? 2 : 1),
+    result_.size(transpose_result ? 1 : 2),
+    batch1_.size(transpose_result ? 1 : 2),
+    alpha.to<scalar_t>(),
+    batch1_.data<scalar_t>(), lda, batch1_.stride(0),
+    batch2_.data<scalar_t>(), ldb, batch2_.stride(0),
+    beta.to<scalar_t>(),
+    result_.data<scalar_t>(), ldc, result_.stride(0),
+    num_batches);
+#else
+  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
+#endif // __HIP_PLATFORM_HCC__
+}
+
+Tensor& baddbmm_out_cuda_impl(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
+  TORCH_CHECK(b_self.dim() == 3, "expected 3D tensor");
+  TORCH_CHECK(batch1.dim() == 3, "expected 3D tensor");
+  TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
+  TORCH_CHECK(b_self.size(0) == batch1.size(0), "equal number of batches expected");
+  TORCH_CHECK(b_self.size(0) == batch2.size(0), "equal number of batches expected");
+  TORCH_CHECK(b_self.size(1) == batch1.size(1), "wrong matrix size");
+  TORCH_CHECK(b_self.size(2) == batch2.size(2), "wrong matrix size");
+  TORCH_CHECK(batch1.size(2) == batch2.size(1), "wrong matrix size");
+
+  if (&b_self != &result) {
+    result.resize_as_(b_self);
+    if (beta.to<double>() != 0.0) {
+      result.copy_(b_self);
+    }
+  }
+
+  bool transpose_result;
+  char transpose_batch1;
+  char transpose_batch2;
+  int64_t lda;
+  int64_t ldb;
+  int64_t ldc;
+  Tensor result_;
+  Tensor batch1_;
+  Tensor batch2_;
+
+  if (result.stride(1) == 1 &&
+      (result.size(2) == 1 || result.stride(2) >= std::max<int64_t>(1, result.size(1)))) {
+    transpose_result = false;
+    result_ = result;
+    ldc = result_.stride(2);
+    batch1_ = batch1;
+    batch2_ = batch2;
+
+  } else if (result.stride(2) == 1 &&
+      (result.size(1) == 1 || result.stride(1) >= std::max<int64_t>(1, result.size(2)))) {
+    transpose_result = true;
+    result_ = result;
+    ldc = result_.stride(1);
+    batch1_ = batch2;
+    batch2_ = batch1;
+
+  } else {
+    transpose_result = false;
+    result_ = result.transpose(1, 2).contiguous().transpose(1, 2);
+    ldc = result_.stride(2);
+    batch1_ = batch1;
+    batch2_ = batch2;
+  }
+
+  const int64_t m = result.size(transpose_result ? 2 : 1);
+  const int64_t n = result.size(transpose_result ? 1 : 2);
+  const int64_t k = result.size(transpose_result ? 1 : 2);
+
+  if (batch1_.stride(transpose_result ? 2 : 1) == 1 &&
+      batch1_.stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, m)) {
+    transpose_batch1 = 'n';
+    lda = batch1_.stride(transpose_result ? 1 : 2);
+
+  } else if (batch1_.stride(transpose_result ? 1 : 2) == 1 &&
+      batch1_.stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, k)) {
+    transpose_batch1 = 't';
+    lda = batch1_.stride(transpose_result ? 2 : 1);
+
+  } else {
+    transpose_batch1 = transpose_result ? 'n' : 't';
+    batch1_ = batch1_.contiguous();
+    lda = batch1_.stride(1);
+  }
+
+  if (batch2_.stride(transpose_result ? 2 : 1) == 1 &&
+      batch2_.stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, k)) {
+    transpose_batch2 = 'n';
+    ldb = batch2_.stride(transpose_result ? 1 : 2);
+
+  } else if (batch2_.stride(transpose_result ? 1 : 2) == 1 &&
+      batch2_.stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, n)) {
+    transpose_batch2 = 't';
+    ldb = batch2_.stride(transpose_result ? 2 : 1);
+
+  } else {
+    transpose_batch2 = transpose_result ? 'n' : 't';
+    batch2_ = batch2_.contiguous();
+    ldb = batch2_.stride(1);
+  }
+
+  int64_t num_batches = result_.size(0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
+    baddbmm_out_cuda_kernel<scalar_t>(
+      result_,
+      batch1_,
+      batch2_,
+      beta,
+      alpha,
+      transpose_result,
+      transpose_batch1,
+      transpose_batch2,
+      lda,
+      ldb,
+      ldc,
+      num_batches);
+  });
+  result.resize_as_(result_);
+  result.copy_(result_);
+  return result;
+}
+
+Tensor& baddbmm_out_cuda(Tensor &out, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  {
+    at::NoNamesGuard guard;
+    Tensor& result = baddbmm_out_cuda_impl(out, self, batch1, batch2, beta, alpha);
+  }
+  namedinference::propagate_names_if_nonempty(
+      out,
+      namedinference::compute_baddbmm_outnames(out, batch1, batch2, self));
   return out;
 }
 

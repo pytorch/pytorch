@@ -379,6 +379,237 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 }
 #endif
 
+cublasOperation_t convertTransToCublasOperation(char trans) {
+  if (trans == 't') return CUBLAS_OP_T;
+  else if (trans == 'n') return CUBLAS_OP_N;
+  else if (trans == 'c') return CUBLAS_OP_C;
+  else {
+    TORCH_CHECK(false, "trans must be one of: t, n, c");
+    return CUBLAS_OP_T;
+  }
+}
+
+#ifndef __HIP_PLATFORM_HCC__
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
+#define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
+#else
+// Workaround for https://github.com/pytorch/pytorch/issues/45724
+cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
+  cublasOperation_t transa,
+  cublasOperation_t transb,
+  int m,
+  int n,
+  int k,
+  const void    *alpha,
+  const void     *A,
+  cudaDataType Atype,
+  int lda,
+  long long int strideA,
+  const void     *B,
+  cudaDataType Btype,
+  int ldb,
+  long long int strideB,
+  const void    *beta,
+  void           *C,
+  cudaDataType Ctype,
+  int ldc,
+  long long int strideC,
+  int64_t batchCount,
+  cudaDataType computeType,
+  cublasGemmAlgo_t algo)
+{
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major != 7) {
+    return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
+  }
+  cublasStatus_t result;
+  constexpr int64_t split = 63 * 1024;
+  for(int64_t i = 0; i < batchCount; i += split) {
+    int64_t count = std::min<int64_t>(split, batchCount - i);
+    result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
+      (char *)A + i * strideA * 2, Atype, lda, strideA,
+      (char *)B + i * strideB * 2, Btype, ldb, strideB,
+      beta,
+      (char *)C + i * strideC * 2, Ctype, ldc, strideC,
+      (int)count, computeType, algo);
+    TORCH_CUDABLAS_CHECK(result);
+  }
+  return result;
+}
+#endif
+#endif
+
+template <>
+void gemmBatched<float>(CUDABLAS_GEMM_BATCHED_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+
+#if defined(__HIP_PLATFORM_HCC__)
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda * k : lda * n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb * n : ldb * k;
+  const int64_t stridec = ldc * n;
+  at::cuda::blas::gemmStridedBatched<float>(transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
+#else
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    cublasOperation_t opa = convertTransToCublasOperation(transa);
+    cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    TORCH_CUDABLAS_CHECK(cublasSgemmBatched(handle,
+                                    opa, opb, (int)m, (int)n, (int)k,
+                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
+                                    (int)batchCount));
+#endif
+}
+
+template <>
+void gemmBatched<double>(CUDABLAS_GEMM_BATCHED_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+
+#if defined(__HIP_PLATFORM_HCC__)
+  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda * k : lda * n;
+  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb * n : ldb * k;
+  const int64_t stridec = ldc * n;
+  at::cuda::blas::gemmStridedBatched<double>(transa, transb, m, n, k, alpha, *a, lda, stridea, *b, ldb, strideb, beta, *c, ldc, stridec, batchCount);
+#else
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    cublasOperation_t opa = convertTransToCublasOperation(transa);
+    cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    TORCH_CUDABLAS_CHECK(cublasDgemmBatched(handle,
+                                    opa, opb, (int)m, (int)n, (int)k,
+                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
+                                    (int)batchCount));
+#endif
+}
+
+template <>
+void gemmStridedBatched<float>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(handle,
+    opa, opb, (int)m, (int)n, (int)k,
+    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
+    (int)batchCount));
+}
+
+template <>
+void gemmStridedBatched<double>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgemmStridedBatched(handle,
+    opa, opb, (int)m, (int)n, (int)k,
+    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
+    (int)batchCount));
+}
+
+template <>
+void gemmStridedBatched<at::Half>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(at::Half)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  float fAlpha = alpha;
+  float fBeta = beta;
+#if defined(__HIP_PLATFORM_HCC__)
+  TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(
+    handle, opa, opb, (int)m, (int)n, (int)k,
+    (void*)&fAlpha, a, rocblas_datatype_f16_r, (int)lda, strideA,
+    b, rocblas_datatype_f16_r, (int)ldb, strideB,
+    (void*)&fBeta, c, rocblas_datatype_f16_r, (int)ldc, strideC,
+    c, rocblas_datatype_f16_r, (int)ldc, strideC,
+    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+    0, 0));
+#else
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 11000)
+  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#endif  // CUDA_VERSION < 11000
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
+    opa, opb, (int)m, (int)n, (int)k,
+    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
+    b, CUDA_R_16F, (int)ldb, strideB,
+    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
+    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 11000)
+  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif  // CUDA_VERSION < 11000
+#endif // __HIP_PLATFORM_HCC__
+}
+
+template <>
+void gemmStridedBatched<at::BFloat16>(CUDABLAS_GEMM_STRIDED_BATCHED_ARGTYPES(at::BFloat16)) {
+  // See Note [Writing Nondeterministic Operations]
+  at::globalContext().alertCuBLASConfigNotDeterministic();
+  TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (batchCount < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount ",
+    "with the bound [val] <= ", INT_MAX);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  float fAlpha = alpha;
+  float fBeta = beta;
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major < 8) {
+    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
+  }
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
+    opa, opb, (int)m, (int)n, (int)k,
+    (void*)&fAlpha, a, CUDA_R_16BF, (int)lda, strideA,
+    b, CUDA_R_16BF, (int)ldb, strideB,
+    (void*)&fBeta, c, CUDA_R_16BF, (int)ldc, strideC,
+    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#elif defined(__HIP_PLATFORM_HCC__)
+  TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(
+    handle, opa, opb, (int)m, (int)n, (int)k,
+    (void*)&fAlpha, a, rocblas_datatype_bf16_r, (int)lda, strideA,
+    b, rocblas_datatype_bf16_r, (int)ldb, strideB,
+    (void*)&fBeta, c, rocblas_datatype_bf16_r, (int)ldc, strideC,
+    c, rocblas_datatype_bf16_r, (int)ldc, strideC,
+    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+    0, 0, NULL, NULL));
+#else
+  TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
+#endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+}
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define GEMV_CHECK_ARGVALUES(Dtype)           \
