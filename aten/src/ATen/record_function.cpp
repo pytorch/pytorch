@@ -24,34 +24,6 @@ thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
 
 std::atomic<int64_t> defaultNodeId(-1);
 
-// Enumerates thread ids logically;
-// note: std::this_thread::get_id may return potentially
-// reused thread id
-std::atomic<uint64_t> next_thread_id_ {0};
-thread_local uint64_t current_thread_id_ = 0;
-
-thread_local bool tls_record_function_enabled_ = true;
-
-// Low probability constant
-const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
-
-int sample_geometric() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::geometric_distribution<int> dist(kLowProb);
-  return dist(*gen);
-}
-
-double sample_zero_one() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  return dist(*gen);
-}
-
-} // namespace
-
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
@@ -240,12 +212,37 @@ class CallbackManager {
   RecordFunctionCallbacks sorted_global_callbacks_;
 };
 
-namespace {
-  // Keeping this static manager local.
-  CallbackManager& manager() {
-    static CallbackManager _manager;
-    return _manager;
-  }
+// Enumerates thread ids logically;
+// note: std::this_thread::get_id may return potentially
+// reused thread id
+std::atomic<uint64_t> next_thread_id_ {0};
+thread_local uint64_t current_thread_id_ = 0;
+
+inline CallbackManager& manager() {
+  static CallbackManager _manager;
+  return _manager;
+}
+
+thread_local bool tls_record_function_enabled_ = true;
+
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
+
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(*gen);
+}
+
 } // namespace
 
 bool RecordFunctionCallback::shouldRun(RecordScope scope) const {

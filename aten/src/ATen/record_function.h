@@ -168,17 +168,9 @@ struct TORCH_API RecordFunction {
     handle_ = handle;
   }
 
-  // Whether this RecordFunction runs any callbacks
-  bool active = false;
-  // Whether any of the picked callbacks require inputs
-  bool needs_inputs = false;
-
- private:
-  // Allows the modification of some internal states for callbacks.
-  friend class CallbackManager;
-
   // Used internally to keep track of thread local and global callbacks
   // that were picked to run; must be sorted;
+  // public because of anonymous "friend" class
   CallbackHandles sorted_active_tls_handles_;
   CallbackHandles sorted_active_global_handles_;
 
@@ -190,11 +182,17 @@ struct TORCH_API RecordFunction {
   // callbacks.
   ObserverContextList global_ctx_;
 
+  // Whether this RecordFunction runs any callbacks
+  bool active = false;
+  /// Whether any of the picked callbacks require inputs
+  bool needs_inputs = false;
+
   // In cases when RecordFunction might be active but we chose not to
   // use the observers (e.g. operator is not observed), this boolean
   // flag is used to check whether the start callbacks were called
   bool called_start_callbacks_ = false;
 
+ private:
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
