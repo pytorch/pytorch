@@ -42,7 +42,6 @@ using at::TensorOptions;
 using at::IntArrayRef;
 using at::Generator;
 using at::TensorList;
-using at::ScalarList;
 using at::Dimname;
 using at::DimnameList;
 

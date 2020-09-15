@@ -8,6 +8,8 @@ from torch.quantization import (
     MinMaxDynamicQuantObserver,
     HistogramObserver,
     RecordingObserver,
+    PlaceholderObserver,
+    NoopObserver,
     FakeQuantize,
     default_debug_qconfig,
     default_observer,
@@ -26,6 +28,7 @@ import torch.nn as nn
 # Standard library
 import copy
 import io
+import itertools
 import unittest
 import math
 import numpy as np
@@ -405,6 +408,46 @@ class TestObserver(QuantizationTestCase):
             buf.seek(0)
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
+    def test_state_dict_respects_device_affinity(self):
+        """
+        Tests that loading from a state dict loads buffers to the correct
+        device.
+        """
+        device_cpu = torch.device('cpu')
+        device_cuda = torch.device('cuda:0')
+        test_cases = itertools.product(
+            [device_cpu, device_cuda],
+            [device_cpu, device_cuda],
+            [MinMaxObserver, MovingAverageMinMaxObserver,
+             MinMaxDynamicQuantObserver, PerChannelMinMaxObserver,
+             MovingAveragePerChannelMinMaxObserver,
+             # TODO: enable this (separate PR)
+             # HistogramObserver,
+             PlaceholderObserver, RecordingObserver, NoopObserver])
+
+        for device_source, device_target, obs_cls in test_cases:
+            # calibrated source model
+            model = obs_cls()
+            model.to(device_source)
+            model(torch.randn(4, 1, 4, 4, device=device_source))
+            # target model
+            model2 = obs_cls()
+            model2.to(device_target)
+            model2.load_state_dict(model.state_dict())
+            # verify that buffers stayed on model2's device
+            model_devices = {p.device for p in model2.parameters()} | \
+                {p.device for p in model2.buffers()}
+            # some observers do not have any buffers, so lessEqual instead of
+            # Equal
+            self.assertLessEqual(len(model_devices), 1)
+            if len(model_devices) == 1:
+                model_device = next(iter(model_devices))
+                self.assertEqual(model_device, device_target)
+
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
