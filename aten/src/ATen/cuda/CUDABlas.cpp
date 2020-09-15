@@ -146,6 +146,7 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -158,6 +159,7 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -171,6 +173,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -187,6 +190,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -202,6 +206,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -344,6 +349,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t op = _cublasOpFromChar(trans);
@@ -359,6 +365,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
 template <>
 void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   // gemv is bw bound, and does not befefit from TF32. But the precision
@@ -376,6 +383,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t op = _cublasOpFromChar(trans);
@@ -387,6 +395,7 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
 
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   // gemv is bw bound, and does not befefit from TF32. But the precision
