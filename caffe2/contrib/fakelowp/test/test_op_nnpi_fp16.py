@@ -13,7 +13,7 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-from caffe2.python.oss.fakelowp.test_utils import compute_ulp_error
+from caffe2.python.fakelowp.test_utils import compute_ulp_error
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -104,25 +104,32 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
                     "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff})
                 assert(0)
 
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_add_graph(self):
+    def test_add_graph(self, seed):
+        np.random.seed(seed)
         self._test_binary_op_graph("Add")
 
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_sub_graph(self):
+    def test_sub_graph(self, seed):
+        np.random.seed(seed)
         self._test_binary_op_graph("Sub")
 
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_mul_graph(self):
+    def test_mul_graph(self, seed):
+        np.random.seed(seed)
         self._test_binary_op_graph("Mul")
 
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_div_graph(self):
+    def test_div_graph(self, seed):
+        np.random.seed(seed)
         self._test_binary_op_graph("Div")
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    @settings(deadline=None)
     def _test_unary_op(self, opname, X, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
 
@@ -182,7 +189,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
         return Y_glow
 
-    def _test_op_w_ulp_error(self, opname, regions, atol=0, err_threshold=2):
+    def _test_op_w_ulp_error(self, seed, opname, regions, atol=0, err_threshold=2):
         ulp_err = 0
         for x0, x1 in regions:
             X = np.linspace(x0, x1, num=1025, dtype=np.float16).astype(np.float32)
@@ -197,46 +204,54 @@ class UnaryOpTest(serial.SerializedTestCase):
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_sigmoid(self):
+    def test_sigmoid(self, seed):
+        np.random.seed(seed)
         opname = "Sigmoid"
         regions = [[-8., -4.], [-4., -2.], [-2., -1.], [-1., -.5], [-.5, -.25],
                    [-.25, .25], [.25, .5], [.5, 1.], [1., 2.], [2., 4.],
                    [4., 8.]]
-        self._test_op_w_ulp_error(opname, regions, atol=0, err_threshold=2.5)
+        self._test_op_w_ulp_error(seed, opname, regions, atol=0, err_threshold=2.5)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_tanh(self):
+    def test_tanh(self, seed):
+        np.random.seed(seed)
         opname = "Tanh"
         regions = [[2.**(-9), 2.**(-8)], [2.**(-8), 2.**(-7)],
                    [2.**(-7), 2.**(-6)], [2.**(-6), 2.**(-5)],
                    [2.**(-5), 2.**(-4)], [2.**(-4), 2.**(-3)],
                    [2.**(-3), 2.**(-2)], [2.**(-2), 2.**(-1)],
                    [2.**(-1), 1.], [1., 2.], [2., 4.], [4., 8.]]
-        self._test_op_w_ulp_error(opname, regions, atol=0, err_threshold=2)
+        self._test_op_w_ulp_error(seed, opname, regions, atol=0, err_threshold=2)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_swish(self):
+    def test_swish(self, seed):
+        np.random.seed(seed)
         opname = "Swish"
         regions = [[-20.5, -11.], [-11., -8.], [-8., -1.], [-1., -0.1],
                    [-1. / 8., 1. / 8.], [1. / 8, 5.], [5., 8.]]
-        self._test_op_w_ulp_error(opname, regions, atol=0.008, err_threshold=384)
+        self._test_op_w_ulp_error(seed, opname, regions, atol=0.008, err_threshold=384)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @given(seed=st.integers(0, 65534))
     @settings(deadline=None)
-    def test_logit(self):
+    def test_logit(self, seed):
+        np.random.seed(seed)
         workspace.ResetWorkspace()
         n = 1
         m = 15361

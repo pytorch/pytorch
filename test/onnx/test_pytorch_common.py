@@ -74,6 +74,16 @@ def enableScriptTest():
         return wrapper
     return script_dec
 
+
+# Disable tests for scripting.
+def disableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = False
+            return func(self)
+        return wrapper
+    return script_dec
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
@@ -81,6 +91,15 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version in unsupported_opset_versions:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+def skipIfONNXShapeInference(onnx_shape_inference):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.onnx_shape_inference is onnx_shape_inference:
                 raise unittest.SkipTest("Skip verify test for unsupported opset_version")
             return func(self)
         return wrapper

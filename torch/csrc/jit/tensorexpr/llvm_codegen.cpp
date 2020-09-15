@@ -623,13 +623,14 @@ void LLVMCodeGenImpl::visit(const Max* v) {
     return;
   }
 
-  if (v->propagate_nans()) {
-    value_ = irb_.CreateBinaryIntrinsic(llvm::Intrinsic::maximum, lhs, rhs);
-    return;
-  }
-
   value_ = irb_.CreateSelect(
-      irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs);
+      irb_.CreateFCmp(
+          llvm::FCmpInst::FCMP_UNO,
+          lhs,
+          llvm::ConstantFP::get(lhs->getType(), 0.0)),
+      lhs,
+      irb_.CreateSelect(
+          irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs));
 }
 
 void LLVMCodeGenImpl::visit(const Min* v) {
@@ -644,13 +645,14 @@ void LLVMCodeGenImpl::visit(const Min* v) {
     return;
   }
 
-  if (v->propagate_nans()) {
-    value_ = irb_.CreateBinaryIntrinsic(llvm::Intrinsic::minimum, lhs, rhs);
-    return;
-  }
-
   value_ = irb_.CreateSelect(
-      irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs);
+      irb_.CreateFCmp(
+          llvm::FCmpInst::FCMP_UNO,
+          lhs,
+          llvm::ConstantFP::get(lhs->getType(), 0.0)),
+      lhs,
+      irb_.CreateSelect(
+          irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs));
 }
 
 void LLVMCodeGenImpl::visit(const CompareSelect* v) {

@@ -577,13 +577,6 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
   }
 
- private:
-  const Expr* lhs_;
-  const Expr* rhs_;
-  const Expr* ret_val1_;
-  const Expr* ret_val2_;
-  CompareSelectOperation compare_op_;
-
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
@@ -600,6 +593,13 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       throw malformed_input("bad dtype in CompareSelect");
     }
   }
+
+ private:
+  const Expr* lhs_;
+  const Expr* rhs_;
+  const Expr* ret_val1_;
+  const Expr* ret_val2_;
+  CompareSelectOperation compare_op_;
 };
 
 enum IntrinsicsOp {
@@ -802,6 +802,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 

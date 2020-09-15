@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 
 #include <stdexcept>
@@ -92,9 +93,9 @@ static inline Backend toDense(Backend b) {
 }
 
 static inline Backend dispatchKeyToBackend(DispatchKey t) {
-  if (t == DispatchKey::CPU) {
+  if (t == DispatchKey::CPU || t == DispatchKey::AutogradCPU) {
     return Backend::CPU;
-  } else if (t == DispatchKey::CUDA) {
+  } else if (t == DispatchKey::CUDA || t == DispatchKey::AutogradCUDA) {
     return Backend::CUDA;
   } else if (t == DispatchKey::HIP) {
     return Backend::HIP;
