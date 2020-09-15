@@ -506,7 +506,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vec256<scalar_t>;
-        const Vec beta_vec(beta);
+        const Vec256<double> beta_vec(beta);
         const Vec point_five_vec(static_cast<scalar_t>(0.5));
         cpu_kernel_vec(
             iter,

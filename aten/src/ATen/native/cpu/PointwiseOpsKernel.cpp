@@ -51,7 +51,7 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm, dou
   AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
     auto norm_val_vec = Vec256<scalar_t>(norm_val);
-    auto beta_val_vec = Vec256<scalar_t>(beta);
+    auto beta_val_vec = Vec256<double>(beta);
     const auto neg_1_vec = Vec256<scalar_t>(-1);
     const auto pos_1_vec = Vec256<scalar_t>(1);
     cpu_kernel_vec(iter,
