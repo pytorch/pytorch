@@ -201,8 +201,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
       && hasKernelForDispatchKey(DispatchKey::Math)
       && !(isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
            && hasKernelForDispatchKey(getBackendKeyFromAutograd(dispatch_key)))) {
-      return {getKernelForDispatchKey(DispatchKey::Math), "math kernel"};
-    }
+    return {getKernelForDispatchKey(DispatchKey::Math), "math kernel"};
   }
 
   // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
