@@ -211,7 +211,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
       code_ << "f" << node->name();
     } else {
       const int digits = std::numeric_limits<Float::ScalarType>::max_digits10;
-      code_ << std::setprecision(digits) << *node->value();
+      code_ << "float(" << std::setprecision(digits) << *node->value() << ")";
     }
   }
 
@@ -443,7 +443,13 @@ class CudaKernelGenerator : private OptInConstDispatch {
       indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
+      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+      if (node->pred() == nullptr) {
+        indent() << kTab << "true,\n";
+      } else {
+        indent() << kTab << genInline(node->pred()) << ",\n";
+      }
+      indent() << kTab << genInline(node->init()) << ");\n";
     }
   }
 
@@ -495,7 +501,13 @@ class CudaKernelGenerator : private OptInConstDispatch {
     indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
     indent() << kTab << "&" << gen(work_buffer) << "[0],\n";
     indent() << kTab << gen(sync_buffer) << ",\n";
-    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    if (node->pred() == nullptr) {
+      indent() << kTab << "true,\n";
+    } else {
+      indent() << kTab << genInline(node->pred()) << ",\n";
+    }
+    indent() << kTab << genInline(node->reduction_op()->init()) << ");\n";
   }
 
   void handle(const kir::Scope& scope) {

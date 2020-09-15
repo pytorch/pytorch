@@ -198,7 +198,15 @@ static auto code_template_block_reduction = R"(
 // may actually be slower.
 template<bool X_REDUCE, bool Y_REDUCE, bool Z_REDUCE, typename T, typename Func>
 __inline__ __device__
-void blockReduce(T& out, const T inp_val, Func reduction_op, const dim3& thread_idx, const dim3& block_dim, T* shared_mem, bool read_write_pred, T init_val) {
+void blockReduce(
+    T& out,
+    const T inp_val,
+    Func reduction_op,
+    const dim3& thread_idx,
+    const dim3& block_dim,
+    T* shared_mem,
+    bool read_write_pred,
+    T init_val) {
 
   unsigned int reduction_size
     = (X_REDUCE ? block_dim.x : 1)
@@ -442,8 +450,15 @@ __host__ __device__ int offset_in_reduction_block(const dim3& thread_idx,
 */
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD,
           typename T, typename Func>
-__device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
-                                    Func reduction_op, T* shared_buf, bool read_write_pred, T init_val) {
+__device__ void gridReduceLastBlock(
+      T& out,
+      const T *in,
+      const size_t in_size,
+      Func reduction_op,
+      T* shared_buf,
+      bool read_write_pred,
+      T init_val) {
+        
   const int tid = ioffset(threadIdx, blockDim);
   const int block_size = isize(blockDim);
   const int rblock_size = size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
