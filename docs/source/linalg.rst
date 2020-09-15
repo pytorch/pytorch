@@ -12,4 +12,5 @@ Common linear algebra operations.
 Functions
 ---------
 
-.. autofunction:: outer
+.. autofunction:: det
+.. autofunction:: norm

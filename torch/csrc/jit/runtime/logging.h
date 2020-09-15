@@ -40,7 +40,7 @@ class TORCH_API LockingLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override;
   virtual int64_t getCounterValue(const std::string& name) const;
-  enum class AggregationType { SUM, AVG };
+  enum class AggregationType { SUM = 0, AVG = 1 };
   void setAggregationType(const std::string& stat_name, AggregationType type);
   ~LockingLogger() {}
 

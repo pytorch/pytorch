@@ -273,6 +273,33 @@ class TestMkldnn(TestCase):
                         max_pool3d(x),
                         max_pool3d(x.to_mkldnn()).to_dense())
 
+    def test_max_pool_unsupported(self):
+        # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        # 2d dilation case
+        x = torch.randn(N, C, 7, 7, dtype=torch.float32).to_mkldnn()
+        max_pool2d = torch.nn.MaxPool2d(
+            kernel_size=3,
+            stride=3,
+            padding=1,
+            dilation=2)
+        self.assertRaisesRegex(RuntimeError,
+                               'mkldnn_max_pool2d does not support dilation case',
+                               lambda: max_pool2d(x))
+
+        # 3d dilation case
+        x = torch.randn(N, C, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+        max_pool3d = torch.nn.MaxPool3d(
+            kernel_size=3,
+            stride=3,
+            padding=1,
+            dilation=2)
+        self.assertRaisesRegex(RuntimeError,
+                               'mkldnn_max_pool3d does not support dilation case',
+                               lambda: max_pool3d(x))
+
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()

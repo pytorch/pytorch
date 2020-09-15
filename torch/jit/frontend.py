@@ -12,7 +12,7 @@ from torch._C._jit_tree_views import (
     TrueLiteral, FalseLiteral, NoneLiteral, Starred,
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
-    SliceExpr, Subscript, TernaryIf, With, WithItem,
+    SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -128,6 +128,33 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
+def get_class_properties(cls, self_name):
+    """
+    Get a list of Property objects representing the properties of a class.
+
+    Arguments:
+        cls:  The class to get properties of.
+        self_name: The name of the class that the properties should belong to.
+    Returns:
+        A list of Property objects corresponding to the properties of cls. Property
+        here refers to the subclass of TreeView.
+    """
+    props = inspect.getmembers(
+        cls, predicate=lambda m: isinstance(m, property))
+    # Any property that should not compiled must be in this list on the Module.
+    ignored_properties = getattr(cls, "__ignored_properties__", [])
+
+    # Create Property TreeView objects from inspected property objects.
+    properties = []
+    for prop in props:
+        if prop[0] not in ignored_properties:
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+
+    return properties
+
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -137,9 +164,11 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
-    method_defs = [get_jit_def(method[1],
-                               method[0],
-                               self_name=self_name) for method in methods]
+    methods = [get_jit_def(method[1],
+                           method[0],
+                           self_name=self_name) for method in methods]
+
+    properties = get_class_properties(cls, self_name)
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
@@ -147,7 +176,7 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
+    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
 
 def get_jit_def(fn, def_name, self_name=None):
@@ -178,13 +207,16 @@ def get_jit_def(fn, def_name, self_name=None):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
-        fn_def.body = unused_fn_def.body
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
+        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
+            raise RuntimeError("Expected a single top-level function")
+        unused_def = unused_fn_def.body[0]
+        fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
             # Replace potentially unsupported type annotations by "Any"
-            arg.annotation = unused_fn_def.args.args[0].annotation
+            arg.annotation = unused_def.args.args[0].annotation
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
@@ -197,10 +229,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
@@ -278,13 +310,8 @@ class WithItemBuilder(Builder):
     def build_withitem(ctx, item):
         lineno = item.context_expr.lineno
         start = item.context_expr.col_offset
+        end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
-
-        if op_vars:
-            end = op_vars.col_offset + len(op_vars.id)
-        else:
-            end = start + len(item.context_expr.id)
-
         r = ctx.make_range(lineno, start, end)
 
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
@@ -544,10 +571,9 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         if op_token is None:
-            err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
-            raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
+            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod

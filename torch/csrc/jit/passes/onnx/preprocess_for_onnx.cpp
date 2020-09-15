@@ -67,10 +67,9 @@ void FuseWithListUnpack(Node* n) {
   //    is aware of the number of outputs.
   // 2. Add the exact number of outputs to n, copy metadata and replace uses of
   // listUnpack outputs.
-  WithInsertPoint guard(n);
-  auto v_num_outputs = n->owningGraph()->insertConstant(at::full(
-      {1}, static_cast<int64_t>(listUnpack_node->outputs().size()), at::kLong));
-  n->addInput(v_num_outputs);
+  n->i_(
+      Symbol::fromQualString("attr::_outputs"),
+      static_cast<int64_t>(listUnpack_node->outputs().size()));
 
   for (auto i = 0; i < listUnpack_node->outputs().size(); ++i) {
     auto new_output = n->addOutput();
@@ -96,6 +95,7 @@ static void FuseWithListUnpack(Block* b) {
       case aten::unsafe_split_with_sizes:
       case aten::unbind:
       case aten::unsafe_chunk:
+      case aten::where:
         FuseWithListUnpack(*it);
         break;
       default:

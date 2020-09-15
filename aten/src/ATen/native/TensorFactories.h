@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
@@ -84,5 +86,11 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
       break;
   }
 }
+
+using binary_fn = void (*)(TensorIterator&);
+
+DECLARE_DISPATCH(binary_fn, complex_stub);
+DECLARE_DISPATCH(binary_fn, polar_stub);
+
 } // namespace native
 } // namespace at

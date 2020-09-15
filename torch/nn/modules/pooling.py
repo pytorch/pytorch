@@ -46,18 +46,19 @@ class MaxPool1d(_MaxPoolNd):
         out(N_i, C_j, k) = \max_{m=0, \ldots, \text{kernel\_size} - 1}
                 input(N_i, C_j, stride \times k + m)
 
-    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
-    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
+    for :attr:`padding` number of points. :attr:`dilation` is the stride between the elements within the
+    sliding window. This `link`_ has a nice visualization of the pooling parameters.
 
     Args:
-        kernel_size: the size of the window to take a max over
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
-        dilation: a parameter that controls the stride of elements in the window
-        return_indices: if ``True``, will return the max indices along with the outputs.
+        kernel_size: The size of the sliding window, must be > 0.
+        stride: The stride of the sliding window, must be > 0. Default value is :attr:`kernel_size`.
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.MaxUnpool1d` later
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
 
     Shape:
         - Input: :math:`(N, C, L_{in})`

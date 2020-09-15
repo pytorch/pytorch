@@ -285,6 +285,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
@@ -327,6 +328,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_custom_op_cuda(self):
         cuda_source = """
@@ -401,6 +403,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
+    @unittest.skip("Temporarily disabled")
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """

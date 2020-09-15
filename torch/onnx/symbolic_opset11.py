@@ -224,9 +224,19 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
-    return g.op("ScatterElements", self, index, src, axis_i=dim)
+    src_type = src.type().scalarType()
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("ScatterElements", self, index, src, axis_i=dim)
+    else:
+        # Check if scalar 'src' has same type as self (PyTorch allows different
+        # type for scalar src (but not when src is tensor)). If not, insert Cast node.
+        if self.type().scalarType() != src_type:
+            src = g.op("Cast", src, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'none')
@@ -263,11 +273,13 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    return g.op("SequenceLength", self)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        return g.op("SequenceLength", self)
+    return g.op("Size", self)
 
 
 def __getitem_(g, self, i):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if sym_help._is_tensor_list(self):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
     else:
@@ -278,6 +290,19 @@ def __getitem_(g, self, i):
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
+
+def add(g, self, other, alpha=None):
+    if sym_help._is_value(self) and sym_help._is_tensor_list(self):
+        tensor_list_node = other.node()
+        if tensor_list_node.kind() != "prim::ListConstruct":
+            return _unimplemented("add", "does not support adding dynamic tensor list to another")
+        tensors = sym_help._unpack_list(other)
+        l = self
+        for t in tensors:
+            l = g.op("SequenceInsert", l, t)
+        return l
+
+    return torch.onnx.symbolic_opset9.add(g, self, other, alpha)
 
 def insert(g, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
@@ -361,6 +386,17 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
             return split_out
+        # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
+        if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
+            split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            res = []
+            for i in range(_outputs):
+                end = g.op("Add", start, split_sizes[i])  # split_sizes is a list of same length as _outputs
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+            return res
         return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
                 for i in range(_outputs)]
     else:
@@ -452,24 +488,32 @@ def arange(g, *args):
         dtype = sym_help._maybe_get_const(dtype, 'i')
         return dtype
 
-    if len(args) == 5:
-        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
-        dtype = _get_arange_dtype(args[1])
+    if len(args) == 2 or len(args) == 5:
+        if len(args) == 2:
+            # aten::arange(Scalar end, Tensor out)
+            dtype = None
+        else:
+            # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+            dtype = _get_arange_dtype(args[1])
         type, end, start, step = sym_help._arange_cast_helper(g, end=args[0], dtype=dtype)
         start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         arange_tensor = g.op("Range", start_default, end, delta_default)
+    elif len(args) == 4 or len(args) == 7:
+        if len(args) == 4:
+            # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
+            dtype = None
+        else:
+            # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+            dtype = _get_arange_dtype(args[3])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
+        arange_tensor = g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
         type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], dtype=dtype)
         delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         arange_tensor = g.op("Range", start, end, delta_default)
-    elif len(args) == 7:
-        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
-        dtype = _get_arange_dtype(args[3])
-        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
-        arange_tensor = g.op("Range", start, end, step)
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor
@@ -492,14 +536,21 @@ def size(g, self, dim=None):
 
 def squeeze(g, self, dim=None):
     if dim is None:
-        dims = []
-        for i, size in enumerate(self.type().sizes()):
-            if size == 1:
-                dims.append(i)
-    else:
-        dims = [sym_help._get_const(dim, 'i', 'dim')]
-    return g.op("Squeeze", self, axes_i=dims)
+        return g.op("Squeeze", self)
 
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
+    # create 'cond' node (condition is shape[i]==1)
+    dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
+    size = sym_help._size_helper(g, self, dim_constant)
+    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    cond = g.op("Equal", size, const_one)
+    # create the 'If' node and add the 'then' and 'else' blocks to it.
+    if_node_outputs = g.op("If", cond)
+    if_node = if_node_outputs.node()
+    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=[dim])
+    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
+    return if_node_outputs
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):

@@ -99,7 +99,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_before(Stmt* s, Stmt* before) {
+  void insert_stmt_before(Stmt* s, const Stmt* before) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -114,7 +114,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_after(Stmt* s, Stmt* after) {
+  void insert_stmt_after(Stmt* s, const Stmt* after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -134,7 +134,7 @@ class TORCH_API Block : public StmtNode<Block> {
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt wiith existing parent", new_stmt);
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -216,6 +216,32 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     stmts_.splice(it, other->stmts_);
+  }
+
+  static const Block* getSharedParent(const Stmt* p1, const Stmt* p2) {
+    std::unordered_set<const Block*> enclosing;
+
+    const Stmt* p1_p = p1;
+    while (p1_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p1_p)) {
+        if (b) {
+          enclosing.insert(b);
+        }
+      }
+      p1_p = p1_p->get_parent();
+    }
+
+    const Stmt* p2_p = p2;
+    while (p2_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p2_p)) {
+        if (enclosing.count(b) != 0) {
+          return b;
+        }
+      }
+      p2_p = p2_p->get_parent();
+    }
+
+    return nullptr;
   }
 
  private:
@@ -504,22 +530,31 @@ class TORCH_API LoopOptions {
   }
 
   std::string ToString() const {
-    std::ostringstream oss;
     if (is_gpu_block_index()) {
-      oss << gpu_block_index_str();
+      return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
-      oss << gpu_thread_index_str();
+      return gpu_thread_index_str();
     }
-    return oss.str();
+    return "";
   }
 
   bool isDefault() const {
     return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
   }
 
+  void set_buffer_mapping(
+      const std::unordered_map<std::string, const Buf*>& map) {
+    map_input_to_tensor_bufs_ = map;
+  }
+
+  std::unordered_map<std::string, const Buf*> get_buffer_mapping() const {
+    return map_input_to_tensor_bufs_;
+  }
+
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
 class TORCH_API For : public StmtNode<For> {
@@ -613,6 +648,10 @@ class TORCH_API For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {
+    loop_options_.set_buffer_mapping(map);
+  }
+
   For* cloneWithNewBody(Stmt* body) const {
     return new For(var_, start_, stop_, body, loop_options_);
   }
@@ -662,6 +701,11 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
+};
+
+class SyncThreads : public StmtNode<SyncThreads> {
+ public:
+  SyncThreads() {}
 };
 
 } // namespace tensorexpr

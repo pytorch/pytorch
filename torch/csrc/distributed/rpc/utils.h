@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -85,7 +86,9 @@ struct TensorpipeReadBuffers {
 // Convert an RPC message into a TensorPipe message, plus a holder to all the
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
-tensorpipeSerialize(Message&& rpcMessage);
+tensorpipeSerialize(
+    Message&& rpcMessage,
+    std::vector<c10::DeviceIndex> devices = {});
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read

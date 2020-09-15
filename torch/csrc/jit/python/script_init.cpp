@@ -45,8 +45,6 @@
 #include <utility>
 #include <vector>
 
-PYBIND11_MAKE_OPAQUE(torch::jit::ExtraFilesMap);
-
 namespace torch {
 namespace jit {
 
@@ -354,6 +352,8 @@ static StrongFunctionPtr script_compile_overloaded_function(
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {new_def},
       {pythonResolver(std::move(rcb))},
       nullptr,
@@ -380,6 +380,8 @@ static StrongFunctionPtr script_compile_function(
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {def},
       {pythonResolver(std::move(rcb))},
       nullptr,
@@ -707,12 +709,23 @@ IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   return ivalue.deepcopy(ivalue_memo);
 }
 
+ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
+  ExtraFilesMap r;
+  for (const auto& it : pydict) {
+    r[py::cast<std::string>(it.first)] = "";
+  }
+  return r;
+}
+
+void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
+  // py::dict is pointer-like type so it gets modified despite const&
+  for (const auto& it : m) {
+    pydict[py::str(it.first)] = py::bytes(it.second);
+  }
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-
-  // STL containers are not mutable by default and hence we need to bind as
-  // follows.
-  py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
@@ -898,19 +911,24 @@ void initJitScriptBindings(PyObject* module) {
           "_save_for_mobile",
           [](Module& m,
              const std::string& filename,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            m._save_for_mobile(filename, _extra_files);
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_mobile_debug_info = false) {
+            m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
           },
           py::arg("filename"),
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_mobile_debug_info") = false)
       .def(
           "_save_to_buffer_for_mobile",
-          [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+          [](Module& m,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_mobile_debug_info = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files);
+            m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
             return py::bytes(buf.str());
           },
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_mobile_debug_info") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1037,7 +1055,7 @@ void initJitScriptBindings(PyObject* module) {
           "find_method",
           [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
-            return method != nullptr;
+            return method != c10::nullopt;
           },
           py::arg("method_name"))
       .def(
@@ -1049,7 +1067,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method(method_name, stack);
+            return m.get_method(method_name)(stack);
           },
           py::arg("method_name"),
           py::arg("input_tuple"))
@@ -1060,7 +1078,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method("forward", stack);
+            return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));
 
@@ -1293,8 +1311,10 @@ void initJitScriptBindings(PyObject* module) {
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_type(classType);
-        std::vector<ResolverPtr> rcbs;
+        std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
+        std::vector<Property> props;
+
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
@@ -1303,11 +1323,22 @@ void initJitScriptBindings(PyObject* module) {
                    "something else!";
           }
           methodDefs.emplace_back(Def(def));
-          rcbs.push_back(
+          methodRcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
+
+        // Gather definitions for property getters and setters as well as
+        // corresponding resolution callbacks.
+        if (classDef.properties().present()) {
+          for (const auto& prop : classDef.properties().get()) {
+            props.emplace_back(prop);
+            propRcbs.push_back(
+                pythonResolver(rcb, classDef.name().name(), classType));
+          }
+        }
+
         const auto self = SimpleSelf(classType);
-        cu->define(classname, methodDefs, rcbs, &self);
+        cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
       });
   m.def(
       "_jit_script_interface_compile",
@@ -1341,22 +1372,25 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<CompilationUnit> cu,
          const std::string& filename,
          py::object map_location,
-         ExtraFilesMap& extra_files) {
+         const py::dict& extra_files) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        return import_ir_module(
-            std::move(cu), filename, optional_device, extra_files);
+        ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
+        auto ret = import_ir_module(
+            std::move(cu), filename, optional_device, extra_files_map);
+        extra_files_to_python(extra_files_map, extra_files);
+        return ret;
       });
   m.def(
       "import_ir_module_from_buffer",
       [](std::shared_ptr<CompilationUnit> cu,
          const std::string& buffer,
          py::object map_location,
-         ExtraFilesMap& extra_files) {
+         const py::dict& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
@@ -1364,8 +1398,11 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        return import_ir_module(
-            std::move(cu), in, optional_device, extra_files);
+        ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
+        auto ret = import_ir_module(
+            std::move(cu), in, optional_device, extra_files_map);
+        extra_files_to_python(extra_files_map, extra_files);
+        return ret;
       });
   m.def(
       "_load_for_lite_interpreter",
@@ -1496,7 +1533,13 @@ void initJitScriptBindings(PyObject* module) {
       std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
       .def(py::init<py::object>())
-      .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
+      .def(
+          "add_constant",
+          [](ConcreteModuleTypeBuilder& self,
+             std::string name,
+             py::object value) {
+            self.addConstant(std::move(name), std::move(value));
+          })
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
       .def(
           "add_function_attribute",
@@ -1547,27 +1590,43 @@ void initJitScriptBindings(PyObject* module) {
             return self.equals(other);
           })
       .def(
-          "_create_methods",
+          "_create_methods_and_properties",
           [](std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
+             const std::vector<Property>& properties,
+             const std::vector<ResolutionCallback>& propertyRcbs,
+             const std::vector<Def>& methodDefs,
+             const std::vector<ResolutionCallback>& methodRcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
+            TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
+            TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
+
+            std::vector<ResolverPtr> methodResolvers, propertyResolvers;
+            methodResolvers.reserve(methodRcbs.size());
+            for (auto& callback : methodRcbs) {
+              methodResolvers.push_back(pythonResolver(callback));
             }
+
+            propertyResolvers.reserve(propertyRcbs.size());
+            for (auto& callback : propertyRcbs) {
+              propertyResolvers.push_back(pythonResolver(callback));
+            }
+
             const auto& selfType =
                 concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
-            cu->define(prefix, defs, resolvers, &self);
+            cu->define(
+                prefix,
+                properties,
+                propertyResolvers,
+                methodDefs,
+                methodResolvers,
+                &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
+            auto defs_it = methodDefs.begin();
+            while (defs_it != methodDefs.end()) {
               const auto method_name =
                   QualifiedName(prefix, (*defs_it).name().name());
               auto& method = cu->get_function(method_name);

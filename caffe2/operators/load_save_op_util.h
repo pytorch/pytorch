@@ -40,6 +40,17 @@ CAFFE2_API void ProcessBlob(
     const std::string& key,
     int* loaded_blobs);
 
+CAFFE2_API void prepareBlob(
+    Blob* blob,
+    std::unordered_map<std::string, BlobState>* blob_states_ptr,
+    const std::string& key);
+
+CAFFE2_API void updateBlobStates(
+    const BlobProto& proto,
+    std::unordered_map<std::string, BlobState>* blob_states_ptr,
+    const std::string& key,
+    int* loaded_blobs);
+
 CAFFE2_API void validateBlobStates(
     const std::unordered_map<std::string, BlobState>& blob_states);
 

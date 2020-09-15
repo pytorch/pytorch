@@ -1,5 +1,3 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
-
 package org.pytorch;
 
 import com.facebook.jni.HybridData;

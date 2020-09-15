@@ -639,7 +639,7 @@ void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
       {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
       {"SparseLengthsWeightedSum4BitRowwiseSparse",
        "SparseLengthsWeightedSumFused4BitRowwise"},
-      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSumFused8BitRowwise"},
       {"SparseLengthsWeightedSum8BitRowwiseSparse",
        "SparseLengthsWeightedSumFused8BitRowwise"},
       {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},
@@ -1102,7 +1102,7 @@ bool OnnxifiTransformer::supportOpOnnx(
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
     if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
+      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());

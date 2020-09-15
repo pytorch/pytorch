@@ -538,29 +538,35 @@ TEST(ProcessGroupGlooTest, testWaitDelay) {
 #ifdef USE_CUDA
 // CUDA-only tests
 TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
+  if (!torch::cuda::is_available()) {
+    LOG(INFO) << "Skipping test - requires CUDA";
+    return;
+  }
   {
-    if (torch::cuda::is_available()) {
-      TemporaryFile file;
-      testAllreduce(file.path, at::DeviceType::CUDA);
-    }
+    TemporaryFile file;
+    testAllreduce(file.path, at::DeviceType::CUDA);
   }
 }
 
 TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
+  if (torch::cuda::device_count() <= 1) {
+    LOG(INFO) << "Skipping test - requires multiple CUDA devices";
+    return;
+  }
   {
-    if (torch::cuda::device_count() > 1) {
-      TemporaryFile file;
-      testBroadcast(file.path, at::DeviceType::CUDA);
-    }
+    TemporaryFile file;
+    testBroadcast(file.path, at::DeviceType::CUDA);
   }
 }
 
 TEST(ProcessGroupGlooTest, testAlltoallCUDA) {
+  if (!torch::cuda::is_available()) {
+    LOG(INFO) << "Skipping test - requires CUDA";
+    return;
+  }
   {
-    if (torch::cuda::is_available()) {
-      TemporaryFile file;
-      testAlltoall(file.path, at::DeviceType::CUDA);
-    }
+    TemporaryFile file;
+    testAlltoall(file.path, at::DeviceType::CUDA);
   }
 }
 
