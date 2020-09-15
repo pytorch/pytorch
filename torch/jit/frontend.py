@@ -141,13 +141,16 @@ def get_class_properties(cls, self_name):
     """
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
+    # Any property that should not compiled must be in this list on the Module.
+    ignored_properties = getattr(cls, "__ignored_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+        if prop[0] not in ignored_properties:
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
 
     return properties
 

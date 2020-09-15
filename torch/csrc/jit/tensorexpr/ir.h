@@ -802,6 +802,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 
