@@ -115,12 +115,6 @@ def async_execution(fn):
         >>>         )
         >>>         return ret_fut
         >>>
-        >>>     @rpc.functions.async_execution
-        >>>     def bound_async_add(self, to, x, y, z):
-        >>>         return rpc.rpc_async(to, torch.add, args=(x, y)).then(
-        >>>             lambda fut: fut.wait() + z
-        >>>         )
-        >>>
         >>> # On worker0
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
