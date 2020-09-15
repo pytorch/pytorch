@@ -342,141 +342,6 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
-Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
-  Tensor ret = at::cumsum(-x, dim);
-
-  int64_t end_idx = ret.size(dim) - 1;
-  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone(at::MemoryFormat::Preserve);
-  ret -= ret_sum.expand_as(ret);
-  ret += x;
-  return ret;
-}
-
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
-  /*
-    There are two algorithms to do this. The first one
-    is very efficient, but works only when there are no
-    nonzero elements in the input.
-
-    The second one is much more complex, but it doesn't
-    assume anything on the input. The main downside is
-    that it takes time O(n^2), where n = input.size(self.dim)
-    (i.e. the length of the cumulative product). This is in
-    contrast to the forward pass and the efficient algorithm,
-    which are both O(n).
-
-    The second algorithm is a simple application of the chain
-    rule. If x is an n-dimensional vector, and y = cumprod(x),
-    and F is the final cost, then
-
-    dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
-
-    The term dF / dy_j is just grad_output[j] (assuming again
-    everything is one-dimensional).
-
-    The term (dy_j / dx_k) is easilly seen to be
-
-    if j >= k
-      dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
-    else:
-      dy_j / dx_k = 0
-
-    Note that the indicator (j>=k) can be taken out
-    by replacing the sum in (1) with a sum from
-    j = k to n.
-
-    Thus,
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
-
-    with
-    dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
-
-    Note that this last term is just the cumulative product
-    with k omitted. Thus, if x_k (the input) is nonzero, we can
-    just express this as
-
-    dy_j / dx_k = (prod_{1 <= i <= j} x_i) / x_k
-                = y_j / x_k
-
-    So therefore,
-
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
-
-    so
-
-    grad_output = sum_scan_exclusiv(grad_output * output) / input
-
-    If the input is nonzero, we need to calculate the dy_j / dx_k
-    by using the formula (2), called in the code omitted_products.
-
-    The way the code calculates it is simply by noting that
-
-    prod_{1 <= i <= j, i != k} x_i
-        = (prod_{1 <= i <= k} x_i) * (prod_{k + 1 <= i <= j} x_i)
-
-    the first term is calculated as prods_until_k, which since
-    doesn't depend in j is easy to vectorize.
-
-    The second term (indexed by j) is the cumulative product of
-    x_{k+1}, x_{k+2}, ..., x_n, and it's named in the code
-    prods_from_k_pkus_1, and it's calculated as a cumprod.
-
-    In order to vectorize this properly, we need to add to
-    omitted_products the dimensions where k > j, and therefore
-    dy_j / dx_k = 0, which is done right after the assert.
-  */
-
-  if (input.dim() == 0 || input.numel() == 0) {
-    return grad;
-  }
-  dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  int64_t dim_size = input.size(dim);
-  if (dim_size == 1) {
-    return grad;
-  }
-
-  // Simple case with nonzero elements in the input
-  if ((input != 0).all().item<uint8_t>()) {
-    Tensor result = at::cumprod(input, dim);
-    return sum_scan_exclusive(result * grad, dim) / input;
-  }
-
-  auto ones_size = input.sizes().vec();
-  ones_size[dim] = 1;
-  Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
-  Tensor grad_input = at::zeros(input.sizes(), grad.options());
-  Tensor prods_from_k_plus_1;
-  Tensor omitted_products;
-  for (int k = 0; k < dim_size; ++k) {
-    if (k == 0) {
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
-      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
-    } else if (k == dim_size - 1) {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      omitted_products = prods_until_k;
-    } else {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
-      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
-      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
-    }
-
-    // At this point omitted_products is the same size
-    // as input, except on the dimension dim where it's
-    // dim_size - k
-    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
-
-    grad_input.select(dim, k).copy_(
-        at::sum(grad.slice(dim, k) * omitted_products,dim));
-  }
-
-  return grad_input;
-}
-
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, optional<ScalarType> dtype) {
-  return cumprod_backward(grad.to(input.scalar_type()), input, dim);
-}
-
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
 }
@@ -499,22 +364,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
-}
-
-Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
-  if (input.numel() == 0) {
-    return input;
-  }
-  auto result = at::zeros(input.sizes(), input.options());
-  return result.scatter_add_(dim, indices, grad);
-}
-
-Tensor cummin_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
-  if (input.numel() == 0) {
-    return input;
-  }
-  auto result = at::zeros(input.sizes(), input.options());
-  return result.scatter_add_(dim, indices, grad);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -742,17 +591,6 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
-Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
-  if (sizes.size() != 2) {
-    throw std::runtime_error("expected matrix input");
-  }
-
-  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
-  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
-  grad_input.index_fill_(0, indices, grad);
-  return grad_input.view(sizes);
-}
-
 Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }
@@ -930,15 +768,6 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 
-Tensor infinitely_differentiable_gelu_backward(
-    const Tensor& grad,
-    const Tensor& self) {
-  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
-}
-
 Tensor infinitely_differentiable_silu_backward(
     const Tensor& grad_output,
     const Tensor& input) {
@@ -1100,28 +929,6 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
   return (r * grad).sum();
-}
-
-Tensor diag_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
-  }
-
-  // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
-}
-
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(offset, dim1, dim2);
-  diag.copy_(grad);
-  return grad_input;
 }
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
