@@ -16795,24 +16795,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
-    @onlyCPU
     @dtypes(torch.bfloat16, torch.float)
     def test_div(self, device, dtype):
-        m1 = torch.randn(10, 10, dtype=torch.float, device=device).to(dtype=dtype)
-        res1 = m1.clone()
-        res1[:, 3].div_(2)
-        res2 = m1.clone()
-        for i in range(m1.size(0)):
-            res2[i, 3] = res2[i, 3] / 2
-        self.assertEqual(res1, res2)
+        for op, method, inplace in ((torch.div, torch.Tensor.div, torch.Tensor.div_),
+                                    (torch.true_divide, torch.Tensor.true_divide,
+                                     torch.Tensor.true_divide_)):
+            m1 = torch.randn(10, 10, dtype=torch.float, device=device).to(dtype=dtype)
+            res1 = m1.clone()
+            inplace(res1[:, 3], 2)
+            res2 = m1.clone()
+            for i in range(m1.size(0)):
+                res2[i, 3] = res2[i, 3] / 2
+            self.assertEqual(res1, res2)
 
-        if dtype == torch.bfloat16:
-            a1 = torch.tensor([4.2, 6.2], dtype=dtype, device=device)
-            a2 = torch.tensor([2., 2.], dtype=dtype, device=device)
-            self.assertEqual(a1 / a2,
-                             torch.tensor([2.1, 3.1], dtype=dtype, device=device),
-                             atol=0.01, rtol=0)
-            self.assertEqual(a1.div(a2), a1 / a2)
+            if dtype == torch.bfloat16:
+                a1 = torch.tensor([4.2, 6.2], dtype=dtype, device=device)
+                a2 = torch.tensor([2., 2.], dtype=dtype, device=device)
+                self.assertEqual(op(a1, a2),
+                                 torch.tensor([2.1, 3.1], dtype=dtype, device=device),
+                                 atol=0.01, rtol=0)
+                self.assertEqual(method(a1, a2), op(a1, a2))
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -17864,7 +17866,7 @@ else:
 
     @onlyCPU
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_div_zero(self, device, dtype):
+    def test_floor_divide_zero(self, device, dtype):
         a = torch.tensor([0, 1], dtype=dtype, device=device)
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
