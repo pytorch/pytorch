@@ -2571,14 +2571,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _smooth_l1_loss(input, target, beta=1.0):
-    # type: (Tensor, Tensor, float) -> Tensor
-    t = torch.abs(input - target)
-    return torch.where(t < beta, 0.5 * t ** 2 / beta, t - 0.5 * beta)
-
-
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', beta=1.0):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, Optional[float]) -> Tensor
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below beta and an L1 term otherwise.
 
