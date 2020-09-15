@@ -88,5 +88,6 @@ CAFFE_KNOWN_TYPE(c10::qint8)
 CAFFE_KNOWN_TYPE(c10::quint8)
 CAFFE_KNOWN_TYPE(c10::qint32)
 CAFFE_KNOWN_TYPE(at::BFloat16)
+CAFFE_KNOWN_TYPE(c10::quint4x2)
 
 } // namespace caffe2

@@ -38,7 +38,8 @@ namespace c10 {
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
-  _(at::BFloat16, BFloat16) /* 15 */
+  _(at::BFloat16, BFloat16) /* 15 */                     \
+  _(c10::quint4x2, QUInt4x2) /* 16 */
 
 
 // If you want to support ComplexHalf for real, add ComplexHalf
@@ -154,7 +155,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 #define AT_FORALL_QINT_TYPES(_)  \
   _(c10::qint8, QInt8)           \
   _(c10::quint8, QUInt8)         \
-  _(c10::qint32, QInt32)
+  _(c10::qint32, QInt32)         \
+  _(c10::quint4x2, QUInt4x2)
 
 #define AT_FORALL_COMPLEX_TYPES(_)             \
   _(c10::complex<float>, ComplexFloat)         \
@@ -279,7 +281,7 @@ static inline bool isComplexType(ScalarType t) {
 
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
-  return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
+  return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32 || t == ScalarType::QUInt4x2;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
@@ -303,6 +305,8 @@ static inline ScalarType toUnderlying(ScalarType t) {
       return ScalarType::Char;
     case ScalarType::QInt32:
       return ScalarType::Int;
+    case ScalarType::QUInt4x2:
+      return ScalarType::Byte;
     default:
       return t;
   }

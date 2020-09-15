@@ -77,6 +77,12 @@ using dequantize_tensor_per_channel_float_qparams_fn = void (*)(
     Tensor zero_points,
     int64_t axis);
 
+using quantize_tensor_per_tensor_affine_sub_byte_fn =
+    void (*)(Tensor rtensor, Tensor qtensor, float scale, float zero_point);
+
+using dequantize_tensor_per_tensor_affine_sub_byte_fn =
+    void (*)(Tensor qtensor, Tensor rtensor, float scale, float zero_point);
+
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,
     quantize_tensor_per_tensor_affine_stub);
@@ -97,6 +103,13 @@ DECLARE_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_fn,
     dequantize_tensor_per_channel_float_qparams_stub);
 
+DECLARE_DISPATCH(
+    quantize_tensor_per_tensor_affine_sub_byte_fn,
+    quantize_tensor_per_tensor_affine_sub_byte_stub);
+
+DECLARE_DISPATCH(
+    dequantize_tensor_per_tensor_affine_sub_byte_fn,
+    dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>

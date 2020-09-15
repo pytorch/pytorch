@@ -10,7 +10,7 @@ namespace native {
 // format of the output the same as input
 Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(
         self.sizes(),
         self.options().dtype(UNDERLYING_TYPE),

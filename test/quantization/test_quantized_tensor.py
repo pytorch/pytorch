@@ -103,6 +103,36 @@ class TestQuantizedTensor(TestCase):
                                  "quantization_scheme=torch.per_tensor_affine, " +
                                  "scale=1.0, zero_point=2)")
 
+    def test_qtensor_sub_byte(self):
+        num_elements = 10
+        scale = 1.0
+        zero_point = 2
+        for dtype in [torch.quint4x2]:
+            r = torch.ones(num_elements, dtype=torch.float)
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            self.assertEqual(qr.q_scale(), scale)
+            self.assertEqual(qr.q_zero_point(), zero_point)
+            self.assertTrue(qr.is_quantized)
+            self.assertFalse(r.is_quantized)
+            self.assertEqual(qr.storage().size(), 5)
+
+            int_repr = qr.int_repr()
+            for num in int_repr[0:5]:
+                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+
+            # Test tensor creation
+            q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
+                                              dtype=torch.quint4x2)
+            self.assertEqual(q.storage().size(), 5)
+
+            # Test save/load
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(qr, f)
+                f.seek(0)
+                loaded_q = torch.load(f)
+                loaded_int_repr = loaded_q.int_repr()[0:5]
+                self.assertEqual(int_repr[0:5], loaded_int_repr)
+
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
         # item
@@ -216,15 +246,10 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint32)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2]:
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 

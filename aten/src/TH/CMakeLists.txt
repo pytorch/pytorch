@@ -65,6 +65,7 @@ install(FILES
   THGenerateComplexTypes.h
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
+  THGenerateQUInt4x2Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
