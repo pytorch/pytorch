@@ -295,6 +295,7 @@ def valid_default_value_expr(expr):
     is_valid = not (expr.kind() == TokenKind.ListLiteralKind or expr.kind() == TokenKind.DictLiteralKind)
     is_valid &= not expr.kind() == TokenKind.VarKind
 
+    # If expr is a tuple literal, recursively process each tuple element to check that it is valid.
     if expr.kind() == TokenKind.TupleLiteralKind:
         for elem in expr.inputs():
             is_valid &= valid_default_value_expr(elem)

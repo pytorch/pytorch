@@ -1175,17 +1175,13 @@ else:
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
-
     .. warning::
-
         torch.norm is deprecated and may be removed in a future PyTorch release.
         Use :func:`torch.linalg.norm` instead.
-
     Args:
         input (Tensor): the input tensor
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
-
             =====  ============================  ==========================
             ord    matrix norm                   vector norm
             =====  ============================  ==========================
@@ -1194,7 +1190,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             'nuc'  nuclear norm                  --
             Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
             =====  ============================  ==========================
-
         dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
             vector norm will be calculated, if it is 2-tuple of ints, matrix norm
             will be calculated. If the value is None, matrix norm will be calculated
@@ -1210,10 +1205,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
-
-
     Example::
-
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
@@ -1329,6 +1321,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
 
     raise RuntimeError('Unknown norm type')
+
 
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed

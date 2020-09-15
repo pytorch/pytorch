@@ -192,95 +192,7 @@ c10::optional<IValue> tryCalculateDefaultParam(
     return c10::nullopt;
   }
 }
-
-// An overloaded function may have a default that does not subtype all overloads
-// @overload
-// def foo(x: str)
-// def foo(x=1)
-FunctionDefaults calcOverloadedFunctionDefaults(
-    const FunctionSchema& schema,
-    const FunctionDefaults& defaults) {
-  FunctionDefaults updated_defaults;
-  for (const auto& arg : schema.arguments()) {
-    const std::string& arg_name = arg.name();
-    auto value = defaults.find(arg_name);
-    if (value == defaults.end()) {
-      continue;
-    }
-    auto maybe_ivalue = tryCalculateDefaultParam(arg, value->second);
-    if (maybe_ivalue) {
-      updated_defaults[arg_name] = value->second;
-    }
-  }
-  return updated_defaults;
-}
 } // namespace
-
-bool checkMutableFunctionDefault(const py::object& def_arg) {
-  if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
-    return true;
-  }
-  if (py::isinstance<py::tuple>(def_arg)) {
-    auto pytuple = def_arg.cast<py::tuple>();
-    for (py::handle t : pytuple) {
-      py::object obj = py::reinterpret_borrow<py::object>(t);
-      if (checkMutableFunctionDefault(obj)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-void checkMutableFunctionDefault(
-    const SourceRange& range,
-    const Argument& arg,
-    const py::object& def_arg) {
-  if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
-    throw ErrorReport(range)
-        << "Mutable default parameters are not supported because Python binds them to the function"
-        << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
-        << " the default parameter within the body of the function. Found "
-        << def_arg.get_type() << " on parameter " << arg.name();
-  }
-}
-
-FunctionSchema getSchemaWithNameAndDefaults(
-    const SourceRange& range,
-    const FunctionSchema& schema,
-    const at::optional<std::string>& new_name,
-    const FunctionDefaults& default_args) {
-  std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments()) {
-    auto it = default_args.find(arg.name());
-    if (it != default_args.end()) {
-      checkMutableFunctionDefault(range, arg, it->second);
-      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
-      if (!value) {
-        ErrorReport error(range);
-        error << "Expected a default value of type " << arg.type()->repr_str()
-              << " on parameter \"" << arg.name() << "\".";
-        if (arg.is_inferred_type()) {
-          error << "Because \"" << arg.name()
-                << "\" was not annotated with an explicit type "
-                << "it is assumed to be type 'Tensor'.";
-        }
-        throw error;
-      }
-      new_args.emplace_back(
-          arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
-    } else {
-      new_args.push_back(arg);
-    }
-  }
-  return FunctionSchema(
-      new_name.value_or(schema.name()),
-      schema.overload_name(),
-      new_args,
-      schema.returns(),
-      schema.is_vararg(),
-      schema.is_varret());
-}
 
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
@@ -316,10 +228,12 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     auto impl_type = impl_params[i].type();
     auto impl_default = impl_params[i].defaultValue();
 
-    // If the overload has no default value but the impl does, copy it
-    // over if the types match.
+    // Check to see if a default value needs to be copied from the
+    // implementation.
     bool add_default = false;
     if (!overload_default.present() && impl_default.present()) {
+      // Case 1: The parameter is annotated with the same type on both the
+      // overload and implementation.
       if (impl_type.present() && overload_type.present() &&
           impl_type.get().kind() == TK_VAR &&
           overload_type.get().kind() == TK_VAR) {
@@ -329,22 +243,30 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
         if (impl_ty.name().name() == overload_ty.name().name()) {
           add_default = true;
         }
+        // Case 2: The parameter is annotated with a type on the overload and
+        // there is a default value on the implementation.
       } else if (overload_type.present() && impl_default.present()) {
         auto overload_ty = Var(overload_type.get());
+        // Type on overload is float and default value is a float literal.
         bool float_and_const = impl_default.get().kind() == TK_CONST &&
             Const(impl_default.get()).isFloatingPoint() &&
             overload_ty.name().name() == FloatType::get()->annotation_str();
+        // Type on overload is int and default value is an int literal.
         bool int_and_const = impl_default.get().kind() == TK_CONST &&
             Const(impl_default.get()).isIntegral() &&
             overload_ty.name().name() == IntType::get()->annotation_str();
+        // Type on overload is str and default value is a string literal.
         bool str_and_literal = impl_default.get().kind() == TK_STRINGLITERAL &&
             overload_ty.name().name() == StringType::get()->annotation_str();
+        // If any of the three things above is true, the default value needs to
+        // be copied from the implementation.
         if (float_and_const || int_and_const || str_and_literal) {
           add_default = true;
         }
       }
     }
 
+    // Add overloaded param with default from implementation if necessary.
     if (!add_default) {
       adjusted_params.push_back(overload_params[i]);
     } else {
