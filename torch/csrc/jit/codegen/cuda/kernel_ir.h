@@ -391,7 +391,12 @@ class TORCH_CUDA_API TernaryOp : public Expr {
 
 class TORCH_CUDA_API ReductionOp : public Expr {
  public:
-  ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
+  ReductionOp(
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in,
+      Bool* pred = nullptr);
 
   Val* out() const {
     return out_;
@@ -403,6 +408,10 @@ class TORCH_CUDA_API ReductionOp : public Expr {
 
   Val* init() const {
     return init_;
+  }
+
+  Bool* pred() const {
+    return pred_;
   }
 
   BinaryOpType getReductionOpType() const {
@@ -420,6 +429,7 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  Bool* const pred_ = nullptr;
 };
 
 class TORCH_CUDA_API TensorIndex : public Val {
@@ -668,7 +678,8 @@ class TORCH_CUDA_API GridReduction : public Expr {
   GridReduction(
       ReductionOp* reduction_op,
       Allocate* reduction_buffer,
-      Allocate* sync_buffer);
+      Allocate* sync_buffer,
+      Bool* pred = nullptr);
 
   ReductionOp* reduction_op() const {
     return reduction_op_;
@@ -682,6 +693,10 @@ class TORCH_CUDA_API GridReduction : public Expr {
     return sync_buffer_;
   }
 
+  Bool* pred() const {
+    return pred_;
+  }
+
   static std::string getPredicateFlagName(const TensorView* val);
   static std::string getPredicateFlagName(const fuser::TensorView* val);
 
@@ -689,6 +704,7 @@ class TORCH_CUDA_API GridReduction : public Expr {
   ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
+  Bool* pred_ = nullptr;
 };
 
 // Simple classification helpers

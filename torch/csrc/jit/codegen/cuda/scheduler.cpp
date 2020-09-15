@@ -30,24 +30,52 @@ std::vector<int> reductionAxes(TensorView* tv) {
   return reduction_axes;
 }
 
-// coalesces all reduction to the right side and returns total number of
+// Merge all reduction to the right side and returns total number of
 // reduction axes
-size_t coalescReduction(TensorView* tv) {
-  auto reduction_axes = reductionAxes(tv);
-  size_t n_dims = tv->nDims();
-  std::unordered_map<int, int> coalesc_permute;
-  for (size_t i = 0; i < reduction_axes.size(); i++) {
-    size_t new_pos = i + n_dims - reduction_axes.size();
-    if ((int)new_pos == reduction_axes[i]) {
-      break;
+size_t mergeReduction(TensorView* tv) {
+  int prev_i = -1;
+  size_t num_merged = 0;
+  for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
+    if (!tv->axis(i)->isReduction()) {
+      continue;
+    }
+    if (prev_i == -1) {
+      prev_i = i;
     } else {
-      coalesc_permute[reduction_axes[i]] = new_pos;
+      tv->merge(i, prev_i);
+      prev_i = i;
+      num_merged++;
     }
   }
-  if (!coalesc_permute.empty()) {
-    tv->reorder(coalesc_permute);
+  if (prev_i == 0) {
+    tv->reorder({{prev_i, -1}});
   }
-  return reduction_axes.size();
+
+  return prev_i == -1 ? 0 : num_merged + 1;
+}
+
+// merge all non-reduction axes to the left side and returns total number of
+// iteration axes
+size_t mergeNonReduction(TensorView* tv) {
+  int prev_i = -1;
+  size_t num_merged = 0;
+  for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
+    if (tv->axis(i)->isReduction()) {
+      continue;
+    }
+    if (prev_i == -1) {
+      prev_i = i;
+    } else {
+      tv->merge(i, prev_i);
+      prev_i = i;
+      num_merged++;
+    }
+  }
+  if (prev_i != 0) {
+    tv->reorder({{prev_i, 0}});
+  }
+
+  return prev_i == -1 ? 0 : num_merged + 1;
 }
 
 } // namespace
@@ -57,158 +85,55 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
   FusionGuard fg(fusion);
   // maybe has_reduction for scheudling should be done on a per output tensor
   // basis.
-  const bool has_reduction = fusion->hasReduction();
+  TORCH_INTERNAL_ASSERT(
+      !fusion->hasReduction(), "This scheduler only handles pointwise ops.");
   const bool disable_unroll = fusion->isStochastic();
   bool fcd_reduction = false;
 
   for (auto out_val : fusion->outputs()) {
     auto out = out_val->as<TensorView>();
-    if (has_reduction) {
-      // TODO: this scheduling only works for a single reduction operation in
-      //       the fusion, in this case we can coalesc all reduction axes and
-      //       merge them together. (same applies to iteration axes)
-      // TODO: does this work for multiple outputs?
 
-      // query if fastest changing dimension (FCD) is a reduction
-      fcd_reduction = out->axis((int)out->nDims() - 1)->isReduction();
-
-      // We coalesc all reduction axes to the right;
-      size_t num_reduction_axes = coalescReduction(out);
-
-      // Merge all iteration dimensions
-      while (out->nDims() > num_reduction_axes + 1) {
-        // we merge the last two iterative axes;
-        out->merge(static_cast<int>(out->nDims() - num_reduction_axes) - 2);
-      }
-      // Merge all reduction dimensions
-      while (out->nDims() > 2) {
-        out->merge(-2, -1);
-      }
-    } else {
-      // Merge all dimensions because we're only supporting pointwise
-      while (out->nDims() > 1)
-        out->merge(-2, -1);
+    // Merge all dimensions because we're only supporting pointwise
+    while (out->nDims() > 1) {
+      out->merge(-2, -1);
     }
   }
 
-  if (has_reduction) {
-    // Run through outputs, grab all inputs of outputs
-    // squeeze with computeAt to set overall structure.
-    for (auto output : fusion->outputs()) {
-      if (output->getValType() != ValType::TensorView)
-        continue;
-      TensorView* out_tv = output->as<TensorView>();
+  // Run through outputs, grab all inputs of outputs
+  // squeeze with computeAt to set overall structure.
+  for (auto output : fusion->outputs()) {
+    if (output->getValType() != ValType::TensorView)
+      continue;
+    TensorView* out_tv = output->as<TensorView>();
 
-      // launch configuratoin.
-      TensorView* intermediate = nullptr;
-      if (fcd_reduction) {
-        out_tv->split(-1, kFcdReductionThreadX);
-        // necessary to avoid dynamic allocation on intermediates;
-        intermediate = out_tv->rFactor({-2});
-      } else {
-        // TODO: we don't need a full warp here, this should be determined by
-        //       element data type
-        out_tv->split(0, kNonFcdReductionThreadX);
-        out_tv->split(
-            -1, kNonFcdReductionThreadY); // necessary to avoid dynamic
-                                          // allocation on intermediates;
-        intermediate = out_tv->rFactor({-2});
-      }
-      for (Val* inp : fusion->inputsOf(output)) {
-        // scheduling of inputs shouldn't change with different fcd_reduction
-        if (inp->getValType().value() == ValType::TensorView) {
-          inp->as<TensorView>()->computeAt(intermediate, -1);
-        }
-      }
-      // scheduling of inputs shouldn't change with different fcd_reduction
-      intermediate->computeAt(out_tv, -2);
-      if (fcd_reduction) {
-        out_tv->axis(0)->parallelize(ParallelType::BIDx);
-      } else {
-        out_tv->axis(0)->parallelize(ParallelType::BIDx);
-        out_tv->axis(1)->parallelize(ParallelType::TIDx);
-      }
+    // Split into 128 which will be bockDim.x
+    out_tv->split(0, kPwThreadX);
+    // Split by another 4 which will be our unroll factor
+    auto ur_factor = disable_unroll ? 1 : kUnrollFactor;
+    if (!disable_unroll) {
+      out_tv->split(0, ur_factor);
     }
-    // Run through all values, unroll, and bind their axes
-    for (auto val : fusion->vals()) {
-      if (val->getValType().value() != ValType::TensorView ||
-          fusion->hasInput(val))
-        continue;
-      TensorView* tv = val->as<TensorView>();
-      if (fcd_reduction) {
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      } else {
-        tv->axis(-1)->parallelize(ParallelType::TIDy);
-      }
-    }
+  }
 
-    TensorView* out0 = fusion->outputs()[0]->as<TensorView>();
-    int ndim = (int)out0->nDims();
-    Val* numel = new Int(1);
-    for (int i = 0; i < ndim; i++) {
-      if (out0->axis(i)->isBlockDim()) {
-        numel = mul(numel, out0->axis(i)->rawExtent());
-      }
+  for (auto output : fusion->outputs()) {
+    if (output->getValType() != ValType::TensorView)
+      continue;
+    TensorView* out_tv = output->as<TensorView>();
+    for (Val* inp : fusion->inputsOf(output)) {
+      if (inp->getValType().value() == ValType::TensorView)
+        inp->as<TensorView>()->computeAt(out_tv, -1);
     }
-  } else {
-    // Run through outputs, grab all inputs of outputs
-    // squeeze with computeAt to set overall structure.
-    for (auto output : fusion->outputs()) {
-      if (output->getValType() != ValType::TensorView)
-        continue;
-      TensorView* out_tv = output->as<TensorView>();
+    out_tv->axis(0)->parallelize(ParallelType::BIDx);
+    out_tv->axis(1)->parallelize(ParallelType::Unroll);
+    out_tv->axis(2)->parallelize(ParallelType::TIDx);
+  }
 
-      // Split into 128 which will be bockDim.x
-      out_tv->split(0, kPwThreadX);
-      // Split by another 4 which will be our unroll factor
-      auto ur_factor = disable_unroll ? 1 : kUnrollFactor;
-      if (!disable_unroll) {
-        out_tv->split(0, ur_factor);
-      }
-    }
-
-    for (auto output : fusion->outputs()) {
-      if (output->getValType() != ValType::TensorView)
-        continue;
-      TensorView* out_tv = output->as<TensorView>();
-      for (Val* inp : fusion->inputsOf(output)) {
-        if (inp->getValType().value() == ValType::TensorView)
-          inp->as<TensorView>()->computeAt(out_tv, -1);
-      }
-      out_tv->axis(0)->parallelize(ParallelType::BIDx);
-      out_tv->axis(1)->parallelize(ParallelType::Unroll);
-      out_tv->axis(2)->parallelize(ParallelType::TIDx);
-    }
-
-    // Run through all values, unroll, and bind their axes
-    for (auto val : fusion->vals()) {
-      if (val->getValType().value() != ValType::TensorView ||
-          fusion->hasInput(val))
-        continue;
-      TensorView* tv = val->as<TensorView>();
-
-      // Disabling below as currently unrolling doesn't make a lot of sense as
-      // we don't extract global loads/reads out of intermediate logic.
-      //
-      // Below check should be true for all intermediates, but if one isn't
-      // hooked up right, skip it and hope for the best for now
-      //
-      // if (!disable_unroll && tv->nDims() == 3) {
-      //   tv->axis(-2)->parallelize(ParallelType::Unroll);
-      //   tv->axis(-1)->parallelize(ParallelType::TIDx);
-      // } else {
-      //   if (tv->nDims() == 2)
-      //     tv->axis(-1)->parallelize(ParallelType::TIDx);
-      // }
-    }
-    TensorView* out0 = fusion->outputs()[0]->as<TensorView>();
-    int ndim = (int)out0->nDims();
-    Val* numel = new Int(1);
-    for (int i = 0; i < ndim; i++) {
-      if (out0->axis(i)->isBlockDim()) {
-        numel = mul(numel, out0->axis(i)->rawExtent());
-      }
-    }
+  // Run through all values, unroll, and bind their axes
+  for (auto val : fusion->vals()) {
+    if (val->getValType().value() != ValType::TensorView ||
+        fusion->hasInput(val))
+      continue;
+    TensorView* tv = val->as<TensorView>();
   }
   return true;
 }
@@ -374,7 +299,8 @@ ReductionParams reductionHeuristic(
 c10::optional<ReductionParams> scheduleReduction(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
-    TensorView* red_tv) {
+    TensorView* red_tv,
+    std::vector<TensorView*> outs_of_red) {
   FusionGuard fg(fusion);
 
   if (!fusion->hasReduction()) {
@@ -384,7 +310,6 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv != nullptr, "Reduction TensorView wasn't found.");
   TORCH_INTERNAL_ASSERT(
       red_tv->hasReduction(), "TensorView doesn't have a reduction.");
-
   const auto red_expr = fusion->origin(red_tv);
 
   TORCH_INTERNAL_ASSERT(
@@ -396,15 +321,12 @@ c10::optional<ReductionParams> scheduleReduction(
       red_tv->axis(static_cast<int>(red_tv->nDims()) - 1)->isReduction();
 
   // We coalesc all reduction axes to the right;
-  const size_t num_reduction_axes = coalescReduction(red_tv);
+  const size_t num_reduction_axes = mergeReduction(red_tv);
 
   // Merge all iteration dimensions
-  while (red_tv->nDims() > num_reduction_axes + 1) {
-    red_tv->merge(static_cast<int>(red_tv->nDims() - num_reduction_axes) - 2);
-  }
-  // Merge all reduction dimensions
-  while (red_tv->nDims() > 2) {
-    red_tv->merge(-2, -1);
+  mergeNonReduction(red_tv);
+  for (auto iter_tv : outs_of_red) {
+    mergeNonReduction(iter_tv);
   }
 
   StatefulExpressionEvaluator evaluator(
@@ -412,13 +334,17 @@ c10::optional<ReductionParams> scheduleReduction(
 
   // Evaluate Dimensions of Reduction TensorView
   auto red_ids = red_tv->domain()->domain();
+
   TORCH_INTERNAL_ASSERT(
       red_ids.size() == 2, "We coalesced all dimensions into 2 previously.");
+
   const auto red_outputs = evaluator.inferValue(red_ids[0]->extent());
   const auto red_elems = evaluator.inferValue(red_ids[1]->extent());
+
   TORCH_INTERNAL_ASSERT(
       red_outputs != c10::nullopt,
       "The number of reduction outputs is expected.");
+
   TORCH_INTERNAL_ASSERT(
       red_elems != c10::nullopt,
       "The number of reduction elements is expected.");
@@ -446,6 +372,9 @@ c10::optional<ReductionParams> scheduleReduction(
       //       ----------------------------
       //       Output Dimensions
       red_tv->split(0, rparams.lparams.bdimy());
+      for (auto iter_tv : outs_of_red) {
+        iter_tv->split(0, rparams.lparams.bdimy());
+      }
 
       auto red_tv_rf = red_tv->rFactor({-3, -1});
 
@@ -461,11 +390,20 @@ c10::optional<ReductionParams> scheduleReduction(
       // Reduction Output Tensor:
       //      [Out-Leftover, Out-PerBlock, X-Warp]
       // Idx:       0              1       2(-1)
+      if (!outs_of_red.empty()) {
+        red_tv->computeAt(outs_of_red[0], -1);
+      }
 
       red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
       red_tv->axis(0)->parallelize(ParallelType::BIDx);
+      for (auto iter_tv : outs_of_red) {
+        iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+      }
       red_tv->axis(1)->parallelize(ParallelType::TIDy);
+      for (auto iter_tv : outs_of_red) {
+        iter_tv->axis(1)->parallelize(ParallelType::TIDy);
+      }
       red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
       // Bind Inputs to Reduction
@@ -503,9 +441,16 @@ c10::optional<ReductionParams> scheduleReduction(
         //      [Outputs, X-Grid, X-Block, X-Warp]
         // Idx:     0      1(-3)   2(-2)    3(-1)
 
+        if (!outs_of_red.empty()) {
+          red_tv->computeAt(outs_of_red[0], -1);
+        }
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        }
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::BIDy);
         red_tv->axis(-3)->parallelize(ParallelType::TIDy);
@@ -541,9 +486,16 @@ c10::optional<ReductionParams> scheduleReduction(
         //      [Outputs, X-Block, X-Warp]
         // Idx:     0      1(-2)    2(-1)
 
+        if (!outs_of_red.empty()) {
+          red_tv->computeAt(outs_of_red[0], -1);
+        }
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        }
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
 
@@ -583,6 +535,9 @@ c10::optional<ReductionParams> scheduleReduction(
         //       ----------------------------
         //       Output Dimensions
         red_tv->split(0, rparams.lparams.bdimx());
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->split(0, rparams.lparams.bdimx());
+        }
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
@@ -599,9 +554,18 @@ c10::optional<ReductionParams> scheduleReduction(
         //      [Out-Leftover, Out-PerBlock, X-Block, X-Grid]
         // Idx:       0              1        2(-2)   3(-1)
 
+        if (!outs_of_red.empty()) {
+          red_tv->computeAt(outs_of_red[0], -1);
+        }
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+          iter_tv->axis(1)->parallelize(ParallelType::TIDx);
+        }
+
         red_tv->axis(-3)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
         red_tv->axis(-1)->parallelize(ParallelType::BIDy);
@@ -637,6 +601,9 @@ c10::optional<ReductionParams> scheduleReduction(
         //       ----------------------------
         //       Output Dimensions
         red_tv->split(0, rparams.lparams.bdimx());
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->split(0, rparams.lparams.bdimx());
+        }
 
         auto red_tv_rf = red_tv->rFactor({-3, -1});
 
@@ -653,9 +620,17 @@ c10::optional<ReductionParams> scheduleReduction(
         //      [Out-Leftover, Out-PerBlock, X-Block]
         // Idx:       0              1        2(-1)
 
+        if (!outs_of_red.empty()) {
+          red_tv->computeAt(outs_of_red[0], -1);
+        }
+
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
         red_tv->axis(0)->parallelize(ParallelType::BIDx);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+          iter_tv->axis(1)->parallelize(ParallelType::TIDx);
+        }
         red_tv->axis(-2)->parallelize(ParallelType::TIDx);
         red_tv->axis(-1)->parallelize(ParallelType::TIDy);
 
@@ -668,8 +643,20 @@ c10::optional<ReductionParams> scheduleReduction(
       }
     } else {
       red_tv->split(0, rparams.lparams.bdimx());
-      red_tv->axis(0)->parallelize(ParallelType::TIDx);
-      red_tv->axis(1)->parallelize(ParallelType::BIDx);
+      for (auto iter_tv : outs_of_red) {
+        iter_tv->split(0, rparams.lparams.bdimx());
+      }
+
+      if (!outs_of_red.empty()) {
+        red_tv->computeAt(outs_of_red[0], -1);
+      }
+
+      red_tv->axis(0)->parallelize(ParallelType::BIDx);
+      red_tv->axis(1)->parallelize(ParallelType::TIDx);
+      for (auto iter_tv : outs_of_red) {
+        iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        iter_tv->axis(1)->parallelize(ParallelType::TIDx);
+      }
 
       for (auto input : fusion->inputsOf(red_tv)) {
         if (input->getValType().value() == ValType::TensorView) {

@@ -673,6 +673,44 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
     @skipIfRocm
+    def test_reduction_dtype(self):
+        def t(x: torch.Tensor):
+            o = torch.mul(x, 1.0)
+            o = torch.sum(o, dim=[2], dtype=torch.float32)
+            return o
+        t_jit = torch.jit.script(t)
+
+        x = torch.randn(8, 4, 16, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+        self.assertGraphContains(t_jit.graph_for(x), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_reduction_half(self):
+        def t(x: torch.Tensor):
+            o = torch.mul(x, 1.0)
+            o = torch.sum(o, dim=[2])
+            return o
+
+        t_jit = torch.jit.script(t)
+        x = torch.randn(8, 4, 16, dtype=torch.float16, device="cuda")
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+        self.assertGraphContains(t_jit.graph_for(x), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
     def test_pw_single_reduction_partition(self):
         sizes = [8, 8, 8]
         dtype = torch.float
