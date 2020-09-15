@@ -228,6 +228,8 @@ class ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  c10::intrusive_ptr<ProcessGroup::Work> test_throw_exception_work() override;
+
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
 

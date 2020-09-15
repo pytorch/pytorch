@@ -2071,7 +2071,23 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   return work;
 }
 
+class JustExceptionWork : public ProcessGroupGloo::AsyncWork {
+  public: 
+  JustExceptionWork() {}
+
+  void run() override {
+    throw std::runtime_error("Intended exception from work for testing only.");
+  }
+};
+
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::test_throw_exception_work() {
+  auto work = c10::make_intrusive<JustExceptionWork>();
+  enqueue(work);
+  return work;
+}
+
 namespace {
+
 
 class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
  public:

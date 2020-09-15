@@ -491,6 +491,7 @@ for name in dir(_C._VariableFunctions):
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
+from torch._classes import classes
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
 from .functional import *
@@ -560,7 +561,6 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops
-from torch._classes import classes
 
 # Import the quasi random sampler
 import torch.quasirandom

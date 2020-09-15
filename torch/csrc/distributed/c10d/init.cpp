@@ -901,6 +901,9 @@ static auto fileStore_torchbind =
   torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
     .def(torch::init<std::string, int64_t>());
 
+static auto processGroupExceptionPtr_torchbind =
+  torch::class_<::c10d::ProcessGroupExceptionPtr>("dist_c10d", "ProcessGroupExceptionPtr");
+
 // Torchbind the ProcessGroup to make it available in TorchScript
 static auto processGroupWork_torchbind =
   torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
@@ -913,7 +916,8 @@ static auto processGroupWork_torchbind =
     .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
 
 static auto processGroup_torchbind =
-  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup")
+  .def("test_throw_exception_work", &::c10d::ProcessGroup::test_throw_exception_work);
 
 //static auto processGroupGloo_torchbind =
   //torch::class_<::c10d::ProcessGroupGloo>("dist_c10d", "ProcessGroupGloo")

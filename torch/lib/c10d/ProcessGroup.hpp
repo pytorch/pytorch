@@ -214,6 +214,10 @@ class ProcessGroup : public torch::CustomClassHolder{
   virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
+  virtual c10::intrusive_ptr<ProcessGroup::Work> test_throw_exception_work() {
+    throw std::runtime_error("not overridden");
+  }
+
  protected:
   const int rank_;
   const int size_;

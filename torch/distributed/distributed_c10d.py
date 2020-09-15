@@ -1950,6 +1950,10 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
+def just_exception(group: torch.classes.dist_c10d.ProcessGroup):
+    return group.test_throw_exception_work()
+
+
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     """
     Creates a new distributed group.
