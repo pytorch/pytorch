@@ -10,7 +10,7 @@ import numpy
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
-
+from torch.onnx.utils import _add_block, _add_node_to_block, _add_input_to_block, _add_output_to_block
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -727,6 +727,7 @@ def flatten(g, input, start_dim, end_dim):
         end_dim = dim + end_dim
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
+
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,

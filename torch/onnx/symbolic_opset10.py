@@ -11,7 +11,6 @@ from sys import maxsize
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
-from torch.onnx.utils import _add_block, _add_node_to_block, _add_input_to_block, _add_output_to_block
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
