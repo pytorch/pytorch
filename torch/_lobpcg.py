@@ -62,7 +62,7 @@ def _polynomial_coefficients_given_roots(roots):
         # of operations on memory copies imitating the Horner's method.
         # The memory copies are required to construct nodes in the computational graph
         # by exploting the explicit (not in-place, separate node for each step)
-        # nature of the Horner's method.
+        # recursion of the Horner's method.
         # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
         poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
         out = poly_coeffs_new.narrow(-1, poly_order - i, i + 1)
@@ -213,7 +213,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # Note, however, for better performance we use the Horner's rule
     chr_poly_D_at_A = _matrix_polynomial_value(chr_poly_D, A)
 
-    # compute the action of `chr_poly_D_at_A` restricted to U_ortho
+    # compute the action of `chr_poly_D_at_A` restricted to U_ortho_t
     chr_poly_D_at_A_to_U_ortho = torch.matmul(
         U_ortho_t,
         torch.matmul(
