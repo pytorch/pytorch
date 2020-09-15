@@ -63,6 +63,7 @@ constexpr size_t kSmallBuffer = 2097152;    // "small" allocations are packed in
 constexpr size_t kLargeBuffer = 20971520;   // "large" allocations may be packed in 20 MiB blocks
 constexpr size_t kMinLargeAlloc = 10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152;     // round up large allocs to 2 MiB
+constexpr size_t kLargeSize = 209715200;    // largest "large" alloc, "oversize" is not splitable
 
 typedef std::bitset<static_cast<size_t>(StatType::NUM_TYPES)> StatTypes;
 
@@ -166,9 +167,9 @@ struct AllocParams {
     block(nullptr),
     err(cudaSuccess) {}
 
-  int device() { return search_key.device; }
-  cudaStream_t stream() { return search_key.stream; }
-  size_t size() { return search_key.size; }
+  int device() const { return search_key.device; }
+  cudaStream_t stream() const { return search_key.stream; }
+  size_t size() const { return search_key.size; }
 
   Block search_key;
   BlockPool* pool;
@@ -232,8 +233,10 @@ class DeviceCachingAllocator {
       || (trigger_free_memory_callbacks(params) && get_free_block(params))
       // Attempt allocate
       || alloc_block(params, false)
+      // Free one non-split cached block of sufficient size and retry alloc.
+      || (release_cached_block(params) && alloc_block(params, false))
       // Free all non-split cached blocks and retry alloc.
-      || (free_cached_blocks() && alloc_block(params, true));
+      || (release_cached_blocks() && alloc_block(params, true));
 
     TORCH_INTERNAL_ASSERT((!block_found && params.err != cudaSuccess) || params.block);
     if (!block_found) {
@@ -376,7 +379,7 @@ class DeviceCachingAllocator {
   /** returns cached blocks to the system allocator **/
   void emptyCache() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    free_cached_blocks();
+    release_cached_blocks();
   }
 
   /** Retrieves info (total size + largest block) of the memory cache **/
@@ -588,7 +591,7 @@ class DeviceCachingAllocator {
     if (block->pool == &small_blocks) {
       return remaining >= kMinBlockSize;
     } else if (block->pool == &large_blocks) {
-      return remaining > kSmallSize;
+      return (size < kLargeSize) && (remaining > kSmallSize);
     } else {
       AT_ERROR("should_split: invalid pool");
     }
@@ -608,6 +611,12 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
     auto it = pool.lower_bound(&p.search_key);
     if (it == pool.end() || (*it)->stream != p.stream())
+      return false;
+    // Do not return an oversized block for a large request
+    if ((p.size() < kLargeSize) && ((*it)->size >= kLargeSize))
+      return false;
+    // Allow oversized block size to be rounded up but within a limit
+    if ((p.size() >= kLargeSize) && ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
     pool.erase(it);
@@ -645,37 +654,54 @@ class DeviceCachingAllocator {
     return (p.block != nullptr);
   }
 
-  bool free_cached_blocks()
+  bool release_cached_block(const AllocParams& p)
+  {
+    BlockPool& pool = *p.pool;
+    Block key = p.search_key;
+    key.size = (key.size < kLargeSize) ? kLargeSize : key.size;
+    auto it = pool.lower_bound(&key);
+    if (it == pool.end() || (*it)->stream != p.stream())
+      return false;
+    release_block(*it);
+    return true;
+  }
+
+  bool release_cached_blocks()
   {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
     synchronize_and_free_events();
 
     // Free all non-split cached blocks
-    free_blocks(large_blocks);
-    free_blocks(small_blocks);
+    release_blocks(large_blocks);
+    release_blocks(small_blocks);
     return true;
   }
 
-  void free_blocks(BlockPool& blocks)
+  void release_block(Block *block)
+  {
+    C10_CUDA_CHECK(cudaFree((void*)block->ptr));
+
+    StatTypes stat_types;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
+    update_stat_array(stats.segment, -1, stat_types);
+    update_stat_array(stats.reserved_bytes, -block->size, stat_types);
+
+    block->pool->erase(block);
+    delete block;
+  }
+
+  void release_blocks(BlockPool& blocks)
   {
     // Frees all non-split blocks
     auto it = blocks.begin();
     while (it != blocks.end()) {
       Block* block = *it;
       if (!block->prev && !block->next) {
-        C10_CUDA_CHECK(cudaFree((void*)block->ptr));
-
-        StatTypes stat_types;
-        stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-        stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
-        update_stat_array(stats.segment, -1, stat_types);
-        update_stat_array(stats.reserved_bytes, -block->size, stat_types);
-
         auto cur = it;
         ++it;
-        blocks.erase(cur);
-        delete block;
+       release_block(*cur);
       } else {
         ++it;
       }
