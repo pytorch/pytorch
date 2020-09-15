@@ -134,7 +134,7 @@ class Timer(object):
             # compared to the inner loop. This also serves as a warmup.
             while True:
                 time_taken = self._timer.timeit(number)
-                if check_cache_speedup:
+                if number == 1 and check_cache_speedup:
                     cache_speedup = uncached_time / (time_taken / number)
                 relative_overhead = overhead / time_taken
                 if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:

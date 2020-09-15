@@ -22,7 +22,7 @@ _IQR_WARN_THRESHOLD = 0.1
 _IQR_GROSS_WARN_THRESHOLD = 0.25
 
 _CACHE_SPEEDUP_THRESHOLD = 1.5
-_CACHE_SPEEDUP_MIN_SECONDS = 0.000005
+_CACHE_SPEEDUP_MIN_SECONDS = 5 / (1000.0 * 1000.0)
 
 class Measurement:
     """The result of a Timer measurement.
@@ -52,7 +52,6 @@ class Measurement:
         self.num_threads = num_threads
         self.stmt = stmt
         self.metadata = metadata
-        self._has_cache_warning = False
 
         # Derived attributes
         self._sorted_times = sorted([t / number_per_run for t in times])
@@ -88,16 +87,11 @@ class Measurement:
         self._cache_speedup = cache_speedup
         if cache_speedup < _CACHE_SPEEDUP_THRESHOLD:
             return
-        self._has_cache_warning = True
         self._warnings.append(
             "  WARNING: {}\n           {}\n".format(
                 'Runtime is impacted by CPU caching effects.',
                 'CPU Caching speeds up by about {:.2f}x.'.format(cache_speedup))
         )
-
-    @property
-    def has_cache_warning(self) -> bool:
-        return self._has_cache_warning
 
     def _populate_warnings(self):
         warnings, rel_iqr = [], self._iqr / self._median * 100
