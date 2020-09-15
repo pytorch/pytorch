@@ -7,6 +7,8 @@
 #include <c10/util/Half.h>
 #endif
 
+#include <c10/util/BFloat16.h>
+
 /* The largest consecutive integer representable in float32 (2^24) */
 #define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
@@ -34,6 +36,15 @@ template <typename T>
 __device__ __forceinline__ T doLdg(const T* p) {
 #if __CUDA_ARCH__ >= 350
   return __ldg(p);
+#else
+  return *p;
+#endif
+}
+
+template <>
+__device__ __forceinline__ c10::BFloat16 doLdg<c10::BFloat16>(const c10::BFloat16* p) {
+#if __CUDA_ARCH__ >= 350
+  return c10::BFloat16(__ldg(reinterpret_cast<const short *>(p)), c10::BFloat16::from_bits());
 #else
   return *p;
 #endif
