@@ -2,7 +2,7 @@
 
 This guide builds from source. For alternatives, refer to https://caffe2.ai/docs/getting-started.html
 
-Get latest source from GitHub.
+Get the latest source from GitHub.
 
     git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
@@ -62,7 +62,7 @@ To use Caffe2 in Python, you need two libraries, future and six.
 
     pip install future six
 
-To run the tutorials, download additional source from GitHub.
+To run the tutorials, download the additional sources from GitHub.
 
     git clone --recursive https://github.com/caffe2/tutorials.git caffe2_tutorials
     cd caffe2_tutorials
