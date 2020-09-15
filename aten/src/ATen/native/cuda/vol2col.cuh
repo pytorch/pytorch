@@ -104,7 +104,7 @@ void vol2col(
     T* data_col) {
   // We are going to launch channels * depth_col * height_col * width_col
   // kernels, each kernel responsible for copying a single-channel grid.
-  int num_kernels = channels * depth_col * height_col * width_col;
+  int64_t num_kernels = channels * depth_col * height_col * width_col;
   // Launch
   vol2col_kernel<<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>>(
       num_kernels,
