@@ -881,11 +881,18 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
                 return None
+            elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
+                return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
                 new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
                 for b in n.blocks():
                     new_block = new_node.addBlock()
+                    # Copy input metadata to subblock
+                    # This is for Loop only, since If only has a single input.
+                    for i, b_in in enumerate(b.inputs()):
+                        if i > 0 and (i + 1) < len(inputs):
+                            b_in.setType(inputs[i + 1].type())
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
                 # Process Loop and If after subblock is converted.

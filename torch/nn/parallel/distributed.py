@@ -192,7 +192,6 @@ class DistributedDataParallel(Module):
         parameters).
 
     .. warning::
-
         If you plan on using this module with a ``nccl`` backend or a ``gloo``
         backend (that uses Infiniband), together with a DataLoader that uses
         multiple workers, please change the multiprocessing start method to
@@ -589,7 +588,7 @@ class DistributedDataParallel(Module):
 
         if self.ddp_join_enabled:
             # Notify joined ranks whether they should sync in backwards pass or not.
-            self._check_global_requires_backward_grad_sync(call_from_joiner=False)
+            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
@@ -644,8 +643,8 @@ class DistributedDataParallel(Module):
 
     # When running in join mode, schedules an allreduce to notify joined ranks
     # of whether backwards pass synchronization will run this iteraton or not.
-    def _check_global_requires_backward_grad_sync(self, call_from_joiner):
-        if not call_from_joiner and self.require_backward_grad_sync:
+    def _check_global_requires_backward_grad_sync(self, is_joined_rank):
+        if not is_joined_rank and self.require_backward_grad_sync:
             requires_sync_tensor = torch.ones(1, device=self.device)
         else:
             requires_sync_tensor = torch.zeros(1, device=self.device)
@@ -824,11 +823,14 @@ class DistributedDataParallel(Module):
                             work,
                             should_sync_backwards_tensor,
                         ) = self._check_global_requires_backward_grad_sync(
-                            call_from_joiner=True
+                            is_joined_rank=True
                         )
                         work.wait()
                         # If nonzero, then we should sync in the bwd pass.
                         should_sync_backwards = should_sync_backwards_tensor.item() != 0
+                        # Forward param sync is disabled in the next iteration
+                        # if we are skipping grad sync this iteration. Hence, we
+                        # set require_forward_param_sync appropriately here.
                         self.require_forward_param_sync = should_sync_backwards
                         if not should_sync_backwards:
                             continue
