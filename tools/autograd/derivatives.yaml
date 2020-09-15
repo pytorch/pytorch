@@ -884,7 +884,7 @@
   self: zeros_like(grad)
 
 - name: reciprocal(Tensor self) -> Tensor
-  self: -grad * result * result
+  self: -grad * (result * result).conj()
 
 - name: remainder.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
