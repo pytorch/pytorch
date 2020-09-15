@@ -4112,19 +4112,19 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_scales
+    QuantizedCPU, QuantizedCUDA: q_per_channel_scales
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_zero_points
+    QuantizedCPU, QuantizedCUDA: q_per_channel_zero_points
 
 - func: q_per_channel_axis(Tensor self) -> int
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_axis
+    QuantizedCPU, QuantizedCUDA: q_per_channel_axis
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: full
