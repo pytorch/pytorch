@@ -283,6 +283,36 @@ static void sign_kernel(TensorIterator& iter){
   }
 }
 
+template<typename scalar_t>
+static scalar_t sinc_scalar(scalar_t a) {
+  constexpr auto pi = static_cast<scalar_t>(M_PI);
+  constexpr auto two = static_cast<scalar_t>(2);
+  if (std::isnan(a)) {
+    return a;
+  }
+  auto r = std::fmod(a, two);
+  if (r < 0.5) {
+    return std::sin(pi * r) / a;
+  }
+  else if (r > 1.5) {
+    return std::sin(pi * (r - 2)) / a;
+  }
+  else {
+    return std::sin(pi * (1 - r)) / a;
+  }
+}
+template<typename scalar_t>
+static std::complex<scalar_t> sinc_scalar<std::complex<scalar_t>>(std::complex<scalar_t> a) {
+  constexpr auto pi = static_cast<scalar_t>(M_PI);
+  return std::sin(pi * a) / a;
+}
+
+static void sinc_kernel(TensorIterator& iter){
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinc_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return sinc_scalar<scalar_t>(a); });
+  });
+}
+
 static void signbit_kernel(TensorIterator& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
@@ -630,6 +660,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
