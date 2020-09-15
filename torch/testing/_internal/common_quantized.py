@@ -2,25 +2,58 @@ r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+from contextlib import contextmanager
+
 import numpy as np
 import torch
-from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+from torch.backends.quantized import QuantizedEngine
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_PPC,
+    IS_WINDOWS,
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+    TEST_WITH_UBSAN,
+)
 
-supported_qengines = torch.backends.quantized.supported_engines
-supported_qengines.remove('none')
+
+supported_qengines = QuantizedEngine.supported_engines
+supported_qengines.remove("none")
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 # QNNPACK throws ASAN heap-buffer-overflow error.
-if 'qnnpack' in supported_qengines:
-    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
-        supported_qengines.remove('qnnpack')
+if "qnnpack" in supported_qengines:
+    if (
+        IS_PPC
+        or TEST_WITH_ASAN
+        or TEST_WITH_TSAN
+        or TEST_WITH_UBSAN
+        or IS_MACOS
+        or IS_WINDOWS
+    ):
+        supported_qengines.remove("qnnpack")
 
 """Computes the output shape given convolution parameters."""
-def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
-                       output_padding=0):
-    return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
-                     * (dilation - 1)) / stride) + 2 * output_padding + 1
+
+
+def _conv_output_shape(
+    input_size, kernel_size, padding, stride, dilation, output_padding=0
+):
+    return (
+        np.floor(
+            (
+                input_size
+                + 2 * padding
+                - kernel_size
+                - (kernel_size - 1) * (dilation - 1)
+            )
+            / stride
+        )
+        + 2 * output_padding
+        + 1
+    )
+
 
 # Quantization references
 def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
@@ -47,6 +80,7 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
     qx = (x * multiplier).round() + zero_point
     qx = np.clip(qx, qmin, qmax).astype(qtype)
     return qx
+
 
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
@@ -78,6 +112,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
         zero_point = min(qmax, zero_point)
     return [float(scale), int(zero_point)]
 
+
 def _calculate_dynamic_per_channel_qparams(X, dtype):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
@@ -104,14 +139,16 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
 
     return scale, zero_point
 
+
 @contextmanager
 def override_quantized_engine(qengine):
-    previous = torch.backends.quantized.engine
-    torch.backends.quantized.engine = qengine
+    previous = QuantizedEngine.engine
+    QuantizedEngine.engine = qengine
     try:
         yield
     finally:
-        torch.backends.quantized.engine = previous
+        QuantizedEngine.engine = previous
+
 
 # TODO: Update all quantization tests to use this decorator.
 # Currently for some of the tests it seems to have inconsistent params
@@ -122,9 +159,13 @@ def override_qengines(qfunction):
             with override_quantized_engine(qengine):
                 # qfunction should not return anything.
                 qfunction(*args, **kwargs)
+
     return test_fn
 
+
 def qengine_is_fbgemm():
-    return torch.backends.quantized.engine == 'fbgemm'
+    return QuantizedEngine.engine == "fbgemm"
+
+
 def qengine_is_qnnpack():
-    return torch.backends.quantized.engine == 'qnnpack'
+    return QuantizedEngine.engine == "qnnpack"
