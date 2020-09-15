@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 from typing import NamedTuple
-import contextlib
 import enum
 import logging
 import os
@@ -252,7 +251,7 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
+        with self.hybrid_module.join(simulate_uneven_inputs):
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
@@ -499,7 +498,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
 
     @requires_gloo()
     @dist_init
-    def test_ddp_comparison(self):
+    def test_ddp_comparison(self, simulate_uneven_inputs=True):
         gLogger.info(f"Running trainer rank: {self.rank}")
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
@@ -515,32 +514,53 @@ class DdpComparisonTest(RpcAgentTestFixture):
         ddp_net = DistributedDataParallel(
             net
         )
-        inputs = torch.rand((3, 2))
+
+        # ddp_net_local = DistributedDataParallel(
+        #     deepcopy(net)
+        # )
+
+        # num_inputs = 1
+        # if simulate_Un
+        # Odd ranks join early if simulate_uneven_inputs.
+        num_inputs = 1
+        # simulate_uneven_inputs = False
+        if simulate_uneven_inputs:
+            if self.rank % 2 == 0:
+                num_inputs += 2
+        inputs_list = [torch.rand((3, 2)) for _ in range(num_inputs)]
+
+        if simulate_uneven_inputs:
+            gLogger.info(
+                f"Rank {self.rank} training with {len(inputs_list)} inputs."
+            )
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
-        with dist_autograd.context() as context_id:
-            loss = ddp_net(inputs).norm()
-            dist_autograd.backward(context_id, [loss])
-            grads_dict = dist_autograd.get_gradients(context_id)
-        gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+        with ddp_net.join(simulate_uneven_inputs):
+            for i, inputs in enumerate(inputs_list):
+                with dist_autograd.context() as context_id:
+                    loss = ddp_net(inputs).norm()
+                    dist_autograd.backward(context_id, [loss])
+                    grads_dict = dist_autograd.get_gradients(context_id)
+                gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
 
-        # Use local autograd. The gradients will be in each variable's '.grad'.
-        loss = ddp_net(inputs).norm()
-        loss.backward()
+                # Use local autograd. The gradients will be in each variable's '.grad'.
+                ddp_net.zero_grad()
+                loss = ddp_net(inputs).norm()
+                loss.backward()
 
-        # The gradients should be the same
-        for param in net.parameters():
-            self.assertTrue(
-                param in grads_dict,
-                msg=f"Param {param} is not in dist_auto grad dict {grads_dict}",
-            )
-            self.assertEqual(
-                grads_dict[param],
-                param.grad,
-                msg=f"The grads for param {param} are different under local "
-                f"and dist autograd: {param.grad} \n---\n {grads_dict[param]}",
-            )
+                # The gradients should be the same
+                for param in net.parameters():
+                    self.assertTrue(
+                        param in grads_dict,
+                        msg=f"Param {param} is not in dist_auto grad dict {grads_dict} for iteration {i}",
+                    )
+                    self.assertEqual(
+                        grads_dict[param],
+                        param.grad,
+                        msg=f"The grads for param {param} are different under local "
+                        f"and dist autograd: {param.grad} \n---\n {grads_dict[param]} for iteration {i}",
+                    )
         dist.destroy_process_group()
 
     @requires_gloo()
