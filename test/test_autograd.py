@@ -4678,7 +4678,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition
 separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos', 'div', 'log',
-                          'log10', 'log1p', 'log2', 'pow'] #, 'reciprocal', 'tan']
+                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
