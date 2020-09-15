@@ -211,8 +211,7 @@ def _jit_script_compile_overload(
 def _jit_script_compile(
     qual_name: str,
     definition: Def,
-    rcb: ResolutionCallback,
-    defaults: Dict[str, Any]
+    rcb: ResolutionCallback
 ): ...
 def _jit_script_class_compile(
     qual_name: str,
