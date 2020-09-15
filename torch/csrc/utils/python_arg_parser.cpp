@@ -116,7 +116,24 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   if (it == type_map.end()) {
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
   }
+  std::cout << "\n\n-------------> fmt: " <<  fmt << std::endl;
+  std::cout << "-------------> type_str: " <<  type_str << std::endl;
   type_ = it->second;
+  switch(type_) {
+    case ParameterType::TENSOR_LIST: {
+      std::cout << "tensor list" << std::endl;
+      break;
+    }
+      
+    case ParameterType::FLOAT_LIST: {
+      std::cout << "float list" << std::endl;
+      break;
+    }
+
+    default: {
+      std::cout << "ELSE" << std::endl;
+    }
+  }
 
   auto eq = name_str.find('=');
   if (eq != std::string::npos) {
@@ -765,6 +782,23 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
+    std::cout << "\n\n\n param : " << param.name << " " << param.type_name() << std::endl;
+    switch(param.type_) {
+      case ParameterType::TENSOR_LIST: {
+        std::cout << "param is tensor list" << std::endl;
+        break;
+      }
+        
+      case ParameterType::FLOAT_LIST: {
+        std::cout << "param is float list" << std::endl;
+        break;
+      }
+
+      default: {
+        std::cout << "ELSE" << std::endl;
+      }
+    }
+
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
@@ -892,6 +926,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
   }
 
   for (auto& signature : signatures_) {
+    std::cout << "in signature! " << signature.toString() << std::endl;
     if (signature.parse(self, args, kwargs, parsed_args, false)) {
       check_deprecated(signature);
       return PythonArgs(traceable, signature, parsed_args);

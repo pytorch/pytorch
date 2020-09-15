@@ -173,6 +173,7 @@ struct PythonArgs {
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
+  inline std::vector<double> doublelist(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
@@ -383,6 +384,27 @@ inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
+  }
+  return res;
+}
+
+inline std::vector<double> PythonArgs::doublelist(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<double> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    try {
+      res[idx] = THPUtils_unpackDouble(obj);
+    } catch (const std::exception &e) {
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type1 %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
