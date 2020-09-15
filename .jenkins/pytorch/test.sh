@@ -344,6 +344,37 @@ test_benchmarks() {
   fi
 }
 
+test_pytorch_benchmark() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    # TODO where to clone this? avoided ./benchmark to avoid git dirty assert
+    BENCH_DIR=`pwd`/../benchmark/
+    BENCH_DATA_FILE=${BENCH_DIR}/.data/${CIRCLE_SHA1}.json
+    # TODO centralize a config of tests to run on PRs and on master to keep PR job fast
+    PYTEST_FILTER="not cyclegan"
+
+    echo "Cloning pytorch benchmark repo"
+    mkdir -p ${BENCH_DIR}
+    git clone https://github.com/pytorch/benchmark ${BENCH_DIR}
+    pushd ${BENCH_DIR}
+    echo "Running setup for pytorch benchmarks"
+    python install.py
+    popd
+
+    echo "Running pytorch benchmarks"
+    # important to run from pytorch repo, so git info captured by pytest is relevant
+    pytest ${BENCH_DIR}/test_bench.py \
+      --benchmark-sort=Name \
+      --benchmark-json=${BENCH_DATA_FILE} \
+      -k "${PYTEST_FILTER}" \
+      --fuser=old \
+      --executor=legacy \
+
+    echo "Uploading benchmark results to scuba"
+    python ${BENCH_DIR}/scripts/upload_scribe.py --pytest_bench_json ${BENCH_DATA_FILE}
+    assert_git_not_dirty
+  fi
+}
+
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
@@ -399,6 +430,7 @@ else
   test_torch_function_benchmark
   test_distributed
   test_benchmarks
+  test_pytorch_benchmark
   test_rpc
   if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
     pushd test
