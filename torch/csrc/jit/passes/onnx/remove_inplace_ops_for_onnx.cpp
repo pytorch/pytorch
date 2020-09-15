@@ -122,7 +122,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
       } else {
         std::cerr
             << "Error: ONNX Remove Inplace Ops - Cannot export ellipsis indexing for input "
-            << "of unknown shape.";
+            << "of unknown rank.";
       }
     }
     dim = dim + dim_offset;
