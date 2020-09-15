@@ -220,7 +220,15 @@ void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher,
 }
 
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  for (auto k : c10::getRuntimeDispatchKeys(dispatch_key)) {
+  // Undefined isn't a runtime key but we have an entry for it in dispatchTable_ (which is not necessary).
+  // Update it separately if required.
+  // XXX: in fact I think we should just start from iter=1 in updateDispatchTableFull_.
+  // dispatchTable should never care about Undefined key.
+  if (dispatch_key == DispatchKey::Undefined) {
+    updateDispatchTableEntry_(dispatcher, dispatch_key);
+    return;
+  }
+  for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
   // Registering to backend key might affect computed entry at its Autograd backend key due to 2.2.
