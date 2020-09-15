@@ -27,6 +27,13 @@ if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses )
 git submodule sync --recursive
 git submodule update --init --recursive
 
+rmdir /q /s third_party\gloo
+cd third_party
+git clone https://github.com/gunandrose4u/gloo.git
+cd gloo
+git.exe checkout -b jozh/test_build remotes/origin/jozh/test_build
+cd ..\..
+
 :: Override VS env here
 pushd .
 if "%VC_VERSION%" == "" (
@@ -132,4 +139,3 @@ python setup.py install --cmake && sccache --show-stats && (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
-
