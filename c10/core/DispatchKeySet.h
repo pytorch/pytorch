@@ -189,11 +189,6 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
-// TODO(#43441): Once we have iterator-like funtionality on DispatchKeySet
-//      we can remove this API and use c10::getRuntimeDispatchKeySet instead.
-//      This API is only used in aten/src/ATen/core/dispatch/OperatorEntry.cpp.
-C10_API ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k);
-
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
 // in OperatorEntry.cpp but we disallow it in has() API.
