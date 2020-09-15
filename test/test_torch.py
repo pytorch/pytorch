@@ -16379,7 +16379,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
-    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
+    @precisionOverride({torch.bfloat16: 1e-0, torch.half: 3e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -16388,29 +16388,62 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
-        t = torch.randn(10, device=device).to(dtype)
-        m = torch.randn(10, 100, device=device).to(dtype)
-        v = torch.randn(100, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmv, t, m, v)
-
-        # Test 0-strided
-        t = torch.randn(1, device=device).to(dtype).expand(10)
-        m = torch.randn(10, 1, device=device).to(dtype).expand(10, 100)
-        v = torch.randn(100, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmv, t, m, v)
-
-        # Test beta=0, v=nan
+        ts = [
+            torch.randn(10, device=device).to(dtype),
+            torch.randn(1, device=device).to(dtype).expand(10),
+        ]
+        vs = [
+            torch.randn(100, device=device).to(dtype),
+            torch.ones(1, device=device).to(dtype).expand(100),  # to reduce errors for low precision
+        ]
+        ms = [
+            # 0d
+            torch.ones((), device=device).to(dtype).expand(10, 100),  # to reduce errirs for low precision
+            # 1d
+            torch.randn((1, 100), device=device).to(dtype).expand(10, 100),
+            # this initialization reduces errors for low precision for broadcasted matrices
+            torch.randint(3, (10, 1), dtype=torch.float, device=device).to(dtype).expand(10, 100),
+            torch.randint(3, (1, 10), dtype=torch.float, device=device).to(dtype).expand(100, 10).t(),
+            torch.randn((100, 1), device=device).to(dtype).expand(100, 10).t(),
+            # 2d
+            torch.randn((10, 100), device=device).to(dtype),
+            torch.randn((100, 10), device=device).to(dtype).t(),
+        ]
+        for m in ms:
+            for v in vs:
+                for t in ts:
+                    self._test_addmm_addmv(torch.addmv, t, m, v)
+        # Test beta=0, t=nan
         t = torch.full((10,), math.nan, device=device).to(dtype)
-        m = torch.randn(10, 100, device=device).to(dtype)
-        v = torch.randn(100, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+        for m in ms:
+            for v in vs:
+                self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+        # # have to use torch.randn(...).to(bfloat16) instead of
+        # # torch.randn(..., dtype=bfloat16). randn does not support
+        # # bfloat16 yet.
+        # t = torch.randn(10, device=device).to(dtype)
+        # m = torch.randn(10, 100, device=device).to(dtype)
+        # v = torch.randn(100, device=device).to(dtype)
+        # self._test_addmm_addmv(torch.addmv, t, m, v)
 
-        # Test beta=0, v=nan, 0-strided v
-        t = torch.full((10,), math.nan, device=device).to(dtype)
-        m = torch.randn(10, 10, device=device).to(dtype)
-        v = torch.randn(1, device=device).to(dtype).expand(10)
-        self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
-        self._test_addmm_addmv(torch.addmv, t, m.t(), v, beta=0)
+        # # Test 0-strided
+        # t = torch.randn(1, device=device).to(dtype).expand(10)
+        # m = torch.randn(10, 1, device=device).to(dtype).expand(10, 100)
+        # v = torch.randn(100, device=device).to(dtype)
+        # self._test_addmm_addmv(torch.addmv, t, m, v)
+
+        # # Test beta=0, v=nan
+        # t = torch.full((10,), math.nan, device=device).to(dtype)
+        # m = torch.randn(10, 100, device=device).to(dtype)
+        # v = torch.randn(100, device=device).to(dtype)
+        # self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+
+        # # Test beta=0, v=nan, 0-strided v
+        # t = torch.full((10,), math.nan, device=device).to(dtype)
+        # m = torch.randn(10, 10, device=device).to(dtype)
+        # v = torch.randn(1, device=device).to(dtype).expand(10)
+        # self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+        # self._test_addmm_addmv(torch.addmv, t, m.t(), v, beta=0)
 
     @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
                     + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
