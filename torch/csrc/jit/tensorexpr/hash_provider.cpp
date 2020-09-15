@@ -310,6 +310,39 @@ void HashProvider::visit(const Polynomial* v) {
 
   putHash(v, hash);
 }
+
+void HashProvider::visit(const MaxTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("maxterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
+void HashProvider::visit(const MinTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("minterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
