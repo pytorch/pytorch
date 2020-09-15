@@ -31,7 +31,7 @@ Tensor empty_affine_quantized(
           scale, zero_point, typeMetaToScalarType(options.dtype())));
 }
 
-Tensor empty_per_channel_affine_quantized_cpu(
+Tensor empty_per_channel_affine_quantized(
     IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,

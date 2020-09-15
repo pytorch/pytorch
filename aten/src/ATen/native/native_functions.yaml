@@ -1369,7 +1369,7 @@
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
-    QuantizedCPU: empty_per_channel_affine_quantized_cpu
+    QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -3627,8 +3627,7 @@
     CPU, CUDA: clone
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
-    QuantizedCPU: quantized_clone
-    QuantizedCUDA: quantized_clone
+    QuantizedCPU, QuantizedCUDA: quantized_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
