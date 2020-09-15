@@ -205,7 +205,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
       && hasKernelForDispatchKey(DispatchKey::Autograd)) {
     return {getKernelForDispatchKey(DispatchKey::Autograd), "autograd kernel"};
   }
