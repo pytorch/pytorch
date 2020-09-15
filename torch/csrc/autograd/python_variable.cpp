@@ -334,24 +334,27 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
 
 PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
 {
+  HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject *)self)) {
-    HANDLE_TH_ERRORS
     return handle_torch_function_getter(self, "volatile");
-    END_HANDLE_TH_ERRORS
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
-  PyErr_WarnEx(PyExc_UserWarning, msg, 1);
+  auto r = PyErr_WarnEx(PyExc_UserWarning, msg, 1);
+  if (r != 0) throw python_error();
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_volatile(THPVariable *self, PyObject *obj, void *unused)
 {
+  HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject *)self)) {
-    HANDLE_TH_ERRORS
     return handle_torch_function_setter(self, "volatile", obj);
-    END_HANDLE_TH_ERRORS_RET(-1)
   }
-  return PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
+  auto r = PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
+  if (r != 0) throw python_error();
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_get_output_nr(THPVariable *self, void *unused)
