@@ -87,6 +87,24 @@ class DelegateBase:
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
+    def call_module(self, m : torch.nn.Module, target : str, args, kwargs, orig_call):
+        """
+        Method to override behavior when calling a module. By default, this
+        method checks `self.is_leaf_module()`. If `m` is not a leaf module,
+        trace through the original call using the `orig_call` method, preserved
+        from nn.Module.__call__. If it is a leaf module, emit a `call_module`
+        node.
+
+        You can override this method to get more sophisticated behavior.
+        For example, you might trace an entirely new GraphModule for the
+        submodule call, then emit a `call_module` node. This can be a way to
+        preserve the original module hierarchy.
+        """
+        if not self.is_leaf_module(m):
+            return orig_call(m, *args, **kwargs)
+        else:
+            return torch.fx.proxy._create_proxy(self, 'call_module', target, args, kwargs)
+
     def create_arg(self, a: Any) -> Argument:
         """
         A method that lowers the objects seen as arguments during symbolic evaluation
@@ -209,11 +227,8 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
     orig_call = torch.nn.Module.__call__
 
     def module_call_wrapper(mod, *args, **kwargs):
-        if not delegate.is_leaf_module(mod):
-            return orig_call(mod, *args, **kwargs)
-        else:
-            target = _find_module(root, mod)
-            return _create_proxy(delegate, 'call_module', target, args, kwargs)
+        target = _find_module(root, mod)
+        return delegate.call_module(mod, target, args, kwargs, orig_call)
     try:
         torch.nn.Module.__call__ = module_call_wrapper
         graph.output(delegate.create_arg(fn(*args)))
