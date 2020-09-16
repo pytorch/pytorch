@@ -191,6 +191,14 @@ void testConstantFoldIntrinsics() {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+void testConstantFoldCastToBool() {
+  KernelScope kernel_scope;
+  ExprHandle f = Cast::make(kBool, IntImm::make(0));
+  ExprHandle newF = IRSimplifier::simplify(f);
+  SimpleIRExprEval eval(newF);
+  ASSERT_EQ(eval.value<bool>(), false);
+}
+
 void testConstantFoldWithVar() {
   KernelScope kernel_scope;
   {
