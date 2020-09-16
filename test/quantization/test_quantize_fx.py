@@ -406,6 +406,7 @@ class TestQuantizeFx(QuantizationTestCase):
         FileCheck().check_count('FakeQuantize = prim::GetAttr[name="activation_post_process', 4, exactly=True) \
                    .run(scripted.graph)
 
+    @skipIfNoFBGEMM
     def test_custom_module_class(self):
         class CustomModule(torch.nn.Module):
             def __init__(self):
