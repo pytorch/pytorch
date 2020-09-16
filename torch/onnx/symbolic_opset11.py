@@ -273,7 +273,7 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
     return g.op("Size", self)
 

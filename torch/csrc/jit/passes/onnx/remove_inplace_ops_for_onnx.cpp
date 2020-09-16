@@ -473,18 +473,29 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
 
-        auto newNode = node->owningGraph()->create(aten::clone, 1);
-        newNode->output()->copyMetadata(input);
-        newNode->addInput(input);
+        if (input->type()->kind() == TypeKind::ListType) {
+          // Create an aten::list to clone the list in graph inputs
+          auto newNode = node->owningGraph()->create(aten::list, 1);
+          newNode->output()->copyMetadata(input);
+          newNode->addInput(input);
+          newNode->insertBefore(node);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        } else {
+          // Create an aten::clone to clone the tensor in graph inputs
+          auto newNode = node->owningGraph()->create(aten::clone, 1);
+          newNode->output()->copyMetadata(input);
+          newNode->addInput(input);
 
-        auto* noneNode = node->owningGraph()->create(prim::Constant);
-        noneNode->output()->setType(NoneType::get());
-        newNode->addInput(noneNode->output());
+          auto* noneNode = node->owningGraph()->create(prim::Constant);
+          noneNode->output()->setType(NoneType::get());
+          newNode->addInput(noneNode->output());
 
-        newNode->insertBefore(node);
-        noneNode->insertBefore(newNode);
-        node->replaceInput(index, newNode->output());
-        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          newNode->insertBefore(node);
+          noneNode->insertBefore(newNode);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        }
       }
     }
   }

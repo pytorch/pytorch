@@ -70,4 +70,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
+  pytest "${args[@]}" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset9_IRv4_new_jit_API" \
+    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12_IRv4_new_jit_API"
 fi

@@ -1204,7 +1204,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.tensor([10, 15]).view(2, 1)
+        update = torch.tensor([10, 15]).view(1, 2, 1)
         self.run_test(IndexPutModel(), (x, update))
 
         class IndexPutModel2(torch.nn.Module):
@@ -2127,6 +2127,7 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3101,6 +3102,28 @@ class TestONNXRuntime(unittest.TestCase):
         class MaskedFillModel2(torch.nn.Module):
             def forward(self, x):
                 return x.masked_fill(x > 3, -1)
+
+        x = torch.arange(16).view(2, 2, 4).to(torch.float32)
+        self.run_test(MaskedFillModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_masked_fill_inplace(self):
+
+        class MaskedFillModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                x.masked_fill_(mask, 2)
+                return x
+
+        x = torch.zeros(4, 2, 3, requires_grad=True)
+        self.run_test(MaskedFillModel(), x)
+
+        class MaskedFillModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                x.masked_fill_(x > 3, -1)
+                return x
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)

@@ -264,6 +264,7 @@ namespace c10 {
   _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
+  _(aten, masked_fill_)              \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
