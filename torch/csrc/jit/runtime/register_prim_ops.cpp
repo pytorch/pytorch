@@ -598,6 +598,19 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::dequantize.tensors(Tensor[] qtensor) -> Tensor[]"),
+         [](Stack* stack) {
+           IValue iv = pop(stack);
+           auto elems = iv.toTensorList();
+           auto output_list = c10::impl::GenericList(elems.elementType());
+           for (size_t i = 0; i < elems.size(); ++i) {
+             output_list.emplace_back(at::dequantize(elems[i]));
+           }
+           push(stack, std::move(output_list));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
