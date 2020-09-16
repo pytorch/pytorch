@@ -64,23 +64,21 @@ class FakeQuantize(Module):
 
     @torch.jit.export
     def enable_fake_quant(self, enabled=True):
-        # type: (bool) -> FakeQuantize
+        # type: (bool) -> None
         self.fake_quant_enabled[0] = 1 if enabled else 0
-        return self
 
     @torch.jit.export
     def disable_fake_quant(self):
-        return self.enable_fake_quant(False)
+        self.enable_fake_quant(False)
 
     @torch.jit.export
     def enable_observer(self, enabled=True):
-        # type: (bool) -> FakeQuantize
+        # type: (bool) -> None
         self.observer_enabled[0] = 1 if enabled else 0
-        return self
 
     @torch.jit.export
     def disable_observer(self):
-        return self.enable_observer(False)
+        self.enable_observer(False)
 
     @torch.jit.export
     def calculate_qparams(self):

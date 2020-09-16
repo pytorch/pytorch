@@ -87,12 +87,14 @@ class Handle final {
   Handle& operator=(const Handle&) = delete;
   Handle(Handle&&);
   Handle& operator=(Handle&&) &;
+  Handle& operator=(Handle&&) && = delete;
   ~Handle();
 
-  operator bool() const &;
+  operator bool() const;
   Type get() const &;
-  Type release() &;
-  void reset(Type payload = kNull) &;
+  Type get() const && = delete;
+  Type release();
+  void reset(Type payload = kNull);
 
  private:
   static constexpr Type kNull{};
@@ -133,7 +135,7 @@ inline Handle<Type, Deleter>::~Handle() {
 }
 
 template<typename Type, typename Deleter>
-inline Handle<Type, Deleter>::operator bool() const & {
+inline Handle<Type, Deleter>::operator bool() const {
   return get();
 }
 
@@ -143,7 +145,7 @@ inline Type Handle<Type, Deleter>::get() const & {
 }
 
 template<typename Type, typename Deleter>
-inline Type Handle<Type, Deleter>::release() & {
+inline Type Handle<Type, Deleter>::release() {
   const Type payload = payload_;
   payload_ = kNull;
 
@@ -151,7 +153,7 @@ inline Type Handle<Type, Deleter>::release() & {
 }
 
 template<typename Type, typename Deleter>
-inline void Handle<Type, Deleter>::reset(Type payload) & {
+inline void Handle<Type, Deleter>::reset(Type payload) {
   using std::swap;
   swap(payload_, payload);
 
