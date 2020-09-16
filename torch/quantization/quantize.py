@@ -154,7 +154,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                     child.register_forward_pre_hook(_observer_forward_pre_hook)
         elif needs_observation(child) and is_custom_module_class(type(child)):
             observed_child = get_observed_custom_module_class(type(child)).from_float(child)
-            mark_observed_custom_module(observed_child)
+            mark_observed_custom_module(observed_child, type(child))
             setattr(module, name, observed_child)
             insert_activation_post_process(observed_child)
         else:

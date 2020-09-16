@@ -14,6 +14,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
 from torch.quantization import (
     is_custom_module_class,
+    is_observed_custom_module,
 )
 from torch.quantization.quantization_mappings import (
     get_dynamic_quant_module_mappings,
@@ -364,7 +365,7 @@ class QuantizationTestCase(TestCase):
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_qat_module_mappings().values() and \
-           not is_custom_module_class(type(module)):
+           not is_observed_custom_module(module):
             for child in module.children():
                 self.checkObservers(child)
 

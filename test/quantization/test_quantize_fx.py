@@ -20,6 +20,8 @@ from torch.quantization import (
     quantize_static_fx,
     quantize_dynamic_fx,
     prepare_qat_fx,
+    register_observed_custom_module_mapping,
+    register_quantized_custom_module_mapping,
 )
 
 from torch.quantization import (
@@ -417,17 +419,19 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.conv(x)
 
         class ObservedCustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv):
                 super().__init__()
+                self.conv = conv
 
             def forward(self, x):
-                pass
+                return self.conv(x)
 
             @classmethod
             def from_float(cls, float_module):
                 assert hasattr(float_module, 'qconfig')
-                float_module._FLOAT_MODULE = CustomModule
-                return float_module
+                observed = cls(float_module.conv)
+                observed.qconfig = float_module.qconfig
+                return observed
 
         class QuantizedCustomModule(torch.nn.Module):
             def __init__(self, conv):
@@ -446,8 +450,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        from torch.quantization import register_observed_custom_module_mapping
-        from torch.quantization import register_quantized_custom_module_mapping
         register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
         register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 

@@ -3,6 +3,9 @@ OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS = dict()
 def register_observed_custom_module_mapping(custom_module_class, observed_custom_module_class):
     """ Register a mapping from `custom_module_class` to
     `observed_custom_module_class`
+    `observed_custom_module_class` will have a `from_float` classmethod,
+    which will return an observed custom module instance given
+    a float custom module instance.
     This will be used in prepare step of post training static quantization or
     quantization aware training
     """
@@ -29,6 +32,9 @@ def register_quantized_custom_module_mapping(custom_module_class, quantized_cust
     A quantized custom module class should accept quantized input and
     return quantized output. (we can relax this condition in the
     future if there is a need)
+    `quantized_custom_module_class` will have a `from_observed` classmethod,
+    which will return an quantized custom module instance given
+    a observed custom module instance.
     This will be used in prepare step of post training static quantization or
     quantization aware training
     """
@@ -54,11 +60,12 @@ def is_custom_module_class(module_class):
     return module_class in OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS and \
         module_class in QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
 
-def mark_observed_custom_module(module):
+def mark_observed_custom_module(module, custom_module_class):
     """ Mark a module as observed custom module, so that
     it can be identified during convert step
     """
     module._is_observed_custom_module = True
+    module._FLOAT_MODULE = custom_module_class
 
 def is_observed_custom_module(module):
     """ Check if a module is marked as observed custom module

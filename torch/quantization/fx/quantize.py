@@ -262,7 +262,7 @@ class Quantizer:
                         get_observed_custom_module_class(type(custom_module))
                     observed_custom_module = \
                         observed_custom_module_class.from_float(custom_module)
-                    mark_observed_custom_module(observed_custom_module)
+                    mark_observed_custom_module(observed_custom_module, type(custom_module))
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
 

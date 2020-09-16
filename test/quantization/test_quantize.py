@@ -23,6 +23,8 @@ from torch.quantization import (
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_dynamic_qconfig,
+    register_observed_custom_module_mapping,
+    register_quantized_custom_module_mapping,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -584,17 +586,19 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 return self.conv(x)
 
         class ObservedCustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv):
                 super().__init__()
+                self.conv = conv
 
             def forward(self, x):
-                pass
+                return self.conv(x)
 
             @classmethod
             def from_float(cls, float_module):
                 assert hasattr(float_module, 'qconfig')
-                type(float_module)._FLOAT_MODULE = CustomModule
-                return float_module
+                observed = cls(float_module.conv)
+                observed.qconfig = float_module.qconfig
+                return observed
 
         class QuantizedCustomModule(torch.nn.Module):
             def __init__(self, conv):
@@ -613,8 +617,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        from torch.quantization import register_observed_custom_module_mapping
-        from torch.quantization import register_quantized_custom_module_mapping
         register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
         register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 
