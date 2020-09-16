@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Resource final {
+struct C10_EXPORT Resource final {
   /*
     Memory
   */
@@ -18,19 +18,49 @@ struct Resource final {
     VmaAllocation allocation;
     VmaAllocationInfo allocation_info;
 
+    struct Access final {
+      typedef uint8_t Flags;
+
+      enum Type : Flags {
+        Read = 1u << 0u,
+        Write = 1u << 1u,
+      };
+
+      template<typename Type, Flags access>
+      using Pointer = std::add_pointer_t<
+          std::conditional_t<
+              0u != (access & Write),
+              Type,
+              std::add_const_t<Type>>>;
+    };
+
     class Scope;
     template<typename Type>
     using Data = Handle<Type, Scope>;
 
     template<
         typename Type,
-        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
+        typename Pointer = Access::Pointer<Type, Access::Read>>
     Data<Pointer> map() const &;
 
     template<
         typename Type,
-        typename Pointer = std::add_pointer_t<Type>>
+        Access::Flags kAccess,
+        typename Pointer = Access::Pointer<Type, kAccess>>
     Data<Pointer> map() &;
+
+   private:
+    // Intentionally disabed to ensure memory access is always properly
+    // encapsualted in a scoped map-unmap region.  Allowing below overloads
+    // to be invoked on a temporary would open the door to the possibility
+    // of accessing the underlying memory out of the expected scope making
+    // for seemingly ineffective memory writes and hard to hunt down bugs.
+
+    template<typename Type, typename Pointer>
+    Data<Pointer> map() const && = delete;
+
+    template<typename Type, Access::Flags kAccess, typename Pointer>
+    Data<Pointer> map() && = delete;
   };
 
   /*
@@ -123,18 +153,17 @@ struct Resource final {
 
 class Resource::Memory::Scope final {
  public:
-  enum class Access {
-    Read,
-    Write,
-  };
+  Scope(
+      VmaAllocator allocator,
+      VmaAllocation allocation,
+      Resource::Memory::Access::Flags access);
 
-  Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
   void operator()(const void* data) const;
 
  private:
   VmaAllocator allocator_;
   VmaAllocation allocation_;
-  Access access_;
+  Resource::Memory::Access::Flags access_;
 };
 
 template<typename, typename Pointer>
@@ -143,17 +172,23 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
 
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Read),
+    Scope(allocator, allocation, Access::Read),
   };
 }
 
-template<typename, typename Pointer>
+template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
+  static_assert(
+      (kAccess == Access::Read) ||
+      (kAccess == Access::Write) ||
+      (kAccess == (Access::Read | Access::Write)),
+      "Invalid memory access!");
+
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Scope::Access::Write),
+    Scope(allocator, allocation, kAccess),
   };
 }
 
