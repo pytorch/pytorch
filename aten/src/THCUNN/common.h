@@ -10,11 +10,10 @@ const int CUDA_NUM_THREADS = 1024;
 // CUDA: number of blocks for threads.
 inline int GET_BLOCKS(const int64_t N)
 {
-  THAssertMsg(N > 0, "CUDA kernel launch blocks must be positive");
-  constexpr int64_t max_int = std::numeric_limits<int>::max();
+  // Round up division for positive number
+  auto block_num = N / CUDA_NUM_THREADS + (N % CUDA_NUM_THREADS == 0 ? 0 : 1);
 
-  // Round up division for positive number that cannot cause integer overflow
-  auto block_num = (N - 1) / CUDA_NUM_THREADS + 1;
+  constexpr int64_t max_int = std::numeric_limits<int>::max();
   THAssertMsg(block_num <= max_int, "Can't schedule too many blocks on CUDA device");
 
   return static_cast<int>(block_num);
