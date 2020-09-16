@@ -37,13 +37,13 @@ template<int n> struct TensorListMetadata
 
 template<typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
-__global__ void 
+__global__ void
 multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however it likes.
-  callable(kChunkSize, tensorListMeta, args...); 
+  callable(kChunkSize, tensorListMeta, args...);
 }
 
 template<int depth, typename T, typename... ArgTypes>
@@ -88,7 +88,7 @@ void multi_tensor_apply(
                     // Reset.
                     loc_block_info = 0;
                     if(chunk == chunks - 1) {
-                        loc_tensor_info = 0; 
+                        loc_tensor_info = 0;
                     }
                     else {
                         tensorListMeta.sizes[0] = tensorListMeta.sizes[loc_tensor_info-1];

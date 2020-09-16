@@ -180,25 +180,33 @@ class GradScaler(object):
         per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
+        # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
+        # There could be hundreds of grads, so we'd like to iterate through them just once.
+        # However, we can't know their devices or dtypes in advance.
+        per_device_and_dtype_grads = defaultdict(defaultdict(list))  # https://knowyourmeme.com/memes/xzibit-yo-dawg
         for group in optimizer.param_groups:
             for param in group["params"]:
                 if param.grad is not None:
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
                         raise ValueError("Attempting to unscale FP16 gradients.")
                     else:
-                        with torch.no_grad():
-                            if param.grad.is_sparse:
-                                # is_coalesced() == False means the sparse grad has values with duplicate indices.
-                                # coalesce() deduplicates indices and adds all values that have the same index.
-                                # For scaled fp16 values, there's a good chance coalescing will cause overflow,
-                                # so we should check the coalesced _values().
-                                if param.grad.dtype is torch.float16:
-                                    param.grad = param.grad.coalesce()
-                                to_unscale = param.grad._values()
-                            else:
-                                to_unscale = param.grad
+                        if param.grad.is_sparse:
+                            # is_coalesced() == False means the sparse grad has values with duplicate indices.
+                            # coalesce() deduplicates indices and adds all values that have the same index.
+                            # For scaled fp16 values, there's a good chance coalescing will cause overflow,
+                            # so we should check the coalesced _values().
+                            if param.grad.dtype is torch.float16:
+                                param.grad = param.grad.coalesce()
+                            to_unscale = param.grad._values()
+                        else:
+                            to_unscale = param.grad
 
-                            torch._amp_non_finite_check_and_unscale_(to_unscale,
+                        per_device_grads[to_unscale.device][to_unscale.dtype] = to_unscale
+
+        with torch.no_grad():
+            for device, per_dtype_grads in per_device_and_dtype_grads.items():
+                for dtype, grads in per_dtype_grads.items():
+                    torch._amp_foreach_non_finite_check_and_unscale_(grads,
                                                                      per_device_found_inf.get(param.grad.device),
                                                                      per_device_inv_scale.get(param.grad.device))
 

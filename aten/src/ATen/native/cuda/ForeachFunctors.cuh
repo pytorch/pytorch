@@ -5,12 +5,27 @@ namespace at { namespace native {
 
 namespace {
 
+// For FP16 inputs, ops should perform internal math in FP32.
+template<typename scalar_t> struct get_opmath_t {
+  using opmath_t = scalar_t;
+  // or equivalently:
+  // (https://en.cppreference.com/w/cpp/language/typedef says
+  // "type aliases provide the same functionality as typedefs using a different syntax")
+  // typedef float opmath_t;
+};
+
+template<> struct get_opmath_t<at::Half> {
+  using opmath_t = float;
+}
+
 template<typename T, template<class> class Op>
 struct BinaryOpScalarFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
         T scalar) {
+            using opmath_t = get_opmath_t<T>::opmath_t
+
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -29,7 +44,8 @@ struct BinaryOpScalarFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<T>(Op<opmath_t>()(static_cast<opmath_t>(r_x[ii]),
+                                                                static_cast<opmath_t>(scalar)));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -47,7 +63,8 @@ struct BinaryOpScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<T>(Op<opmath_t>()(static_cast<opmath_t>(r_x[ii]),
+                                                                static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -87,7 +104,8 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<T>(Op<opmath_t>()(static_cast<opmath_t>(r_x[ii]),
+                                                                static_cast<opmath_t>(scalar)));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -105,7 +123,8 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = static_cast<T>(Op<opmath_t>()(static_cast<opmath_t>(r_x[ii]),
+                                                                static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
