@@ -3,6 +3,8 @@ import gc
 import inspect
 import runpy
 import threading
+import typing
+from typing import Union, List, TypeVar, Tuple, Generic, ClassVar, Iterable, Any, Optional
 from functools import wraps
 <<<<<<< HEAD
 =======
@@ -170,6 +172,7 @@ except ImportError:
 # you should check if it's available and (if it is) add it to this list.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 device_type_test_bases: typing.List[typing.Any] = list()
 =======
 
@@ -187,6 +190,11 @@ device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
 # todo: need to fix
 device_type_test_bases : typing.List[typing.Union[CPUTestBase, CUDATestBase]] = []
 >>>>>>> 64e5a2953d... fixed 8 typing related exceptions
+=======
+
+#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
+device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
+>>>>>>> 62c2bd3c6f... try to fix the errors
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -293,6 +301,7 @@ class DeviceTypeTestBase(TestCase):
 =======
                     args = (device_arg, dtype, op)
 <<<<<<< HEAD
+<<<<<<< HEAD
                     args = tuple(arg for arg in args if arg is not None)
 <<<<<<< HEAD
 >>>>>>> 62c2bd3c6f... try to fix the errors
@@ -302,6 +311,9 @@ class DeviceTypeTestBase(TestCase):
                     # todo: need to fix.
                     args = (arg for arg in args if arg is not None)
 >>>>>>> 64e5a2953d... fixed 8 typing related exceptions
+=======
+                    args = tuple(arg for arg in args if arg is not None)
+>>>>>>> 62c2bd3c6f... try to fix the errors
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -346,11 +358,11 @@ class DeviceTypeTestBase(TestCase):
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
 
-class CPUTestBase(DeviceTypeTestBase):
+class CPUTestBase(Generic[DeviceTypeTestBase]):
     device_type = 'cpu'
 
 
-class CUDATestBase(DeviceTypeTestBase):
+class CUDATestBase(Generic[DeviceTypeTestBase]):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -468,6 +480,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         device_type_test_class = type(class_name, (base, empty_class), {})
         #: Tuple(DeviceTypeTestBase, Tuple(), Dict[<nothing>, <nothing>])
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 62c2bd3c6f... try to fix the errors
 =======
 >>>>>>> 62c2bd3c6f... try to fix the errors
@@ -477,6 +490,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         # device_type_test_class expects to be either CPUTestBase or CUDATestBase.. How to make it compatible with the right expression?
         device_type_test_class: type(DeviceTypeTestBase)  = type(class_name, (base, empty_class), {})
 >>>>>>> 64e5a2953d... fixed 8 typing related exceptions
+=======
+>>>>>>> 62c2bd3c6f... try to fix the errors
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
