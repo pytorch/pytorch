@@ -1274,6 +1274,20 @@ exp_() -> Tensor
 In-place version of :meth:`~Tensor.exp`
 """)
 
+add_docstr_all('exp2',
+               r"""
+exp2() -> Tensor
+
+See :func:`torch.exp2`
+""")
+
+add_docstr_all('exp2_',
+               r"""
+exp2_() -> Tensor
+
+In-place version of :meth:`~Tensor.exp2`
+""")
+
 add_docstr_all('expm1',
                r"""
 expm1() -> Tensor

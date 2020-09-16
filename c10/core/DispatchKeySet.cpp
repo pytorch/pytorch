@@ -50,6 +50,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | Disp
 constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset;
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset;
@@ -83,6 +84,10 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
   return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+}
+
+DispatchKeySet getRuntimeAutogradKeySet() {
+  return autograd_dispatch_keyset;
 }
 
 std::string toString(DispatchKeySet ts) {
