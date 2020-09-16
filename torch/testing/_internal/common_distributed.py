@@ -164,7 +164,7 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         indices = torch.reshape(torch.arange(rank + 1), (1, rank + 1))
         shape = [world_size] + [2 for _ in range(dense_dims)]
         for _ in range(sparse_dims - 1):
-            indices = torch.cat((indices,torch.zeros(1, rank + 1)))
+            indices = torch.cat((indices, torch.zeros(1, rank + 1)))
             shape.append(world_size)
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
