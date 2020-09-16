@@ -6,6 +6,7 @@
 #include <c10/core/Layout.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/Exception.h>
 
@@ -422,11 +423,11 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
         for (int64_t w = 0; w < out_W; ++w) {
           // get the corresponding input x, y, z co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-          scalar_t ix = *grid_ptr_NHW;
-          scalar_t iy = grid_ptr_NHW[grid_sCoor];
+          scalar_t x = *grid_ptr_NHW;
+          scalar_t y = grid_ptr_NHW[grid_sCoor];
 
-          ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-          iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
+          scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+          scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
 
           if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
             // get corner pixel values from (x, y)
@@ -484,7 +485,42 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               }
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-            TORCH_WARN("bicubic forward");
+            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding, 
+            // which would cause calculation to be wrong,
+            // for example x = -0.1 -> ix = 0 for zero padding, but in bicubic ix = floor(x) = -1
+            // There would be more problem in reflection padding, since the -1 and +1 direction is not fixed in boundary condition
+            ix = grid_sampler_unnormalize(x, inp_W, align_corners);
+            iy = grid_sampler_unnormalize(y, inp_H, align_corners);
+
+            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
+            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+
+            const scalar_t tx = ix - ix_nw;
+            const scalar_t ty = iy - iy_nw;
+
+            scalar_t *inp_ptr_NC = inp_ptr_N;
+            scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
+            for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+              scalar_t coefficients[4];
+
+              // Interpolate 4 values the in the x directon
+              for (int64_t i = 0; i < 4; i++) {
+                coefficients[i] = cubic_interp1d<scalar_t>(
+                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw - 1, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 0, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 1, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 2, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
+                  tx);
+              }
+
+              // Interpolate in y direction
+              *out_ptr_NCHW = cubic_interp1d<scalar_t>(
+                coefficients[0],
+                coefficients[1],
+                coefficients[2],
+                coefficients[3],
+                ty);
+            }
           }
         }
       }
@@ -549,13 +585,13 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
         for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
           // get the corresponding input x, y co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
-          scalar_t ix = *grid_ptr_NHW;
-          scalar_t iy = grid_ptr_NHW[grid_sCoor];
+          scalar_t x = *grid_ptr_NHW;
+          scalar_t y = grid_ptr_NHW[grid_sCoor];
 
           // multipliers for gradients on ix, iy
           scalar_t gix_mult, giy_mult;
-          ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-          iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
+          scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+          scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
 
           if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
             // get corner pixel values from (x, y)
@@ -631,7 +667,56 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
                           inp_H, inp_W, *gOut_ptr_NCHW);
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-            TORCH_WARN("bicubic backward");
+
+            scalar_t dummy;
+            ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &dummy);
+            iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &dummy);
+
+            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
+            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+
+            const scalar_t tx = ix - ix_nw;
+            const scalar_t ty = iy - iy_nw;
+
+            scalar_t x_coeffs[4];
+            scalar_t y_coeffs[4];
+            scalar_t x_coeffs_grad[4];
+            scalar_t y_coeffs_grad[4];
+
+            get_cubic_upsample_coefficients<scalar_t>(x_coeffs, tx);
+            get_cubic_upsample_coefficients<scalar_t>(y_coeffs, ty);
+            get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+            get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+            scalar_t gix = static_cast<scalar_t>(0);
+            scalar_t giy = static_cast<scalar_t>(0);
+
+            scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+            scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
+            scalar_t *inp_ptr_NC = inp_ptr_N;
+
+            for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
+              scalar_t gOut = *gOut_ptr_NCHW;
+
+              for (int64_t i = 0; i < 4; i++) {
+                for (int64_t j = 0; j < 4; j++) {
+
+                  // set input gradient
+                  add_value_bounded<scalar_t>(gInp_ptr_NC, inp_W, inp_H, ix_nw - 1 + i, iy_nw - 1 + j,
+                    gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
+
+                  // set grid gradient
+                  scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H,
+                    ix_nw - 1 + i, iy_nw - 1 + j, inp_sW, inp_sH, padding_mode, align_corners);
+
+                  gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+                  giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
+
+                  gGrid_ptr_NHW[0] = gix_mult * gix;
+                  gGrid_ptr_NHW[1] = giy_mult * giy;
+                }
+              }
+            }
           }
         }
       }

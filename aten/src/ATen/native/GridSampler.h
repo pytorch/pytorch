@@ -203,6 +203,77 @@ static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, 
 }
 
 template<typename scalar_t>
+static inline scalar_t get_value_bounded(
+    scalar_t* data,
+    int64_t W,
+    int64_t H,
+    int64_t x,
+    int64_t y,
+    int64_t sW,
+    int64_t sH,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    return within_bounds_2d(y, x, H, W) ? data[y * sH + x * sW]: static_cast<scalar_t>(0);
+  } else if (padding_mode == GridSamplerPadding::Border) {
+    x = clip_coordinates(x, W);
+    y = clip_coordinates(y, H);
+    return data[y * sH + x * sW];
+  } else { // padding_mode == GridSamplerPadding::Reflection
+    if (align_corners) {
+      x = reflect_coordinates(x, 0, 2*(W - 1));
+      y = reflect_coordinates(y, 0, 2*(H - 1));
+    } else {
+      x = reflect_coordinates(x, -1, 2*W - 1);
+      y = reflect_coordinates(y, -1, 2*H - 1);
+    }
+
+    x = clip_coordinates(x, W);
+    y = clip_coordinates(y, H);
+    return data[y * sH + x * sW];
+  }
+}
+
+template<typename scalar_t>
+static inline void add_value_bounded(
+    scalar_t* data,
+    int64_t W,
+    int64_t H,
+    int64_t x,
+    int64_t y,
+    int64_t sW,
+    int64_t sH,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    if (within_bounds_2d(y, x, H, W)) {
+      data[y * sH + x * sW] += delta;
+    }
+  } else if (padding_mode == GridSamplerPadding::Border) {
+    x = clip_coordinates(x, W);
+    y = clip_coordinates(y, H);
+
+    data[y * sH + x * sW] += delta;
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    if (align_corners) {
+      x = reflect_coordinates(x, 0, 2*(W - 1));
+      y = reflect_coordinates(y, 0, 2*(H - 1));
+    } else {
+      x = reflect_coordinates(x, -1, 2*W - 1);
+      y = reflect_coordinates(y, -1, 2*H - 1);
+    }
+
+    x = clip_coordinates(x, W);
+    y = clip_coordinates(y, H);
+
+    data[y * sH + x * sW] += delta;
+  }
+}
+
+template<typename scalar_t>
 static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
                                int64_t sH, int64_t sW, int64_t H, int64_t W,
                                scalar_t delta) {
@@ -219,6 +290,26 @@ static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
   if (within_bounds_3d(d, h, w, D, H, W)) {
     data[d * sD + h * sH + w * sW] += delta;
   }
+}
+
+template<typename scalar_t>
+static inline void get_cubic_coefficients_grad(
+    scalar_t coeffs[4],
+    scalar_t t) {
+
+  // Must be the same as forward calculation in
+  // aten/src/ATen/native/UpSample.h:get_cubic_upsample_coefficients
+  scalar_t A = -0.75;
+
+  scalar_t x;
+  x = -1 - t;
+  coeffs[0] = (-3 * A * x - 10 * A ) * x - 8 * A;
+  x = -t;
+  coeffs[1] = (-3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 1 - t;
+  coeffs[2] = (3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 2 - t;
+  coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
 }}  // namespace at::native
