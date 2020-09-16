@@ -3,9 +3,9 @@ import gc
 import inspect
 import runpy
 import threading
-import typing
-from typing import Union, List, TypeVar, Tuple, Generic, ClassVar, Iterable, Any, Optional
 from functools import wraps
+# how to introduce ClassVar without importing typing?
+import typing
 import unittest
 import os
 import torch
@@ -15,7 +15,7 @@ from torch.testing import \
     (get_all_dtypes)
 
 try:
-    import psutil
+    import psutil # type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -166,8 +166,9 @@ except ImportError:
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
 
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
-device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
+#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', bound=DeviceTypeTestBase)
+# todo: need to fix
+device_type_test_bases : typing.List[typing.Union[CPUTestBase, CUDATestBase]] = []
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -185,7 +186,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
     return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type = 'generic_device_type'
+    device_type : str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -260,7 +261,7 @@ class DeviceTypeTestBase(TestCase):
                                                      self.device_type, dtype):
                     self.skipTest("Skipped!")
 
-                device_arg = cls.get_primary_device()
+                device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
@@ -270,7 +271,8 @@ class DeviceTypeTestBase(TestCase):
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (device_arg, dtype, op)
-                    args = tuple(arg for arg in args if arg is not None)
+                    # todo: need to fix.
+                    args = (arg for arg in args if arg is not None)
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -315,14 +317,19 @@ class DeviceTypeTestBase(TestCase):
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
 
-class CPUTestBase(Generic[DeviceTypeTestBase]):
+class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
 
-class CUDATestBase(Generic[DeviceTypeTestBase]):
+class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    primary_device: typing.ClassVar[str]
+    cudnn_version: typing.ClassVar[typing.Any]
+    no_magma: typing.ClassVar[bool]
+    no_cudnn: typing.ClassVar[bool]
+
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -356,6 +363,8 @@ class CUDATestBase(Generic[DeviceTypeTestBase]):
 
 
 # Adds available device-type-specific test base classes
+# Todo: Error: Argument 1 to "append" of "list" has incompatible type "Type[CUDATestBase]"; expected "Type[CPUTestBase]"
+# tried to add Union to include both..
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
@@ -422,8 +431,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-        device_type_test_class = type(class_name, (base, empty_class), {})
-        #: Tuple(DeviceTypeTestBase, Tuple(), Dict[<nothing>, <nothing>])
+
+        # todo: need to fix..
+        # device_type_test_class expects to be either CPUTestBase or CUDATestBase.. How to make it compatible with the right expression?
+        device_type_test_class: type(DeviceTypeTestBase)  = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
