@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Resource final {
+struct C10_EXPORT Resource final {
   /*
     Memory
   */
@@ -48,6 +48,19 @@ struct Resource final {
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
     Data<Pointer> map() &;
+
+   private:
+    // Intentionally disabed to ensure memory access is always properly
+    // encapsualted in a scoped map-unmap region.  Allowing below overloads
+    // to be invoked on a temporary would open the door to the possibility
+    // of accessing the underlying memory out of the expected scope making
+    // for seemingly ineffective memory writes and hard to hunt down bugs.
+
+    template<typename Type, typename Pointer>
+    Data<Pointer> map() const && = delete;
+
+    template<typename Type, Access::Flags kAccess, typename Pointer>
+    Data<Pointer> map() && = delete;
   };
 
   /*
