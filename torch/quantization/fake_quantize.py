@@ -164,8 +164,7 @@ def _is_fake_quant_script_module(mod):
         suffix = mod._c.qualified_name.split('.', 1)[1]
         name = re.sub(r'\.___torch_mangle_\d+', '', suffix)
         return name == 'torch.quantization.fake_quantize.FakeQuantize'
-    else:
-        return false
+    return False
 
 def disable_fake_quant(mod):
     if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
