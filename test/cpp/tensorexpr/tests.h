@@ -390,6 +390,7 @@ namespace jit {
   _(LLVMElemwiseAdd)                       \
   _(LLVMElemwiseAddFloat)                  \
   _(LLVMElemwiseLog10Float)                \
+  _(LLVMElemwiseLog1pFloat)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
   _(LLVMElemwiseMaxFloat)                  \
