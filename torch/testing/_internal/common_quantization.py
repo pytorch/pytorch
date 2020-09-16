@@ -355,8 +355,8 @@ class QuantizationTestCase(TestCase):
                     submodule_name_count += 1
             return submodule_name_count == 0
 
-        if (hasattr(module, 'qconfig') and module.qconfig is not None and \
-           is_leaf_module(module) and not isinstance(module, torch.nn.Sequential) \
+        if (hasattr(module, 'qconfig') and module.qconfig is not None and
+           is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
            and type(module) in propagate_qconfig_list) or \
            is_custom_module_class(type(module)):
             self.assertTrue(hasattr(module, 'activation_post_process'),
