@@ -29,7 +29,7 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 template <>
 EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
     detail::_Uninitialized>() noexcept {
-  static constexpr detail::TypeMetaData singleton = detail::TypeMetaData(
+  static detail::TypeMetaData singleton = detail::TypeMetaData(
       0,
       nullptr,
       nullptr,

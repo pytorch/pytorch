@@ -124,7 +124,7 @@ struct TypeMetaData final {
 
   TypeMetaData() = delete;
 
-  constexpr TypeMetaData(
+  TypeMetaData(
       size_t itemsize,
       New* newFn,
       PlacementNew* placementNew,
@@ -143,7 +143,7 @@ struct TypeMetaData final {
         name_(name),
         scalarTypeOpt_(c10::nullopt) {}
 
-  constexpr TypeMetaData(
+  TypeMetaData(
       size_t itemsize,
       New* newFn,
       PlacementNew* placementNew,
@@ -314,9 +314,9 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 }
 
 template <class T>
-inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
-  C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
-  C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
+inline TypeMetaData _makeTypeMetaDataInstance() {
+  auto typeId = TypeIdentifier::Get<T>();
+  auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
   return {sizeof(T),
           _PickNew<T>(),
@@ -329,9 +329,9 @@ inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
 }
 
 template <class T>
-inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeScalarTypeMetaDataInstance(ScalarType scalarType) {
-  C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
-  C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
+inline TypeMetaData _makeScalarTypeMetaDataInstance(ScalarType scalarType) {
+  auto typeId = TypeIdentifier::Get<T>();
+  auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
   return {sizeof(T),
           _PickNew<T>(),
@@ -546,7 +546,7 @@ inline std::ostream& operator<<(
   template <>                                                      \
   EXPORT_IF_NOT_GCC const detail::TypeMetaData*                    \
   TypeMeta::_typeMetaDataInstance<T>() noexcept {                  \
-    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton = \
+    static detail::TypeMetaData singleton =                        \
         detail::_makeTypeMetaDataInstance<T>();                    \
     return &singleton;                                             \
   }
