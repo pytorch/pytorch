@@ -467,6 +467,9 @@ class TORCH_API IRSimplifier {
   static Stmt* simplify(Stmt* s) {
     PolynomialTransformer simplifier;
     s = s->accept_mutator(&simplifier);
+    if (s == nullptr) {
+      return nullptr;
+    }
 
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
