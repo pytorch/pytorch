@@ -148,9 +148,9 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
-        self._generate_forward()
+        self.regenerate_forward()
 
-    def _generate_forward(self) -> None:
+    def regenerate_forward(self) -> None:
         body, result, free_variables = self.graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.code = f"""\
