@@ -2566,7 +2566,6 @@ class TestQuantizedLinear(unittest.TestCase):
                      use_relu, use_multi_dim_input, use_channelwise):
         decimal_val = 4
         if torch.backends.quantized.engine == 'qnnpack':
-            use_multi_dim_input = False
             # QNNPACK supports uint8 in the kernels. In the op we shift the int8
             # weight values to uint8 to be on par with fbgemm. However, this causes
             # some rounding issues in rare cases. So, we relax the check to allow

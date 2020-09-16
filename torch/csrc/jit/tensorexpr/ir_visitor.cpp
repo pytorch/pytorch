@@ -207,6 +207,20 @@ void IRVisitor::visit(const RoundOff* v) {
   v->rhs()->accept(this);
 }
 
+void IRVisitor::visit(const MaxTerm* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
+void IRVisitor::visit(const MinTerm* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
 void IRVisitor::visit(const ReduceOp* v) {
   v->accumulator()->accept(this);
   v->body().node()->accept(this);
