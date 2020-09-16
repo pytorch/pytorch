@@ -1406,30 +1406,8 @@ graph(%Ra, %Rb):
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        torch._C._jit_run_cpp_tests(run_cuda=False)
+        torch._C._jit_run_cpp_tests()
         tests_setup.shutdown()
-
-    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
-    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    def test_cpp_cuda(self):
-        from cpp.jit import tests_setup
-        tests_setup.setup()
-        torch._C._jit_run_cpp_tests(run_cuda=True)
-        tests_setup.shutdown()
-
-    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
-    @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
-    @unittest.skipIf(IS_WINDOWS, "enable on windows")
-    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    def test_tensorexpr_cpp(self):
-        torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
-
-    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
-    @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
-    @unittest.skipIf(IS_WINDOWS, "enable on windows")
-    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    def test_tensorexpr_cpp_cuda(self):
-        torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
