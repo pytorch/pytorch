@@ -1611,10 +1611,16 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
-        sparse_tensor, _, _ = self._gen_sparse(len([2, 3, 4]), 9, [2, 3, 4] + [3, 4, 5, 6])
-        for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format, torch.preserve_format]:
+        sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6])
+        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        for x, mem_format in zip(data, mem_formats):
+
             with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
-                result = torch.zeros_like(sparse_tensor, memory_format=mem_format)
+                result = torch.zeros_like(x, memory_format=mem_format)
+
+            result = torch.zeros_like(x, layout=torch.strided, memory_format=mem_format)
+            self.assertTrue(result.layout == torch.strided)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
@@ -1622,43 +1628,45 @@ class TestSparse(TestCase):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
 
-        result = torch.zeros_like(sparse_tensor, layout=torch.strided)
-        self.assertTrue(result.layout == torch.strided)
+    def _assert_sparse_invars(self, t):
+        # SparseTensor has the following invariants:
+        # - sparse_dim + dense_dim = len(SparseTensor.shape)
+        # - SparseTensor._indices().shape = (sparse_dim, nnz)
+        # - SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+        self.assertEqual(t.sparse_dim() + t.dense_dim(), len(t.shape))
+        self.assertEqual(tuple(t._indices().shape), (t.sparse_dim(), t._nnz()))
+        self.assertEqual(tuple(t._values().shape), (t._nnz(), ) + t.shape[t.sparse_dim():])
+
+    def _test_empty_like(self, sparse_tensor):
+
+        result = torch.empty_like(sparse_tensor)
+        self.assertTrue(result.is_sparse)
+        self._assert_sparse_invars(result)
+        self.assertEqual(result.shape, sparse_tensor.shape)
+        self.assertEqual(result.dtype, sparse_tensor.dtype)
+        self.assertEqual(result.device, sparse_tensor.device)
+        self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
+        self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
+
+        sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6])
+        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        for x, mem_format in zip(data, mem_formats):
+
+            with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
+                result = torch.empty_like(x, memory_format=mem_format)
+
+            result = torch.empty_like(x, layout=torch.strided, memory_format=mem_format)
+            self.assertTrue(result.layout == torch.strided)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+        ):
+            dense_tensor = sparse_tensor.to_dense()
+            result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
     def test_empty_like(self):
         # tests https://github.com/pytorch/pytorch/issues/43699
-        def assert_sparse_invars(t):
-            # SparseTensor has the following invariants:
-            # - sparse_dim + dense_dim = len(SparseTensor.shape)
-            # - SparseTensor._indices().shape = (sparse_dim, nnz)
-            # - SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
-            self.assertEqual(t.sparse_dim() + t.dense_dim(), len(t.shape))
-            self.assertEqual(tuple(t._indices().shape), (t.sparse_dim(), t._nnz()))
-            self.assertEqual(tuple(t._values().shape), (t._nnz(), ) + t.shape[t.sparse_dim():])
-
-        def _test_empty_like(sparse_tensor):
-
-            result = torch.empty_like(sparse_tensor)
-            self.assertTrue(result.is_sparse)
-            assert_sparse_invars(result)
-            self.assertEqual(result.shape, sparse_tensor.shape)
-            self.assertEqual(result.dtype, sparse_tensor.dtype)
-            self.assertEqual(result.device, sparse_tensor.device)
-            self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
-            self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
-
-            for mem_format in [torch.channels_last, torch.channels_last_3d, torch.contiguous_format, torch.preserve_format]:
-                with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
-                    result = torch.empty_like(sparse_tensor, memory_format=mem_format)
-
-            with self.assertRaisesRegex(
-                RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
-            ):
-                dense_tensor = sparse_tensor.to_dense()
-                result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
-
-            result = torch.empty_like(sparse_tensor, layout=torch.strided)
-            self.assertTrue(result.layout == torch.strided)
 
         if not self.is_uncoalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -1667,7 +1675,7 @@ class TestSparse(TestCase):
                 size=[3, ],
                 device=self.device
             ).coalesce()
-            _test_empty_like(input_coalesced)
+            self._test_empty_like(input_coalesced)
 
             # hybrid sparse input
             input_coalesced = torch.sparse_coo_tensor(
@@ -1676,7 +1684,7 @@ class TestSparse(TestCase):
                 size=[4, 5, 2],
                 device=self.device
             ).coalesce()
-            _test_empty_like(input_coalesced)
+            self._test_empty_like(input_coalesced)
 
         if self.is_uncoalesced:
             # test uncoalesced input
@@ -1686,7 +1694,7 @@ class TestSparse(TestCase):
                 size=[3, ],
                 device=self.device
             )
-            _test_empty_like(input_uncoalesced)
+            self._test_empty_like(input_uncoalesced)
 
             # test on empty sparse tensor
             input_uncoalesced = torch.sparse_coo_tensor(
@@ -1695,7 +1703,7 @@ class TestSparse(TestCase):
                 size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
                 device=self.device
             )
-            _test_empty_like(input_uncoalesced)
+            self._test_empty_like(input_uncoalesced)
 
     def _test_narrow(self, input, narrow_args):
         expected = input.to_dense().narrow(*narrow_args)
