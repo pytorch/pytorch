@@ -1656,7 +1656,7 @@ std::vector<FileLineFunc> currentCallstack() {
   if (tls_int_state_ptr_) {
     auto cs = tls_int_state_ptr_->callstack();
     entries.reserve(cs.size());
-    for (auto idx = cs.size() - 1; idx >= 0; --idx) {
+    for (int idx = cs.size() - 1; idx >= 0; --idx) {
       auto& range = cs[idx].range;
       if (range.source()) {
         auto& src = range.source();

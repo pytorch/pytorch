@@ -62,7 +62,7 @@ class TestProfiler(TestCase):
             w = ts_method_2(x, y) + a
             return w.sum()
 
-        with profile(record_shapes=False, with_source=True) as p:
+        with profile(with_source=True) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
@@ -70,19 +70,17 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
 
-        for e in p.function_events:
-            if "aten::add" in e.name or "AddBackward" in e.name:
-                self.assertTrue("test_profiler" in e.src_location)
-                self.assertTrue(
-                    "test_source" in e.src_location or
-                    "ts_method_1" in e.src_location or
-                    "ts_method_2" in e.src_location)
-
         print(p.key_averages(
-            group_by_input_shape=False,
-            group_by_source=True).table(
+            group_by_stack_n=5).table(
             sort_by="self_cpu_time_total", row_limit=-1))
 
+        for e in p.function_events:
+            if "aten::add" in e.name or "AddBackward" in e.name:
+                self.assertTrue(any(["test_profiler" in entry for entry in e.stack]))
+                self.assertTrue(any([(
+                    "test_source" in entry or
+                    "ts_method_1" in entry or
+                    "ts_method_2" in entry) for entry in e.stack]))
 
         torch._C._set_graph_executor_optimize(prev_opt)
 

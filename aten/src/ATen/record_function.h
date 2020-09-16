@@ -115,7 +115,7 @@ struct TORCH_API RecordFunction {
   // For backward functions - thread id of the corresponding forward function,
   // or zero otherwise;
   // used alongside with sequence number to correlate backward functions with
-  // forward
+  // the forward ones
   inline uint64_t forwardThreadId() const {
     return fwd_thread_id_;
   }

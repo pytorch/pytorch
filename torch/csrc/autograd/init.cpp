@@ -60,7 +60,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("node_id", &Event::nodeId)
       .def("is_remote", &Event::isRemote)
       .def("sequence_nr", &Event::sequenceNr)
-      .def("stack", &Event::stack);
+      .def("stack", &Event::stack)
+      .def("scope", &Event::scope);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);

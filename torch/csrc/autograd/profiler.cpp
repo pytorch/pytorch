@@ -296,9 +296,9 @@ struct ProfilerThreadLocalState
   std::vector<std::string> callstackStr(const std::vector<jit::FileLineFunc>& cs) {
     std::vector<std::string> cs_str;
     cs_str.reserve(cs.size());
-    for (auto idx = cs.size() - 1; idx >= 0; --idx) {
+    for (const auto& entry : cs) {
       std::stringstream loc;
-      loc << cs[idx].filename << "(" << cs[idx].line << "): " << cs[idx].funcname;
+      loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
       cs_str.push_back(loc.str());
     }
     return cs_str;

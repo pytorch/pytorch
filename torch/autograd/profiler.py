@@ -103,6 +103,34 @@ class EventList(list):
 
         self._cpu_children_populated = True
 
+    def set_backward_stacktraces(self):
+        self.populate_cpu_children()
+
+        def bw_parent(evt):
+            if evt is None:
+                return None
+            elif evt.scope == 1:
+                return evt
+            else:
+                return bw_parent(evt.cpu_parent)
+
+        fwd_stacks = {}
+        for evt in self:
+            if bw_parent(evt) is None:
+                t = (evt.sequence_nr, evt.thread)
+                if t not in fwd_stacks:
+                    fwd_stacks[t] = evt.stack
+
+        for evt in self:
+            p = bw_parent(evt)
+            if p is not None:
+                t = (p.sequence_nr, p.fwd_thread)
+                if t in fwd_stacks:
+                    evt.stack = fwd_stacks[t]
+                else:
+                    evt.stack = []
+
+
     @property
     def self_cpu_time_total(self):
         return sum([event.self_cpu_time_total for event in self])
@@ -206,7 +234,7 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
-    def key_averages(self, group_by_input_shapes=False, group_by_source=False):
+    def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
         @param group_by_input_shapes The key would become
@@ -215,7 +243,7 @@ class EventList(list):
         the most and may help with dimension specific optimizations or
         choosing best candidates for quantization (aka fitting a roof line)
 
-        @param group_by_source Group by operator source filename and line
+        @param group_by_stack_n Group by top n stack trace entries
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -223,17 +251,22 @@ class EventList(list):
         self.populate_cpu_children()
         stats = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes, group_by_source):
+        def get_key(event, group_by_input_shapes, group_by_stack_n):
             key = [str(event.key), str(event.node_id)]
             if group_by_input_shapes:
                 key += [str(event.input_shapes)]
-            if group_by_source:
-                key += [str(event.src_location)]
+            if group_by_stack_n > 0:
+                key += event.stack[:group_by_stack_n]
             return tuple(key)
         for evt in self:
-            stats[get_key(evt, group_by_input_shapes, group_by_source)].add(evt)
+            stats[get_key(evt, group_by_input_shapes, group_by_stack_n)].add(evt)
 
-        return EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
+        avg_list = EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
+        for evt in avg_list:
+            evt.stack = evt.stack[:group_by_stack_n]
+            if not group_by_input_shapes:
+                evt.input_shapes = ""
+        return avg_list
 
     def total_average(self):
         """Averages all events.
@@ -354,6 +387,8 @@ class profile(object):
             parse_event_records(records),
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
+        if self.with_source:
+            self.function_events.set_backward_stacktraces()
         return False
 
     def __repr__(self):
@@ -385,9 +420,9 @@ class profile(object):
         return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self, group_by_input_shape=False, group_by_source=False):
+    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        return self.function_events.key_averages(group_by_input_shape, group_by_source)
+        return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
@@ -674,20 +709,22 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            src_location=None, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
+            self, id, node_id, name, thread, fwd_thread, cpu_start, cpu_end, input_shapes=None,
+            stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=True, sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
         self.thread = thread
+        self.fwd_thread = fwd_thread
         self.kernels = []
         self.count = 1
         self.cpu_children = []
         self.cpu_parent = None
         self.input_shapes = input_shapes
-        self.src_location = src_location
+        self.stack = stack
+        self.scope = scope
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
@@ -757,7 +794,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
-            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} src_location={}'
+            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
             'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
@@ -769,7 +806,6 @@ class FunctionEvent(FormattedTimesMixin):
                 self.name,
                 self.thread,
                 str(self.input_shapes),
-                self.src_location,
                 self.cpu_memory_usage,
                 self.cuda_memory_usage,
                 self.is_async,
@@ -791,7 +827,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
         self.input_shapes = None
-        self.src_location = None
+        self.stack = None
+        self.scope = None
         self.cpu_memory_usage = 0
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
@@ -810,16 +847,9 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.cpu_parent = other.cpu_parent
             self.cpu_children = other.cpu_children
 
-            if other.input_shapes:
-                if self.input_shapes:
-                    assert self.input_shapes == other.input_shapes
-                else:
-                    self.input_shapes = other.input_shapes
-            if other.src_location:
-                if self.src_location:
-                    assert self.src_location == other.src_location
-                else:
-                    self.src_location = other.src_location
+            self.input_shapes = other.input_shapes
+            self.stack = other.stack
+            self.scope = other.scope
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
@@ -839,14 +869,13 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            'cuda_time={} input_shapes={} src_location={}'
+            'cuda_time={} input_shapes={} '
             'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
-                self.src_location,
                 self.cpu_memory_usage,
                 self.cuda_memory_usage,
             )
@@ -863,35 +892,6 @@ class StringTable(defaultdict):
         # the short sequences
         self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
-
-
-def get_source_location(record):
-    ts_loc = record.ts_location().strip()
-    if len(ts_loc) > 0:
-        return ts_loc
-    # heuristically figure user script source location
-    # using python callstack
-    filtered_entries = [
-        ("autograd/__init__", "_make_grads"),
-        ("autograd/__init__", "backward"),
-        ("torch/tensor", "backward"),
-        ("_internal/common_utils", "prof_callable"),
-        ("_internal/common_utils", "prof_func_call"),
-        ("_internal/common_utils", "prof_meth_call"),
-    ]
-    def should_filter(line):
-        for entry in filtered_entries:
-            if entry[0] in line and entry[1] in line:
-                return True
-        return False
-
-    for line in record.py_stack():
-        line = line.strip()
-        if len(line) == 0:
-            continue
-        if not should_filter(line):
-            return line
-    return None
 
 def parse_event_records(thread_records):
     def get_record_key(record):
@@ -916,6 +916,17 @@ def parse_event_records(thread_records):
         "aten::output_nr",
         "aten::_version",
     ]
+
+    def filter_stack_entry(entry):
+        filtered_entries = [
+            ("autograd/__init__", "_make_grads"),
+            ("autograd/__init__", "backward"),
+            ("torch/tensor", "backward"),
+            ("_internal/common_utils", "prof_callable"),
+            ("_internal/common_utils", "prof_func_call"),
+            ("_internal/common_utils", "prof_meth_call"),
+        ]
+        return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
@@ -993,10 +1004,12 @@ def parse_event_records(thread_records):
                     node_id=record.node_id(),
                     name=string_table[start.name()],
                     thread=start.thread_id(),
+                    fwd_thread=start.fwd_thread_id(),
                     cpu_start=start_record.cpu_elapsed_us(start),
                     cpu_end=start_record.cpu_elapsed_us(record),
                     input_shapes=start.shapes(),
-                    src_location = get_source_location(start),
+                    stack = [entry for entry in start.stack() if filter_stack_entry(entry)],
+                    scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
@@ -1133,13 +1146,16 @@ def build_table(
         ), use_cuda=use_cuda, profile_memory=profile_memory)
 
     has_input_shapes = any(
-        [event.input_shapes is not None for event in events])
-    has_src_location = any(
-        [event.src_location is not None for event in events])
+        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
+    has_stack = any(
+        [(event.stack is not None and len(event.stack) > 0) for event in events])
 
     name_column_width = max([len(evt.key) for evt in events]) + 4
     DEFAULT_COLUMN_WIDTH = 15
-    SHAPES_COLUMN_WIDTH = 45
+    MAX_SHAPES_COLUMN_WIDTH = 45
+    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    if shapes_column_width > MAX_SHAPES_COLUMN_WIDTH:
+        shapes_column_width = MAX_SHAPES_COLUMN_WIDTH
     SRC_COLUMN_WIDTH = 55
 
     headers = [
@@ -1179,10 +1195,11 @@ def build_table(
     row_format = [""]
     header_sep = [""]
     line_length = [-SPACING_SIZE]
+    MAX_STACK_ENTRY = 5
 
     def add_column(padding):
-        row_format[0] += '{: <' + str(padding) + '}  '
-        header_sep[0] += '-' * padding + '  '
+        row_format[0] += '{: <' + str(padding) + '}' + (' ' * SPACING_SIZE)
+        header_sep[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length[0] += padding + SPACING_SIZE
 
     add_column(name_column_width)
@@ -1191,9 +1208,9 @@ def build_table(
 
     if has_input_shapes:
         headers.append('Input Shapes')
-        add_column(SHAPES_COLUMN_WIDTH)
+        add_column(shapes_column_width)
 
-    if has_src_location:
+    if has_stack:
         headers.append('Source Location')
         add_column(SRC_COLUMN_WIDTH)
 
@@ -1270,11 +1287,18 @@ def build_table(
         if append_node_id:
             row_values.append(evt.node_id)
         if has_input_shapes:
-            row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
-        if has_src_location:
-            loc = evt.src_location
-            row_values.append((str(loc) if loc else "")[:SRC_COLUMN_WIDTH])
+            row_values.append(str(evt.input_shapes)[:shapes_column_width])
+        if has_stack:
+            src_field = ""
+            if len(evt.stack) > 0:
+                src_field = evt.stack[0][:SRC_COLUMN_WIDTH]
+            row_values.append(src_field)
         append(row_format.format(*row_values))
+        empty_headers = [""] * (len(headers) - 1)
+        for entry in evt.stack[1:MAX_STACK_ENTRY]:
+            append(row_format.format(*(empty_headers + [entry[:SRC_COLUMN_WIDTH]])))
+        empty_headers.append("")
+        append(row_format.format(*empty_headers))
 
     append(header_sep)
     append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
