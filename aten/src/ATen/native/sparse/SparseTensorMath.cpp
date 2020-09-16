@@ -207,6 +207,9 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
   auto commonDtype = at::result_type(self, value);
+  if (c10::isIntegralType(commonDtype, /*include_bool=*/true)) {
+    commonDtype = typeMetaToScalarType(at::get_default_dtype());
+  }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return div_out_sparse_zerodim(result, self, value);
 }
@@ -217,64 +220,6 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
   return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
-}
-
-// --------------------------------------------------------------------
-// true_divide(SparseTensor, Scalar)
-// --------------------------------------------------------------------
-
-SparseTensor& true_divide_out_sparse_zerodim(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    const Tensor& divisor) {
-  TORCH_CHECK(divisor.dim() == 0, "Sparse true division requires a scalar or ",
-    "zero-dim dense tensor divisor (got shape ", divisor.sizes(), " for divisor)");
-  TORCH_CHECK(!divisor.is_sparse(), "Sparse true division requires a scalar or ",
-    "zero-dim dense tensor divisor (got a sparse divisor)");
-
-  AT_ASSERT(result.is_sparse());
-  AT_ASSERT(dividend.is_sparse());
-
-  // Short-circuits if result and dividend are the same tensor
-  if (is_same_tensor(result, dividend)) {
-    Tensor result_values = result._values();
-    at::true_divide_out(result_values, result_values, divisor);
-  } else {
-    Tensor dividend_tmp = dividend;
-    result.resize_as_(dividend_tmp);
-    auto indices = result._indices();
-    indices.resize_as_(dividend_tmp._indices());
-    indices.copy_(dividend_tmp._indices());
-    Tensor result_values = result._values();
-    at::true_divide_out(result_values, dividend_tmp._values(), divisor);
-    get_sparse_impl(result)->set_nnz_and_narrow(dividend_tmp._nnz());
-    result._coalesced_(dividend_tmp.is_coalesced());
-  }
-
-  return result;
-}
-
-Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
-
-  // Ensures floating dtype
-  if (isIntegralType(commonDtype, /*includeBool=*/ true)) {
-    commonDtype = typeMetaToScalarType(c10::get_default_dtype());
-  }
-
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return true_divide_out_sparse_zerodim(result, self, value);
-}
-
-SparseTensor& true_divide_out_sparse_scalar(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    Scalar divisor) {
-  return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
-}
-
-Tensor& true_divide_sparse_(Tensor& self, const Tensor& divisor) {
-  return true_divide_out_sparse_zerodim(self, self, divisor);
 }
 
 // --------------------------------------------------------------------
@@ -385,7 +330,7 @@ Tensor norm_sparse(const SparseTensor& self, optional<Scalar> p, IntArrayRef dim
 
 Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 {
-  TORCH_CHECK(self.ndimension() == 2 && 
+  TORCH_CHECK(self.ndimension() == 2 &&
               vec.ndimension() == 1,
               "mv: two tensor dim should be 2 and 1, but got ",
               "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());

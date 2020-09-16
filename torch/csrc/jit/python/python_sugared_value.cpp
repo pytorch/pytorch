@@ -573,6 +573,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr;
   }
 
+  // Check if it's a property.
+  auto prop =
+      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+  if (prop) {
+    return MethodValue(self_, prop->getter->name())
+        .call(loc, m, {}, {}, /*n_binders=*/1);
+  }
+
   // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
@@ -855,11 +863,20 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
+    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
       py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("rpc_sync").ptr()) {
+    return SpecialFormValue::create(prim::rpc_sync);
+  } else if (
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
+    return SpecialFormValue::create(prim::rpc_remote);
 #endif
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
