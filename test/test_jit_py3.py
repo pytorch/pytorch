@@ -408,6 +408,31 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_optional_no_element_type_annotation(self):
+        """
+        Test that using an optional with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Optional
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(annotated_fn)
+
     def test_tuple_no_element_type_annotation(self):
         """
         Test that using a tuple with no contained types produces an error.
