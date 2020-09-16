@@ -445,12 +445,26 @@ ProcessGroupGloo::Options::Options()
 
 namespace {
 
+#ifdef _WIN32
+void init_winsock() {
+  WSADATA wsa_data;
+  int res;
+  res = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+  if (res != 0) {
+    throw std::system_error(res, std::system_category());
+  }
+}
+#endif
+
 // Gloo assumes that this machine's hostname can always be resolved
 // to an address. If it doesn't it throws a runtime error saying
 // that it can't be resolved. Instead of catching it, we choose
 // to proactively check if an address can be resolved, so we can
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+#ifdef _WIN32
+  init_winsock();
+#endif
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -504,6 +518,9 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
+#ifdef _WIN32
+  init_winsock();
+#endif
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
