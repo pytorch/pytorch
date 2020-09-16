@@ -600,8 +600,8 @@ class Module:
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
-            if not dtype.is_floating_point:
-                raise TypeError('nn.Module.to only accepts floating point '
+            if not (dtype.is_floating_point or dtype.is_complex):
+                raise TypeError('nn.Module.to only accepts floating point or complex '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
