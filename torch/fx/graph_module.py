@@ -105,8 +105,8 @@ class GraphModule(torch.nn.Module):
         code : The Python source code for the function generated from `graph`
         forward : The Python method generated from `graph`
 
-    `graph` can be modified, but `regenerate_forward()` MUST be called to sync `code`
-    and `forward` up with `graph`.
+    Note that when `graph` is reassigned, `code` and `forward` will be automatically
+    regenerated.
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
