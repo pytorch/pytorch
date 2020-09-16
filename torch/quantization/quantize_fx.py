@@ -3,7 +3,6 @@ from .fx import Quantizer  # noqa: F401
 from torch.fx import GraphModule  # type: ignore
 from .fx.utils import graph_pretty_str  # noqa: F401
 
-
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):
         raise ValueError(
