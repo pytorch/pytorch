@@ -19,6 +19,10 @@ gradients by minimizing gradient underflow, as explained :ref:`here<gradient-sca
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
 In the samples below, each is used as its individual documentation suggests.
 
+(Samples here are illustrative.  See the
+`Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_
+for a runnable walkthrough.)
+
 .. contents:: :local:
 
 Typical Mixed Precision Training
