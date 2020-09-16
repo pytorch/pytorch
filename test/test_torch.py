@@ -14578,6 +14578,10 @@ class TestTorchDeviceType(TestCase):
             self.assertFalse(like.is_contiguous())
             self.assertTrue(like.is_contiguous(memory_format=memory_format))
 
+            sparse = x.to_sparse()
+            with self.assertRaises(RuntimeError):
+                z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
         test_helper(torch.randn(4, 3, 8, 8, device=device), torch.channels_last)
         test_helper(torch.randn(4, 3, 8, 8, 8, device=device), torch.channels_last_3d)
 
