@@ -621,7 +621,7 @@ class TestNN(NNTestCase):
                 m2.to(torch.complex64)
                 self.assertIs(m2.weight.dtype, torch.complex64)
                 m2.to(torch.complex128)
-                self.assertIs(m2.weight.dtype, torch.complex64)
+                self.assertIs(m2.weight.dtype, torch.complex128)
 
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
