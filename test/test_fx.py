@@ -445,8 +445,30 @@ class TestFX(JitTestCase):
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
+        self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
         self.assertEqual(copied(x), transformed(x))
+
+    def test_deepcopy_with_submods(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.relu(x) + self.param
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(x) - 3.0
+
+        baz = Baz()
+        traced = symbolic_trace(baz)
+        copied = copy.deepcopy(traced)
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
@@ -524,10 +546,10 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
-        input = torch.rand(3) 
+        input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
-        self.assertEqual(r, ref) 
+        self.assertEqual(r, ref)
 
 if __name__ == '__main__':
     run_tests()
