@@ -21,7 +21,7 @@ Argument = Optional[Union[
 ]]
 
 class Node:
-    def __init__(self, graph: 'Graph', name: str, op: str, target: Target, 
+    def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
                  args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
