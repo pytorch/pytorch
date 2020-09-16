@@ -1,6 +1,7 @@
 from torch.testing._internal.jit_utils import JitTestCase
 import os
 import sys
+import unittest
 
 import torch
 import torch._C
