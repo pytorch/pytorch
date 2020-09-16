@@ -627,6 +627,13 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann):
+    if ann is Tuple:
+        raise RuntimeError(
+            "Attempted to use Tuple without a "
+            "contained type. Please add a contained type, e.g. "
+            "Tuple[int]"
+        )
+
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, '__module__'):
         return False
