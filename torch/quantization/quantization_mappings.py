@@ -13,41 +13,41 @@ from .stubs import QuantStub, DeQuantStub
 
 # Map for swapping float module to quantized ones
 STATIC_QUANT_MODULE_MAPPINGS = {
-    nn.Linear: nnq.Linear,
-    nn.ReLU: nnq.ReLU,
-    nn.ReLU6: nnq.ReLU6,
-    nn.Hardswish: nnq.Hardswish,
-    nn.ELU: nnq.ELU,
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
+    nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
-    nn.BatchNorm2d: nnq.BatchNorm2d,
-    nn.BatchNorm3d: nnq.BatchNorm3d,
-    nn.LayerNorm: nnq.LayerNorm,
+    nn.ELU: nnq.ELU,
+    nn.Embedding: nnq.Embedding,
+    nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.GroupNorm: nnq.GroupNorm,
+    nn.Hardswish: nnq.Hardswish,
     nn.InstanceNorm1d: nnq.InstanceNorm1d,
     nn.InstanceNorm2d: nnq.InstanceNorm2d,
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
-    nn.Embedding: nnq.Embedding,
-    nn.EmbeddingBag: nnq.EmbeddingBag,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
+    nn.LayerNorm: nnq.LayerNorm,
+    nn.Linear: nnq.Linear,
+    nn.ReLU6: nnq.ReLU6,
+    nn.ReLU: nnq.ReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.BNReLU2d: nniq.BNReLU2d,
+    nni.BNReLU3d: nniq.BNReLU3d,
     nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
-    nni.BNReLU2d: nniq.BNReLU2d,
-    nni.BNReLU3d: nniq.BNReLU3d,
-    nniqat.ConvReLU2d: nniq.ConvReLU2d,
-    nniqat.LinearReLU: nniq.LinearReLU,
     nniqat.ConvBn2d: nnq.Conv2d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
+    nniqat.ConvReLU2d: nniq.ConvReLU2d,
+    nniqat.LinearReLU: nniq.LinearReLU,
     # QAT modules:
-    nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+    nnqat.Linear: nnq.Linear,
 }
 
 # Map for swapping float module to qat modules
@@ -63,11 +63,11 @@ QAT_MODULE_MAPPINGS = {
 
 # Map for swapping dynamic modules
 DYNAMIC_QUANT_MODULE_MAPPINGS = {
+    nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
-    nn.GRUCell: nnqd.GRUCell,
 }
 
 # Whitelist for propagating the qconfig
@@ -147,13 +147,12 @@ def get_qconfig_propagation_list():
     ''' Get the list of module types that we'll attach qconfig
     attribute to in prepare
     '''
-    QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
-        (set(STATIC_QUANT_MODULE_MAPPINGS.keys()) |
-         set(QAT_MODULE_MAPPINGS.keys()) |
-         set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
-         _INCLUDE_QCONFIG_PROPAGATE_LIST) -
-        _EXCLUDE_QCONFIG_PROPAGATE_LIST
-    )
+    QCONFIG_PROPAGATE_MODULE_CLASS_LIST =(
+        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())  |
+        set(QAT_MODULE_MAPPINGS.keys())            |
+        set(STATIC_QUANT_MODULE_MAPPINGS.keys())   |
+        _INCLUDE_QCONFIG_PROPAGATE_LIST
+    ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
 def get_compare_output_module_list():
@@ -161,13 +160,13 @@ def get_compare_output_module_list():
     in numeric suite
     '''
     NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST = (
-        set(STATIC_QUANT_MODULE_MAPPINGS.values())
-        | set(QAT_MODULE_MAPPINGS.values())
-        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.values())
-        | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
-        | set(QAT_MODULE_MAPPINGS.keys())
-        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
-        | _INCLUDE_QCONFIG_PROPAGATE_LIST
+        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())   |
+        set(DYNAMIC_QUANT_MODULE_MAPPINGS.values()) |
+        set(QAT_MODULE_MAPPINGS.keys())             |
+        set(QAT_MODULE_MAPPINGS.values())           |
+        set(STATIC_QUANT_MODULE_MAPPINGS.keys())    |
+        set(STATIC_QUANT_MODULE_MAPPINGS.values())  |
+        _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
