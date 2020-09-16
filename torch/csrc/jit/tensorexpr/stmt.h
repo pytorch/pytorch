@@ -4,6 +4,7 @@
 #include <list>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 namespace torch {
