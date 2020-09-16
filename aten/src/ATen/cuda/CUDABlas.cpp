@@ -145,6 +145,7 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -157,6 +158,7 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -167,9 +169,10 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -183,9 +186,10 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   }
 #endif
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -201,6 +205,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
@@ -340,9 +345,10 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     CUDABLAS_POSINT_CHECK(gemv<Dtype>, incy); \
   } while (0)
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t op = _cublasOpFromChar(trans);
@@ -355,9 +361,10 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 #endif
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
+    // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t op = _cublasOpFromChar(trans);
@@ -372,6 +379,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t op = _cublasOpFromChar(trans);
@@ -383,6 +391,7 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
 
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
+  // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t op = _cublasOpFromChar(trans);
@@ -492,28 +501,16 @@ void dot<float>(CUDABLAS_DOT_ARGTYPES(float)) {
 
 template <>
 void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
-  #ifndef __HIP_PLATFORM_HCC__
   TORCH_CUDABLAS_CHECK(cublasZdotu(handle, n, reinterpret_cast<const cuDoubleComplex*>(x),
                                    incx, reinterpret_cast<const cuDoubleComplex*>(y), incy,
                                    reinterpret_cast<cuDoubleComplex*>(result)));
-  #else
-  TORCH_CUDABLAS_CHECK(cublasZdotu(handle, n, reinterpret_cast<const rocblas_double_complex*>(x),
-                                   incx, reinterpret_cast<const rocblas_double_complex*>(y), incy,
-                                   reinterpret_cast<rocblas_double_complex*>(result)));
-  #endif
 }
 
 template <>
 void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
-  #ifndef __HIP_PLATFORM_HCC__
   TORCH_CUDABLAS_CHECK(cublasCdotu(handle, n, reinterpret_cast<const cuComplex*>(x),
                                    incx, reinterpret_cast<const cuComplex*>(y), incy,
                                    reinterpret_cast<cuComplex*>(result)));
-  #else
-  TORCH_CUDABLAS_CHECK(cublasCdotu(handle, n, reinterpret_cast<const rocblas_float_complex*>(x),
-                                   incx, reinterpret_cast<const rocblas_float_complex*>(y), incy,
-                                   reinterpret_cast<rocblas_float_complex*>(result)));
-  #endif
 }
 
 template <>
@@ -543,6 +540,20 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 #else
   AT_ERROR("Cublas_Hdot requires CUDA 8.0+");
 #endif
+}
+
+template <>
+void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const cuComplex*>(x),
+                                   incx, reinterpret_cast<const cuComplex*>(y), incy,
+                                   reinterpret_cast<cuComplex*>(result)));
+}
+
+template <>
+void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZdotc(handle, n, reinterpret_cast<const cuDoubleComplex*>(x),
+                                   incx, reinterpret_cast<const cuDoubleComplex*>(y), incy,
+                                   reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
 } // namespace blas

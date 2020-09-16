@@ -6,6 +6,11 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
+# ---[ MSVC OpenMP modification 
+if(MSVC)
+  include(../cmake/public/utils.cmake)
+endif()
+
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
@@ -106,10 +111,12 @@ endif()
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
-add_subdirectory(perfkernels)
+if(BUILD_CAFFE2)
+  add_subdirectory(perfkernels)
+endif()
 
 # Skip modules that are not used by libtorch mobile yet.
-if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(contrib)
   add_subdirectory(predictor)
   add_subdirectory(predictor/emulator)
@@ -146,6 +153,9 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(share)
   # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
   add_subdirectory(transforms)
+endif()
+if(NOT BUILD_CAFFE2)
+  add_subdirectory(proto)
 endif()
 
 # Advanced: if we have allow list specified, we will do intersections for all
@@ -304,10 +314,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Generate files
   set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
-  configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
-    "${TOOLS_PATH}/shared/cwrap_common.py"
-    COPYONLY)
-
   configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
     "${TOOLS_PATH}/shared/_utils_internal.py"
     COPYONLY)
@@ -449,6 +455,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
 
+  # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
+  )
+
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
@@ -462,11 +473,21 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
+    # Disable legacy import of building without Caffe2 support
+    if(BUILD_CAFFE2)
+      list(APPEND TORCH_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
+      )
+    else()
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
+        PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
+      )
+    endif()
     if(USE_DISTRIBUTED)
       append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
@@ -894,6 +915,11 @@ if(USE_OPENMP)
   find_package(OpenMP QUIET)
 endif()
 if(USE_OPENMP AND OPENMP_FOUND)
+  if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES "libiomp5md\\.lib")
+    set(AT_MKL_MT 1)
+  else()
+    set(AT_MKL_MT 0)
+  endif()
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
@@ -1209,6 +1235,12 @@ if(USE_ROCM)
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
+if(BUILD_STATIC_RUNTIME_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/static_runtime ${PROJECT_BINARY_DIR}/bin)
+  add_executable(static_runtime_bench "${STATIC_RUNTIME_BENCHMARK_SRCS}")
+  target_link_libraries(static_runtime_bench torch_library benchmark)
+endif()
+
 if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
@@ -1235,6 +1267,27 @@ endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)
+
+  foreach(test_src ${ATen_VEC256_TEST_SRCS})
+    foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY) 
+        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)  
+        separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
+        add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
+        target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${ATen_CPU_INCLUDE})
+        target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY}  CPU_CAPABILITY_${CPU_CAPABILITY})
+        target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE  ${FLAGS})
+        if(NOT MSVC)
+              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers) 
+        endif(NOT MSVC)
+        add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
+    endforeach()
+  endforeach()
+
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
@@ -1374,10 +1427,12 @@ if(BUILD_PYTHON)
   endif()
 
   # ---[ Python.
+  if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
+  torch_set_target_props(caffe2_pybind11_state)
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1407,6 +1462,7 @@ if(BUILD_PYTHON)
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     endif()
+    torch_set_target_props(caffe2_pybind11_state_gpu)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1434,6 +1490,7 @@ if(BUILD_PYTHON)
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     endif()
+    torch_set_target_props(caffe2_pybind11_state_hip)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1485,6 +1542,7 @@ if(BUILD_PYTHON)
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
+  endif()
 
   # generated pb files are copied from build/caffe2 to caffe2
   # if we copied them back to build this would create a build cycle

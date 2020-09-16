@@ -17,7 +17,7 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-    throw std::runtime_error("PyTorch was compiled without NumPy support");
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 }}
 #else
@@ -247,7 +247,8 @@ bool is_numpy_int(PyObject* obj) {
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return is_numpy_int(obj) || PyArray_IsScalar(obj, Floating);
+  return is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
+         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating);
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
