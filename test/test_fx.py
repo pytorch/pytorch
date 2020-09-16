@@ -6,6 +6,7 @@ import pickle
 import copy
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.proxy import TraceError
+from torch.fx.experimental import GraphManipulation
 
 from fx.quantization import Quantizer
 
@@ -524,10 +525,29 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
-        input = torch.rand(3) 
+        input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
-        self.assertEqual(r, ref) 
+        self.assertEqual(r, ref)
+        input = torch.rand(3)
+        r = gm(input)
+        ref = torch.sin(mod.linear(input) + mod.bias)
+        self.assertEqual(r, ref)
+
+    def test_replace_all_uses_with(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = testModule()
+        traced = symbolic_trace(m)
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+        assert (input1 + input2) == traced(input1, input2)
+        GraphManipulation.replace_all_uses_with(
+            traced, "call_function", operator.add, "call_function", operator.mul
+        )
+        assert (input1 * input2) == traced(input1, input2)
 
 if __name__ == '__main__':
     run_tests()
