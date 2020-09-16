@@ -120,6 +120,67 @@ public:
 private:
   DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
+
+public:
+  // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
+  // set. The iterator is only invalidated by the destruction of the underlying
+  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // the DispatchKeySet.
+  class iterator {
+   public:
+    using self_type = iterator;
+    using iterator_category = std::input_iterator_tag;
+    using value_type = DispatchKey;
+    using difference_type = ptrdiff_t;
+
+    explicit iterator(const uint64_t *data_ptr, uint8_t i=0) : data_ptr_(data_ptr), i_(i) {
+      // Go to the first key in the set
+      ++(*this);
+    }
+
+    self_type& operator++() {
+      TORCH_INTERNAL_ASSERT(i_ <= static_cast<uint8_t>(DispatchKey::NumDispatchKeys));
+
+      // Create a masked version of the set representation to ignore previous
+      // keys that we've iterated through.
+      uint64_t masked_data = llvm::maskTrailingZeros<uint64_t>(i_) & *data_ptr_;
+      uint64_t firstKeyIndex = llvm::findFirstSet(masked_data);
+
+      // If there are no keys, set to end iterator value
+      if (firstKeyIndex == std::numeric_limits<uint64_t>::max() ||
+         i_ == static_cast<uint8_t>(DispatchKey::NumDispatchKeys)) {
+        i_ = static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
+        return *this;
+      }
+
+      i_ = static_cast<uint8_t>(firstKeyIndex) + 1;
+      return *this;
+    }
+
+    self_type operator++(int) {
+      self_type previous_iterator =  *this;
+      ++(*this);
+      return previous_iterator;
+    }
+
+    bool operator==(const self_type& rhs) const { return i_ == rhs.i_; }
+    bool operator!=(const self_type& rhs) const { return i_ != rhs.i_; }
+    DispatchKey operator*() const { return static_cast<DispatchKey> (i_); }
+
+   private:
+    const uint64_t *data_ptr_;
+    uint8_t i_;
+  };
+
+ public:
+  // Returns iterator to the first key in the set. If no keys are in the
+  // set, then will return the end iterator.
+  iterator begin() const { return iterator(&repr_); }
+
+  // We do not need to iterate beyond NumDispatchKeys so we will treat this as
+  // the end iterator. NumDispatchKeys will always be strictly less than 64.
+  iterator end() const { return iterator(&repr_, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)); }
+
 };
 
 C10_API std::string toString(DispatchKeySet);

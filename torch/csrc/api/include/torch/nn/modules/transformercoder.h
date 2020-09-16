@@ -27,7 +27,7 @@ namespace nn {
 /// Example:
 /// ```
 /// TransformerEncoderLayer encoderLayer(TransformerEncoderLayerOptions(512, 8).dropout(0.1));
-//  TransformerEncoder encoder(TransformerEncoderOptions(encoderLayer, 6).norm(LayerNorm(LayerNormOptions({2}))));
+/// TransformerEncoder encoder(TransformerEncoderOptions(encoderLayer, 6).norm(LayerNorm(LayerNormOptions({2}))));
 /// ```
 class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl> {
 
@@ -59,7 +59,7 @@ class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl
     AnyModule norm;
 };
 
-/// A `ModuleHolder` subclass for `TransformerEncoderImpl``.
+/// A `ModuleHolder` subclass for `TransformerEncoderImpl`.
 /// See the documentation for `TransformerEncoderImpl` class to learn what
 /// methods it provides, and examples of how to use `TransformerEncoder` with
 /// `torch::nn::TransformerEncoderOptions`.
@@ -85,47 +85,48 @@ TORCH_MODULE(TransformerEncoder);
 /// auto out = transformer_decoder(tgt, memory);
 /// ```
 class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl> {
- public:
-  TransformerDecoderImpl(TransformerDecoderLayer decoder_layer, int64_t num_layers)
-    : TransformerDecoderImpl(TransformerDecoderOptions(decoder_layer, num_layers)) {}
-  explicit TransformerDecoderImpl(TransformerDecoderOptions options_);
 
-  void reset() override;
+  public:
+    TransformerDecoderImpl(TransformerDecoderLayer decoder_layer, int64_t num_layers)
+      : TransformerDecoderImpl(TransformerDecoderOptions(decoder_layer, num_layers)) {}
+    explicit TransformerDecoderImpl(TransformerDecoderOptions options_);
 
-  void reset_parameters();
+    void reset() override;
 
-  /// Pass the inputs (and mask) through the decoder layer in turn.
-  ///Args:
-  ///       tgt: the sequence to the decoder layer (required).
-  ///       memory: the sequence from the last layer of the encoder (required).
-  ///       tgt_mask: the mask for the tgt sequence (optional).
-  ///       memory_mask: the mask for the memory sequence (optional).
-  ///       tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
-  ///       memory_key_padding_mask: the mask for the memory keys per batch (optional).
-  Tensor forward(const Tensor& tgt,
-                 const Tensor& memory,
-                 const Tensor& tgt_mask = {},
-                 const Tensor& memory_mask = {},
-                 const Tensor& tgt_key_padding_mask = {},
-                 const Tensor& memory_key_padding_mask = {});
+    void reset_parameters();
 
-  /// The options used to configure this module.
-  TransformerDecoderOptions options;
+    /// Pass the inputs (and mask) through the decoder layer in turn.
+    /// Args:
+    ///       tgt: the sequence to the decoder layer (required).
+    ///       memory: the sequence from the last layer of the encoder (required).
+    ///       tgt_mask: the mask for the tgt sequence (optional).
+    ///       memory_mask: the mask for the memory sequence (optional).
+    ///       tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
+    ///       memory_key_padding_mask: the mask for the memory keys per batch (optional).
+    Tensor forward(
+      const Tensor& tgt,
+      const Tensor& memory,
+      const Tensor& tgt_mask = {},
+      const Tensor& memory_mask = {},
+      const Tensor& tgt_key_padding_mask = {},
+      const Tensor& memory_key_padding_mask = {});
 
-  ///Cloned layers of decoder layers
-  ModuleList layers{nullptr};
+    /// The options used to configure this module.
+    TransformerDecoderOptions options;
 
-  ///optional layer normalization module
-  AnyModule norm;
+    ///Cloned layers of decoder layers
+    ModuleList layers{nullptr};
 
- protected:
-  FORWARD_HAS_DEFAULT_ARGS(
+    ///optional layer normalization module
+    AnyModule norm;
+
+  protected:
+    FORWARD_HAS_DEFAULT_ARGS(
       {2, AnyValue(Tensor())},
       {3, AnyValue(Tensor())},
       {4, AnyValue(Tensor())},
       {5, AnyValue(Tensor())})
-
-  };
+};
 
 /// A `ModuleHolder` subclass for `TransformerDecoderImpl`.
 /// See the documentation for `TransformerDecoderImpl` class to learn what methods it

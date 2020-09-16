@@ -186,122 +186,91 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr tensor_type;
   c10::optional<c10::Device> device;
   c10::optional<bool> requires_grad;
-  if (L.cur().kind == '*') {
-    // Parse a type with unknown sizes but known number of dimensions. The type
-    // might also have requires_grad and/or device option.
-    // An example of a type we're handling here:
-    //   Float(*,*,*, device=cpu, requires_grad=1)
-    size_t num_dims = 0;
-    parseList(TK_NOTHING, ',', ')', [&] {
-      // Extra handling for options like 'device' and 'requires_grad'
-      if (L.cur().kind == TK_IDENT) {
-        const std::string& field = L.expect(TK_IDENT).text();
-        if (field == "device") {
-          auto parsed_device = tryToParseDeviceType();
-          if (parsed_device.has_value()) {
-            if (device.has_value()) {
-              throw ErrorReport(L.cur()) << "'device' is specified twice";
-            }
-            device = parsed_device;
+  // Parse a type with either no ranks, known ranks with sizes, ranks with
+  // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
+  // known sizes and strides. The type might also have requires_grad and/or
+  // device option. Examples of types we're handling here:
+  //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
+  //   Float(10, *, 20, device=cuda:1)
+  //   Float(requires_grad=1)
+  std::vector<c10::optional<int64_t>> dims;
+  bool seen_strides = false;
+  std::vector<int64_t> strides;
+  parseList(TK_NOTHING, ',', ')', [&] {
+    // Extra handling for options like 'device' and 'requires_grad'
+    if (L.cur().kind == TK_IDENT) {
+      const std::string& field = L.expect(TK_IDENT).text();
+      if (field == "device") {
+        auto parsed_device = tryToParseDeviceType();
+        if (parsed_device.has_value()) {
+          if (device.has_value()) {
+            throw ErrorReport(L.cur()) << "'device' is specified twice";
           }
-          return;
+          device = parsed_device;
         }
-        if (field == "requires_grad") {
-          auto parsed_requires_grad = tryToParseRequiresGrad();
-          if (parsed_requires_grad.has_value()) {
-            if (requires_grad.has_value()) {
-              throw ErrorReport(L.cur())
-                  << "'requires_grad' is specified twice";
-            }
-            requires_grad = parsed_requires_grad;
+        return;
+      }
+      if (field == "requires_grad") {
+        auto parsed_requires_grad = tryToParseRequiresGrad();
+        if (parsed_requires_grad.has_value()) {
+          if (requires_grad.has_value()) {
+            throw ErrorReport(L.cur()) << "'requires_grad' is specified twice";
           }
-          return;
+          requires_grad = parsed_requires_grad;
         }
-        throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+        return;
       }
-      if (device.has_value() || requires_grad.has_value()) {
-        throw ErrorReport(L.cur())
-            << "'device' and 'requires_grad' should come after dimensions in the type specification";
-      }
-      L.expect('*');
-      num_dims++;
-    });
-    ptr = at::TensorType::create(dtype, device, num_dims, requires_grad);
-  } else {
-    // Parse a type with known sizes and (optionally) strides. The type
-    // might also have requires_grad and/or device option.
-    // An example of a type we're handling here:
-    //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
-    std::vector<int64_t> dims;
-    bool seen_strides = false;
-    std::vector<int64_t> strides;
-    parseList(TK_NOTHING, ',', ')', [&] {
-      // Extra handling for options like 'device' and 'requires_grad'
-      if (L.cur().kind == TK_IDENT) {
-        const std::string& field = L.expect(TK_IDENT).text();
-        if (field == "device") {
-          auto parsed_device = tryToParseDeviceType();
-          if (parsed_device.has_value()) {
-            if (device.has_value()) {
-              throw ErrorReport(L.cur()) << "'device' is specified twice";
-            }
-            device = parsed_device;
-          }
-          return;
-        }
-        if (field == "requires_grad") {
-          auto parsed_requires_grad = tryToParseRequiresGrad();
-          if (parsed_requires_grad.has_value()) {
-            if (requires_grad.has_value()) {
-              throw ErrorReport(L.cur())
-                  << "'requires_grad' is specified twice";
-            }
-            requires_grad = parsed_requires_grad;
-          }
-          return;
-        }
-        throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
-      }
-      if (device.has_value() || requires_grad.has_value()) {
-        throw ErrorReport(L.cur())
-            << "'device' and 'requires_grad' should come after dimensions in the type specification";
-      }
+      throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+    }
+    if (device.has_value() || requires_grad.has_value()) {
+      throw ErrorReport(L.cur())
+          << "'device' and 'requires_grad' should come after dimensions in the type specification";
+    }
 
-      // Parsing the size/stride numbers
+    // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
+    // ranks
+    if (L.cur().kind == '*') {
+      dims.emplace_back(c10::nullopt);
+      L.next();
+      if (L.cur().kind == ':') {
+        throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
+      }
+      return;
+    }
+    const std::string& num = L.expect(TK_NUMBER).text();
+    std::string::size_type num_len;
+    size_t dim = c10::stoi(num, &num_len);
+    dims.emplace_back(dim);
+    if (seen_strides || L.cur().kind == ':') {
+      L.expect(':');
+      seen_strides = true;
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
-      size_t dim = c10::stoi(num, &num_len);
-      dims.push_back(dim);
-      if (seen_strides || L.cur().kind == ':') {
-        L.expect(':');
-        seen_strides = true;
-        const std::string& num = L.expect(TK_NUMBER).text();
-        std::string::size_type num_len;
-        size_t stride = c10::stoi(num, &num_len);
-        strides.push_back(stride);
-      }
-    });
-    at::IntArrayRef dims_ref(dims);
-    if (seen_strides) {
-      at::IntArrayRef strides_ref(strides);
-      if (strides.size() != dims.size()) {
-        throw ErrorReport(L.cur())
-            << "Strides info is specified for some but not for all dimensions";
-      }
-      ptr = at::TensorType::create(
-          dtype,
-          device,
-          c10::VaryingShape<int64_t>(dims),
-          c10::VaryingShape<int64_t>(strides),
-          requires_grad);
-    } else {
-      ptr = at::TensorType::create(
-          dtype,
-          device,
-          c10::VaryingShape<int64_t>(dims_ref),
-          c10::VaryingShape<int64_t>(dims.size()),
-          requires_grad);
+      size_t stride = c10::stoi(num, &num_len);
+      strides.push_back(stride);
     }
+  });
+  if (seen_strides) {
+    at::IntArrayRef strides_ref(strides);
+    if (strides.size() != dims.size()) {
+      // note: mixing unsized ranks and ranks with strides will always trigger
+      // this
+      throw ErrorReport(L.cur())
+          << "Strides info is specified for some but not for all dimensions";
+    }
+    ptr = at::TensorType::create(
+        dtype,
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(strides),
+        requires_grad);
+  } else {
+    ptr = at::TensorType::create(
+        dtype,
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(dims.size()),
+        requires_grad);
   }
   return ptr;
 }

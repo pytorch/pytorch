@@ -581,9 +581,11 @@ at::Tensor convolution(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
+  // See Note [Enabling Deterministic Operations]
+  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministic();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN() || ctx.deterministic(), ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
 }
 
 at::Tensor convolution_overrideable(
