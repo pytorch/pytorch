@@ -4,6 +4,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
@@ -251,10 +252,10 @@ private:
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
 
-  // Whether there's kernel directly registered to dispatch_key
-  bool hasKernelForDispatchKey(DispatchKey dispatch_key) const;
-  // Retrieves AnnotatedKernel at kernels_.at(dispatch_key).front()
-  const AnnotatedKernel& getKernelForDispatchKey(DispatchKey dispatch_key) const;
+  // Returns true if kernel_ has entry for any key in ks.
+  bool hasKernelForDispatchKeySet(DispatchKeySet ks) const;
+  // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
+  const c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl
