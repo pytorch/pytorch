@@ -1148,22 +1148,22 @@ def build_table(
 
     has_input_shapes = any(
         [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
-    has_stack = any(
-        [(event.stack is not None and len(event.stack) > 0) for event in events])
 
     name_column_width = max([len(evt.key) for evt in events]) + 4
     DEFAULT_COLUMN_WIDTH = 15
-    MAX_SHAPES_COLUMN_WIDTH = 45
-    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
 
-    MAX_SRC_COLUMN_WIDTH = 75
+    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    shapes_column_width = min(shapes_column_width, 45)
+
+    src_column_width = None
     stacks = []
     for evt in events:
-        if len(evt.stack) > 0:
+        if evt.stack is not None and len(evt.stack) > 0:
             stacks.append(evt.stack)
-    src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
-    src_column_width = min(src_column_width, MAX_SRC_COLUMN_WIDTH)
+    has_stack = len(stacks) > 0
+    if has_stack:
+        src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+        src_column_width = min(src_column_width, 75)
 
     headers = [
         'Name',
@@ -1301,11 +1301,13 @@ def build_table(
                 src_field = evt.stack[0][:src_column_width]
             row_values.append(src_field)
         append(row_format.format(*row_values))
-        empty_headers = [""] * (len(headers) - 1)
-        for entry in evt.stack[1:MAX_STACK_ENTRY]:
-            append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
-        empty_headers.append("")
-        append(row_format.format(*empty_headers))
+
+        if has_stack:
+            empty_headers = [""] * (len(headers) - 1)
+            for entry in evt.stack[1:MAX_STACK_ENTRY]:
+                append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
+            empty_headers.append("")
+            append(row_format.format(*empty_headers))
 
     append(header_sep)
     append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
