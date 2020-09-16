@@ -65,7 +65,12 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
 
     def update_jacobians(x, idx, d, d_idx, is_mkldnn=False):
 
+        # compute_jacobian only works for pure real
+        # or pure imaginary delta
         def compute_gradient(delta):
+            # we currently assume that the norm of delta equals eps
+            assert(delta == eps or delta == (eps * 1j))
+
             def fn_out():
                 if not is_mkldnn:
                     # x is a view into input and so this works
