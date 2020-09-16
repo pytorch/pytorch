@@ -606,8 +606,8 @@ class Module:
 
         def convert(t):
             if convert_to_format is not None and t.dim() == 4:
-                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking, memory_format=convert_to_format)
+            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
 
         return self._apply(convert)
 
