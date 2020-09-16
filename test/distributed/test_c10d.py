@@ -1974,14 +1974,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _prepare_single_device_module(self, process_group, devices, device_ids, global_batch_size, grad_is_view=False):
+    def _prepare_single_device_module(
+      self, process_group, devices, device_ids, global_batch_size, gradient_as_bucket_view=False):
         model = Net()
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(devices[0]),
             device_ids=device_ids,
             process_group=process_group,
             bucket_cap_mb=0.001,
-            grad_is_view=grad_is_view)
+            gradient_as_bucket_view=gradient_as_bucket_view)
 
         model.to(devices[0])
 
@@ -2696,7 +2697,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             num_iters=4, ddp_comm_hook=allreduce_with_then_hook
         )
 
-    def _test_accumulate_gradients_module(self, grad_is_view=False):
+    def _test_accumulate_gradients_module(self, gradient_as_bucket_view=False):
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
         # module.
@@ -2708,7 +2709,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         model, ddp_model, input, target = \
             self._prepare_single_device_module(
-                process_group, devices, devices, global_batch_size, grad_is_view)
+                process_group, devices, devices, global_batch_size, gradient_as_bucket_view)
 
         def step_model(model, input, target):
             model.train()
@@ -2756,7 +2757,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_not_multigpu
     def test_accumulate_gradients_module_with_grad_is_view(self):
-        self._test_accumulate_gradients_module(grad_is_view=True)
+        self._test_accumulate_gradients_module(gradient_as_bucket_view=True)
 
     @requires_gloo()
     def test_ignored_output(self):
@@ -3114,12 +3115,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
 
-    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None):
+    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None, gradient_as_bucket_view=False):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
         )
 
         # Register DDP Communication Hook if defined
@@ -3183,9 +3185,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_hook_nccl(self):
+    def _test_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether a DDP communication hook that just calls
         allreduce gives the same result result with the case of no hook registered.
@@ -3200,10 +3200,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             return process_group.allreduce(tensors).get_future()
 
         # Get GPU model with allreduce_hook registered.
-        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook, gradient_as_bucket_view)
 
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_hook_nccl(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

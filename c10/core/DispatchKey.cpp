@@ -130,4 +130,24 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
   }
 }
 
+DispatchKey getBackendKeyFromAutograd(DispatchKey t) {
+  switch (t) {
+    case DispatchKey::AutogradCPU:
+      return DispatchKey::CPU;
+    case DispatchKey::AutogradCUDA:
+      return DispatchKey::CUDA;
+    case DispatchKey::AutogradXLA:
+      return DispatchKey::XLA;
+    case DispatchKey::AutogradPrivateUse1:
+      return DispatchKey::PrivateUse1;
+    case DispatchKey::AutogradPrivateUse2:
+      return DispatchKey::PrivateUse2;
+    case DispatchKey::AutogradPrivateUse3:
+      return DispatchKey::PrivateUse3;
+    default:
+      return DispatchKey::Undefined;
+  }
+}
+
+
 } // namespace c10

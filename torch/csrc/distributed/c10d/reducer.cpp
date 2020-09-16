@@ -33,7 +33,7 @@ Reducer::Reducer(
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
-    bool grad_is_view)
+    bool gradient_as_bucket_view)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -42,7 +42,7 @@ Reducer::Reducer(
       next_bucket_(0),
       has_marked_unused_parameters_(false),
       find_unused_parameters_(find_unused_parameters),
-      grad_is_view_(grad_is_view),
+      gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_maps_reduced_(false),
       backward_stats_base_(0),
       has_rebuilt_bucket_(false),
@@ -344,7 +344,7 @@ void Reducer::check_grad_layout(
         ", strides() = ",
         bucket_view.strides());
   }
-  if (!grad_is_view_) {
+  if (!gradient_as_bucket_view_) {
     TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
   }
 }
@@ -380,16 +380,16 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
       this->check_grad_layout(grad, bucket_view);
-      // When grad_is_view_ is false, or even when grad_is_view_ is true,
-      // in rare cases users may set grad to be None after every iteration.
-      // In these cases, grad and bucket_view are pointing
-      // to different storages and thus need to copy grads to bucket_view.
-      // If grad_is_view_ is set as true, let grad point to bucket_view.
-      // If grad has already been set as views of buckets in previous
-      // iterations, no copy is needed.
+      // When gradient_as_bucket_view_ is false, or even when
+      // gradient_as_bucket_view_ is true, in rare cases users may set grad to
+      // be None after every iteration. In these cases, grad and bucket_view are
+      // pointing to different storages and thus need to copy grads to
+      // bucket_view. If gradient_as_bucket_view_ is set as true, let grad point
+      // to bucket_view. If grad has already been set as views of buckets in
+      // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         this->copy_grad_to_bucket(grad, bucket_view);
-        if (grad_is_view_) {
+        if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
           // The grad is modified and need to be written back.
@@ -398,7 +398,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       } else {
         // If grad and bucket view point to the same storage, no need to copy
         if (comm_hook_ == nullptr) {
-          bucket_view.div_(process_group_->getSize());
+          bucket_view.div_(divFactor_);
         }
       }
     } else {
@@ -887,16 +887,16 @@ void Reducer::initialize_bucket_views(
     // essentially the same thing.
     replica.bucket_views_out = replica.bucket_views_in;
 
-    // If grad_is_view_ is set as true, then there are two cases to handle:
-    // initialize_bucket_views could be called inside initialize_buckets when
-    // rebuild_buckets, if grad has already been defined/calculated in previous
-    // iteration, old grad needs to be copied into new bucket_view
-    // and let grad point to the new bucket_view,
-    // initialize_bucket_views could also be called inside initialize_buckets
-    // during construction. Grads are not defined during construction time,
-    // in this case, do not let grad point to bucket_view, because grads should
-    // be kept as being undefined for globally unused parameters.
-    if (grad_is_view_) {
+    // If gradient_as_bucket_view_ is set as true, then there are two cases to
+    // handle: initialize_bucket_views could be called inside initialize_buckets
+    // when rebuild_buckets, if grad has already been defined/calculated in
+    // previous iteration, old grad needs to be copied into new bucket_view and
+    // let grad point to the new bucket_view, initialize_bucket_views could also
+    // be called inside initialize_buckets during construction. Grads are not
+    // defined during construction time, in this case, do not let grad point to
+    // bucket_view, because grads should be kept as being undefined for globally
+    // unused parameters.
+    if (gradient_as_bucket_view_) {
       auto& bucket_view = replica.bucket_views_in.back();
       runGradCallbackForVariable(v, [&](auto& grad) {
         if (grad.defined() && !grad.is_alias_of(bucket_view)) {
@@ -916,6 +916,7 @@ void Reducer::initialize_bucket_views(
 void Reducer::populate_bucket_views_out(
     Reducer::BucketReplica& replica,
     at::Tensor& tensor) {
+  replica.bucket_views_out.clear();
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -1104,7 +1105,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         }
       }
 
-      if (!grad_is_view_) {
+      if (!gradient_as_bucket_view_) {
         copy_bucket_to_grad(
             variable, replica, intra_bucket_index, global_unused);
       } else {
@@ -1126,9 +1127,23 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
             if (!grad.defined()) {
               grad = bucket_view_in;
             } else {
-              TORCH_INTERNAL_ASSERT(
-                  grad.is_alias_of(bucket_view_in),
-                  "Grad should have been pointed to bucket_view_in if grad is defined");
+              if (!grad.is_alias_of(bucket_view_in)) {
+                grad.copy_(bucket_view_in);
+                TORCH_WARN_ONCE(
+                    "It is found that it is possible that gradient is not  "
+                    "alias of bucket_view_in here when there are two  "
+                    "different parameter variables in the model share "
+                    "the same storage. For example, param0 and param1 "
+                    "share the same gradient variable grad0. grad0 "
+                    "firstly points to bucket_view_in0 when param0 gradient "
+                    "is ready, then grad0 points to bucket_view_in1 when "
+                    "param1 gradient is ready during  "
+                    "''mark_variable_ready_dense''. In this case, grad0 "
+                    "is not alias of bucket_view_in0 here, although it can "
+                    "still copy bucket_view_in0 to grad0. If you have this "
+                    "case, please check whether it is expected in your "
+                    "application.");
+              }
             }
             // The grad is modified and needs to be written back.
             return true;
@@ -1183,7 +1198,6 @@ void Reducer::finalize_backward() {
         } else {
           // Reinitialize only `bucket_views_out` with the future_result by
           // following the same logic in `initialize_buckets`.
-          replica.bucket_views_out.clear();
           populate_bucket_views_out(replica, future_result[i]);
         }
       }

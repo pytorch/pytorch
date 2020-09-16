@@ -167,7 +167,7 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
-          py::arg("grad_is_view") = false,
+          py::arg("gradient_as_bucket_view") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",

@@ -31,7 +31,7 @@ class Reducer {
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
-      bool grad_is_view);
+      bool gradient_as_bucket_view);
 
   ~Reducer() noexcept(false);
 
@@ -126,7 +126,7 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
-  const bool grad_is_view_;
+  const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -223,18 +223,17 @@ class Reducer {
   };
 
   // This function is called inside `initialize_buckets`, it initializes both
-  // views_in and views_out into the contents tensor for each variable's grad.
-  // Views serve as entry points to copy_ each grad's data in/out of the flat
-  // contents tensor.
+  // bucket_views_in and bucket_views_out into the contents tensor for each
+  // variable's grad. Views serve as entry points to copy_ each grad's data
+  // in/out of the flat contents tensor.
   void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
 
   // This function is called inside `finalize_backward`, it happens only if
-  // DDP communication hook was registered to recreate just views_out with the
-  // result of `future_work`. Note that before the
-  // call in `finalize_backward`, views_out must be cleared.
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
   void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
 
-  // If grad_is_view_ is false, after all reduce buckets,
+  // If gradient_as_bucket_view_ is false, after all reduce buckets,
   // copy bucket results back to grads.
   void copy_bucket_to_grad(
       torch::autograd::Variable& variable,
@@ -243,7 +242,7 @@ class Reducer {
       bool global_unused);
   // Check layout of grad and bucket_view before calling copy_grad_to_bucket
   void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
-  // If grad_is_view_ is false, before all reduce buckets,
+  // If gradient_as_bucket_view_ is false, before all reduce buckets,
   // copy grads to buckets.
   void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
 

@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
+    module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
@@ -4042,6 +4042,38 @@ class TestNN(NNTestCase):
                     self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
+    def test_ConvTranspose2d_output_size_downsample_upsample(self):
+        b, c, hid_c = 2, 3, 2
+        for h in range(13, 24):
+            for w in range(13, 17):
+                for k in range(2, 5):
+                    for d in range(1, 5):
+                        for s in range(1, 4):
+                            for p in range(3):
+                                conv = nn.Conv2d(
+                                    in_channels=c,
+                                    out_channels=hid_c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                t_conv = nn.ConvTranspose2d(
+                                    in_channels=hid_c,
+                                    out_channels=c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                i = torch.randn(b, c, h, w)
+
+                                out = t_conv(conv(i), output_size=i.shape)
+
+                                self.assertEqual(out.size()[2:], i.size()[2:])
 
     def test_ConvTranspose3d_correct_output_size(self):
         # Check that ConvTranspose3d can take a 5d output_size.
@@ -8753,7 +8785,7 @@ for test_params in module_tests + new_module_tests:
 
         add_test(test, decorator)
 
-for test_params in criterion_tests + new_criterion_tests:
+for test_params in criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = CriterionTest(**test_params)
