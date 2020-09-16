@@ -1616,7 +1616,9 @@ class TestSparse(TestCase):
             with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
                 result = torch.zeros_like(sparse_tensor, memory_format=mem_format)
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+        ):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
 
@@ -1649,7 +1651,9 @@ class TestSparse(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
                     result = torch.empty_like(sparse_tensor, memory_format=mem_format)
 
-            with self.assertRaisesRegex(RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"):
+            with self.assertRaisesRegex(
+                RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+            ):
                 dense_tensor = sparse_tensor.to_dense()
                 result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
