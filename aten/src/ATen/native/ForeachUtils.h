@@ -132,36 +132,5 @@ bool can_use_fast_route(TensorList tensors) {
   return true;
 }
 
-bool acan_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
-  auto expected_device = tensors[0].device();
-
-  for (int i = 0; i < tensors.size(); i++) {
-    if (tensors[i].device() != expected_device) {
-      return false;
-    }
-
-    if (tensors[i].layout() != at::kStrided) {
-      return false;
-    }
-
-    if (tensors[i].device() != expected_device) {
-      return false;
-    }
-
-    if (!tensors[i].is_non_overlapping_and_dense()) {
-      return false;
-    }
-
-    // float scalar + integral or boolean tensor will result in float tensor
-    if (at::isIntegralType(tensors[i].scalar_type(), /*includeBool*/ true)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 }
 }} // at::native

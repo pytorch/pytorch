@@ -139,6 +139,20 @@ class TestForeach(TestCase):
             self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
+    def test_int_scalarlist(self, device, dtype):
+        tensors = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
+        scalars = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+        if dtype == torch.bool:
+            return
+
+        expected = [torch.add(t, s) for t, s in zip(tensors, scalars)]
+        res = torch._foreach_add(tensors, scalar)
+        torch._foreach_add_(tensors, scalar)
+        self.assertEqual(res, expected)
+        self.assertEqual(res, tensors)
+
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalar(self, device, dtype):
         tensors = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
         float_scalar = 1.

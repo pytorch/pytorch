@@ -116,24 +116,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   if (it == type_map.end()) {
     throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
   }
-  std::cout << "\n\n-------------> fmt: " <<  fmt << std::endl;
-  std::cout << "-------------> type_str: " <<  type_str << std::endl;
   type_ = it->second;
-  switch(type_) {
-    case ParameterType::TENSOR_LIST: {
-      std::cout << "tensor list" << std::endl;
-      break;
-    }
-      
-    case ParameterType::FLOAT_LIST: {
-      std::cout << "float list" << std::endl;
-      break;
-    }
-
-    default: {
-      std::cout << "ELSE" << std::endl;
-    }
-  }
 
   auto eq = name_str.find('=');
   if (eq != std::string::npos) {
@@ -383,6 +366,15 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
   return true;
 }
 
+
+bool is_float_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+  // check if obj is a TensorList
+  if (is_tensor_list_and_append_overloaded(obj, overloaded_args, argnum, false)) {
+    return false;
+  }
+  return (PyTuple_Check(obj) || PyList_Check(obj));
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -437,7 +429,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
-    case ParameterType::FLOAT_LIST: return (PyTuple_Check(obj) || PyList_Check(obj));
+    case ParameterType::FLOAT_LIST: {
+      return is_float_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
+    }
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -782,23 +776,6 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
-    std::cout << "\n\n\n param : " << param.name << " " << param.type_name() << std::endl;
-    switch(param.type_) {
-      case ParameterType::TENSOR_LIST: {
-        std::cout << "param is tensor list" << std::endl;
-        break;
-      }
-        
-      case ParameterType::FLOAT_LIST: {
-        std::cout << "param is float list" << std::endl;
-        break;
-      }
-
-      default: {
-        std::cout << "ELSE" << std::endl;
-      }
-    }
-
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
@@ -926,7 +903,6 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
   }
 
   for (auto& signature : signatures_) {
-    std::cout << "in signature! " << signature.toString() << std::endl;
     if (signature.parse(self, args, kwargs, parsed_args, false)) {
       check_deprecated(signature);
       return PythonArgs(traceable, signature, parsed_args);
@@ -935,6 +911,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
   print_error(self, args, kwargs, parsed_args);
 }
+
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);

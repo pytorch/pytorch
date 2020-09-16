@@ -24,24 +24,24 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_slow(TensorList tensor
   return result;                                                                                          \
 }
 
-#define FOREACH_BINARY_OP_SCALARLIST(NAME)                                                                    \
+#define FOREACH_BINARY_OP_SCALARLIST(NAME)                                                                              \
 void foreach_tensor_##NAME##_scalarlist_kernel_slow_(TensorList tensors, at::ArrayRef<double> scalars) {                \
-  check_foreach_api_restrictions(tensors);                                                           \
-                                                                                                              \
-  for (int i = 0; i < tensors.size(); i++) {                                                                  \
-      tensors[i].NAME##_(scalars[i]);                                                                         \
-    }                                                                                                         \
-}                                                                                                             \
-                                                                                                              \
+  check_foreach_api_restrictions(tensors);                                                                              \
+                                                                                                                        \
+  for (int i = 0; i < tensors.size(); i++) {                                                                            \
+      tensors[i].NAME##_(scalars[i]);                                                                                   \
+    }                                                                                                                   \
+}                                                                                                                       \
+                                                                                                                        \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_slow(TensorList tensors, at::ArrayRef<double> scalars) {  \
-  check_foreach_api_restrictions(tensors);                                                           \
-  std::vector<Tensor> result;                                                                                 \
-  result.reserve(tensors.size());                                                                             \
-  for (int i = 0; i < tensors.size(); i++) {                                                                  \
-    result.emplace_back(tensors[i].NAME(scalars[i]));                                                         \
-  }                                                                                                           \
-                                                                                                              \
-  return result;                                                                                              \
+  check_foreach_api_restrictions(tensors);                                                                              \
+  std::vector<Tensor> result;                                                                                           \
+  result.reserve(tensors.size());                                                                                       \
+  for (int i = 0; i < tensors.size(); i++) {                                                                            \
+    result.emplace_back(tensors[i].NAME(scalars[i]));                                                                   \
+  }                                                                                                                     \
+                                                                                                                        \
+  return result;                                                                                                        \
 }
 
 #define FOREACH_BINARY_OP_LIST(NAME)                                                                      \

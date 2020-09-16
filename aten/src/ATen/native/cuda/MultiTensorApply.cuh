@@ -57,7 +57,7 @@ multi_tensor_apply_kernel(
 }
 
 template<int depth, typename T, typename... ArgTypes>
-void multi_tensor_apply2(
+void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::ArrayRef<double> scalars,
     T callable,
