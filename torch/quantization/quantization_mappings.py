@@ -147,11 +147,11 @@ def get_qconfig_propagation_list():
     ''' Get the list of module types that we'll attach qconfig
     attribute to in prepare
     '''
-    QCONFIG_PROPAGATE_MODULE_CLASS_LIST =(
-        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())  |
-        set(QAT_MODULE_MAPPINGS.keys())            |
-        set(STATIC_QUANT_MODULE_MAPPINGS.keys())   |
-        _INCLUDE_QCONFIG_PROPAGATE_LIST
+    QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
+        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
+        | set(QAT_MODULE_MAPPINGS.keys())
+        | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
+        | _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
@@ -160,13 +160,13 @@ def get_compare_output_module_list():
     in numeric suite
     '''
     NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST = (
-        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())   |
-        set(DYNAMIC_QUANT_MODULE_MAPPINGS.values()) |
-        set(QAT_MODULE_MAPPINGS.keys())             |
-        set(QAT_MODULE_MAPPINGS.values())           |
-        set(STATIC_QUANT_MODULE_MAPPINGS.keys())    |
-        set(STATIC_QUANT_MODULE_MAPPINGS.values())  |
-        _INCLUDE_QCONFIG_PROPAGATE_LIST
+        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
+        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.values())
+        | set(QAT_MODULE_MAPPINGS.keys())
+        | set(QAT_MODULE_MAPPINGS.values())
+        | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
+        | set(STATIC_QUANT_MODULE_MAPPINGS.values())
+        | _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
