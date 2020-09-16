@@ -450,7 +450,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.fc(x)
                 return x
 
-        model = Model().eval()
+        orig = Model().eval()
+        model = orig
         qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
 
         # symbolically trace
@@ -464,18 +465,19 @@ class TestQuantizeFx(QuantizationTestCase):
         quant = convert_static_fx(model)
 
         # save state_dict of model
+        obs_dict = torch.quantization.get_observer_state_dict(model)
         import io
         b = io.BytesIO()
-        torch.save(model.state_dict(), b)
+        torch.save(obs_dict, b)
         b.seek(0)
 
         # Load the stats into new model
-        model_2 = Model().eval()
+        model_2 = orig
         model_2 = symbolic_trace(model_2)
         model_2 = prepare_static_fx(model_2, qconfig_dict)
 
         loaded_dict = torch.load(b)
-        model_2.load_state_dict(loaded_dict)
+        torch.quantization.load_observer_state_dict(model_2, loaded_dict)
 
         quant_2 = convert_static_fx(model_2)
 

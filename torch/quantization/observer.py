@@ -3,7 +3,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
 from typing import List, Tuple, Optional
-
+from collections import OrderedDict
 import torch
 import torch.nn as nn
 
@@ -1072,6 +1072,61 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+def _is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize))
+
+def _get_attr_names_for_obs(module, name):
+    r"""
+    Return a dict that contains the module attr to fully qualified name
+    in the model. The name should correspond to the attr name in the model
+    state_dict.
+    """
+    qual_names = {}
+    qual_names['eps'] = name + '.eps'
+    if isinstance(module, torch.quantization.PerChannelMinMaxObserver) or\
+       isinstance(module, torch.quantization.MovingAveragePerChannelMinMaxObserver):
+        qual_names['min_vals'] = name + '.min_vals'
+        qual_names['max_vals'] = name + '.max_vals'
+    elif isinstance(module, torch.quantization.MinMaxObserver):
+        qual_names['min_val'] = name + '.min_val'
+        qual_names['max_val'] = name + '.max_val'
+    elif isinstance(module, torch.quantization.HistogramObserver):
+        qual_names['histogram'] = name + '.histogram'
+        qual_names['min_val'] = name + '.min_val'
+        qual_names['max_val'] = name + '.max_val'
+
+    return qual_names
+
+def get_observer_state_dict(mod):
+    r"""
+    Returns the state dict corresponding to the observer stats.
+    Traverse the model state_dict and extract out the stats.
+    """
+    od = OrderedDict()
+    if isinstance(mod, torch.jit.RecursiveScriptModule):
+        for k, v in mod.state_dict().items():
+            if 'observer' in k:
+                od[k] = v
+    else:
+        # path for GraphModule and nn.Module (eager mode)
+        for k, v in mod.state_dict().items():
+            if 'activation_post_process' in k:
+                od[k] = v
+
+    return od
+
+def load_observer_state_dict(mod, obs_dict):
+    r"""
+    Given input model and a state_dict containing model observer stats,
+    load the stats back into the model. The observer state_dict can be saved
+    using torch.quantization.get_observer_state_dict
+    """
+    for name, module in mod.named_modules():
+        if _is_activation_post_process(module):
+            qual_names = _get_attr_names_for_obs(module, name)
+            for k, v in qual_names.items():
+                setattr(module, k, obs_dict[v])
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
