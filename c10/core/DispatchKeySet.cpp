@@ -14,14 +14,11 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradOther,
 });
 
-// backend_dispatch_keyset should include all runtime backend keys.
-constexpr DispatchKeySet backend_dispatch_keyset = DispatchKeySet({
-  DispatchKey::CPU,
-  DispatchKey::CUDA,
+// backend dispatch keys that map to DispatchKey::AutogradOther
+constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::HIP,
   DispatchKey::FPGA,
   DispatchKey::MSNPU,
-  DispatchKey::XLA,
   DispatchKey::Vulkan,
   DispatchKey::MKLDNN,
   DispatchKey::OpenGL,
@@ -36,6 +33,13 @@ constexpr DispatchKeySet backend_dispatch_keyset = DispatchKeySet({
   DispatchKey::SparseCPU,
   DispatchKey::SparseCUDA,
   DispatchKey::SparseHIP,
+});
+
+// backend_dispatch_keyset should include all runtime backend keys.
+constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | DispatchKeySet({
+  DispatchKey::CPU,
+  DispatchKey::CUDA,
+  DispatchKey::XLA,
   DispatchKey::PrivateUse1,
   DispatchKey::PrivateUse2,
   DispatchKey::PrivateUse3,
@@ -53,6 +57,27 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return math_dispatch_keyset;
    default:
      return DispatchKeySet(t);
+  }
+}
+
+DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
+  switch (t) {
+    case DispatchKey::AutogradCPU:
+      return DispatchKeySet(DispatchKey::CPU);
+    case DispatchKey::AutogradCUDA:
+      return DispatchKeySet(DispatchKey::CUDA);
+    case DispatchKey::AutogradXLA:
+      return DispatchKeySet(DispatchKey::XLA);
+    case DispatchKey::AutogradPrivateUse1:
+      return DispatchKeySet(DispatchKey::PrivateUse1);
+    case DispatchKey::AutogradPrivateUse2:
+      return DispatchKeySet(DispatchKey::PrivateUse2);
+    case DispatchKey::AutogradPrivateUse3:
+      return DispatchKeySet(DispatchKey::PrivateUse3);
+    case DispatchKey::AutogradOther:
+      return autogradother_backends;
+    default:
+      return DispatchKeySet();
   }
 }
 

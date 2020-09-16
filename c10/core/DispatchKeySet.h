@@ -189,6 +189,10 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
+// Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key t,
+// DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.
+C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
+
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
 // in OperatorEntry.cpp but we disallow it in has() API.

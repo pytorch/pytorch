@@ -1885,6 +1885,27 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
   }
 }
 
+TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
+  bool sparsecpu_called, math_called = false;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { sparsecpu_called = true; return x; }));
+  m.impl("fn", c10::DispatchKey::Math, [&](const Tensor& x) { math_called = true; return x; });
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  {
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
+    ASSERT_TRUE(sparsecpu_called);
+  }
+
+  {
+    expectThrows<c10::Error>([&] {
+      callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
+    }, "You're registering kernel to a backend maps to AutogradOther trying to override Math kernel behavior.");
+  }
+}
+
 TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   bool privateuse1_called = false;
   bool catchall_called = false;
