@@ -51,15 +51,15 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
 
     CodeOnlyModule.forward = _forward_from_src(body['code'])
 
-    from .symbolic_trace import symbolic_trace, DefaultDelegate
+    from .symbolic_trace import Tracer
 
     # we shouldn't trace into any of the submodules, they were not
     # because they were not traced in the original GraphModule
-    class KeepModules(DefaultDelegate):
+    class KeepModules(Tracer):
         def is_leaf_module(self, _: torch.nn.Module) -> bool:
             return True
 
-    return symbolic_trace(CodeOnlyModule(body), delegate_class=KeepModules)
+    return KeepModules().trace(CodeOnlyModule(body))
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
