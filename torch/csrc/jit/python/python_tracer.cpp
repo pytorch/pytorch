@@ -40,7 +40,6 @@ std::vector<FileLineFunc> pythonCallstack() {
 
 SourceRange getPythonInterpreterSourceRange() {
   auto cs = pythonCallstack();
-
   c10::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;

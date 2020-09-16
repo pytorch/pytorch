@@ -1069,7 +1069,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   struct ActiveFrame {
     size_t pc;
     Instruction* instructions;
-    Node** instructions_source;
     IValue* constants;
     Operation* operators;
     Function** functions;
@@ -1079,7 +1078,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame(Frame& frame)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),
-          instructions_source(frame.function->instructions_source_.data()),
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
           functions(frame.function->function_table_.data()),
@@ -1111,9 +1109,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
   }
 
-  void enterFrame(
-      const Code& code,
-      size_t base_pointer) {
+  void enterFrame(const Code& code, size_t base_pointer) {
     frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt});
     registers.resize(registers.size() + code.pImpl->register_size_);
   }
@@ -1147,10 +1143,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ++af->pc;
   }
 
-  void runGraphFunction(
-      Stack& stack,
-      Function* fn,
-      ActiveFrame* af) {
+  void runGraphFunction(Stack& stack, Function* fn, ActiveFrame* af) {
     const Code& code =
         // consider passing
         // `frames.back().function->remaining_bailout_depth_` into
@@ -1656,14 +1649,15 @@ std::vector<FileLineFunc> currentCallstack() {
   if (tls_int_state_ptr_) {
     auto cs = tls_int_state_ptr_->callstack();
     entries.reserve(cs.size());
-    for (int idx = cs.size() - 1; idx >= 0; --idx) {
-      auto& range = cs[idx].range;
+    std::reverse(cs.begin(), cs.end());
+    for (const auto& entry : cs) {
+      auto& range = entry.range;
       if (range.source()) {
         auto& src = range.source();
         if (src && src->filename()) {
           auto line = src->starting_line_no() +
               src->lineno_for_offset(range.start());
-          entries.emplace_back(FileLineFunc{*(src->filename()), line, cs[idx].filename});
+          entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
         }
       }
     }
@@ -1729,9 +1723,8 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(
-    const Code& code)
-    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)){}
+InterpreterState::InterpreterState(const Code& code)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

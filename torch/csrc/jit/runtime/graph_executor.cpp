@@ -502,7 +502,6 @@ void GraphExecutorImplBase::run(Stack& stack) {
   ExecutionPlan plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
-
   last_executed_optimized_graph = plan.graph;
 }
 

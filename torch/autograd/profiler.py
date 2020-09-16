@@ -237,13 +237,14 @@ class EventList(list):
     def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
-        @param group_by_input_shapes The key would become
-        (event name, input dimensions) rather than just event name.
-        This is useful to see which dimensionality contributes to the runtime
-        the most and may help with dimension specific optimizations or
-        choosing best candidates for quantization (aka fitting a roof line)
+        Arguments:
+            group_by_input_shapes: The key would become
+            (event name, input dimensions) rather than just event name.
+            This is useful to see which dimensionality contributes to the runtime
+            the most and may help with dimension specific optimizations or
+            choosing best candidates for quantization (aka fitting a roof line)
 
-        @param group_by_stack_n Group by top n stack trace entries
+            group_by_stack_n: Group by top n stack trace entries
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -254,7 +255,7 @@ class EventList(list):
         def get_key(event, group_by_input_shapes, group_by_stack_n):
             key = [str(event.key), str(event.node_id)]
             if group_by_input_shapes:
-                key += [str(event.input_shapes)]
+                key.append(str(event.input_shapes))
             if group_by_stack_n > 0:
                 key += event.stack[:group_by_stack_n]
             return tuple(key)
@@ -1008,7 +1009,7 @@ def parse_event_records(thread_records):
                     cpu_start=start_record.cpu_elapsed_us(start),
                     cpu_end=start_record.cpu_elapsed_us(record),
                     input_shapes=start.shapes(),
-                    stack = [entry for entry in start.stack() if filter_stack_entry(entry)],
+                    stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
                     scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
@@ -1154,16 +1155,15 @@ def build_table(
     DEFAULT_COLUMN_WIDTH = 15
     MAX_SHAPES_COLUMN_WIDTH = 45
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    if shapes_column_width > MAX_SHAPES_COLUMN_WIDTH:
-        shapes_column_width = MAX_SHAPES_COLUMN_WIDTH
+    shapes_column_width = min(shapes_column_width, MAX_SHAPES_COLUMN_WIDTH)
 
+    MAX_SRC_COLUMN_WIDTH = 75
     stacks = []
     for evt in events:
         if len(evt.stack) > 0:
             stacks.append(evt.stack)
     src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
-    MAX_SRC_COLUMN_WIDTH = 75
-    src_column_width = max(src_column_width, MAX_SRC_COLUMN_WIDTH)
+    src_column_width = min(src_column_width, MAX_SRC_COLUMN_WIDTH)
 
     headers = [
         'Name',

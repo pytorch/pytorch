@@ -231,14 +231,6 @@ struct ProfilerThreadLocalState
           cs = jit::tracer::pythonCallstack();
         }
         evt.setStack(callstackStr(cs));
-
-        /*std::cerr << "===" << std::endl;
-        std::cerr << fn.name() << ", seq: " << fn.seqNr() << ", scope: " << (int)fn.scope() << ", thread: " << fn.threadId() << std::endl;
-        auto loc = evt.sourceLocation();
-        std::cerr << "ts: " << loc.ts_location << std::endl << "python: " << std::endl;
-        for (auto& line : loc.py_stack) {
-          std::cerr << "   " << line << std::endl;
-        }*/
       }
 
       getEventList().record(std::move(evt));
