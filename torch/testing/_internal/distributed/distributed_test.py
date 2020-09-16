@@ -3229,3 +3229,72 @@ class DistributedTest:
                 self.assertNotEqual(objects, collectives_object_test_list)
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, collectives_object_test_list)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_ignore_params_arg(self):
+            class TestModel(nn.Module):
+                def __init__(self):
+                    super(TestModel, self).__init__()
+                    self.fc1 = nn.Linear(1, 1, bias=False)
+                    # Proxy that will be materialized to another architecture later.
+                    # (after wrapping model with DDP)
+                    self.fc2 = nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    x = self.fc1(x)
+                    x = self.fc2(x)
+                    return x
+
+            device_id = self.rank
+            model = TestModel().float().to(device_id)
+            proxy_params = list(model.fc2.parameters())
+            # Ensure the test works for both find_unused_parameter settings.
+            for find_unused in [False, True]:
+                if self.rank == 0:
+                    print(f"Running with {find_unused}")
+                ddp = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[device_id],
+                    # Specify that we should ignore proxy_params since it will be
+                    # materialized later.
+                    parameters_to_ignore=proxy_params,
+                    find_unused_parameters=find_unused,
+                )
+
+                # Materialize new params. These are not registered in DDP and thus
+                # don't have autograd hooks installed on them.
+                ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
+                # local model with the new materialized parameters.
+                local_model = copy.deepcopy(ddp.module).cuda(self.rank)
+
+                inp = torch.ones(1, dtype=torch.float).to(device_id) * (self.rank + 1)
+                for i in range(6):
+                    ddp(inp).sum().backward()
+                    local_model(inp).sum().backward()
+                    # materialized param grad is not touched by DDP, so its grad should
+                    # be the same as if running locally.
+                    for materialized_param, local_param in zip(ddp.module.fc2.parameters(), local_model.fc2.parameters()):
+                        self.assertEqual(materialized_param.grad, local_param.grad)
+
+                    # fc1 parameter grad should still be different, due to allreduce.
+                    for synced_param, local_param in zip(ddp.module.fc1.parameters(), local_model.fc1.parameters()):
+                        self.assertFalse(synced_param.grad == local_param.grad)
+
+                    # Proxy module grad should not be touched
+                    for proxy_param in proxy_params:
+                        self.assertTrue(proxy_param.grad is None)
+
+            # Validate that we fail due to unused params error when we don't pass
+            # either parameters_to_ignore nor find_unused_parameters.
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                TestModel().float().to(device_id), device_ids=[device_id]
+            )
+            # Materialize new params
+            ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
+            inp = torch.ones(1, dtype=torch.float).to(device_id) * (self.rank + 1)
+            ddp(inp).sum().backward()
+            with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
+                ddp(inp).sum().backward()
