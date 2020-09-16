@@ -206,7 +206,6 @@ class UnaryUfuncInfo(OpInfo):
 op_db = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
-                   supports_out_param=False,
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
