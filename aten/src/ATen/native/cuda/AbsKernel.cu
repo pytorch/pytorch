@@ -6,23 +6,10 @@
 
 namespace at { namespace native {
 
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t abs_wrapper(scalar_t v) {
-  return std::abs(v);
-}
-
-__host__ __device__ static inline uint8_t abs_wrapper(uint8_t v) {
-  return v;
-}
-
-__host__ __device__ static inline bool abs_wrapper(bool v) {
-  return v;
-}
-
 void abs_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return abs_wrapper(a);
+      return std::abs(a);
     });
   });
 }
