@@ -161,9 +161,19 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     operations called by `func`, effectively vectorizing those operations.
 
     vmap is useful for handling batch dimensions: one can write a function `func`
-    that runs on examples and the lift it to a function that can take batches of
-    examples with `vmap(func)`. Furthermore, it is possible to use vmap to obtain
-    batched gradients when composed with autograd.
+    that runs on examples and then lift it to a function that can take batches of
+    examples with `vmap(func)`. vmap can also be used to compute batched
+    gradients when composed with autograd.
+
+    .. warning::
+        torch.vmap is an experimental prototype that is subject to
+        change and/or deletion. Please use at your own risk.
+
+    .. note::
+        If you're interested in using vmap for your use case, please
+        `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
+        We're interested in gathering feedback from early adopters to inform
+        the design.
 
     Args:
         func (function): A Python function that takes one or more arguments.
@@ -188,9 +198,51 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         Examples of side-effects include mutating Python data structures and
         assigning values to variables not captured in `func`.
 
-    .. warning::
-        torch.vmap is an experimental prototype that is subject to
-        change and/or deletion. Please use at your own risk.
+    One example of using `vmap` is to compute batched dot products. PyTorch
+    doesn't provide a batched `torch.dot` API; instead of unsuccessfully
+    rummaging through docs, use `vmap` to construct a new function.
+
+        >>> torch.dot                      # [D], [D] -> []
+        >>> batched_dot = vmap(torch.dot)  # [N, D], [N, D] -> [N]
+        >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
+        >>> batched_dot(x, y)
+
+    `vmap` can be helpful in hiding batch dimensions, leading to a simpler
+    model authoring experience.
+
+        >>> def model(feature_vec):
+        >>>     # Very simple linear model with activation
+        >>>     return feature_vec.dot(weights).relu()
+        >>>
+        >>> examples = torch.randn(batch_size, feature_size)
+        >>> result = vmap(model)(examples)
+
+    `vmap` can also help vectorize computations that were previously difficult
+    or impossible to batch. One example is higher-order gradient computation.
+    The PyTorch autograd engine computes vjps (vector-Jacobian products).
+    Computing a full Jacobian matrix for some function f: R^N -> R^N usually
+    requires N calls to `autograd.grad`, one per Jacobian row. Using `vmap`,
+    we can vectorize the whole computation, computing the Jacobian in a single
+    call to `autograd.grad`.
+
+        >>> # Setup
+        >>> x = torch.randn(N, requires_grad=True)
+        >>> y = f(x)
+        >>> I_N = torch.eye(N)
+
+        >>> # Sequential approach
+        >>> jacobian_rows = [torch.autograd.grad(y, x, v, retain_graph=True)
+        >>>                  for v in I_n.unbind()]
+        >>> jacobian = torch.stack(jacobian_rows)
+
+        >>> # vectorized gradient computation
+        >>> def get_vjp(v):
+        >>>     return torch.autograd.grad(y, x, v)
+        >>> jacobian = vmap(get_vjp)(I_N)
+
+    .. note::
+        vmap does not provide general autobatching or handle variable-length
+        sequences out of the box.
     """
     warnings.warn(
         'torch.vmap is an experimental prototype that is subject to '
