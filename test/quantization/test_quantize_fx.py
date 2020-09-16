@@ -19,11 +19,13 @@ from torch.quantization import (
     convert_static_fx,
     quantize_static_fx,
     quantize_dynamic_fx,
+    prepare_qat_fx,
 )
 
 from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_qat_qconfig,
     prepare,
     prepare_qat,
@@ -51,6 +53,7 @@ from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
+from torch.testing import FileCheck
 
 import itertools
 import operator
@@ -179,6 +182,54 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    @skipIfNoFBGEMM
+    def test_dynamic_quant_fp16(self):
+        class Linear(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                return F.linear(x, self.weight)
+
+        linear_input = torch.rand(8, 5)
+        linear_weight = torch.rand(10, 5)
+
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_module_input = torch.rand(8, 5)
+
+        tests = [
+            (Linear, (linear_weight,), (linear_input,),
+             ns.call_function(torch.ops.quantized.linear_dynamic),
+             ns.call_function(torch.ops.quantized.linear_prepack_fp16)),
+            (LinearModule, (), (linear_module_input,),
+             ns.call_module(nnqd.Linear),
+             None),
+        ]
+        for (ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            for debug in [True, False]:
+                node_occurrence = dict()
+                if weight_prepack_node:
+                    if debug:
+                        node_occurrence[weight_prepack_node] = 1
+                    else:
+                        node_occurrence[weight_prepack_node] = 0
+                m = ModuleClass(*module_constructor_inputs).eval()
+                m = symbolic_trace(m)
+                qconfig_dict = {"": float16_dynamic_qconfig}
+                m = quantize_dynamic_fx(m, qconfig_dict, debug=debug)
+                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -317,6 +368,44 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
 
+    def test_qat_and_script(self):
+        class TwoLayerLinear(nn.Module):
+            def __init__(self):
+                super(TwoLayerLinear, self).__init__()
+                self.fc1 = nn.Linear(5, 5)
+                self.fc2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.subm = TwoLayerLinear()
+                self.fc = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.subm(x)
+                x = self.fc(x)
+                return x
+
+        model = Model()
+        qengine = torch.backends.quantized.engine
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
+
+        # symbolically trace
+        model = symbolic_trace(model)
+        model = prepare_qat_fx(model, qconfig_dict)
+
+        # ensure scripting works
+        scripted = torch.jit.script(model)
+        # run one round to make sure model runs
+        x = torch.randn(5, 5)
+        scripted(x)
+        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="activation_post_process', 4, exactly=True) \
+                   .run(scripted.graph)
+
     def test_custom_module_class(self):
         class CustomModule(torch.nn.Module):
             def __init__(self):
@@ -356,14 +445,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        from torch.fx.symbolic_trace import DefaultDelegate
-
-        class CustomDelegate(DefaultDelegate):
-            def is_leaf_module(self, m):
-                return (m.__module__.startswith('torch.nn') and
-                        not isinstance(m, torch.nn.Sequential)) or \
-                    isinstance(m, CustomModule)
-
         from torch.quantization import register_observed_custom_module_mapping
         from torch.quantization import register_quantized_custom_module_mapping
         register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
@@ -400,14 +481,23 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
 
-        m = symbolic_trace(original_m, delegate_class=CustomDelegate).eval()
+        from torch.fx.symbolic_trace import Tracer
+
+        # define a custom tracer to not trace through the custom module
+
+        class CustomTracer(Tracer):
+            def is_leaf_module(self, m):
+                return (m.__module__.startswith('torch.nn') and
+                        not isinstance(m, torch.nn.Sequential)) or \
+                    isinstance(m, CustomModule)
+
+        m = CustomTracer().trace(original_m).eval()
         qconfig_dict = {'': default_qconfig}
         # check prepared model
         m = prepare_static_fx(m, qconfig_dict)
         # calibration
         m(data)
-        # input and output of first conv, observer for custom module
-        # will be inserted in the custom module itself
+        # all activation observers are inserted in the top level module
         count_check = {
             ns.call_module(torch.quantization.MinMaxObserver): 3
         }

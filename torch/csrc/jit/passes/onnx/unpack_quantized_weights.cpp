@@ -465,9 +465,14 @@ void insertPermutes(
   graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
         %r = quantized::conv2d_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
         return (%r) )";
+  std::string qconv_transpose = R"(
+  graph(%input, %weight, %bias, %stride, %padding, %dilation, %output_padding, %groups, %w_scale, %w_zero_point):
+        %r = quantized::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups, %w_scale, %w_zero_point)
+        return (%r) )";
 
   insertPermutesHelper(graph, paramsDict, qconv);
   insertPermutesHelper(graph, paramsDict, qconv_relu);
+  insertPermutesHelper(graph, paramsDict, qconv_transpose);
 }
 
 } // namespace jit
