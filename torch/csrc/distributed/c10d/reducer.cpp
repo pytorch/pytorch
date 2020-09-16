@@ -440,7 +440,7 @@ std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
 
 void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!should_rebuild_buckets()) {
+  if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
   }
   const auto replica_count = replicas_.size();
