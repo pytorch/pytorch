@@ -56,7 +56,7 @@ class JitBackendTestCase(JitTestCase):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS:
             raise unittest.SkipTest("non-portable load_library call used in test")
         torch_root = Path(__file__).parent.parent.parent
-        p = torch_root / 'build/lib/libjitbackend_test.so'
+        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
