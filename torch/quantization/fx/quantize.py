@@ -465,7 +465,7 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module':
-                if node.target.split('.')[-1].startswith('activation_post_process_'):
+                if '_activation_post_process_' in node.target.split('.')[-1]:
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
                     if observer_module.dtype == torch.float16:
@@ -499,7 +499,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
-               node.target.split('.')[-1].startswith('activation_post_process_'):
+               '_activation_post_process_' in node.target.split('.')[-1]:
                 # remove activation post process
                 env[node.name] = env[node.args[0].name]
             else:
@@ -508,7 +508,7 @@ class Quantizer:
 
         to_be_removed = []
         for name, _ in model.named_modules():
-            if name.split('.')[-1].startswith('activation_post_process_'):
+            if '_activation_post_process_' in name.split('.')[-1]:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)

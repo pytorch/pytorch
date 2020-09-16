@@ -403,7 +403,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # run one round to make sure model runs
         x = torch.randn(5, 5)
         scripted(x)
-        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="activation_post_process', 4, exactly=True) \
+        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
                    .run(scripted.graph)
 
     def test_save_observer_state_dict(self):
@@ -427,15 +427,15 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.subm(x)
                 x = self.fc(x)
                 return x
+
         model = Model().eval()
         qengine = torch.backends.quantized.engine
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
 
         # symbolically trace
         model = symbolic_trace(model)
-        print(model.graph)
         model = prepare_static_fx(model, qconfig_dict)
-        print(model, model.graph)
+
         # run it through input
         x = torch.randn(5, 5)
         model(x)
@@ -458,6 +458,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         quant_2 = convert_static_fx(model_2)
 
+        # Verify that loaded state dict produces same results.
         self.assertEqual(quant(x), quant_2(x))
 
 class TestQuantizeFxOps(QuantizationTestCase):
