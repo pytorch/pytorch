@@ -479,21 +479,20 @@ class AttributePropagator {
     auto node = n->inputs()[0]->node();
     // Check if first parameter of fork is a module. This module is used
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
-    if (node->kind() != prim::GetAttr) {
-      return;
+    //  Otherwise freezing is applied using module_
+    if (node->kind() == prim::GetAttr &&
+        node->output()->type()->cast<ClassType>()) {
+      auto name = node->s(attr::name);
+      auto input = node->inputs()[0];
+      if (!findConstantAttr(input, name, attrModule, graph)) {
+        // Module needs to be preserved.
+        return;
+      }
+      attrModule = attrModule.attr(name).toModule();
+      std::swap(module_, attrModule);
     }
-    if (!node->output()->type()->cast<ClassType>()) {
-      return;
-    }
-    auto name = node->s(attr::name);
-    auto input = node->inputs()[0];
-    if (!findConstantAttr(input, name, attrModule, graph)) {
-      // Module needs to be preserved.
-      return;
-    }
-    attrModule = attrModule.attr(name).toModule();
+
     auto subgraph = n->g(attr::Subgraph);
-    std::swap(module_, attrModule);
     func(subgraph);
     module_ = attrModule;
   }

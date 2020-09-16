@@ -56,54 +56,6 @@ int64_t stringFindImpl(
   return result;
 }
 
-RegisterOperators reg_str_ops({
-
-// python string is methods return false if empty
-#define DEFINE_STRING_IS_OP(op_name, char_op)                          \
-  Operator(                                                            \
-      #op_name "(str self) -> bool",                                   \
-      [](Stack* stack) {                                               \
-        auto string = pop(stack).toStringRef();                        \
-        push(                                                          \
-            stack,                                                     \
-            string.size() != 0 &&                                      \
-                std::all_of(string.begin(), string.end(), [](char c) { \
-                  return char_op(c);                                   \
-                }));                                                   \
-      },                                                               \
-      aliasAnalysisFromSchema())
-
-    DEFINE_STRING_IS_OP(aten::isdigit, ::isdigit),
-    DEFINE_STRING_IS_OP(aten::isspace, ::isspace),
-    DEFINE_STRING_IS_OP(aten::isalnum, ::isalnum),
-    DEFINE_STRING_IS_OP(aten::isalpha, ::isalpha),
-    DEFINE_STRING_IS_OP(aten::isdecimal, ::isdigit),
-    DEFINE_STRING_IS_OP(aten::isnumeric, ::isdigit),
-
-#define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op) \
-  Operator(                                         \
-      #op_name "(str self) -> str",                 \
-      [](Stack* stack) {                            \
-        auto string = pop(stack).toStringRef();     \
-        std::stringstream ss;                       \
-        for (char c : string) {                     \
-          ss << static_cast<char>(char_op(c));      \
-        }                                           \
-        push(stack, ss.str());                      \
-      },                                            \
-      aliasAnalysisFromSchema())
-
-    DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::swapcase, ([](char c) {
-                                if (c == static_cast<char>(::toupper(c))) {
-                                  return static_cast<char>(::tolower(c));
-                                } else {
-                                  return static_cast<char>(::toupper(c));
-                                }
-                              }))
-
-});
-
 // String Ops
 // Implementations located in torch/csrc/jit/runtime/register_string_ops.cpp
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {

@@ -34,5 +34,34 @@ namespace nn {
     TORCH_ARG(AnyModule, norm);
   };
 
+/// Options for the `TransformerDecoder` module.
+///
+/// Example:
+/// ```
+/// TransformerDecoderLayer decoder_layer(TransformerDecoderLayerOptions(512, 8).dropout(0.1));
+/// auto options = TransformerDecoderOptions(decoder_layer, 6)norm(LayerNorm(LayerNormOptions({2})));
+/// TransformerDecoder transformer_decoder(options);
+/// ```
+struct TORCH_API TransformerDecoderOptions {
+  // This constructor will keep the a ref of passed in decoder_layer,
+  // so it keeps all the data in decoder_layer.
+  TransformerDecoderOptions(TransformerDecoderLayer decoder_layer,
+                            int64_t num_layers);
+  // This constructor will create a new TransformerDecoderLayer obj,
+  // based on passed in decoder_layer_options.
+  TransformerDecoderOptions(
+    const TransformerDecoderLayerOptions& decoder_layer_options,
+    int64_t num_layers);
+
+  /// decoder layer to be cloned
+  TORCH_ARG(TransformerDecoderLayer, decoder_layer) = nullptr;
+
+  /// number of decoder layers
+  TORCH_ARG(int64_t, num_layers);
+
+  /// normalization module
+  TORCH_ARG(AnyModule, norm);
+};
+
 } // namespace nn
 } // namespace torch

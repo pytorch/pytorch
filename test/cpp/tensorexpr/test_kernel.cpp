@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
 #include <cmath>
 #include <sstream>
@@ -36,7 +37,17 @@ void testKernel_1() {
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
   Stmt* s = k.getCodeGenStmt();
-  // TODO: verify stmt
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
@@ -66,7 +77,17 @@ void testKernel_2() {
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
   Stmt* s = k.getCodeGenStmt();
-  // TODO: verify stmt
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
@@ -96,7 +117,17 @@ void testKernel_3() {
   TensorExprKernel k(graph);
   std::vector<at::Tensor> inputs = {a, b};
   Stmt* s = k.getCodeGenStmt();
-  // TODO: verify stmt
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
@@ -130,6 +161,17 @@ void testKernel_4() {
     std::vector<at::Tensor> inputs = {a, b};
     Stmt* s = k.getCodeGenStmt();
 
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NOT: for)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
     o = stack[0].toTensor();
@@ -158,6 +200,15 @@ void testKernel_4() {
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a, b};
     Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
@@ -201,6 +252,19 @@ void testKernel_4() {
     std::vector<at::Tensor> inputs = {a, b, c};
     Stmt* s = k.getCodeGenStmt();
 
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_mul)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
     o = stack[0].toTensor();
@@ -208,7 +272,7 @@ void testKernel_4() {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (auto idx = 0; idx < ref.sizes().size(); idx++) {
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
@@ -243,6 +307,18 @@ void testKernel_4() {
     std::vector<at::Tensor> inputs = {a, b, c};
     Stmt* s = k.getCodeGenStmt();
 
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
     o = stack[0].toTensor();
@@ -250,7 +326,7 @@ void testKernel_4() {
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
-    for (auto idx = 0; idx < ref.sizes().size(); idx++) {
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
@@ -312,7 +388,16 @@ void testKernelSumAllAxes() {
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a};
     Stmt* s = k.getCodeGenStmt();
-    // TODO: verify stmt
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
@@ -327,12 +412,11 @@ void testKernelSumOneAxis() {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
       graph(%0 : Float(5:3,3:1, device=cpu)):
-        %1 : int = prim::Constant[value=${dim}]()
-        %2 : int[] = prim::ListConstruct(%1)
-        %3 : bool = prim::Constant[value=${keepdim}]()
-        %4 : ${dtype}
-        %5 : Tensor = aten::sum(%0, %2, %3, %4)
-        return (%5))IR";
+        %1 : int[] = prim::Constant[value=[${dim}]]()
+        %2 : bool = prim::Constant[value=${keepdim}]()
+        %3 : ${dtype}
+        %4 : Tensor = aten::sum(%0, %1, %2, %3)
+        return (%4))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
@@ -357,7 +441,17 @@ void testKernelSumOneAxis() {
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
         Stmt* s = k.getCodeGenStmt();
-        // TODO: verify stmt
+
+        std::ostringstream oss;
+        oss << *s;
+
+        // Check the IR we produced
+        const std::string& verification_pattern =
+            R"IR(
+# CHECK: int v = 0
+# CHECK: int v_1 = 0
+# CHECK: input1)IR";
+        torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
         std::vector<IValue> stack = fmap<IValue>(inputs);
         k.run(stack);
@@ -373,7 +467,7 @@ void testKernelSumOneAxis() {
 void testKernelSumMultipleAxes() {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(5:72,3:24,4:6,6:1, device=cpu)):
+      graph(%0 : Float(2:18,3:6,2:3,3:1, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
@@ -381,44 +475,49 @@ void testKernelSumMultipleAxes() {
         %5 : ${dtype}
         %6 : Tensor = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
-  auto a = iotaTensor({5, 3, 4, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   // Only iterate over positive values of axes to keep the running time
   // reasonable, since the number of pairs is quadratic.
   for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
-    for (int dim2 = 0; dim2 < a.dim(); ++dim2) {
+    for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
-        for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
-          KernelScope kernel_scope;
-          TemplateEnv env;
-          env.d("dim1", dim1);
-          env.d("dim2", dim2);
-          env.d("keepdim", keepdim);
-          env.s("dtype", dtypeConstant(scalar_type));
-          const auto graph_string = format(graph_template, env);
+        KernelScope kernel_scope;
+        TemplateEnv env;
+        env.d("dim1", dim1);
+        env.d("dim2", dim2);
+        env.d("keepdim", keepdim);
+        env.s("dtype", dtypeConstant(ScalarType::None));
+        const auto graph_string = format(graph_template, env);
 
-          auto graph = std::make_shared<Graph>();
-          parseIR(graph_string, &*graph);
+        auto graph = std::make_shared<Graph>();
+        parseIR(graph_string, &*graph);
 
-          auto o = at::empty({}, TensorOptions(kCPU));
-          c10::optional<c10::ScalarType> dtype;
-          if (scalar_type != ScalarType::None) {
-            dtype = static_cast<c10::ScalarType>(scalar_type);
-          }
-          auto ref = a.sum(
-              IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim, /*dtype=*/dtype);
-          TensorExprKernel k(graph);
-          std::vector<at::Tensor> inputs = {a};
-          Stmt* s = k.getCodeGenStmt();
-          // TODO: verify stmt
+        auto o = at::empty({}, TensorOptions(kCPU));
+        auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
+        TensorExprKernel k(graph);
+        std::vector<at::Tensor> inputs = {a};
+        Stmt* s = k.getCodeGenStmt();
 
-          std::vector<IValue> stack = fmap<IValue>(inputs);
-          k.run(stack);
-          o = stack[0].toTensor();
-          ASSERT_EQ(o.sizes(), ref.sizes());
-          ASSERT_EQ(o.dtype(), ref.dtype());
-          ASSERT_TRUE(at::allclose(o, ref));
-        }
+        std::ostringstream oss;
+        oss << *s;
+
+        // Check the IR we produced
+        const std::string& verification_pattern =
+            R"IR(
+# CHECK: int v = 0
+# CHECK: int v_1 = 0
+# CHECK: int v_2 = 0
+# CHECK: int v_3 = 0
+# CHECK: input1)IR";
+        torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+        std::vector<IValue> stack = fmap<IValue>(inputs);
+        k.run(stack);
+        o = stack[0].toTensor();
+        ASSERT_EQ(o.sizes(), ref.sizes());
+        ASSERT_EQ(o.dtype(), ref.dtype());
+        ASSERT_TRUE(at::allclose(o, ref));
       }
     }
   }

@@ -56,7 +56,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             i += 1
 
         base = lookupInModule(expr[:i].strip(), module)
-        assert base is not None, "Unresolvable type {}".format(expr[:i])
+        assert base is not None, f"Unresolvable type {expr[:i]}"
         if i == len(expr) or expr[i] != '[':
             return base, i
 
@@ -465,7 +465,7 @@ def ignore(drop=False, **kwargs):
 
     if not isinstance(drop, bool):
         raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                           "a function but got {}".format(drop))
+                           f"a function but got {drop}")
 
     # for backwards compat
     drop_on_export = kwargs.pop("drop_on_export", None)
@@ -707,7 +707,7 @@ class BroadcastingListCls(object):
 # list size
 BroadcastingList1 = BroadcastingListCls()
 for i in range(2, 7):
-    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+    globals()[f"BroadcastingList{i}"] = BroadcastingList1
 
 
 def is_scripting():
@@ -768,12 +768,12 @@ def _qualified_name(obj):
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
     if module_name is None:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.".format(name))
+        raise RuntimeError(f"Could not get qualified name for class '{name}': "
+                           "__module__ can't be None.")
 
     # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError("Could not get qualified name for class '{}': "
-    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
+    #                        f"the attr {name} on module {module_name} is not the the class")
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":
@@ -784,8 +784,8 @@ def _qualified_name(obj):
         module_name = "__torch__." + module_name
 
     if "." in name:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "'{}' is not a valid identifier".format(name, name))
+        raise RuntimeError(f"Could not get qualified name for class '{name}': "
+                           f"'{name}' is not a valid identifier")
 
     return module_name + "." + name
 
