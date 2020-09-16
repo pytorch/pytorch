@@ -570,7 +570,11 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
     int32_t inputSize[4];
     float s;
   };
-  ConstBlock cb{{W, H, C_4, 0}, s};
+  ConstBlock cb{{safe_downcast<int32_t>(W),
+                 safe_downcast<int32_t>(H),
+                 safe_downcast<int32_t>(C_4),
+                 0},
+                s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -619,7 +623,11 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
     int32_t inputSize[4];
     float s;
   };
-  ConstBlock cb{{W, H, C_4, 0}, s};
+  ConstBlock cb{{safe_downcast<int32_t>(W),
+                 safe_downcast<int32_t>(H),
+                 safe_downcast<int32_t>(C_4),
+                 0},
+                s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
