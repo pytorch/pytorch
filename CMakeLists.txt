@@ -360,7 +360,7 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
 endif(MSVC)
 
 list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
@@ -614,6 +614,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
+  float a[] = {1.0, 1.0};
   float32x4x2_t v;
   v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
   v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));

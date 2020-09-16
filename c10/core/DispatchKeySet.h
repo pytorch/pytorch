@@ -186,6 +186,9 @@ public:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+// Resolve alias dispatch key Autograd
+C10_API DispatchKeySet getRuntimeAutogradKeySet();
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
@@ -211,6 +214,6 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // is the most likely key that will need this treatment;
   // After Autograd keys are moved from globally enabled set to TensorImpl,
   // we should remove all Autograd keys before taking highestPriority.
-  return (s - getRuntimeDispatchKeySet(DispatchKey::Autograd)).highestPriorityTypeId();
+  return (s - getRuntimeAutogradKeySet()).highestPriorityTypeId();
 }
 }
