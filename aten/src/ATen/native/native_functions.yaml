@@ -282,15 +282,17 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: conj(Tensor self) -> Tensor
+- func: conj(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
 
-- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: _conj(Tensor self) -> Tensor
+- func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
+
+- func: materialize_conj(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full

@@ -192,6 +192,7 @@ static void imag_kernel(TensorIterator& iter) {
   });
 }
 
+// NB: Ignores the conjugate bit on tensors
 static void conj_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "conj_cpu", [&]() {
     cpu_kernel_vec(

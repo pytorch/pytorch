@@ -6,6 +6,8 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 
+#include <ATen/native/cpu/zmath.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -13,6 +15,15 @@ namespace {
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
+    // TODO: as the majority of these operations can be done treating
+    // their datatypes as opaque bit patterns, we don't actually need
+    // separate instantiations per dtype; we only need a separate
+    // instantiation per dtype size.  This would probably save us a
+    // little bit of code size here
+    // TODO: not sure if optimizer is able to compile two levels of
+    // conditionals into a single jump table.  We should have a
+    // single jump table here; might be worth just writing out the
+    // dispatch statement by hand instead of using AT_DISPATCH
     if (dtype == ScalarType::Half) {
       cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
     } else if (dtype == ScalarType::BFloat16) {
@@ -25,12 +36,21 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
-      AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-          cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return a; },
-            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
-        });
+      if (iter.tensor(0).is_conjugate() == iter.tensor(1).is_conjugate()) {
+        AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
+            cpu_kernel_vec(
+              iter,
+              [=](scalar_t a) -> scalar_t { return a; },
+              [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
+          });
+      } else {
+        AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
+            cpu_kernel_vec(
+              iter,
+              [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+              [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a.conj(); });
+          });
+      }
     } else {
       AT_DISPATCH_ALL_TYPES_AND(
           ScalarType::Bool, dtype, "copy_kernel", [&] {

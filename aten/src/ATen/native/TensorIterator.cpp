@@ -34,6 +34,11 @@ TensorIteratorConfig& TensorIteratorConfig::set_check_mem_overlap(bool check_mem
   return *this;
 }
 
+TensorIteratorConfig& TensorIteratorConfig::use_slow_conjugate_fallback(bool x) {
+  use_slow_conjugate_fallback_ = x;
+  return *this;
+}
+
 TensorIteratorConfig& TensorIteratorConfig::check_all_same_dtype(const bool _check_all_same_dtype) {
   check_all_same_dtype_ = _check_all_same_dtype;
   return *this;
@@ -418,6 +423,24 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
   }
 }
 
+void TensorIterator::materialize_conjugate_tensors() {
+  for (auto& op : operands_) {
+    op.target_is_conjugate = false;
+    if (!op.tensor.defined()) {
+      // Undefined output tensor, nothing to do
+      continue;
+    }
+    if (op.target_is_conjugate != op.tensor.is_conjugate()) {
+      op.original_tensor = std::move(op.tensor);
+      if (op.is_output) {
+        op.tensor = at::empty_like(op.original_tensor);
+      } else {
+        op.tensor = op.original_tensor.materialize_conj();
+      }
+    }
+  }
+}
+
 StrideVector TensorIterator::compatible_stride(int element_size) const {
   auto stride = StrideVector();
   int64_t next_stride = element_size;
@@ -771,11 +794,13 @@ bool TensorIterator::is_cpu_scalar(int arg) const {
 void TensorIterator::cast_outputs() {
   for (auto& op : operands_) {
     if (op.is_output && op.original_tensor.defined() &&
-        op.original_tensor.scalar_type() != op.current_dtype) {
+        (op.original_tensor.scalar_type() != op.current_dtype ||
+         op.original_tensor.is_conjugate() != op.tensor.is_conjugate())) {
       if (op.original_tensor.sizes() != op.tensor.sizes()){
         op.original_tensor.resize_as_(op.tensor).as_strided_(op.tensor.sizes(), op.tensor.strides());
       }
       op.original_tensor.copy_(op.tensor);
+      // TODO: Move out of original_tensor here, save refcount
       op.tensor = op.original_tensor;
     }
   }
@@ -1230,6 +1255,10 @@ void TensorIterator::build(TensorIteratorConfig& config) {
   mark_resize_outputs(config);
   // compute the result dtype and device
   compute_types(config);
+  // mark inputs for materialization if necessary
+  if (at::isComplexType(common_dtype_) && config.use_slow_conjugate_fallback_) {
+    materialize_conjugate_tensors();
+  }
   // try fast setup output tensor, if failed, fallback to normal setup
   if (!fast_set_up(config)) {
     // compute each tensor's stride after broadcasting

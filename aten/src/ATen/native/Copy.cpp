@@ -139,6 +139,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
+    .use_slow_conjugate_fallback(false)  // o/w will infinite loop!
     .build();
 
   if (iter.numel() == 0) {

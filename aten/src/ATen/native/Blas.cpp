@@ -18,8 +18,14 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
 }
 
-Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat_, const Tensor &vec_, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
+  // TODO: hook up cblas_gemv support for complex numbers, see
+  // https://github.com/pytorch/pytorch/issues/44741
+  // once this is done, certain situations can be handled directly
+  // without explicitly materializing as we do here
+  auto mat = native::materialize_conj(mat_);
+  auto vec = native::materialize_conj(vec_);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
@@ -37,6 +43,9 @@ Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, co
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
   });
+  if (result.is_conjugate()) {
+    native::conj_physical_(result);
+  }
   return result;
 }
 
@@ -125,11 +134,17 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       " elements respectively");
 }
 
-Tensor dot(const Tensor &self, const Tensor &other){
+Tensor dot(const Tensor &self_, const Tensor &other_){
   at::NoNamesGuard guard;
 
-  dot_check(self, other);
+  dot_check(self_, other_);
 
+  // TODO: use vdot to optimize self.is_conjugate() !=
+  // other.is_conjugate() case
+  // TODO: produce is_conjugate() output for case when self.is_conjugate() and
+  // other.is_conjugate()
+  auto self = native::materialize_conj(self_);
+  auto other = native::materialize_conj(other_);
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
@@ -137,16 +152,20 @@ Tensor dot(const Tensor &self, const Tensor &other){
   });
 }
 
-Tensor vdot(const Tensor &self, const Tensor &other){
+Tensor vdot(const Tensor &self_, const Tensor &other_){
   at::NoNamesGuard guard;
 
   // Dispatch to `dot` for real dtypes.
-  if (!self.is_complex()){
-    return at::dot(self, other);
+  if (!self_.is_complex()){
+    return at::dot(self_, other_);
   }
 
   // For complex dtypes.
-  dot_check(self, other);
+  dot_check(self_, other_);
+
+  // TODO: see dot
+  auto self = native::materialize_conj(self_);
+  auto other = native::materialize_conj(other_);
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));

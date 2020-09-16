@@ -200,17 +200,30 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) {
+Tensor materialize_conj(const Tensor& self) {
+  if (!self.is_conjugate()) { return self; }
+  auto result = at::empty_like(self, self.options());
+  return result.copy_(self);
+}
+
+Tensor conj(const Tensor& self) {
+  Tensor self_;
+  auto impl = c10::make_intrusive<TensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype());
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  impl->set_conjugate(!self.is_conjugate());
+  self_ = Tensor(std::move(impl));
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
+Tensor& conj_physical_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_out(result, self, conj_stub);
 }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
-
-Tensor conj(const Tensor& self) {
-  if (!self.is_complex()) {
-    return self;
-  }
-  return at::_conj(self);
+Tensor& conj_physical_(Tensor& self) {
+  return unary_op_impl_(self, conj_physical_out);
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
@@ -601,6 +614,7 @@ DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
 DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
+// NB: conj_stub IGNORES the conjugate bit on input tensors
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(acosh_stub);

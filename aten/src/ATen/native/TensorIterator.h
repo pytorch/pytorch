@@ -70,6 +70,7 @@ struct CAFFE2_API OperandInfo {
       device = tensor.device();
       target_dtype = tensor.scalar_type();
       current_dtype = target_dtype;
+      target_is_conjugate = tensor.is_conjugate();
     }
     validate();
   }
@@ -95,9 +96,18 @@ struct CAFFE2_API OperandInfo {
   Device device = kCPU;
   ScalarType target_dtype = ScalarType::Undefined;
   // Caches dtype of the tensor, because scalar_type is an expensive operation
+  // TODO: make scalar_type not an expensive operation
   // If dtype of the tensor is changed (e.g. as a result of type promotion or in allocate_outputs), this
   //value should be changed too.
   ScalarType current_dtype = ScalarType::Undefined;
+
+  // If an input, specifies if the input should be converted to this conjugation
+  // before running the kernel.  If output, specifies what the output type of
+  // conjugation might be (if it is conjugated, we may need to do an extra
+  // conjugation after the kernel).
+  bool target_is_conjugate = false;
+  // We don't bother caching current is_conjugate as it is a cheap operation
+  // (unlike scalar_type)
 
   bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
@@ -307,6 +317,7 @@ protected:
   void reorder_dimensions(const TensorIteratorConfig&);
   void permute_dimensions(IntArrayRef perm);
   void compute_types(const TensorIteratorConfig&);
+  void materialize_conjugate_tensors();
   ScalarType compute_common_dtype();
   void allocate_or_resize_outputs();
   bool fast_set_up(const TensorIteratorConfig&);
@@ -458,6 +469,14 @@ public:
   TensorIteratorConfig& is_reduction(const bool _is_reduction);
   TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars);
 
+  // True by default.  When this is true, we assume that the implementing kernel
+  // does not understand the conjugate bit (Tensor::is_conjugate()); thus, we
+  // must materialize any conjugated input tensors, and if the output is
+  // supposed to target the conjugated form, we must conjugate our output before
+  // writing to it.  It will be faster (but more code) if kernels can directly
+  // detect these situations.
+  TensorIteratorConfig& use_slow_conjugate_fallback(bool);
+
   // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computatable
   //   (see the [Common Dtype Computation] note) and, on the CPU, temporary
@@ -488,6 +507,7 @@ private:
   c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
+  bool use_slow_conjugate_fallback_ = true;
   bool is_reduction_ = false;
   bool resize_outputs_ = true;
   bool check_all_same_dtype_ = true;

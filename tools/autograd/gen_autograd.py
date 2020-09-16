@@ -37,7 +37,7 @@ from .utils import YamlLoader, split_name_params, op_name_without_overload
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex', 'conj']
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -87,6 +87,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
+    'materialize_conj',
 })
 
 def format_return_type(returns):
