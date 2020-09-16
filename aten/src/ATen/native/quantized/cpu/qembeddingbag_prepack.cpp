@@ -104,8 +104,6 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       embedding_rows,
       embedding_cols +
           8}; // extra 8 bytes to store FP scale and zero_point per row.
-  size_t output_columns = output_shape[1];
-  constexpr float kEpsilon = 1e-8f;
 
   // Allocate output packed weights
   auto output = at::empty(
@@ -114,6 +112,12 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       weight_contig.suggest_memory_format());
   auto* output_data = output.data_ptr<uint8_t>();
 
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+      weight_data, embedding_rows, embedding_cols, output_data);
+#else
+  size_t output_columns = output_shape[1];
+  constexpr float kEpsilon = 1e-8f;
   for (std::size_t row = 0; row < embedding_rows; ++row) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
@@ -134,6 +138,8 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
           lrintf((input_row[col] - minimum_element) * inverse_scale);
     } // embedding_cols
   } // embedding_rows
+#endif // USE_FBGEMM
+
   return output;
 }
 
@@ -145,16 +151,16 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
 
   const auto weight_data = weight.data_ptr<float>();
   TORCH_CHECK(
-    BIT_RATE == 4 || BIT_RATE == 2,
-    "BIT_RATE must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
-    "For 8bit, consider using 'embedding_bag_byte_prepack'.");
+      BIT_RATE == 4 || BIT_RATE == 2,
+      "BIT_RATE must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
+      "For 8bit, consider using 'embedding_bag_byte_prepack'.");
 
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
       "qembeddingbag_" + c10::to_string(BIT_RATE) +
-      "bit_prepack only works for the number of columns a multiple of "
-      + c10::to_string(NUM_ELEM_PER_BYTE));
+          "bit_prepack only works for the number of columns a multiple of " +
+          c10::to_string(NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.
@@ -172,6 +178,11 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
       weight_contig.options().dtype(at::kByte),
       weight_contig.suggest_memory_format());
   auto* output_data = output.data_ptr<uint8_t>();
+
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+      BIT_RATE, weight_data, embedding_rows, embedding_cols, output_data);
+#else
   const auto output_columns = output.size(output.dim() - 1);
 
   for (int row = 0; row < embedding_rows; ++row) {
@@ -221,6 +232,8 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
       }
     } // embedding_cols
   } // embedding_rows
+#endif // USE_FBGEMM
+
   return output;
 }
 
