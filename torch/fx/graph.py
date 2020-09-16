@@ -2,6 +2,7 @@ from .node import Node, Argument, Target
 
 from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
+import copy
 import torch
 import keyword
 
@@ -64,10 +65,46 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     else:
         return a
 
+class FinalizableList(list):
+    def __init__(self, *args, **kwargs):
+        self.finalized = False
+        super().__init__(*args, **kwargs)
+
+    mutation_methods = ['append', 'extend', 'insert', 'remove', 'pop', 'clear', 'sort', 'reverse']
+
+    def _raise_finalized(self):
+        raise RuntimeError('This Graph has already been finalized! FX graphs are immutable after '
+                           'setting output(). Please make a new graph')
+
+    def finalize(self):
+        self.finalized = True
+
+    def __deepcopy__(self, memo):
+        instance = FinalizableList()
+        instance.extend([copy.deepcopy(item, memo) for item in self])
+        if self.finalized:
+            instance.finalize()
+        return instance
+
+for method in FinalizableList.mutation_methods:
+    def scope(method):
+        def wrapper(self, *args, **kwargs):
+            if self.finalized:
+                self._raise_finalized()
+            getattr(super(FinalizableList, self), method)(*args, **kwargs)
+        return wrapper
+    setattr(FinalizableList, method, scope(method))
+
 class Graph:
-    def __init__(self):
-        self.nodes : List[Node] = []
+    def __init__(self, from_graph : Optional['Graph'] = None):
         self._used_names : Dict[str, int] = {}  # base name -> number
+        if from_graph:
+            self.nodes : FinalizableList = FinalizableList()
+            val_map = {}
+            for node in from_graph.nodes:
+                val_map[node] = self.node_copy(node, lambda n: val_map[n])
+        else:
+            self.nodes : FinalizableList = FinalizableList()
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -130,6 +167,7 @@ class Graph:
     def output(self, result: Argument):
         self.result = result
         self._mark_uses(result)
+        self.nodes.finalize()
 
     def _name(self, target: Target) -> str:
         if callable(target):
