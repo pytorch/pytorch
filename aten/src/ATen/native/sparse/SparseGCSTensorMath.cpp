@@ -57,25 +57,27 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
   auto pointers_accessor = pointers.accessor<int64_t, 1>();
   auto indices_accessor = indices.accessor<int64_t, 1>();
 
-  scalar_t cast_alpha = alpha.to<scalar_t>();
-  scalar_t cast_beta = beta.to<scalar_t>();
 
-  if (cast_beta == 0) {
-    r.zero_();
-  } else if (cast_beta == 1) {
-    if (!is_same_tensor(r, t)) {
-      r.copy_(t);
-    }
-  } else {
-    at::mul_out(r, t, scalar_to_tensor(beta));
-  }
+
   
   AT_DISPATCH_ALL_TYPES(
   values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+    scalar_t cast_alpha = alpha.to<scalar_t>();
+    scalar_t cast_beta = beta.to<scalar_t>();
+
+    if (cast_beta == 0) {
+      r.zero_();
+    } else if (cast_beta == 1) {
+      if (!is_same_tensor(r, t)) {
+        r.copy_(t);
+      }
+    } else {
+      at::mul_out(r, t, scalar_to_tensor(beta));
+    }
+
     scalar_t * dense_ptr = dense.data_ptr<scalar_t>();
     scalar_t * r_ptr = r.data_ptr<scalar_t>();
-                                                    // generic implementation without BLAS calls.
-                                                    // hello
+
     
   });
 
