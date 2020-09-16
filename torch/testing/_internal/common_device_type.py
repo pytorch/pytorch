@@ -167,7 +167,13 @@ except ImportError:
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
 <<<<<<< HEAD
+<<<<<<< HEAD
 device_type_test_bases: typing.List[typing.Any] = list()
+=======
+
+#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
+device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
+>>>>>>> 62c2bd3c6f... try to fix the errors
 =======
 
 #TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
@@ -279,6 +285,9 @@ class DeviceTypeTestBase(TestCase):
 =======
                     args = (device_arg, dtype, op)
                     args = tuple(arg for arg in args if arg is not None)
+<<<<<<< HEAD
+>>>>>>> 62c2bd3c6f... try to fix the errors
+=======
 >>>>>>> 62c2bd3c6f... try to fix the errors
                     result = test_fn(self, *args)
                 finally:
@@ -444,6 +453,9 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 =======
         device_type_test_class = type(class_name, (base, empty_class), {})
         #: Tuple(DeviceTypeTestBase, Tuple(), Dict[<nothing>, <nothing>])
+<<<<<<< HEAD
+>>>>>>> 62c2bd3c6f... try to fix the errors
+=======
 >>>>>>> 62c2bd3c6f... try to fix the errors
 
         for name in generic_members:
