@@ -1,3 +1,4 @@
+r"""Functional interface"""
 import math
 import torch
 from torch import Tensor
@@ -13,6 +14,11 @@ def adagrad(params: List[Tensor],
             weight_decay: float,
             lr_decay: float,
             eps: float): 
+    r"""Functional API that performs Adagrad algorithm computation.
+
+    See :class:`~torch.optim.Adagrad` for details.
+    """
+
     for (param, grad, state_sum) in zip(params, grads, state_sums):
         if weight_decay != 0:
             if grad.is_sparse:
@@ -54,6 +60,10 @@ def adam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float):
+    r"""Functional API that performs Adam algorithm computation.
+
+    See :class:`~torch.optim.Adam` for details.
+    """
 
     for i, param in enumerate(params):
 
