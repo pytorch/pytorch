@@ -17,9 +17,9 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
-// When the global flag `allow_tf32` set to true, cuBLAS handles are
+// When the global flag `allow_tf32` is set to true, cuBLAS handles are
 // automatically configured to use math mode CUBLAS_TF32_TENSOR_OP_MATH.
-// For some operators, such as addmv, TF32 has no performance improves
+// For some operators, such as addmv, TF32 offers no performance improvement
 // but causes precision loss. To help this case, this class implements
 // a RAII guard that can be used to quickly disable TF32 within its scope.
 //

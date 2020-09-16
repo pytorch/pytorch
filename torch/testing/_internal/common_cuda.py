@@ -123,6 +123,11 @@ def tf32_on_and_off(tf32_precision=1e-5):
     return wrapper
 
 
+# This is a wrapper that wraps a test to run it with TF32 turned off.
+# This wrapper is designed to be used when a test uses matmul or convolutions
+# but the purpose of that test is not testing matmul or convolutions.
+# Disabling TF32 will enforce torch.float tensors to be always computed
+# at full precision.
 def with_tf32_off(f):
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
