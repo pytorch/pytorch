@@ -738,6 +738,12 @@ class TestScriptPy3(JitTestCase):
         # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
         #     set(torch.jit.export_opnames(scripted_M_mod))))
 
+    def test_homogeneous_tuple(self):
+        @torch.jit.script
+        def foo(a: Tuple[int, ...]) -> int:
+            return len(a)
+
+        FileCheck().check('int[]').run(foo.graph)
 
 if __name__ == '__main__':
     run_tests()
