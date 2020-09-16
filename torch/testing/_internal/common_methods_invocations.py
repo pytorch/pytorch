@@ -64,7 +64,8 @@ class OpInfo(object):
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  skips=tuple(),  # information about which tests to skip
-                 decorators=None):  # decorators to apply to generated tests
+                 decorators=None,  # decorators to apply to generated tests
+                 supports_out_param=True):  # does it support out=... ?
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, _dispatch_dtypes)
@@ -88,6 +89,7 @@ class OpInfo(object):
 
         self.skips = skips
         self.decorators = decorators
+        self.supports_out_param = supports_out_param
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -204,6 +206,7 @@ class UnaryUfuncInfo(OpInfo):
 op_db = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
+                   supports_out_param=False,
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,

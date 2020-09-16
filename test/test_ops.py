@@ -130,6 +130,8 @@ class TestOut(TestCase):
 
     @ops(op_db)
     def test_out(self, device, dtype, op):
+        if not op.supports_out_param:
+            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
