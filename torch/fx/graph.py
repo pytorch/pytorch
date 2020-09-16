@@ -142,7 +142,7 @@ class Graph:
                 op = op[2:-2]
         op = op.replace('.', '_')
         # delete all characters that are illegal in a Python identifier
-        op = re.sub('[^0-9a-zA-Z_]', '', op)
+        op = re.sub('[^0-9a-zA-Z_]+', '_', op)
         op = snake_case(op)
         if op[0].isdigit():
             op = f'_{op}'

@@ -224,7 +224,7 @@ class Reducer {
   // views_in and views_out into the contents tensor for each variable's grad.
   // Views serve as entry points to copy_ each grad's data in/out of the flat
   // contents tensor. The function call in `finalize_backward` happens only if
-  // DDP communication hook was registered to recrate just views_out with the
+  // DDP communication hook was registered to recreate just views_out with the
   // result of `future_work`. If called from `finalize_backward`,
   // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
   // `bucket_views_in` referring to replica's contents and
@@ -320,6 +320,12 @@ class Reducer {
   std::unique_ptr<CommHookInterface> comm_hook_;
 };
 
+// This is equivalent to take_tensors but returns indices into the
+// tensor list argument for bucket assignment. Also, it is aware
+// of device placement and will not allow buckets to span devices.
+// The index of tensors[i] assigned to bucket is tensor_indices[i],
+// when tensor_indices is empty, the index of tensors[i] assigned to
+// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
