@@ -104,7 +104,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
-      thread_id_(at::RecordFunction::currentThreadId()),
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
@@ -114,6 +113,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       // A parent is a Node where this Node is created.
       // We are tracking the parents to track multiple backward operations.
       assign_parent();
+    }
+
+    if (profiler::profilerEnabled()) {
+      thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
 
@@ -135,7 +138,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     if (guard.active) {
       // Using sequence number and thread id to correlate with
       // the forward pass function
-      guard.setForwardThreadId(thread_id());
+      guard.setForwardThreadId(thread_id_);
       if (guard.needs_inputs) {
         guard.before(
           name(),
@@ -382,7 +385,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   const uint64_t sequence_nr_;
 
   // Id of the thread that created the instance
-  const uint64_t thread_id_;
+  uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
