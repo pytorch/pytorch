@@ -1986,6 +1986,60 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
+    def test_rref_type(self):
+
+        def launched_rpc(events):
+            expected_name = "rpc_sync#_rref_typeof_on_owner"
+            return any([e.name.startswith(expected_name) for e in events])
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
+
+        with torch.autograd.profiler.profile() as p:
+            t = rref._get_type()
+
+        self.assertTrue(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        with torch.autograd.profiler.profile() as p:
+            for _ in range(10):
+                t = rref._get_type()
+
+        self.assertFalse(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        rref = rpc.remote(dst, MyClass, args=(0,))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @dist_init
+    def test_rref_type_with_error(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        # 10 ms timeout
+        rref = rpc.remote(dst, raise_func)
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            rref._get_type()
+
+    @dist_init
+    def test_rref_type_owner(self):
+        rref = RRef(torch.ones(2) + 1)
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+        rref = RRef(MyClass(0))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @staticmethod
+    def _slow_add(x, y):
+        time.sleep(1)
+        return x + y
+
+    @dist_init
+    def test_rref_type_slow_init(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, RpcTest._slow_add, args=(torch.ones(2), 1))
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+    @dist_init
     def test_owner_equality(self):
         a = RRef(40)
         b = RRef(50)
