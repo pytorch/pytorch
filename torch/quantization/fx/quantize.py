@@ -21,6 +21,8 @@ from ..quantization_mappings import (
 from ..custom_module_class_mappings import (
     is_custom_module_class,
     get_observed_custom_module_class,
+    mark_observed_custom_module,
+    is_observed_custom_module,
 )
 
 from ..quantize import _remove_qconfig
@@ -260,7 +262,7 @@ class Quantizer:
                         get_observed_custom_module_class(type(custom_module))
                     observed_custom_module = \
                         observed_custom_module_class.from_float(custom_module)
-                    observed_custom_module._is_custom_module = True
+                    mark_observed_custom_module(observed_custom_module)
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
 
@@ -378,8 +380,7 @@ class Quantizer:
         # add custom module instances to the match result
         for node in model.graph.nodes:
             if node.op == 'call_module' and \
-               hasattr(self.modules[node.target], '_is_custom_module') and \
-               self.modules[node.target]._is_custom_module:
+               is_observed_custom_module(self.modules[node.target]):
                 custom_module_qconfig = self.qconfig_map[node.name]
                 matches[node.name] = (node, [node], CustomModule(self, node), custom_module_qconfig)
 

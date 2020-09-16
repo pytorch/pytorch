@@ -14,6 +14,8 @@ from torch.quantization import (
     fuse_modules,
     quantize_dynamic,
     QuantWrapper,
+    QuantStub,
+    DeQuantStub,
     QConfig,
     default_qconfig,
     default_qat_qconfig,
@@ -570,6 +572,115 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
         self.checkLinear(model.fc)
         self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+
+    @skipIfNoFBGEMM
+    def test_custom_module_class(self):
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                pass
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                type(float_module)._FLOAT_MODULE = CustomModule
+                return float_module
+
+        class QuantizedCustomModule(torch.nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, x):
+                return self.conv(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.conv.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
+                return quantized
+
+        from torch.quantization import register_observed_custom_module_mapping
+        from torch.quantization import register_quantized_custom_module_mapping
+        register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
+        register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.custom = CustomModule()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.custom(x)
+                x = self.dequant(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.conv2(x)
+                x = self.dequant(x)
+                return x
+
+        data = torch.randn(1, 1, 1, 1)
+        # instantiate M and RefM and align the parameters
+        original_m = M()
+        original_ref_m = RefM()
+        original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
+
+        original_m.qconfig = default_qconfig
+        m = prepare(original_m)
+        self.checkObservers(m)
+        # calibration
+        m(data)
+        # all activation observers are inserted in the top level module
+
+        # check converted/quantized model
+        m = convert(m)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), nnq.Conv2d)
+        self.assertEqual(type(m.custom.conv), nnq.Conv2d)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = default_qconfig
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
 
 
 @skipIfNoFBGEMM

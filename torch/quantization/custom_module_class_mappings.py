@@ -53,3 +53,16 @@ def is_custom_module_class(module_class):
     """
     return module_class in OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS and \
         module_class in QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
+
+def mark_observed_custom_module(module):
+    """ Mark a module as observed custom module, so that
+    it can be identified during convert step
+    """
+    module._is_observed_custom_module = True
+
+def is_observed_custom_module(module):
+    """ Check if a module is marked as observed custom module
+    or not
+    """
+    return hasattr(module, '_is_observed_custom_module') and \
+        module._is_observed_custom_module
