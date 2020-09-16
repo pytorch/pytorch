@@ -73,11 +73,12 @@ Tensor& addcdiv_out(
     TORCH_CHECK(false,
       "Integer division with addcdiv is no longer supported, and in a future  ",
       "release addcdiv will perform a true division of tensor1 and tensor2. ",
-      "The historic addcdiv behavior can be implemented using floor_divide ",
-      "for integral inputs (self + value * tensor1 // tensor2) and ",
-      "division for float inputs (self + value * tensor1 / tensor2). ",
-      "The future addcdiv behavior can be implemented with true_divide ",
-      "(self + value * torch.true_divide(tensor1, tensor2).");
+      "The historic addcdiv behavior can be implemented as ",
+      "(input + value * torch.trunc(tensor1 / tensor2)).to(input.dtype) ",
+      "for integer inputs and as ",
+      "(input + value * tensor1 / tensor2) for float inputs. ",
+      "The future addcdiv behavior is just the latter implementation: ",
+      "(input + value * tensor1 / tensor2), for all dtypes.");
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()

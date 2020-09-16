@@ -230,6 +230,41 @@ class TestFillerOperator(serial.SerializedTestCase):
             assert np.count_nonzero(blob_out) > 0, "All generated elements are "
             "zeros. Is the random generator functioning correctly?"
 
+    @given(
+        min=st.integers(min_value=0, max_value=5),
+        range=st.integers(min_value=1, max_value=10),
+        emb_size=st.sampled_from((10000, 20000, 30000)),
+        dim_size=st.sampled_from((16, 32, 64)),
+        **hu.gcs)
+    @settings(deadline=None)
+    def test_fp16_uniformfill_op(self, min, range, emb_size, dim_size, gc, dc):
+        op = core.CreateOperator(
+            'Float16UniformFill',
+            [],
+            'out',
+            shape=[emb_size, dim_size],
+            min=float(min),
+            max=float(min + range),
+        )
+        for device_option in dc:
+            op.device_option.CopyFrom(device_option)
+            assert workspace.RunOperatorOnce(op), "Float16UniformFill op did not run successfully"
+
+            self.assertEqual(workspace.blobs['out'].shape, (emb_size, dim_size))
+
+            blob_out = workspace.FetchBlob('out')
+
+            expected_type = "float16"
+            expected_mean = min + range / 2.0
+            expected_var = range * range / 12.0
+            expected_min = min
+            expected_max = min + range
+
+            self.assertEqual(blob_out.dtype.name, expected_type)
+            self.assertAlmostEqual(np.mean(blob_out, dtype=np.float32), expected_mean, delta=0.1)
+            self.assertAlmostEqual(np.var(blob_out, dtype=np.float32), expected_var, delta=0.1)
+            self.assertGreaterEqual(np.min(blob_out), expected_min)
+            self.assertLessEqual(np.max(blob_out), expected_max)
 
 if __name__ == "__main__":
     import unittest
