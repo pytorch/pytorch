@@ -11,6 +11,8 @@ if(USE_VULKAN_RELAXED_PRECISION)
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
+  set(PYTHONPATH "$ENV{PYTHONPATH}")
+  set(ENV{PYTHONPATH} "$ENV{PYTHONPATH}:${CMAKE_CURRENT_LIST_DIR}/..")
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
@@ -20,6 +22,7 @@ if(USE_VULKAN_SHADERC_RUNTIME)
     --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/glsl
     --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
+  set(ENV{PYTHONPATH} "$PYTHONPATH")
 
   if(error_code)
     message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for Vulkan backend")
