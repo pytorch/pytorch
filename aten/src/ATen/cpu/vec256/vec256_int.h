@@ -879,8 +879,8 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
 
 template <typename T, typename Op>
 Vec256<T> inline int_elementwise_binary_256(const Vec256<T>& a, const Vec256<T>& b, Op op) {
-  T values_a[Vec256<T>::size()];
-  T values_b[Vec256<T>::size()];
+  __at_align32__ T values_a[Vec256<T>::size()];
+  __at_align32__ T values_b[Vec256<T>::size()];
   a.store(values_a);
   b.store(values_b);
   for (int i = 0; i != Vec256<T>::size(); i++) {
