@@ -202,7 +202,7 @@ bool annotationAndDefaultTypesMatch(
     const Expr& default_value,
     ResolutionCallback rcb) {
   // Set up the graph.
-  auto range = type.range();
+  auto& range = type.range();
   auto blank_decl = Decl::create(
       range, List<Param>::create(range, {}), Maybe<Expr>::create(range, type));
   auto ret = Return::create(range, default_value);
@@ -289,7 +289,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
         // there is a default value on the implementation.
       } else if (overload_type.present() && impl_default.present()) {
         add_default = annotationAndDefaultTypesMatch(
-            overload_type.get(), impl_default.get(), rcb);
+            overload_type.get(), impl_default.get(), std::move(rcb));
       }
     }
 
@@ -298,7 +298,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     bool strip_default = false;
     if (!add_default && overload_default.present() && overload_type.present()) {
       strip_default = !annotationAndDefaultTypesMatch(
-          overload_type.get(), overload_default.get(), rcb);
+          overload_type.get(), overload_default.get(), std::move(rcb));
     }
 
     // Add overloaded param with default from implementation if necessary.
@@ -337,7 +337,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
-      overload_decl, implementation_def.decl(), rcb);
+      overload_decl, implementation_def.decl(), std::move(rcb));
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(

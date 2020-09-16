@@ -291,8 +291,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
   cu.get_function(def.name().name()).run(stack);
-  auto defaults = stack.at(0).toTuple()->elements();
-  return defaults;
+  return stack.at(0).toTuple()->elements();
 }
 
 std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
@@ -305,7 +304,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
   }
   std::vector<Argument> retval;
 
-  std::vector<Ident> default_names;
   std::vector<Expr> default_types;
   std::vector<Expr> default_exprs;
   // gather any non-empty default arguments
@@ -324,7 +322,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         throw ErrorReport(param.range())
             << "Keyword arguments with defaults need to be type-hinted (TorchScript C++ frontend)";
       }
-      default_names.emplace_back(param.ident());
       default_types.emplace_back(param.type().get());
       default_exprs.emplace_back(def.get());
     }
