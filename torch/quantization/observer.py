@@ -595,7 +595,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         return self._forward(x_orig)
 
-    @torch.jit.ignore
     def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
