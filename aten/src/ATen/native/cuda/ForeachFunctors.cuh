@@ -67,8 +67,8 @@ struct BinaryOpScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op(static_cast<opmath_t>(r_x[ii]),
-                                                    static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
+                                                      static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -110,8 +110,8 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op(static_cast<opmath_t>(r_x[ii]),
-                                                    static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
+                                                      static_cast<opmath_t>(scalar)));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -129,8 +129,8 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op(static_cast<opmath_t>(r_x[ii]),
-                                                    static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
+                                                      static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {

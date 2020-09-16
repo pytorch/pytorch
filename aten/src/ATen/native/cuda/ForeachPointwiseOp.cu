@@ -18,7 +18,8 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
-        multi_tensor_apply<4>(tensor_lists, PointwiseOpFunctor<scalar_t, Op>(), scalar.to<scalar_t>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<4>(tensor_lists, PointwiseOpFunctor<scalar_t, Op<opmath_t>>(), scalar.to<opmath_t>());
     });
 
     return tensor_lists[3];
@@ -32,7 +33,8 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     tensor_lists.emplace_back(tensors2.vec());
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
-        multi_tensor_apply<3>(tensor_lists, PointwiseOpFunctor_<scalar_t, Op>(), scalar.to<scalar_t>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<3>(tensor_lists, PointwiseOpFunctor_<scalar_t, Op<opmath_t>>(), scalar.to<opmath_t>());
     });
 }
 
