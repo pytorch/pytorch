@@ -637,6 +637,29 @@ void testLiteInterpreterFindAndRunMethod() {
   AT_ASSERT(resd == refd);
 }
 
+void testLiteInterpreterRunMethodVariadic() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_three(self, x, y):
+      return self.foo + x + y
+  )");
+
+  std::vector<IValue> inputs;
+  auto inputx = 5 * torch::ones({});
+  auto inputy = 4 * torch::ones({});
+  auto ref = m.run_method("add_three", inputx, inputy);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res = bc.run_method("add_three", inputx, inputy);
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
+}
+
 namespace {
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(

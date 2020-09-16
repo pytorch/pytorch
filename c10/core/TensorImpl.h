@@ -474,7 +474,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // DON'T USE THIS API!! It's only created for testing purpose in
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
-    key_set_ = key_set_ - getRuntimeDispatchKeySet(DispatchKey::Autograd);
+    key_set_ = key_set_ - getRuntimeAutogradKeySet();
   }
 
   int64_t get_device() const {
