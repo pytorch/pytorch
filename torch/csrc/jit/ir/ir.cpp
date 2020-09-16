@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 
+#include <fmt/format.h>
 #include <algorithm>
 #include <iostream>
 #include <set>
@@ -794,9 +795,7 @@ Value* Value::setDebugName(const std::string& name) {
     }
     std::string replacement_name;
     do {
-      std::stringstream ss;
-      ss << name_base << "." << suffix++;
-      replacement_name = ss.str();
+      replacement_name = fmt::format("{}.{}", name_base, suffix++);
     } while (names.count(replacement_name) > 0);
     old_owner_of_name->second->setDebugName(replacement_name);
   }
