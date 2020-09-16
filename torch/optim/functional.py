@@ -1,6 +1,8 @@
+r"""Functional interface"""
 from torch import Tensor
 from typing import List
 
+# TODO: use foreach API in optim.functional to do all the computation
 
 def adagrad(params: List[Tensor],
             grads: List[Tensor],
@@ -10,7 +12,11 @@ def adagrad(params: List[Tensor],
             weight_decay: float,
             lr_decay: float,
             eps: float): 
-    # TODO: use foreach API to do the computation
+    r"""Functional API that performs Adagrad algorithm computation.
+
+    See :class:`~torch.optim.Adagrad` for details.
+    """
+
     for (param, grad, state_sum) in zip(params, grads, state_sums):
         if weight_decay != 0:
             if grad.is_sparse:
