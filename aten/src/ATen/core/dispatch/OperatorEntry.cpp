@@ -162,7 +162,7 @@ bool OperatorEntry::hasKernelForDispatchKeySet(DispatchKeySet ks) const {
   return found;
 }
 
-const c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
+c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
   auto kern_it = kernels_.find(dispatch_key);
   if (kern_it != kernels_.end()) {
     TORCH_INTERNAL_ASSERT(!kernels_.at(dispatch_key).empty());
@@ -230,7 +230,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 2.3. For autograd backend keys, we use kernel from catchAll if there's no direct
   //      registration to the backend key. Once CatchAll is moved to Math, this should
   //      fit 2.1 and we can remove 2.3 entirely.
-  if (!is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
+      && !is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
     return {catchAllKernel_.front(), "catch all"};
   }
