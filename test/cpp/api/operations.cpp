@@ -3,8 +3,6 @@
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
-using namespace torch::nn;
-using namespace std;
 struct OperationTest : torch::test::SeedingFixture {
  protected:
   void SetUp() override {}

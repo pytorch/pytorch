@@ -318,6 +318,7 @@ struct CanEmitInline {
         // instruction stack
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
+        v->node()->kind() != prim::TensorExprGroup &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -1378,7 +1379,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              TORCH_INTERNAL_ASSERT(input.isTensor());
               auto t = input.toTensor();
               const TypePtr& expected = af.types[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
@@ -1571,7 +1571,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     formatStackTrace(ss);
     ss << "RuntimeError: " << msg << "\n";
     if (future_) {
-      future_->setError(Future::FutureError(ss.str()));
+      future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
       throw JITException(ss.str());
     } else {

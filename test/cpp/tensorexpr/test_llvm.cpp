@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
+#include <cmath>
 #include <numeric>
 
 namespace torch {
@@ -649,7 +650,7 @@ void testLLVMElemwiseMinInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testLLVMElemwiseMaxNumFloat() {
+void testLLVMElemwiseMaxFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Buffer a(BufHandle("A", {N}, kFloat));
@@ -684,7 +685,7 @@ void testLLVMElemwiseMaxNumFloat() {
   assertAllEqual(c_buffer, 41.0f);
 }
 
-void testLLVMElemwiseMaxNumNaNFloat() {
+void testLLVMElemwiseMaxNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Buffer a(BufHandle("A", {N}, kFloat));
@@ -715,10 +716,12 @@ void testLLVMElemwiseMaxNumNaNFloat() {
   ASSERT_EQ(b_buffer.size(), N);
   ASSERT_EQ(c_buffer.size(), N);
   assertAllEqual(b_buffer, 1.0f);
-  assertAllEqual(c_buffer, 1.0f);
+  for (auto const& elt : c_buffer) {
+    ASSERT_TRUE(std::isnan(elt));
+  }
 }
 
-void testLLVMElemwiseMinNumFloat() {
+void testLLVMElemwiseMinFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Buffer a(BufHandle("A", {N}, kFloat));
@@ -753,7 +756,7 @@ void testLLVMElemwiseMinNumFloat() {
   assertAllEqual(c_buffer, 1.0f);
 }
 
-void testLLVMElemwiseMinNumNaNFloat() {
+void testLLVMElemwiseMinNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Buffer a(BufHandle("A", {N}, kFloat));
@@ -784,152 +787,10 @@ void testLLVMElemwiseMinNumNaNFloat() {
   ASSERT_EQ(b_buffer.size(), N);
   ASSERT_EQ(c_buffer.size(), N);
   assertAllEqual(b_buffer, 1.0f);
-  assertAllEqual(c_buffer, 1.0f);
-}
-
-#if 1 // LLVM doesn't currently have implementations for maximum/minimum on x86
-void testLLVMElemwiseMaximumFloat() {
-  KernelScope kernel_scope;
-  constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
-  std::vector<float> a_buffer(N, 41);
-  std::vector<float> b_buffer(N, 1);
-  std::vector<float> c_buffer(N, 1);
-
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Max::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), true),
-          mask));
-
-  LLVMCodeGen cg(expr, {a, b, c});
-
-  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  ASSERT_EQ(cg.value<int>(args), 0);
-
-  ASSERT_EQ(a_buffer.size(), N);
-  ASSERT_EQ(b_buffer.size(), N);
-  ASSERT_EQ(c_buffer.size(), N);
-  assertAllEqual(a_buffer, 41.0f);
-  assertAllEqual(b_buffer, 1.0f);
-  assertAllEqual(c_buffer, 41.0f);
-}
-
-void testLLVMElemwiseMaximumNaNFloat() {
-  KernelScope kernel_scope;
-  constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
-  std::vector<float> a_buffer(N, NAN);
-  std::vector<float> b_buffer(N, 1);
-  std::vector<float> c_buffer(N, 1);
-
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Max::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), true),
-          mask));
-
-  LLVMCodeGen cg(expr, {a, b, c});
-
-  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  ASSERT_EQ(cg.value<int>(args), 0);
-
-  ASSERT_EQ(a_buffer.size(), N);
-  ASSERT_EQ(b_buffer.size(), N);
-  ASSERT_EQ(c_buffer.size(), N);
-  for (int i = 0; i < N; ++i) {
-    ASSERT_TRUE(std::isnan(a_buffer[i]));
-    ASSERT_TRUE(std::isnan(c_buffer[i]));
+  for (auto const& elt : c_buffer) {
+    ASSERT_TRUE(std::isnan(elt));
   }
 }
-
-void testLLVMElemwiseMinimumFloat() {
-  KernelScope kernel_scope;
-  constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
-  std::vector<float> a_buffer(N, 41);
-  std::vector<float> b_buffer(N, 1);
-  std::vector<float> c_buffer(N, 1);
-
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Min::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), true),
-          mask));
-
-  LLVMCodeGen cg(expr, {a, b, c});
-
-  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  ASSERT_EQ(cg.value<int>(args), 0);
-
-  ASSERT_EQ(a_buffer.size(), N);
-  ASSERT_EQ(b_buffer.size(), N);
-  ASSERT_EQ(c_buffer.size(), N);
-  assertAllEqual(a_buffer, 41.0f);
-  assertAllEqual(b_buffer, 1.0f);
-  assertAllEqual(c_buffer, 1.0f);
-}
-
-void testLLVMElemwiseMinimumNaNFloat() {
-  KernelScope kernel_scope;
-  constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
-  std::vector<float> a_buffer(N, NAN);
-  std::vector<float> b_buffer(N, 1);
-  std::vector<float> c_buffer(N, 1);
-
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Min::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), true),
-          mask));
-
-  LLVMCodeGen cg(expr, {a, b, c});
-
-  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  ASSERT_EQ(cg.value<int>(args), 0);
-
-  ASSERT_EQ(a_buffer.size(), N);
-  ASSERT_EQ(b_buffer.size(), N);
-  ASSERT_EQ(c_buffer.size(), N);
-  for (int i = 0; i < N; ++i) {
-    ASSERT_TRUE(std::isnan(a_buffer[i]));
-    ASSERT_TRUE(std::isnan(c_buffer[i]));
-  }
-}
-#endif
 
 void testLLVMCompareSelectIntEQ() {
   KernelScope kernel_scope;

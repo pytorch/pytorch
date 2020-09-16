@@ -273,11 +273,13 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    return g.op("SequenceLength", self)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        return g.op("SequenceLength", self)
+    return g.op("Size", self)
 
 
 def __getitem_(g, self, i):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if sym_help._is_tensor_list(self):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
     else:
@@ -388,13 +390,12 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
             split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-            end = split_sizes[0]
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
             for i in range(_outputs):
+                end = g.op("Add", start, split_sizes[i])  # split_sizes is a list of same length as _outputs
                 res.append(g.op("Slice", self, start, end, axis))
                 start = end
-                end = g.op("Add", start, end)
             return res
         return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
                 for i in range(_outputs)]
@@ -487,24 +488,32 @@ def arange(g, *args):
         dtype = sym_help._maybe_get_const(dtype, 'i')
         return dtype
 
-    if len(args) == 5:
-        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
-        dtype = _get_arange_dtype(args[1])
+    if len(args) == 2 or len(args) == 5:
+        if len(args) == 2:
+            # aten::arange(Scalar end, Tensor out)
+            dtype = None
+        else:
+            # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+            dtype = _get_arange_dtype(args[1])
         type, end, start, step = sym_help._arange_cast_helper(g, end=args[0], dtype=dtype)
         start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         arange_tensor = g.op("Range", start_default, end, delta_default)
+    elif len(args) == 4 or len(args) == 7:
+        if len(args) == 4:
+            # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
+            dtype = None
+        else:
+            # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+            dtype = _get_arange_dtype(args[3])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
+        arange_tensor = g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
         type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], dtype=dtype)
         delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
         arange_tensor = g.op("Range", start, end, delta_default)
-    elif len(args) == 7:
-        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
-        dtype = _get_arange_dtype(args[3])
-        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
-        arange_tensor = g.op("Range", start, end, step)
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor

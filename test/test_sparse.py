@@ -1256,7 +1256,7 @@ class TestSparse(TestCase):
             ({'dtype': torch.double, 'p': 'fro'},
              ValueError, r'dtype argument is not supported in frobenius norm'),
             ({'dtype': torch.double, 'p': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument") 
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
         ]
         x = self._gen_sparse(3, 10, 100)[0]
         for kwargs, err, msg in kwarg_error_pairs:
@@ -1373,14 +1373,6 @@ class TestSparse(TestCase):
         y2 = x1.clone()
         y2.div_(37.5)
         expected = self.safeToDense(x1) / 37.5
-        self.assertEqual(self.safeToDense(y1), expected)
-        self.assertEqual(self.safeToDense(y2), expected)
-
-        y1 = torch.true_divide(x1, 37.5)
-        y2 = x1.clone()
-        if y2.dtype.is_floating_point or y2.dtype.is_complex:
-            y2.true_divide_(37.5)
-        expected = torch.true_divide(self.safeToDense(x1), 37.5)
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
@@ -2366,15 +2358,6 @@ class TestSparse(TestCase):
         self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
-
-    def test_true_divide_by_sparse_error(self):
-        def fn():
-            x = torch.tensor(1., device=self.device).to_sparse()
-            y = torch.tensor(1., device=self.device).to_sparse()
-            torch.true_divide(x, y)
-
-        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
-                               fn)
 
     def test_floor_divide_by_sparse_error(self):
         self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
