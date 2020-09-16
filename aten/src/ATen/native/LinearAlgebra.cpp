@@ -339,7 +339,6 @@ static void addbmm_impl_cpu_(
 Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
   {
-    AT_ERROR("intentionally broken");
     at::NoNamesGuard guard;
     addbmm_impl_cpu_(result, b_self, batch1, batch2, beta, alpha);
   }
