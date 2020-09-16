@@ -467,8 +467,6 @@ class TestQuantizedTensor(TestCase):
             # check copy from non-quantized to quantized
             r = torch.randn([numel], dtype=torch.float).to(device)
             q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype, device=device)
-            print("Device:", device)
-            print("Device (in q):", q.device)
             q.copy_(r)
             qr = torch.quantize_per_tensor(r, scale=scale, zero_point=zero_point, dtype=dtype)
             self.assertEqual(q, qr)
