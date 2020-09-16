@@ -248,20 +248,18 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
        "embedding_backward",
        [&]
        {
-         AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "embedding_backward", [&] {
-           using accscalar_t = acc_type<scalar_t, true>;
-           embedding_backward_feature_kernel<scalar_t, accscalar_t>
-             <<<grid,
-                block,
-                sizeof(accscalar_t)*C10_WARP_SIZE*BLOCKDIMY + sizeof(int)*C10_WARP_SIZE*BLOCKDIMY,
-                stream>>>
-             (indices_contig.data_ptr<int64_t>(),
-              grad.data_ptr<scalar_t>(),
-              grad_weight.data_ptr<scalar_t>(),
-              static_cast<int>(num_indices),
-              static_cast<int64_t>(stride),
-              static_cast<int>(padding_idx));
-         });
+          using accscalar_t = acc_type<scalar_t, true>;
+          embedding_backward_feature_kernel<scalar_t, accscalar_t>
+            <<<grid,
+              block,
+              sizeof(accscalar_t)*C10_WARP_SIZE*BLOCKDIMY + sizeof(int)*C10_WARP_SIZE*BLOCKDIMY,
+              stream>>>
+            (indices_contig.data_ptr<int64_t>(),
+            grad.data_ptr<scalar_t>(),
+            grad_weight.data_ptr<scalar_t>(),
+            static_cast<int>(num_indices),
+            static_cast<int64_t>(stride),
+            static_cast<int>(padding_idx));
        });
 
     AT_CUDA_CHECK(cudaGetLastError());
@@ -360,15 +358,13 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "embedding_backward", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-        self.data_ptr<scalar_t>(),
-        unique_indices.data_ptr<int64_t>(),
-        static_cast<accscalar_t>(max_norm),
-        static_cast<accscalar_t>(norm_type),
-        dim, self.stride(0), self.stride(1));
-    });
+    using accscalar_t = acc_type<scalar_t, true>;
+    renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
+      self.data_ptr<scalar_t>(),
+      unique_indices.data_ptr<int64_t>(),
+      static_cast<accscalar_t>(max_norm),
+      static_cast<accscalar_t>(norm_type),
+      dim, self.stride(0), self.stride(1));
   });
   AT_CUDA_CHECK(cudaGetLastError());
 
