@@ -2,10 +2,10 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch
 import types
+from typing import List
 
 # This function should correspond to the enums present in c10/core/QEngine.h
-def _get_qengine_id(qengine):
-    # type: (str) -> int
+def _get_qengine_id(qengine: str) -> int:
     if qengine == 'none' or qengine == '' or qengine is None:
         ret = 0
     elif qengine == 'fbgemm':
@@ -18,24 +18,23 @@ def _get_qengine_id(qengine):
     return ret
 
 # This function should correspond to the enums present in c10/core/QEngine.h
-def _get_qengine_str(qengine):
-    # type: (int) -> str
+def _get_qengine_str(qengine: int) -> str:
     all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack'}
-    return all_engines.get(qengine)
+    return all_engines.get(qengine, '*undefined')
 
 class _QEngineProp(object):
-    def __get__(self, obj, objtype):
+    def __get__(self, obj, objtype) -> str:
         return _get_qengine_str(torch._C._get_qengine())
 
-    def __set__(self, obj, val):
+    def __set__(self, obj, val: str) -> None:
         torch._C._set_qengine(_get_qengine_id(val))
 
 class _SupportedQEnginesProp(object):
-    def __get__(self, obj, objtype):
+    def __get__(self, obj, objtype) -> List[str]:
         qengines = torch._C._supported_qengines()
         return [_get_qengine_str(qe) for qe in qengines]
 
-    def __set__(self, obj, val):
+    def __set__(self, obj, val) -> None:
         raise RuntimeError("Assignment not supported")
 
 class QuantizedEngine(types.ModuleType):
