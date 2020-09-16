@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
      IS_WINDOWS, torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
-     onlyCPU, skipCUDAIfNotRocm, largeCUDATensorTest, precisionOverride, dtypes,
+     onlyCPU, largeCUDATensorTest, precisionOverride, dtypes,
      onlyCUDA, skipCPUIf, dtypesIfCUDA)
 
 if TEST_NUMPY:
@@ -889,7 +889,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(cpu_tensor, device_tensor)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_arange_bfloat16(self, device):
         ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
         bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)

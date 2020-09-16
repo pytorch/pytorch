@@ -57,14 +57,12 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
     // type promotion that does cast and reduction in a single kernel
     return OpFunctor<at::Half, float, float>{}(iter);
   }
-  #ifdef __HIP_PLATFORM_HCC__
   else if (iter.dtype() == kBFloat16) {
     return OpFunctor<at::BFloat16, float>{}(iter);
   } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return OpFunctor<at::BFloat16, float, float>{}(iter);
   }
-  #endif
   op(iter);
 }
 

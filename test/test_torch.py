@@ -1678,7 +1678,10 @@ class AbstractTestCases:
         # https://github.com/pytorch/pytorch/issues/29153
         def test_index_add_all_dtypes(self):
             for device in torch.testing.get_all_device_types():
-                for dtype in torch.testing.get_all_math_dtypes(device):
+                dtypes = torch.testing.get_all_math_dtypes(device)
+                if device == 'cuda':
+                    dtypes += {torch.bfloat16}
+                for dtype in dtypes:
                     size = [5, 5]
                     if dtype.is_floating_point or dtype.is_complex:
                         tensor = torch.rand(size, dtype=dtype, device=device)
@@ -19982,11 +19985,16 @@ tensor_op_tests = [
                       True],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('prod', '', lambda t, d: _small_2d(t, d, oneish=True),
-        lambda t, d: [], 1e-2, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
-    ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
+        lambda t, d: [], 1e-2, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sum', 'complex', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
     ('sum', 'complex_dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),

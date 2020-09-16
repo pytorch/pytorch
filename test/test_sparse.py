@@ -1221,7 +1221,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
-    @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10)
