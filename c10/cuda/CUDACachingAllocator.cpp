@@ -33,13 +33,18 @@ namespace CUDACachingAllocator {
 // - The allocator attempts to find the smallest cached block that will fit the
 //   requested size. If the block is larger than the requested size, it may be
 //   split. If no block is found, the allocator will delegate to cudaMalloc.
-// - If the cudaMalloc fails, the allocator will free all cached blocks that
-//   are not split and retry the allocation.
+// - If the cudaMalloc fails, the allocator will attempt to free one cached
+//   block of sufficient size that is not split and retry the allocation.
+//   If this also fails, the allocator will attempt to free all cached blocks
+//   that are not split and retry the allocation.
 // - Large (>1MB) and small allocations are stored in separate pools.
 //   Small requests are packed into 2MB buffers. Large requests will use the
 //   smallest available free block or allocate a new block using cudaMalloc.
-//   To reduce fragmentation, requests between 1MB and 10MB will allocate and
+// - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
+// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
+//   split. These oversize cached blocks will still satisfy requests within
+//   20MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -654,6 +659,7 @@ class DeviceCachingAllocator {
     return (p.block != nullptr);
   }
 
+  /** Free one oversize cached block of sufficient size **/
   bool release_cached_block(const AllocParams& p)
   {
     BlockPool& pool = *p.pool;
@@ -701,7 +707,7 @@ class DeviceCachingAllocator {
       if (!block->prev && !block->next) {
         auto cur = it;
         ++it;
-       release_block(*cur);
+        release_block(*cur);
       } else {
         ++it;
       }
