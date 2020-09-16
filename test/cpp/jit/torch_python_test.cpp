@@ -1,7 +1,7 @@
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/api/module.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/script.h>
 
 namespace torch {
@@ -73,7 +73,7 @@ void testTorchSaveError() {
   // Ensure torch::jit::load did not run
   AT_ASSERT(passed);
 }
-}
+} // namespace
 
 JIT_TEST_API void runJITCPPTests() {
   // TODO: this test never ran before and is broken.

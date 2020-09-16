@@ -6,7 +6,7 @@ target_link_libraries(torchbind_test torch)
 add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
 target_link_libraries(jitbackend_test torch)
 
-if (INSTALL_TEST)
+if(INSTALL_TEST)
   install(TARGETS torchbind_test DESTINATION lib)
   install(TARGETS jitbackend_test DESTINATION lib)
 endif()
