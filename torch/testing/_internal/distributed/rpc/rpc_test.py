@@ -448,6 +448,12 @@ class AsyncExecutionClass:
         )
         return ret_fut
 
+    @rpc.functions.async_execution
+    def bound_async_add(self, to, x, y, z):
+        return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: fut.wait() + z
+        )
+
 
 def return_future():
     return torch.futures.Future()
@@ -3051,14 +3057,17 @@ class RpcTest(RpcAgentTestFixture):
         if mode == RPCExecMode.SYNC:
             ret = rref.rpc_sync().static_async_add(dst2, x, x, y)
             ret += rref.rpc_sync().class_async_add(dst2, x, x, y)
+            ret += rref.rpc_sync().bound_async_add(dst2, x, x, y)
         elif mode == RPCExecMode.ASYNC:
             ret = rref.rpc_async().static_async_add(dst2, x, x, y).wait()
             ret += rref.rpc_async().class_async_add(dst2, x, x, y).wait()
+            ret += rref.rpc_async().bound_async_add(dst2, x, x, y).wait()
         elif mode == RPCExecMode.REMOTE:
             ret = rref.remote().static_async_add(dst2, x, x, y).to_here()
             ret += rref.remote().class_async_add(dst2, x, x, y).to_here()
+            ret += rref.remote().bound_async_add(dst2, x, x, y).to_here()
 
-        self.assertEqual(ret, 2 * 4 * x)
+        self.assertEqual(ret, 3 * 4 * x)
 
     @dist_init
     def test_async_class_rref_proxy(self):
