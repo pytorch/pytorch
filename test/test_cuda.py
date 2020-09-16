@@ -528,12 +528,18 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    def test_allow_tf32_get_set(self):
+    def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cudnn_allow_tf32_get_set(self):
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            self.assertFalse(torch.backends.cudnn.allow_tf32)
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            self.assertTrue(torch.backends.cudnn.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -2389,11 +2395,20 @@ t2.start()
                             "{} not found as an attribute on either Tensor or the requested module {}".format(
                             op, module))
 
+            # Accounts for ops that return tuples and other non-Tensors.
+            # For example, lstm_cell returns a tuple and equal returns bool.
+            def compare(first, second):
+                if isinstance(first, torch.Tensor):
+                    return torch.equal(first, second)
+                elif isinstance(first, container_abcs.Iterable):
+                    return all(compare(f, s) for f, s in zip(first, second))
+                else:
+                    return first == second
+
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
-                comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
-                    else (output == output_method)
+                comparison = compare(output, output_method)
                 self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
@@ -2407,8 +2422,7 @@ t2.start()
                 else:
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
-                comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
-                    else (output_to_compare == control)
+                comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())

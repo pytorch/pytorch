@@ -1,15 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import enum
 import torch
 from .qconfig import QConfig
+from .quant_type import QuantType
 from torch.jit._recursive import wrap_cpp_module
-
-# Quantization type (dynamic quantization, static quantization).
-# Should match the c++ enum in quantization_type.h
-class QuantType(enum.IntEnum):
-    DYNAMIC = 0
-    STATIC = 1
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):

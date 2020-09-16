@@ -60,12 +60,50 @@ class VarFinder : public IRVisitor {
     return nf.vars();
   }
 
+  static std::unordered_set<const Var*> find(const Expr* e) {
+    VarFinder nf;
+    e->accept(&nf);
+    return nf.vars();
+  }
+
   const std::unordered_set<const Var*>& vars() {
     return vars_;
   }
 
  private:
   std::unordered_set<const Var*> vars_;
+};
+
+// Finds all kinds of write operations to the provided Buf.
+class WritesToBuf : public IRVisitor {
+ public:
+  WritesToBuf(const Buf* target) : target_(target) {}
+
+  std::vector<const Stmt*> writes() {
+    return writes_;
+  }
+
+  static std::vector<const Stmt*> find(Stmt* s, const Buf* b) {
+    WritesToBuf finder(b);
+    s->accept(&finder);
+    return finder.writes();
+  }
+
+ private:
+  void visit(const Store* v) override {
+    if (v->buf() == target_) {
+      writes_.push_back(v);
+    }
+  }
+
+  void visit(const AtomicAdd* v) override {
+    if (v->buf() == target_) {
+      writes_.push_back(v);
+    }
+  }
+
+  const Buf* target_;
+  std::vector<const Stmt*> writes_;
 };
 
 // A class that analyzes the given program relevant for Block backend

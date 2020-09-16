@@ -33,6 +33,10 @@ class TORCH_API CodeGen {
     return stmt_;
   }
 
+  void set_stmt(Stmt* s) {
+    stmt_ = s;
+  }
+
   void apply_mutator(IRMutator* mutator) {
     stmt_ = stmt_->accept_mutator(mutator);
   }

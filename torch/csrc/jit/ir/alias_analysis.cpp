@@ -483,9 +483,13 @@ void AliasDb::analyzeImpl(Node* node) {
     case aten::wait:
       return analyzeWait(node);
     case prim::rpc_async:
+    case prim::rpc_sync:
+    case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    // TODO: think more about TensorExpr alias correctness
+    case prim::TensorExprGroup:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
