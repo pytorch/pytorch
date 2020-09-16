@@ -158,7 +158,8 @@ class Tracer(TracerBase):
             # Snoop up to the next `module_call_wrapper` instance in the callstack, if it exists.
             # If that call wrapper is processing this module, and the local flag `disable_intercept`
             # is set to True, we have already dispatched this Module invocation through `call_module`.
-            # If this is the case, `call_module` wants to invoke the module directly
+            # If this is the case, `call_module` wants to invoke the module directly and not recurse
+            # through module_call_wrapper again.
             stack = inspect.stack()
             for frame in stack[1:]:
                 if frame.function == 'module_call_wrapper':
