@@ -111,7 +111,7 @@ class TestUtilityFuns(TestCase):
         class ReduceModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.norm(a, p=2, dim=-2, keepdim=False)
+                b = torch.linalg.norm(a, p=2, dim=-2, keepdim=False)
                 return b + x
 
         _set_opset_version(self.opset_version)
@@ -127,7 +127,7 @@ class TestUtilityFuns(TestCase):
         class NormModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.norm(a, p=1, dim=-2)
+                b = torch.linalg.norm(a, p=1, dim=-2)
                 return b + x
 
         _set_opset_version(self.opset_version)

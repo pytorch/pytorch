@@ -196,7 +196,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 [[-1.0947,  0.3736],
                  [ 0.0000,  0.5718]]])
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-        >>> torch.norm(A_ - A)
+        >>> torch.linalg.norm(A_ - A)
         tensor(2.9802e-08)
     """
     if not torch.jit.is_scripting():
@@ -1260,25 +1260,25 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
-        >>> torch.norm(a)
+        >>> torch.linalg.norm(a)
         tensor(7.7460)
-        >>> torch.norm(b)
+        >>> torch.linalg.norm(b)
         tensor(7.7460)
-        >>> torch.norm(a, float('inf'))
+        >>> torch.linalg.norm(a, float('inf'))
         tensor(4.)
-        >>> torch.norm(b, float('inf'))
+        >>> torch.linalg.norm(b, float('inf'))
         tensor(4.)
         >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
-        >>> torch.norm(c, dim=0)
+        >>> torch.linalg.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])
-        >>> torch.norm(c, dim=1)
+        >>> torch.linalg.norm(c, dim=1)
         tensor([3.7417, 4.2426])
-        >>> torch.norm(c, p=1, dim=1)
+        >>> torch.linalg.norm(c, p=1, dim=1)
         tensor([6., 6.])
         >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
-        >>> torch.norm(d, dim=(1,2))
+        >>> torch.linalg.norm(d, dim=(1,2))
         tensor([ 3.7417, 11.2250])
-        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        >>> torch.linalg.norm(d[0, :, :]), torch.linalg.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
 

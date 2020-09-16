@@ -10000,8 +10000,8 @@ class TestTorchDeviceType(TestCase):
 
             # larger tensor sanity check
             self.assertEqual(
-                2 * torch.norm(torch.ones(10000), keepdim=keepdim),
-                torch.norm(torch.ones(40000), keepdim=keepdim))
+                2 * torch.linalg.norm(torch.ones(10000), keepdim=keepdim),
+                torch.linalg.norm(torch.ones(40000), keepdim=keepdim))
 
             # matrix norm with non-square >2-D tensors, all combinations of reduction dims
             x = torch.randn(5, 6, 7, 8, device=device)
@@ -10068,13 +10068,13 @@ class TestTorchDeviceType(TestCase):
             a = np.array(x.cpu(), copy=False)
             expected = np.linalg.norm(a, "nuc", axis=axes)
 
-            ans = torch.norm(x, "nuc", dim=axes)
+            ans = torch.linalg.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
             self.assertEqual(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True)
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
-            ans = torch.norm(x, "nuc", dim=axes, out=out)
+            ans = torch.linalg.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
@@ -10157,7 +10157,7 @@ class TestTorchDeviceType(TestCase):
         def run_test(x, y):
             for p in [0, 1, 2, 3, 4, inf, -inf]:
                 dist_xy = torch.dist(x, y, p)
-                dist_xy_norm = torch.norm(x - y, p)
+                dist_xy_norm = torch.linalg.norm(x - y, p)
                 self.assertEqual(dist_xy, dist_xy_norm)
 
         run_test(torch.randn(5, device=device), torch.randn(5, device=device))
@@ -11483,7 +11483,7 @@ class TestTorchDeviceType(TestCase):
         r2 = y.shape[-2]
         if r1 == 0 or r2 == 0:
             return torch.empty(r1, r2, device=x.device)
-        return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
+        return torch.linalg.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
     def test_cdist_norm(self, device):
         for r1 in [3, 4, 5, 6]:
@@ -13195,7 +13195,7 @@ class TestTorchDeviceType(TestCase):
         if k == 0:
             # torch complains about empty indices
             return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-        square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+        square = torch.linalg.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
         unroll = square.view(square.shape[:-2] + (n * n,))
         inds = torch.ones(k, dtype=torch.int)
         inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
@@ -16498,7 +16498,7 @@ class TestTorchDeviceType(TestCase):
         A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
         X1 = torch.randn((m, k), dtype=dtype, device=device)
         E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
@@ -16553,7 +16553,7 @@ class TestTorchDeviceType(TestCase):
 
         E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
 
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # std
         self.assertLess(eq_err_scipy, 1e-6)  # std
@@ -16573,7 +16573,7 @@ class TestTorchDeviceType(TestCase):
         iters2 = len(lambdas2)
         self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
 
-        eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # general
         self.assertLess(eq_err_scipy, 1e-6)  # general
@@ -16632,7 +16632,7 @@ scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
 
         E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1 = len(lambdas1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.linalg.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
@@ -16650,7 +16650,7 @@ scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
 
         E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1_general = len(lambdas1)
-        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err_general = torch.linalg.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)

@@ -21,8 +21,8 @@ import copy
 
 class TestBiasCorrection(QuantizationTestCase):
     def compute_sqnr(self, x, y):
-        Ps = torch.norm(x)
-        Pn = torch.norm(x - y)
+        Ps = torch.linalg.norm(x)
+        Pn = torch.linalg.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
     def correct_artificial_bias_float(self, float_model, img_data):

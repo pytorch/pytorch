@@ -816,7 +816,7 @@ class TestOperators(TestCase):
 
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
-        self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+        self.assertONNX(lambda x: torch.linalg.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
     def test_unfold(self):
         x = torch.randn(2, 3, 4, requires_grad=True)

@@ -8839,7 +8839,7 @@ dedent """
 
         def norm():
             c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
-            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
+            return torch.linalg.norm(c, p="fro"), torch.linalg.norm(c, p="nuc"), torch.linalg.norm(c), torch.linalg.norm(c, p=.5)
 
         self.checkScript(norm, ())
 
