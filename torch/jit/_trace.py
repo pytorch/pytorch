@@ -9,18 +9,21 @@ functionalities in `torch.jit`.
 """
 import torch
 
+import copy
 import os
 import contextlib
 import functools
 import warnings
 import inspect
 import re
+from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
 from torch import _jit_internal
+from torch.nn import Module
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -29,9 +32,14 @@ _unflatten = torch._C._jit_unflatten
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
+
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
 
         f_locals = frame.f_locals
@@ -51,7 +59,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids = set()
+    seen_ids: Set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -82,7 +90,7 @@ class ONNXTracedModule(torch.nn.Module):
         self._return_inputs = return_inputs
         self._return_inputs_states = return_inputs_states
 
-    def forward(self, *args):
+    def forward(self, *args: torch.Tensor):
         in_vars, in_desc = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
@@ -93,13 +101,19 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            trace_inputs = _unflatten(args[: len(in_vars)], in_desc)
+            in_args: List[torch.Tensor] = []
+            for i in range(len(in_vars)):
+                if not isinstance(args[i], torch.Tensor):
+                    raise RuntimeError('Expected Tensor argument')
+                in_args.append(args[i])
+
+            trace_inputs = _unflatten(in_args, in_desc)
 
             ret_inputs.append(
                 tuple(x.clone(memory_format=torch.preserve_format) for x in args)
             )
             if self._return_inputs_states:
-                inputs_states.append(_unflatten(args[: len(in_vars)], in_desc))
+                inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
@@ -204,7 +218,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     # TODO: Consider adding a utility function to torch.jit to test
     # for this case
-    if not isinstance(model, torch._C.CompiledFunction):
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
         raise TypeError(
             "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
         )
@@ -429,13 +443,13 @@ def _check_trace(
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
+                graph_diff_errors, tensor_compare_errors = graph_diagnostic_info()
+                msg = f"encountered an exception while running the {running_what} with test inputs.\nException:\n{indent(str(e))}"
                 raise TracingCheckError(
-                    *graph_diagnostic_info(),
-                    extra_msg="Encountered an exception while running the "
-                    + running_what
-                    + " with test inputs.\nException:\n"
-                    + indent(str(e))
-                )
+                    graph_diff_errors,
+                    tensor_compare_errors,
+                    extra_msg=msg,
+                ) from e
 
         has_warned = [False]
 
@@ -806,7 +820,7 @@ def trace(
     return traced
 
 
-_trace_module_map = None
+_trace_module_map: Optional[Dict[Any, Any]] = None
 
 
 def trace_module(
@@ -912,15 +926,16 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        torch.jit._trace._trace_module_map = {}
+        trace_module_map: Dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():
                 submod_qualname = prefix + "." + name
-                torch.jit._trace._trace_module_map[child] = submod_qualname
+                trace_module_map[child] = submod_qualname
                 register_submods(child, submod_qualname)
 
-        torch.jit._trace._trace_module_map["__module"] = mod
+        trace_module_map["__module"] = mod
+        torch.jit._trace._trace_module_map = trace_module_map
         register_submods(mod, "__module")
 
         module = make_module(mod, _module_class, _compilation_unit)
@@ -996,7 +1011,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
             type(orig)
         )
 
@@ -1097,11 +1112,11 @@ def _script_if_tracing(fn):
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore
         return compiled_fn(*args, **kwargs)
 
-    wrapper.__original_fn = fn
-    wrapper.__script_if_tracing_wrapper = True
+    wrapper.__original_fn = fn  # type: ignore
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore
 
     return wrapper
 

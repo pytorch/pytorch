@@ -57,7 +57,7 @@ struct Refinement {
 struct RefinementSet {
   // When a comparison like x is None is made, we associate type refinements
   // with its true value and its false value. If a boolean that has refinements
-  // associated with it is used in a conditional of an if statememt, the true
+  // associated with it is used in a conditional of an if statement, the true
   // and false refinements are inserted into the corresponding blocks
   using Refinements = std::vector<Refinement>;
 
@@ -205,7 +205,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
 // The Environment keeps track of two tables, one for values which are not first
 // class and a type table for values which are. When a first class value
 // is set in the environment, we emit a prim::Store which sets the
-// name of the variable to approriate type, and when a first-class value is
+// name of the variable to appropriate type, and when a first-class value is
 // referenced we emit a prim::Load that generates a value of the appropriate
 // type.
 //
@@ -700,7 +700,7 @@ struct to_ir {
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
     } else {
       // if we haven't seen any return statements, but the graph block exits
-      // (the funciton always throws) then we accept the declared return type if
+      // (the function always throws) then we accept the declared return type if
       // it exists or set it to none
       if (def_stack_.back().merged_return_type_ == nullptr) {
         def_stack_.back().merged_return_type_ =
@@ -943,9 +943,23 @@ struct to_ir {
       const SourceRange& val_range = subscript.value().range();
       Value* idx = emitExpr(subscript_exprs[0]);
       Value* val = sv->asValue(val_range, method);
-      auto node = graph->create(aten::Delete, {val, idx}, 0)
-                      ->setSourceRange(stmt.range());
-      graph->insertNode(node);
+
+      // If val is a class instance, this is a method call to a type-specific
+      // implementation of del defined in a __delitem__ method.
+      if (auto cls = val->type()->cast<ClassType>()) {
+        if (!cls->findMethod("__delitem__")) {
+          throw ErrorReport(stmt.range())
+              << "Class does not define __delitem__";
+        }
+
+        // Use MethodValue to call the method to handle recursion.
+        MethodValue(val, "__delitem__")
+            .call(stmt.range(), method, {idx}, {}, 0);
+      } else {
+        auto node = graph->create(aten::Delete, {val, idx}, 0)
+                        ->setSourceRange(stmt.range());
+        graph->insertNode(node);
+      }
     } else if (stmt.expr().kind() == TK_VAR) {
       Var var(stmt.expr());
       environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
@@ -996,7 +1010,17 @@ struct to_ir {
       result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
+
     def_stack_.back().merged_return_type_ = result_type;
+
+    // If the annotated return type is Any and the result type is not Any,
+    // cast the result to Any to facilitate type unification between return
+    // statements on different code paths (e.g. different branches of an if,
+    // body and containing scope of a loop).
+    if (result_type == AnyType::get() && result->type() != AnyType::get()) {
+      result = graph->insertUncheckedCast(result, result_type);
+    }
+
     graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
     exit_blocks.insert(environment_stack->block());
   }
@@ -1404,7 +1428,7 @@ struct to_ir {
     // the scope of the if statement (all variables are scoped to the function).
     // Script is a subset of python: we consider variables to be in scope
     // as long as there is a definition of the variable along all paths
-    // through the if statemnent
+    // through the if statement
     // ----
     // if ...:
     //   a =
@@ -2683,8 +2707,10 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
-      case prim::rpc_async: {
-        return emitRpcAsyncExpr(apply);
+      case prim::rpc_async:
+      case prim::rpc_sync:
+      case prim::rpc_remote: {
+        return emitRpcExpr(apply, form);
       }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
@@ -2961,29 +2987,31 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
-  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
+  std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     auto rpcMinInputs = 2;
     auto rpcMaxInputs = 5; // NOLINT
+    std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
-          << "Possible forms of call to rpc_async(..) are\n"
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
-          << "rpc_async(dst_worker_name, user_callable, args)\n"
-          << "rpc_async(dst_worker_name, user_callable)\n"
+          << "Possible forms of call to " << op_name << "(..) are\n"
+          << op_name
+          << "(dst_worker_name, user_callable, args, kwargs, timeout)\n"
+          << op_name << "(dst_worker_name, user_callable, args, kwargs)\n"
+          << op_name << "(dst_worker_name, user_callable, args)\n"
+          << op_name << "(dst_worker_name, user_callable)\n"
           << "Now the number of arguments is " << apply.inputs().size();
     }
     if (apply.attributes().size() != 0) {
       throw ErrorReport(apply)
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs)"
+          << op_name << "(dst_worker_name, user_callable, args, kwargs)"
           << "does not support kwargs yet";
     }
-    // TODO: Make rpc_async(..) support taking kwargs,
+    // TODO: Make rpc_op(..) support taking kwargs,
     // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
 
     auto& input_trees = apply.inputs().tree()->trees();
@@ -3036,12 +3064,12 @@ struct to_ir {
             args_tree->range(),
             entrie_sugared_value->asValue(args_tree->range(), method));
       }
-      // NB: Can't do schema check on kwargs, given the async RPC API is
-      // rpc_async(to, user_callable, args, kwargs),
+      // NB: Can't do schema check on kwargs, given the RPC API is
+      // rpc_op(to, user_callable, args, kwargs),
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // rpc_op(to, user_callable, arg_0, arg_1, kwarg_0="foo",
       // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
@@ -3052,28 +3080,39 @@ struct to_ir {
     Value* userCallableQualNameValue =
         graphPtr->insertConstant(userCallableQualNameIValue, loc);
 
-    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
-    Node* rpc_async_node =
-        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
-            ->setSourceRange(loc);
+    // Graph insert the corresponding RPC node to the graph.
+    Node* rpc_node =
+        graphPtr->insertNode(graphPtr->create(rpc_op, 1))->setSourceRange(loc);
     {
-      WithInsertPoint insert(rpc_async_node);
-      rpc_async_node->addInput(dst_worker_name_value);
-      rpc_async_node->addInput(userCallableQualNameValue);
+      WithInsertPoint insert(rpc_node);
+      rpc_node->addInput(dst_worker_name_value);
+      rpc_node->addInput(userCallableQualNameValue);
 
       for (const auto& tree : args_kwargs_timeout_trees) {
-        rpc_async_node->addInput(emitExpr(Expr(tree)));
+        rpc_node->addInput(emitExpr(Expr(tree)));
       }
     }
-    Value* rpc_async_node_output = rpc_async_node->output();
+    Value* rpc_node_output = rpc_node->output();
 
-    // Set output type from FunctionSchema.
+    // Set output type from FunctionSchema and corresponding rpc_op.
     const std::vector<Argument>& returns = functionSchema.returns();
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
-    auto output_type = returns[0].type();
-    rpc_async_node_output->setType(FutureType::create(output_type));
-
-    return std::make_shared<SimpleValue>(rpc_async_node_output);
+    TypePtr output_type = nullptr;
+    if (rpc_op == prim::rpc_async) {
+      // rpc_async returns FutureType of the functionSchema's return type
+      output_type = FutureType::create(returns[0].type());
+    } else if (rpc_op == prim::rpc_sync) {
+      // rpc_sync returns the functionSchema's return type
+      output_type = returns[0].type();
+    } else if (rpc_op == prim::rpc_remote) {
+      // rpc_remote returns RRefType of the functionSchema's return type
+      output_type = RRefType::create(returns[0].type());
+    } else {
+      throw ErrorReport(apply)
+          << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
+    }
+    rpc_node_output->setType(output_type);
+    return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
   Value* emitSimpleExpr(
