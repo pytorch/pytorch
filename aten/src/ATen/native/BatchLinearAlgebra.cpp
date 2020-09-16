@@ -662,7 +662,7 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, cons
                                                         bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  auto infos_tensor = at::zeros(batchCount(self), self.options().dtype(kInt));
+  auto infos_tensor = at::empty(batchCount(self), self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, infos_tensor, upper, transpose, unitriangular);
   });
