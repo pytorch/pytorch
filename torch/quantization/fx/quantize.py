@@ -122,6 +122,9 @@ def assert_and_get_unique_device(module):
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 
+def is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize))
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -465,7 +468,7 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module':
-                if '_activation_post_process_' in node.target.split('.')[-1]:
+                if is_activation_post_process(self.modules[node.target]):
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
                     if observer_module.dtype == torch.float16:
@@ -499,7 +502,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
-               '_activation_post_process_' in node.target.split('.')[-1]:
+               is_activation_post_process(self.modules[node.target]):
                 # remove activation post process
                 env[node.name] = env[node.args[0].name]
             else:
@@ -507,8 +510,8 @@ class Quantizer:
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
         to_be_removed = []
-        for name, _ in model.named_modules():
-            if '_activation_post_process_' in name.split('.')[-1]:
+        for name, module in model.named_modules():
+            if is_activation_post_process(module):
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
