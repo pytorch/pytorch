@@ -25,46 +25,51 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 // these return singletons, effectively interning TypeMetaData instances.
 // TypeMeta objects are just handles to these interned pointers.
 //
-
-template <>
-EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
-    detail::_Uninitialized>() noexcept {
-  static detail::TypeMetaData singleton = detail::TypeMetaData(
-      0,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      TypeIdentifier::uninitialized(),
-      "nullptr (uninitialized)");
-  return &singleton;
-}
-
-//
-// For TypeMetaData instances representing C++ types that are also represented
-// in the ScalarType enum, we create TypeMetaData objects that also carry the
-// associated ScalarType, to enable fast checks.
+// First the instances corresponding to ScalarType types, then others
+// needed by the core - we use the user macro CAFFE_KNOWN_TYPE(T) for
+// the latter
 //
 
+//
+// TypeMeta/ScalarType bridge
+//
+
+// Canonical TypeMetaData instances for C++ types enumerated by ScalarType
 namespace detail {
 static TypeMetaData scalar_type_metas[] = {
 #define SCALAR_TYPE_META(T, name) \
   _makeScalarTypeMetaDataInstance<T>(ScalarType::name),
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
 #undef SCALAR_TYPE_META
-  _makeScalarTypeMetaDataInstance<detail::_Uninitialized>(ScalarType::Undefined)
+  // Undefined
+  detail::TypeMetaData(
+    0,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    TypeIdentifier::uninitialized(),
+    "nullptr (uninitialized)",
+    ScalarType::Undefined)
 };
 }
 
-#define DEFINE_SCALAR_TYPE_META_DATA_INSTANCE(T, name)                        \
-  template <>                                                                 \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                               \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                             \
-    return &detail::scalar_type_metas[static_cast<int>(ScalarType::name)];    \
+// _typeMetaDataInstace<T> for these types
+#define DEFINE_SCALAR_TYPE_META_DATA_INSTANCE(T, name)                            \
+  template <>                                                                     \
+  EXPORT_IF_NOT_GCC                                                               \
+  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    return &detail::scalar_type_metas[static_cast<int>(ScalarType::name)];        \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE_META_DATA_INSTANCE)
 #undef DEFINE_SCALAR_TYPE_META_DATA_INSTANCE
+
+template <>
+EXPORT_IF_NOT_GCC
+const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
+  return &detail::scalar_type_metas[static_cast<int>(ScalarType::Undefined)];
+}
 
 //
 // other predeclared C++ types

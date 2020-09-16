@@ -454,7 +454,7 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static C10_TYPENAME_CONSTEXPR c10::string_view TypeName() noexcept {
+  static c10::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
@@ -488,6 +488,8 @@ class C10_API TypeMeta final {
  private:
   const detail::TypeMetaData* data_;
 
+  // each TypeMeta::_typeMetaDataInstance<T>() manages
+  // an interned TypeMetaData instance for type T
   template <class T>
   C10_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
