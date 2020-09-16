@@ -49,6 +49,8 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
     endif(GLSLC_PATH)
   endif()
 
+  set(PYTHONPATH "$ENV{PYTHONPATH}")
+  set(ENV{PYTHONPATH} "$ENV{PYTHONPATH}:${CMAKE_CURRENT_LIST_DIR}/..")
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
@@ -59,6 +61,7 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
     --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/spv
     --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
+  set(ENV{PYTHONPATH} "$PYTHONPATH")
 
     if(error_code)
       message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")
