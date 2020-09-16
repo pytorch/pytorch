@@ -3592,6 +3592,14 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: _foreach_softmax.List(Tensor[] tensors, int dim, ScalarType? dtype=None) -> Tensor[]
+  device_guard: False
+  variants: function
+
+- func: _foreach_softmax_backward.List(Tensor[] grad, Tensor[] output, int dim, Tensor[] input) -> Tensor[]
+  device_guard: False
+  variants: function
+
 - func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   use_c10_dispatcher: full
   variants: function, method

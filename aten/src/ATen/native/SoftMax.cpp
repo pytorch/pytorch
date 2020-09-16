@@ -290,5 +290,21 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
+std::vector<at::Tensor> _foreach_softmax(TensorList tensors, const int64_t dim, c10::optional<ScalarType> dtype) {
+  std::vector<at::Tensor> result;
+  for (const Tensor& tensor : tensors) {
+    result.push_back(at::native::softmax(tensor, dim, dtype));
+  }
+  return result;
+}
+
+std::vector<at::Tensor> _foreach_softmax_backward(TensorList grad, TensorList output, const int64_t dim, TensorList input) {
+  std::vector<at::Tensor> result;
+  for (size_t i = 0; i < grad.size(); i++) {
+    result.push_back(at::_softmax_backward_data(grad[i], output[i], dim, input[i]));
+  }
+  return result;
+}
+
 }
 }
