@@ -360,7 +360,7 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
 endif(MSVC)
 
 list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
