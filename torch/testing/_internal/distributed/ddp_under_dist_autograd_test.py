@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from typing import NamedTuple
+import contextlib
 import enum
 import logging
 import os
@@ -251,7 +252,7 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join(simulate_uneven_inputs):
+        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
