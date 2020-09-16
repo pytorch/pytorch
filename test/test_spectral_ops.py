@@ -424,15 +424,22 @@ class TestFFT(TestCase):
         ))
 
         for args in test_args:
-            x = args[0]
-            x_stft = torch.stft(
-                x, n_fft=args[1], hop_length=args[2],
-                center=args[3], pad_mode=args[4], normalized=args[5],
-                onesided=args[6], return_complex=True)
-            x_roundtrip = torch.istft(
-                x_stft, n_fft=args[1], hop_length=args[2], center=args[3],
-                normalized=args[5], onesided=args[6], length=x.size(-1),
-                return_complex=dtype.is_complex)
+            x, n_fft, hop_length, center, pad_mode, normalized, onesided = args
+            common_kwargs = {
+                'n_fft': n_fft, 'hop_length': hop_length, 'center': center,
+                'normalized': normalized, 'onesided': onesided,
+            }
+
+            # Functional interface
+            x_stft = torch.stft(x, pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
+                                      length=x.size(-1), **common_kwargs)
+            self.assertEqual(x_roundtrip, x)
+
+            # Tensor method interface
+            x_stft = x.stft(pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
+                                      length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
 
     @skipCUDAIfRocm

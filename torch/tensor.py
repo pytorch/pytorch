@@ -411,7 +411,7 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
                 win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided
+                onesided=onesided, return_complex=return_complex
             )
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
                           pad_mode, normalized, onesided, return_complex=return_complex)
@@ -427,10 +427,11 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(
                 Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
-                window=window, center=center, normalized=normalized, onesided=onesided, length=None
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
             )
         return torch.istft(self, n_fft, hop_length, win_length, window, center,
-                           normalized, onesided, return_complex=return_complex)
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         relevant_args = (self,)

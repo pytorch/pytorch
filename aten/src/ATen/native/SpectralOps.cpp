@@ -195,7 +195,7 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
 
 /* Short-time Fourier Transform, for signal analysis.
  *
- * This is modelled after librosa but with support for complex time-domain
+ * This is modeled after librosa but with support for complex time-domain
  * signals and complex windows.
  *
  * NOTE: librosa's center and pad_mode arguments are currently only implemented
@@ -316,7 +316,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 
 /* Inverse Short-time Fourier Transform
  *
- * This is modelled after librosa but with support for complex time-domain
+ * This is modeled after librosa but with support for complex time-domain
  * signals and complex windows.
  */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,

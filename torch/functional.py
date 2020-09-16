@@ -401,7 +401,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modelled after librosa_.
+    time. The interface of this function is modeled after librosa_.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -457,6 +457,10 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       the output is a ``input.dim() + 2`` dimensional real tensor where the last
       dimension represents the real and imaginary components.
 
+      .. warning::
+         From pytorch 1.8.0, :attr:`return_complex` will default to ``True``
+         for all input types.
+
     Returns either a complex tensor of size :math:`(* \times N \times T)` if
     :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
     \times T \times 2)`. Where :math:`*` is the optional batch size of
@@ -499,7 +503,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             return handle_torch_function(
                 stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided)
+                onesided=onesided, return_complex=return_complex)
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.
     if center:
@@ -559,7 +563,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             centered at time :math:`t \times \text{hop\_length}`.
             (Default: ``True``)
         normalized (bool): Whether the STFT was normalized. (Default: ``False``)
-        onesided (Optional[bool]): Whether the STFT is onesided.
+        onesided (Optional[bool]): Whether the STFT was onesided.
             (Default: ``True`` if ``n_fft != fft_size`` in the input size)
         length (Optional[int]): The amount to trim the signal by (i.e. the
             original signal length). (Default: whole signal)
@@ -577,7 +581,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             return handle_torch_function(
                 istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, normalized=normalized, onesided=onesided,
-                length=length)
+                length=length, return_complex=return_complex)
 
     return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore
                      normalized, onesided, length, return_complex)
