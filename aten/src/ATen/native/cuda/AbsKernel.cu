@@ -6,12 +6,6 @@
 
 namespace at { namespace native {
 
-// We manually overload abs because std::abs does not work with thrust::complex types and ROCm.
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t abs_wrapper(scalar_t v) {
-  return ::abs(v);
-}
-
 template<typename T>
 __host__ __device__ static inline c10::complex<T> abs_wrapper(c10::complex<T> v) {
   return std::abs(v);
@@ -27,10 +21,8 @@ __host__ __device__ static inline bool abs_wrapper(bool v) {
 
 void abs_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "abs_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return abs_wrapper(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return abs_wrapper(a);
     });
   });
 }
