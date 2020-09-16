@@ -15,6 +15,9 @@ from .utils import (
     quantize_node,
     get_per_tensor_qparams,
 )
+from .custom_module_class import (
+    get_quantized_custom_module_class,
+)
 
 from abc import ABC, abstractmethod
 import operator
@@ -506,6 +509,26 @@ class DefaultQuant(QuantizeHandler):
             root_module,
             quantizer.quantized_graph,
             node, quantizer.activation_post_process_map[node.name])
+
+class CustomModule(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        assert node.op == 'call_module'
+        observed_custom_module = quantizer.modules[node.target]
+        print(node.name in quantizer.activation_post_process_map)
+        if node.name in quantizer.activation_post_process_map:
+            observed_custom_module.activation_post_process = \
+                quantizer.activation_post_process_map[node.name]
+        quantized_custom_module_class = \
+            get_quantized_custom_module_class(observed_custom_module._FLOAT_MODULE)
+        quantized_custom_module = \
+            quantized_custom_module_class.from_observed(observed_custom_module)
+        parent_name, name = _parent_name(node.target)
+        setattr(quantizer.modules[parent_name], name, quantized_custom_module)
+        # hardcoded the qunatized input to be [0], we can extend this
+        # if there is a need, e.g. get the indexes of quantized inputs from some
+        # module attribute like module._QUANTIZED_INPUT_INDEXES
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 
 # 2. Post Training Dynamic Quantizatoin Patterns
 @register_dynamic_quant_pattern(torch.nn.Linear)

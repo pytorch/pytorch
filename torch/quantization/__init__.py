@@ -41,6 +41,8 @@ _all__ = [
     'get_compare_output_module_list',
     'register_quantized_operator_mapping', 'get_quantized_operator',
     'register_fuser_method', 'get_fuser_method',
+    'register_observed_custom_module_mapping',
+    'register_quantized_custom_mdoule_mapping',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
