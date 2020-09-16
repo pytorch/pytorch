@@ -6,7 +6,7 @@ import torch
 from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import Proxy, _create_proxy, TracerBase
+from .proxy import Proxy, TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -165,7 +165,7 @@ class Tracer(TracerBase):
                 if frame.function == 'module_call_wrapper':
                     if 'mod' in frame.frame.f_locals and frame.frame.f_locals['mod'] is mod and\
                             frame.frame.f_locals.get('disable_intercept', False):
-                        return mod._call_impl(*args, **kwargs)
+                        return orig_call(mod, *args, **kwargs)
                     else:
                         break
 
