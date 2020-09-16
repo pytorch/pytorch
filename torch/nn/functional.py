@@ -1673,7 +1673,7 @@ def linear(input, weight, bias=None):
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Shape:
 

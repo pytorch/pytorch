@@ -34,10 +34,7 @@ class Identity(Module):
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
-    .. note:: When the datatype is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Args:
         in_features: size of each input sample

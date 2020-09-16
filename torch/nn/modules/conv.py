@@ -129,6 +129,8 @@ class Conv1d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`L` is a length of signal sequence.
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
@@ -178,11 +180,6 @@ class Conv1d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -280,6 +277,8 @@ class Conv2d(_ConvNd):
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
@@ -333,12 +332,6 @@ class Conv2d(_ConvNd):
         a performance cost) by setting ``torch.backends.cudnn.deterministic =
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
-
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
 
     Args:
@@ -442,6 +435,8 @@ class Conv3d(_ConvNd):
 
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
@@ -493,12 +488,6 @@ class Conv3d(_ConvNd):
         a performance cost) by setting ``torch.backends.cudnn.deterministic =
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
-
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
 
     Args:
@@ -643,6 +632,8 @@ class ConvTranspose1d(_ConvTransposeNd):
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
@@ -695,11 +686,6 @@ class ConvTranspose1d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -781,6 +767,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
@@ -840,11 +828,6 @@ class ConvTranspose2d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -951,6 +934,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
@@ -1010,11 +995,6 @@ class ConvTranspose3d(_ConvTransposeNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
-    Note:
-        When the data type is `torch.float` and the device is an Ampere GPU or newer,
-        this function will automatically uses TF32 tensor core to speedup the computation.
-        This usually results in much faster speed and smaller precision.
-        See :ref:`tf32_on_ampere` for more information.
 
     Args:
         in_channels (int): Number of channels in the input image
