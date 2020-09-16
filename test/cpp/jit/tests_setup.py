@@ -48,7 +48,6 @@ class SerializationInterop(FileSetup):
 
         value = (ones, twos)
 
-        print(self.path)
         torch.save(value, self.path, _use_new_zipfile_serialization=True)
 
 
