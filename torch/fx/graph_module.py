@@ -97,6 +97,17 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
     setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
+    """
+    GraphModule is an nn.Module generated from an fx.Graph. GraphModule has
+    important attributes:
+
+        graph : The graph from which this GraphModule was generated
+        code : The Python source code for the function generated from `graph`
+        forward : The Python method generated from `graph`
+
+    `graph` can be modified, but `regenerate_forward()` MUST be called to sync `code`
+    and `forward` up with `graph`.
+    """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
         # so create a new singleton class for each instance.
