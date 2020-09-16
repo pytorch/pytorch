@@ -2296,6 +2296,13 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseGCS_CPU: _sparse_gcs_mm_out
 
+- func: sparse_gcs_mm(Tensor sparse_,  Tensor(a!) result, Tensor t, Tensor dense, Scalar alpha, Scalar beta) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    SparseGCS_CPU: sparse_gcs_mm_cpu
+  
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   use_c10_dispatcher: full
 
