@@ -16,7 +16,9 @@ F = TypeVar('F', bound=FuncType)
 class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
-    def __call__(self, func: F) -> F:
+    def __call__(self, func) -> F:
+        # setting the original function to be used for JIT compiling
+        func.__original_fn_for_jit = func
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
@@ -24,6 +26,7 @@ class _DecoratorContextManager:
         def decorate_context(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
+
         return cast(F, decorate_context)
 
     def _wrap_generator(self, func):
@@ -38,6 +41,7 @@ class _DecoratorContextManager:
                     yield x
                 except StopIteration:
                     break
+
         return generator_context
 
     def __enter__(self) -> None:

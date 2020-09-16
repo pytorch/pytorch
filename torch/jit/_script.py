@@ -925,6 +925,14 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
+        '''
+        this is a decorated function for no_grad and enable_grad
+        we need the underlying fn and its rcb
+        '''
+        if hasattr(obj, '_DecoratorContextManager__original_fn_for_jit'):
+            obj = obj._DecoratorContextManager__original_fn_for_jit
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
