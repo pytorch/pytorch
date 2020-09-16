@@ -2852,19 +2852,6 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
-    @skipIfRocm
-    def test_profiler_custom_op(self):
-        inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
-
-        with torch.autograd.profiler.profile() as prof:
-            torch.ops._TorchScriptTesting.take_an_instance(inst)
-
-        found_event = False
-        for e in prof.function_events:
-            if e.name == '_TorchScriptTesting::take_an_instance':
-                found_event = True
-        self.assertTrue(found_event)
-
     def test_profiler_propagation(self):
         def foo(x):
             with record_function("in_foo") as rf:

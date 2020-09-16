@@ -269,3 +269,15 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_no_init(self):
         with self.assertRaisesRegex(RuntimeError, 'torch::init'):
             x = torch.classes._TorchScriptTesting._NoInit()
+
+    def test_profiler_custom_op(self):
+        inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        with torch.autograd.profiler.profile() as prof:
+            torch.ops._TorchScriptTesting.take_an_instance(inst)
+
+        found_event = False
+        for e in prof.function_events:
+            if e.name == '_TorchScriptTesting::take_an_instance':
+                found_event = True
+        self.assertTrue(found_event)
