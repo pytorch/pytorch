@@ -7,6 +7,7 @@ static methods.
 import torch
 import random
 import os
+import traceback
 from collections import namedtuple
 from torch._six import queue
 from torch._utils import ExceptionWrapper
@@ -210,6 +211,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
+        traceback.print_exc()
         pass
     if done_event.is_set():
         data_queue.cancel_join_thread()
