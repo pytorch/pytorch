@@ -1,7 +1,7 @@
 import torch
 import torch.overrides
 import linecache
-from typing import Type, Dict, List, Any
+from typing import Type, Dict, List, Any, Union
 from .graph import Graph
 from copy import deepcopy
 
@@ -82,6 +82,20 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
 
     setattr(to_module, field, getattr(from_module, field))
 
+# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
+# This installs empty Modules where none exist yet if they are subpaths of target
+def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
+    *prefix, field = target.split('.')
+    for item in prefix:
+        t = getattr(to_module, item, None)
+
+        if t is None:
+            t = torch.nn.Module()
+            setattr(to_module, item, t)
+        to_module = t
+
+    setattr(to_module, field, from_obj)
+
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -93,14 +107,46 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: torch.nn.Module, graph: Graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+        """
+        Construct a GraphModule.
+        root - `root` can either be an nn.Module instance or a Dict mapping strings to any attribute type.
+               - In the case that `root` is a Module, any references to Module-based objects (via qualified
+                 name) in the Graph's Nodes' `target` field will be copied over from the respective place
+                 within `root`'s Module hierarchy into the GraphModule's module hierarchy.
+               - In the case that `root` is a dict, the qualified name found in a Node's `target` will be
+                 looked up directly in the dict's keys. The object mapped to by the Dict will be copied
+                 over into the appropriate place within the GraphModule's module hierarchy.
+        graph - `graph` contains the nodes this GraphModule should use for code generation
+        """
         super().__init__()
-        if hasattr(root, 'training'):
-            self.training = root.training
-        for node in graph.nodes:
-            if node.op in ['get_param', 'call_module']:
-                assert isinstance(node.target, str)
-                _copy_attr(root, self, node.target)
+        if isinstance(root, torch.nn.Module):
+            if hasattr(root, 'training'):
+                self.training = root.training
+            for node in graph.nodes:
+                if node.op in ['get_param', 'call_module']:
+                    assert isinstance(node.target, str)
+                    _copy_attr(root, self, node.target)
+        elif isinstance(root, dict):
+            targets_to_copy = []
+            for node in graph.nodes:
+                if node.op in ['get_param', 'call_module']:
+                    assert isinstance(node.target, str)
+                    if node.target not in root:
+                        raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
+                                           ' but that target was not provided in `root`!')
+                    targets_to_copy.append(node.target)
+            # Sort targets in ascending order of the # of atoms.
+            # This will ensure that less deeply nested attributes are assigned
+            # before more deeply nested attributes. For example, foo.bar
+            # will be assigned before foo.bar.baz. Otherwise, we might assign
+            # the user-provided `foo.bar` and wipe out the previously-assigned
+            # `foo.bar.baz`
+            targets_to_copy.sort(key=lambda t: t.count('.'))
+            for target_to_copy in targets_to_copy:
+                _assign_attr(root[target_to_copy], self, target_to_copy)
+        else:
+            raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
         self._generate_forward()
 
