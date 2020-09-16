@@ -159,6 +159,7 @@ namespace jit {
   _(ConstantFoldMultiOp)                    \
   _(ConstantFoldMinMax)                     \
   _(ConstantFoldIntrinsics)                 \
+  _(ConstantFoldCastToBool)                 \
   _(ConstantFoldWithVar)                    \
   _(ConditionalSelectFoldSimple)            \
   _(ConditionalSelectFoldTwoLayer)          \
