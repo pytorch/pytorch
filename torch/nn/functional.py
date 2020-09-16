@@ -73,6 +73,7 @@ Note:
     True``.
     Please see the notes on :doc:`/notes/randomness` for background.
 
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
