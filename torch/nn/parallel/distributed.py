@@ -3,7 +3,6 @@ import copy
 import itertools
 import os
 import inspect
-import logging
 
 import torch
 
@@ -575,15 +574,6 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
-        # Calling _rebuild_buckets before forward compuation,
-        # It may allocate new buckets before deallocating old buckets
-        # inside _rebuild_buckets. To save peak memory usage,
-        # call _rebuild_buckets before the peak memory usage increases
-        # during forward computation.
-        # This should be called only once during whole training period.
-        if self.reducer._rebuild_buckets():
-            logging.info("Reducer buckets have been rebuilt in this iteration.")
-
         if self.ddp_join_enabled:
             ones = torch.ones(
                 1, device=self.device
