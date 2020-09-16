@@ -13,7 +13,7 @@ supported_qengines.remove('none')
 # QNNPACK is not supported on PPC
 # QNNPACK throws ASAN heap-buffer-overflow error.
 if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_MACOS, IS_WINDOWS]):
-        supported_qengines.remove('qnnpack')
+    supported_qengines.remove('qnnpack')
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
