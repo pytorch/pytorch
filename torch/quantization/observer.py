@@ -595,17 +595,16 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         return self._forward(x_orig)
 
-    @torch.jit.ignore
     def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
+        new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        y = x.permute(new_axis_list)
         # Need to match dtype of min/max because the updates to buffers
         # are done in place and types need to match for comparisons
         y = y.to(self.min_vals.dtype)
@@ -691,10 +690,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
+        new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals, max_vals = torch._aminmax(y, 1)
