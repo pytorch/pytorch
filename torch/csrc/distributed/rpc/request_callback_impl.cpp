@@ -274,7 +274,7 @@ void RequestCallbackImpl::processScriptRemoteCall(
         try {
           ownerRRef->setValue(jitFuture->value());
         } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
+          ownerRRef->setError(std::current_exception());
         }
         postProcessing();
       };
@@ -297,7 +297,7 @@ void RequestCallbackImpl::processScriptRemoteCall(
                   setRRefValue(valueJitFuture);
                 });
           } catch (const std::exception& e) {
-            ownerRRef->setError(e.what());
+            ownerRRef->setError(std::current_exception());
             postProcessing();
           }
         } else {
@@ -380,7 +380,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
             responseFuture->markCompleted(std::move(m));
           });
     } catch (std::exception& e) {
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       auto m = RemoteRet(rrefId, forkId).toMessage();
       m.setId(messageId);
       responseFuture->markCompleted(std::move(m));
@@ -397,12 +397,12 @@ void RequestCallbackImpl::processPythonRemoteCall(
       ownerRRef->setValue(std::move(py_ivalue));
     } catch (py::error_already_set& e) {
       // py::error_already_set requires GIL to destruct, take special care.
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       py::gil_scoped_acquire acquire;
       e.restore();
       PyErr_Clear();
     } catch (std::exception& e) {
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
     }
     markComplete(RemoteRet(rrefId, forkId).toMessage());
   }
@@ -418,7 +418,7 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
                             int64_t messageId) mutable {
     auto whenValueSet = rref->getFuture();
     if (whenValueSet->hasError()) {
-      responseFuture->setError(whenValueSet->error()->what());
+      responseFuture->setError(whenValueSet->tryRetrieveErrorMessage());
       return;
     }
     try {

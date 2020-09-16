@@ -192,7 +192,7 @@ bool RequestCallbackNoPython::processScriptRemoteCallOp(
     } catch (const std::exception& e) {
       // Don't throw in this call, but rather transfer the exception
       // to the rref.
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       postProcessing();
       return true;
     }
@@ -321,7 +321,8 @@ void RequestCallbackNoPython::processRpc(
         whenValueSet->addCallback(
             [responseFuture, messageId, rref, whenValueSet]() {
               if (whenValueSet->hasError()) {
-                responseFuture->setError(whenValueSet->error()->what());
+                responseFuture->setError(
+                    whenValueSet->tryRetrieveErrorMessage());
                 return;
               }
               try {
@@ -455,16 +456,15 @@ void RequestCallbackNoPython::processRpc(
           autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback(
-          [responseFuture, messageId](const FutureMessage& execFuture) {
-            if (!execFuture.hasError()) {
-              Message m = std::move(PropagateGradientsResp()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(*(execFuture.error()));
-            }
-          });
+      execFuture->addCallback([responseFuture, messageId, execFuture]() {
+        if (!execFuture->hasError()) {
+          Message m = std::move(PropagateGradientsResp()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } else {
+          responseFuture->setError(execFuture->tryRetrieveErrorMessage());
+        }
+      });
       return;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
@@ -517,7 +517,7 @@ void RequestCallbackNoPython::processRpc(
                 }
                 if (cuda_profiling_enabled &&
                     0 == strcmp(e.name(), "__cuda_start_event")) {
-                  e.setCudaUs(e.cpu_us());
+                  e.setCudaUs(e.cpuUs());
                   auto device = e.device();
                   TORCH_CHECK(
                       device != -1,
@@ -552,7 +552,7 @@ void RequestCallbackNoPython::processRpc(
                 // launched/ended, since deserialized event will not have a
                 // corresponding CUDA event.
                 for (auto& e : profiledEvents) {
-                  if (e.has_cuda()) {
+                  if (e.hasCuda()) {
                     auto cuda_device = e.device();
                     TORCH_CHECK(
                         cuda_device != -1,
@@ -565,9 +565,9 @@ void RequestCallbackNoPython::processRpc(
                             cuda_device));
                     auto cudaProfilerStartEvent = it->second;
                     double cuda_elapsed_us =
-                        cudaProfilerStartEvent->cuda_elapsed_us(e);
+                        cudaProfilerStartEvent->cudaElapsedUs(e);
                     int64_t cuda_us =
-                        cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
+                        cuda_elapsed_us + cudaProfilerStartEvent->cpuUs();
                     e.setCudaUs(cuda_us);
                   }
                 }

@@ -127,7 +127,6 @@ void complex_check_dtype(
 Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(real)
       .add_input(imag)
@@ -148,7 +147,6 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
 Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(abs)
       .add_input(angle)
@@ -481,10 +479,11 @@ Tensor new_full(
 Tensor linspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     const TensorOptions& options) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -493,10 +492,12 @@ Tensor linspace(
 Tensor logspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::logspace_out(result, start, end, steps, base);
 }
 

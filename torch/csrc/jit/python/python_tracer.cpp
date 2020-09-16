@@ -23,24 +23,33 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
+std::vector<FileLineFunc> pythonCallstack() {
+  pybind11::gil_scoped_acquire gil;
+  PyFrameObject* frame = PyEval_GetFrame();
+  std::vector<FileLineFunc> entries;
+
+  while (nullptr != frame) {
+    size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    entries.emplace_back(FileLineFunc{filename, line, funcname});
+    frame = frame->f_back;
+  }
+  return entries;
+}
+
 SourceRange getPythonInterpreterSourceRange() {
+  auto cs = pythonCallstack();
+
   c10::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
-
-  pybind11::gil_scoped_acquire gil;
-  PyFrameObject* frame = PyEval_GetFrame();
-
-  while (nullptr != frame) {
-    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    stack_trace << filename << "(" << line << "): " << funcname << "\n";
-    if (!source_filename) {
-      source_filename = filename;
-      source_line = line;
+  for (const auto& entry : cs) {
+     stack_trace << entry.filename << "(" << entry.line << "): " << entry.funcname << "\n";
+     if (!source_filename) {
+      source_filename = entry.filename;
+      source_line = entry.line;
     }
-    frame = frame->f_back;
   }
 
   auto stack_trace_text = stack_trace.str();

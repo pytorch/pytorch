@@ -200,8 +200,18 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
-Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor& conj_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_out(result, self, conj_stub);
+}
+
+Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
+Tensor conj(const Tensor& self) {
+  if (!self.is_complex()) {
+    return self;
+  }
+  return at::_conj(self);
+}
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
@@ -246,6 +256,10 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
+Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
@@ -403,7 +417,6 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)
     .build();
@@ -421,7 +434,6 @@ Tensor& signbit_out(Tensor& result, const Tensor& self) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -607,6 +619,7 @@ DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);

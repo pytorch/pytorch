@@ -2,10 +2,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
@@ -223,9 +221,16 @@ struct ProfilerThreadLocalState
           std::move(shapes),
           at::RecordFunction::getDefaultNodeId());
       evt.setSequenceNr(fn.seqNr());
+      evt.setFwdThreadId(fn.forwardThreadId());
+      evt.setScope((uint8_t)fn.scope());
 
-      if (config_.with_source) {
-        setSourceLocation(evt, fn);
+      // backward nodes source range corresponds to the forward node
+      if (config_.with_source && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+        auto cs = jit::currentCallstack();
+        if (cs.empty()) {
+          cs = jit::tracer::pythonCallstack();
+        }
+        evt.setStack(callstackStr(cs));
 
         /*std::cerr << "===" << std::endl;
         std::cerr << fn.name() << ", seq: " << fn.seqNr() << ", scope: " << (int)fn.scope() << ", thread: " << fn.threadId() << std::endl;
@@ -288,64 +293,15 @@ struct ProfilerThreadLocalState
   }
 
  private:
-  void setSourceLocation(Event& evt, const at::RecordFunction& fn) {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    if (fn.scope() == at::RecordScope::BACKWARD_FUNCTION) {
-      // if that's a backward function then take the source location
-      // from the corresponding function
-      auto fwd_pair = std::make_pair(fn.seqNr(), fn.forwardThreadId());
-      auto it = fwd_source_locs_.find(fwd_pair);
-      if (it != fwd_source_locs_.end()) {
-        evt.setSourceLocation(it->second);
-      }
-      // in some cases we won't find the corr. forward node (e.g. GraphRoot)
-    } else {
-      auto ts_loc = torchScriptCallSite();
-      auto py_stack = pythonCallstack();
-
-      evt.setSourceLocation(EventSourceLocation{ts_loc, py_stack});
-      // if there's a sequence number, save the location for the backward node
-      if (fn.seqNr() >= 0) {
-        fwd_source_locs_[std::make_pair(fn.seqNr(), fn.threadId())] = evt.sourceLocation();
-      }
+  std::vector<std::string> callstackStr(const std::vector<jit::FileLineFunc>& cs) {
+    std::vector<std::string> cs_str;
+    cs_str.reserve(cs.size());
+    for (auto idx = cs.size() - 1; idx >= 0; --idx) {
+      std::stringstream loc;
+      loc << cs[idx].filename << "(" << cs[idx].line << "): " << cs[idx].funcname;
+      cs_str.push_back(loc.str());
     }
-  }
-
-  std::string torchScriptCallSite() {
-    std::stringstream loc;
-    auto call_info = jit::currentCallSite();
-    if (call_info) {
-      auto& range = call_info->source_range;
-      if (range.source()) {
-        auto& src = range.source();
-        if (src && src->filename()) {
-          auto line = src->starting_line_no() +
-              src->lineno_for_offset(range.start());
-
-          loc << *(src->filename()) << "(" << line << "): " << call_info->function_name;
-        }
-      }
-    }
-    return loc.str();
-  }
-
-  std::vector<std::string> pythonCallstack() {
-    std::vector<std::string> py_stack;
-
-    PyGILState_STATE gil_state = PyGILState_Ensure();
-    PyFrameObject* frame = PyEval_GetFrame();
-    while (frame != nullptr) {
-      std::stringstream sstr;
-      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-      sstr << filename << "(" << line << "): " << funcname;
-      py_stack.push_back(sstr.str());
-      frame = frame->f_back;
-    }
-    PyGILState_Release(gil_state);
-
-    return py_stack;
+    return cs_str;
   }
 
   std::string getNvtxStr(
@@ -409,19 +365,6 @@ struct ProfilerThreadLocalState
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
-
-  // Map that saves the source locations of the forward functions,
-  // used to get the corresponding forward location instead of 'backward'
-  // for the backward function nodes;
-  // forward function is identified by a sequence number and a thread id
-  struct PairHash {
-    template <class First, class Second>
-    std::size_t operator()(const std::pair<First, Second>& pair) const {
-      return std::hash<First>()(pair.first) ^ std::hash<Second>()(pair.second);
-    }
-  };
-  std::unordered_map<std::pair<int64_t, uint64_t>, EventSourceLocation, PairHash>
-      fwd_source_locs_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -473,9 +416,6 @@ void pushProfilingCallbacks() {
 }
 
 const int kCUDAWarmupStart = 5;
-
-// temp. workaround for dispatcher ::Profiler key
-thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
 
 } // namespace
 
@@ -536,7 +476,6 @@ void enableProfiler(const ProfilerConfig& new_config) {
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
-  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -565,7 +504,6 @@ thread_event_lists disableProfiler() {
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
-  g_.pop_back();
   at::removeCallback(state_ptr->callbackHandle());
 
   if (state_ptr->config().state == ProfilerState::NVTX) {
@@ -627,13 +565,13 @@ at::IValue Event::toIValue() const {
   eventIValueList.reserve(NUM_EVENT_IVALUE_IDX);
   eventIValueList.emplace_back(static_cast<int64_t>(kind_));
   eventIValueList.emplace_back(std::string(name_.str()));
-  eventIValueList.emplace_back(thread_id_);
+  eventIValueList.emplace_back(static_cast<int64_t>(thread_id_));
   eventIValueList.emplace_back(static_cast<double>(handle_));
   eventIValueList.emplace_back(node_id_);
   eventIValueList.emplace_back(cpu_memory_usage_);
   eventIValueList.emplace_back(cpu_ns_);
   // CUDA event information
-  bool cuda_profiling_enabled = has_cuda();
+  bool cuda_profiling_enabled = hasCuda();
   eventIValueList.emplace_back(cuda_profiling_enabled);
   eventIValueList.emplace_back(static_cast<int64_t>(cuda_memory_usage_));
   eventIValueList.emplace_back(device_);
@@ -641,8 +579,8 @@ at::IValue Event::toIValue() const {
   return at::IValue(eventIValueList);
 }
 
-double Event::cuda_elapsed_us(const Event& e) const {
-  TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
+double Event::cudaElapsedUs(const Event& e) const {
+  TORCH_CHECK(e.hasCuda() && hasCuda(), "Events were not recorded for CUDA");
   TORCH_CHECK(
       e.device() == device(),
       c10::str(
@@ -691,22 +629,22 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& e
   bool first = true;
   for (Event* evt : events) {
     if (evt->kind() == "push") {
-      events_map[std::make_pair(evt->handle(), evt->node_id())] = evt;
+      events_map[std::make_pair(evt->handle(), evt->nodeId())] = evt;
     } else if (evt->kind() == "pop") {
       if (!first) {
         out << ",\n";
       }
       first = false;
-      auto it = events_map.find(std::make_pair(evt->handle(), evt->node_id()));
+      auto it = events_map.find(std::make_pair(evt->handle(), evt->nodeId()));
       TORCH_CHECK(it != events_map.end(), "Unmatched pop event");
       Event* evt_start = it->second;
       events_map.erase(it);
 
       jit::TemplateEnv env;
       env.s("name", evt_start->name());
-      env.d("ts", profiler_start->cpu_elapsed_us(*evt_start));
-      env.d("dur", evt_start->cpu_elapsed_us(*evt));
-      env.d("tid", evt_start->thread_id());
+      env.d("ts", profiler_start->cpuElapsedUs(*evt_start));
+      env.d("dur", evt_start->cpuElapsedUs(*evt));
+      env.d("tid", evt_start->threadId());
       out << event_template.format(env);
     }
   }

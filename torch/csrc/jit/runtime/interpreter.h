@@ -65,15 +65,9 @@ struct TORCH_API Code {
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
 };
 
-struct TORCH_API CallSiteInfo {
-  SourceRange source_range;
-  std::string function_name;
-};
-
 struct InterpreterState {
   TORCH_API InterpreterState(
-      const Code& code,
-      c10::optional<CallSiteInfo> call_info = c10::nullopt);
+      const Code& code);
   TORCH_API void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
@@ -134,8 +128,13 @@ struct InterpreterContinuation {
 TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
     const at::Tensor& t);
 
-// current thread local operator/method source range
-TORCH_API c10::optional<CallSiteInfo> currentCallSite();
+// current (TLS) TorchScript interpreter callstack
+struct TORCH_API FileLineFunc {
+  std::string filename;
+  size_t line;
+  std::string funcname;
+};
+TORCH_API std::vector<FileLineFunc> currentCallstack();
 
 } // namespace jit
 } // namespace torch

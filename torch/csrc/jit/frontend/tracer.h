@@ -193,6 +193,10 @@ struct WithNestedTracingFrame {
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
+TORCH_API std::vector<FileLineFunc> pythonCallstack();
+TORCH_API void setPythonCallstack(std::vector<FileLineFunc> (*v)());
+
+
 // Having finished adding a new 'node' to the graph IR 'setValueTrace'
 // associates this node with an output variable, so that further operations
 // involving this variable know which node in the IR to reference.

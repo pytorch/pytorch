@@ -967,6 +967,18 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
+std::vector<FileLineFunc> defaultPythonCallstack() {
+  return std::vector<FileLineFunc>();
+}
+std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
+    defaultPythonCallstack);
+std::vector<FileLineFunc> pythonCallstack() {
+  return python_callstack_fn.load()();
+}
+void setPythonCallstack(std::vector<FileLineFunc> (*v)()) {
+  python_callstack_fn.store(v);
+}
+
 void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }

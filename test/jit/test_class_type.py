@@ -1113,3 +1113,42 @@ class TestClassType(JitTestCase):
                 return self.props.attr + no_setter.attr + method_uses_property.forward()
 
         self.checkModule(ModuleWithProperties(5), (5, 6, 7, 8,))
+
+    def test_custom_delete(self):
+        """
+        Test that del can be called on an instance of a class that
+        overrides __delitem__.
+        """
+        class Example(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+            def __delitem__(self, key: str):
+                del self._data[key]
+
+        def fn() -> bool:
+            example = Example()
+            del example["1"]
+            return example.check("1")
+
+        self.checkScript(fn, ())
+
+        # Test the case in which the class does not have __delitem__ defined.
+        class NoDelItem(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+        def fn() -> bool:
+            example = NoDelItem()
+            key = "1"
+            del example[key]
+            return example.check(key)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
+            self.checkScript(fn, ())

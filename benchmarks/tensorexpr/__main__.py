@@ -94,6 +94,7 @@ Works only with Python3.\n A few examples:
         import torch
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_profiling_mode(True)
     elif args.cuda_fuser == "old":
         import torch
