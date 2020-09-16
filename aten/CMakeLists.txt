@@ -72,7 +72,7 @@ endif()
 if(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
 endif(MSVC)
 
 if(USE_ROCM)

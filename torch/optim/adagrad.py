@@ -64,19 +64,29 @@ class Adagrad(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            state_sums = []
+            state_step = 0
+
             for p in group['params']:
-                if p.grad is None:
-                    continue
+                if p.grad is not None:
+                    params_with_grad.append(p)
+                    grads.append(p.grad)
+                    state = self.state[p]
+                    state_sums.append(state['sum'])
+                    # update the steps for each param group update
+                    state['step'] += 1
+                    # record the step that associate with the param group
+                    state_step = state['step']
 
-                grad = p.grad
-                state = self.state[p]
-
-                F.adagrad(p, grad,
-                          state['step'],
-                          state['sum'],
-                          group['lr'],
-                          group['weight_decay'],
-                          group['lr_decay'],
-                          group['eps'])
+            F.adagrad(params_with_grad,
+                      grads,
+                      state_sums,
+                      state_step,
+                      group['lr'],
+                      group['weight_decay'],
+                      group['lr_decay'],
+                      group['eps'])
 
         return loss
