@@ -450,7 +450,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         model = Model().eval()
         qengine = torch.backends.quantized.engine
-        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
+        qconfig_dict = {'': torch.quantization.get_default_qconfig(qengine)}
 
         # symbolically trace
         model = symbolic_trace(model)
