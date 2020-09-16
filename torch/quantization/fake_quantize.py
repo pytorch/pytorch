@@ -156,17 +156,25 @@ default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver
                                                       qscheme=torch.per_tensor_affine,
                                                       reduce_range=True)
 def disable_fake_quant(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or\
+        isinstance(mod, torch.jit.RecursiveScriptModule)\
+            and mod.original_name == 'FakeQuantize':
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or\
+        isinstance(mod, torch.jit.RecursiveScriptModule)\
+            and mod.original_name == 'FakeQuantize':
         mod.enable_fake_quant()
 
 def disable_observer(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or\
+        isinstance(mod, torch.jit.RecursiveScriptModule)\
+            and mod.original_name == 'FakeQuantize':
         mod.disable_observer()
 
 def enable_observer(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or\
+        isinstance(mod, torch.jit.RecursiveScriptModule)\
+            and mod.original_name == 'FakeQuantize':
         mod.enable_observer()
