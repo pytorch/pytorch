@@ -52,14 +52,12 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
   LongTensor indices = sparse_.indices();
   LongTensor pointers = sparse_.pointers();
   Tensor values      = sparse_.values();
+  int64_t nnz = sparse_.nnz();
 
   auto values_accessor = values.accessor<int64_t, 1>();
   auto pointers_accessor = pointers.accessor<int64_t, 1>();
   auto indices_accessor = indices.accessor<int64_t, 1>();
 
-
-
-  
   AT_DISPATCH_ALL_TYPES(
   values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
     scalar_t cast_alpha = alpha.to<scalar_t>();
@@ -78,7 +76,6 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
     scalar_t * dense_ptr = dense.data_ptr<scalar_t>();
     scalar_t * r_ptr = r.data_ptr<scalar_t>();
 
-    
   });
 
   return r;
