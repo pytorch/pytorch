@@ -4,16 +4,20 @@
 #include <cfloat>
 #include <cmath>
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/sgd/learning_rate_functors.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LearningRate);
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class LearningRateOp final : public Operator<Context> {
  public:
-  LearningRateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  LearningRateOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         functor_(nullptr),
         base_lr_(this->template GetSingleArgument<float>("base_lr", FLT_MAX)) {
     CAFFE_ENFORCE_NE(base_lr_, FLT_MAX, "Base learning rate must be set.");

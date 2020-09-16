@@ -1,12 +1,20 @@
 #!/usr/bin/python3
 import types
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple, TypeVar, Union, List
 
 import torch
 import torch.distributed.rpc as rpc
-from torch import nn
+from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.nn.parameter import Parameter
+from torch.utils.hooks import RemovableHandle
 
+
+_grad_t = Union[Tuple[Tensor, ...], Tensor]
+# See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
+# of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
+# the type of the subclass, not the looser type of `Module`.
+T = TypeVar("T", bound="Module")
 
 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE = (
     instantiator.instantiate_non_scriptable_remote_module_template()
@@ -30,6 +38,17 @@ def _create_module(module_cls, args, kwargs, module_interface_cls=None):
     return rpc.RRef(module, module_interface_cls)
 
 
+def _param_rrefs(module_rref, recurse):
+    ret = []
+    for param in module_rref.local_value().parameters(recurse):
+        ret.append(rpc.RRef(param))
+    return ret
+
+
+def _raise_not_supported(name):
+    raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
+
+
 class _RemoteModule(nn.Module):
     def __init__(
         self,
@@ -49,6 +68,17 @@ class _RemoteModule(nn.Module):
 
         The arguments of ``forward_async`` and ``forward`` are the same as
         the ``forward`` method of the module returned by the ``module_cls``.
+
+        Apart from ``forward_async`` and ``forward``, no other methods are supported from nn.Module for now.
+
+        Particularly, to create a hybrid model, typically the local modules should be
+        created outside of remote modules, rather than as submodules of any remote module (by calling ``add_module``).
+        Hybrid Example:
+                >>> class HybridModel(nn.Module):
+                >>>     def __init__(self):
+                >>>         nn.Module.__init__(self)
+                >>>         self.remote_embedding = RemoteModule(...)
+                >>>         self.local_linear = nn.Linear(...)
 
         For example, if ``module_cls`` returns an instance of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
@@ -111,6 +141,8 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
+        self.on = on
+
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
@@ -132,9 +164,7 @@ class _RemoteModule(nn.Module):
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
-            on,
-            _create_module,
-            (module_cls, args, kwargs, _module_interface_cls),
+            on, _create_module, (module_cls, args, kwargs, _module_interface_cls)
         )
 
         # Install generated methods.
@@ -142,6 +172,126 @@ class _RemoteModule(nn.Module):
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
+
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
+        r"""Returns a list of RRefs of remote module parameters.
+        This is typically passed to a distributed optimizer.
+        Args:
+            recurse (bool): if True, then returns parameters of the remote module
+                and all submodules of the remote module.
+                Otherwise, returns only parameters that are direct members of the remote module.
+
+        Returns:
+            A list of RRefs to remote module parameters.
+        """
+        return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
+
+    def register_buffer(
+        self, name: str, tensor: Optional[Tensor], persistent: bool = True
+    ) -> None:
+        _raise_not_supported(self.register_buffer.__name__)
+
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+        _raise_not_supported(self.register_parameter.__name__)
+
+    def add_module(self, name: str, module: Optional["Module"]) -> None:
+        _raise_not_supported(self.add_module.__name__)
+
+    def apply(self: T, fn: Callable[["Module"], None]) -> T:
+        _raise_not_supported(self.apply.__name__)
+
+    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+        _raise_not_supported(self.cuda.__name__)
+
+    def cpu(self: T) -> T:
+        _raise_not_supported(self.cpu.__name__)
+
+    def type(self: T, dst_type: Union[dtype, str]) -> T:
+        _raise_not_supported(self.type.__name__)
+
+    def float(self: T) -> T:
+        _raise_not_supported(self.float.__name__)
+
+    def double(self: T) -> T:
+        _raise_not_supported(self.double.__name__)
+
+    def half(self: T) -> T:
+        _raise_not_supported(self.half.__name__)
+
+    def bfloat16(self: T) -> T:
+        _raise_not_supported(self.bfloat16.__name__)
+
+    def to(self, *args, **kwargs):
+        _raise_not_supported(self.to.__name__)
+
+    def register_backward_hook(
+        self, hook: Callable[["Module", _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:
+        _raise_not_supported(self.register_backward_hook.__name__)
+
+    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        _raise_not_supported(self.register_forward_pre_hook.__name__)
+
+    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        _raise_not_supported(self.register_forward_hook.__name__)
+
+    def state_dict(self, destination=None, prefix="", keep_vars=False):
+        _raise_not_supported(self.state_dict.__name__)
+
+    def load_state_dict(
+        self,
+        state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+        strict: bool = True,
+    ):
+        _raise_not_supported(self.load_state_dict.__name__)
+
+    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+        raise ValueError(
+            "Method ``parameters`` not supported for RemoteModule. Please use ``remote_parameters`` instead."
+        )
+
+    def named_parameters(
+        self, prefix: str = "", recurse: bool = True
+    ) -> Iterator[Tuple[str, Tensor]]:
+        _raise_not_supported(self.named_parameters.__name__)
+
+    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
+        _raise_not_supported(self.buffers.__name__)
+
+    def named_buffers(
+        self, prefix: str = "", recurse: bool = True
+    ) -> Iterator[Tuple[str, Tensor]]:
+        _raise_not_supported(self.named_buffers.__name__)
+
+    def children(self) -> Iterator["Module"]:
+        _raise_not_supported(self.children.__name__)
+
+    def named_children(self) -> Iterator[Tuple[str, "Module"]]:
+        _raise_not_supported(self.named_children.__name__)
+
+    def modules(self) -> Iterator["Module"]:
+        _raise_not_supported(self.modules.__name__)
+
+    def named_modules(self, memo: Optional[Set["Module"]] = None, prefix: str = ""):
+        _raise_not_supported(self.named_modules.__name__)
+
+    def train(self: T, mode: bool = True) -> T:
+        _raise_not_supported(self.train.__name__)
+
+    def eval(self: T) -> T:
+        _raise_not_supported(self.eval.__name__)
+
+    def requires_grad_(self: T, requires_grad: bool = True) -> T:
+        _raise_not_supported(self.requires_grad_.__name__)
+
+    def zero_grad(self) -> None:
+        _raise_not_supported(self.zero_grad.__name__)
+
+    def share_memory(self: T) -> T:
+        _raise_not_supported(self.share_memory.__name__)
+
+    def extra_repr(self) -> str:
+        _raise_not_supported(self.extra_repr.__name__)
 
 
 class RemoteModule(_RemoteModule):

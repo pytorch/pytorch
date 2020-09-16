@@ -225,36 +225,49 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, name, test):
+    def instantiate_test(cls, name, test, *, generic_cls=None):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
-
-            # wraps test with op decorators
-            if op is not None and op.decorators is not None:
-                for decorator in op.decorators:
-                    test = decorator(test)
 
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
+            # wraps instantiated test with op decorators
+            # NOTE: test_wrapper exists because we don't want to apply
+            #   op-specific decorators to the original test.
+            #   Test-sepcific decorators are applied to the original test,
+            #   however.
+            if op is not None and op.decorators is not None:
+                @wraps(test)
+                def test_wrapper(*args, **kwargs):
+                    return test(*args, **kwargs)
+
+                for decorator in op.decorators:
+                    test_wrapper = decorator(test_wrapper)
+
+                test_fn = test_wrapper
+            else:
+                test_fn = test
+
             # Constructs the test
             @wraps(test)
-            def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
-                if op is not None and op.should_skip(name, self.device_type, dtype):
+            def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
+                if op is not None and op.should_skip(generic_cls.__name__, name,
+                                                     self.device_type, dtype):
                     self.skipTest("Skipped!")
 
                 device_arg = cls.get_primary_device()
-                if hasattr(test, 'num_required_devices'):
+                if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
                 try:
-                    self.precision = self._get_precision_override(test, dtype)
+                    self.precision = self._get_precision_override(test_fn, dtype)
                     args = (device_arg, dtype, op)
                     args = (arg for arg in args if arg is not None)
-                    result = test(self, *args)
+                    result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
 
@@ -416,8 +429,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     test = test.__func__
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
+                sig = inspect.signature(device_type_test_class.instantiate_test)
+                if len(sig.parameters) == 3:
+                    # Instantiates the device-specific tests
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
+                else:
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
