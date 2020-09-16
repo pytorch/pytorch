@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch
 import types
+from typing import List
 
 # This function should correspond to the enums present in c10/core/QEngine.h
 def _get_qengine_id(qengine):
