@@ -112,7 +112,7 @@ struct AutogradZeroSpecializer {
     replaceBlockInputsWithGraphInputs(true_block);
     false_block->cloneFrom(graph_->block(), value_map);
     replaceBlockInputsWithGraphInputs(false_block);
-    replaceBlockWithFallbackGraph(graph_->block(), graph_->inputs());
+    replaceBlockWithFallbackGraph(false_block, graph_->inputs());
 
     WithInsertPoint wip{graph_->block()->param_node()->next()};
     Value* none_val = graph_->insertConstant(IValue());
