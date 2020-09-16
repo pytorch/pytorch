@@ -288,6 +288,7 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
         output = output_process_fn(fn(*tensors))
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output
     return script_fn
@@ -314,6 +315,7 @@ def create_traced_fn(self, fn):
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
         self.assertExportImport(traced.graph, inputs_tensors)
         output = traced(*inputs_tensors)
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
         return output
     return traced_fn
@@ -452,6 +454,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         if self:
             self.assertExportImportModule(module, tensors)
             module(*args)
+        # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         create_script_module.last_graph = module.graph  # type: ignore[attr-defined]
         return module
     return script_module
