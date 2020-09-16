@@ -78,7 +78,7 @@ class Graph:
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
-                    name: Optional[str] = None):
+                    name: Optional[str] = None) -> Node:
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
@@ -87,6 +87,31 @@ class Graph:
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
         self.nodes.append(n)
         return n
+
+    # sugar for above when you know the op
+    def placeholder(self, name: str) -> Node:
+        return self.create_node('placeholder', name)
+
+    def get_param(self, name: str) -> Node:
+        return self.create_node('get_param', name)
+
+    def call_module(self, 
+                    module_name: str, 
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_module', module_name, args, kwargs)
+
+    def call_method(self, 
+                    method_name: str, 
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_method', method_name, args, kwargs)
+
+    def call_function(self, 
+                      the_function: Callable[..., Any], 
+                      args: Optional[Tuple[Argument, ...]] = None,
+                      kwargs: Optional[Dict[str, Argument]] = None) -> Node:
+        return self.create_node('call_function', the_function, args, kwargs)
 
     def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
@@ -115,6 +140,7 @@ class Graph:
             if _is_magic(op):
                 op = op[2:-2]
         op = op.replace('.', '_')
+        op = op.replace('*', '')
         op = snake_case(op)
 
         if op not in self._used_names:
@@ -135,6 +161,9 @@ class Graph:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
+                raw_name = node.target.replace('*', '')
+                if raw_name != node.name:
+                    body.append(f'{node.name} = {raw_name}\n')
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
@@ -171,6 +200,48 @@ class Graph:
 
         src = ''.join(body)
         return src, str(self.result), free_vars
+
+    def __str__(self) -> str:
+        placeholder_names : List[str] = []
+
+        def format_arg(arg) -> str:
+            if isinstance(arg, list):
+                items = ', '.join(format_arg(a) for a in arg)
+                return f'[{items}]'
+            elif isinstance(arg, tuple):
+                items = ', '.join(format_arg(a) for a in arg)
+                maybe_comma = ',' if len(arg) == 1 else ''
+                return f'({items}{maybe_comma})'
+            elif isinstance(arg, dict):
+                items_str = ', '.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
+                return f'{{{items_str}}}'
+
+            if isinstance(arg, Node):
+                return '%' + str(arg)
+            else:
+                return str(arg)
+
+        def format_node(n : Node) -> Optional[str]:
+            if n.op == 'placeholder':
+                assert isinstance(n.target, str)
+                placeholder_names.append(n.target)
+                return None
+            elif n.op == 'get_param':
+                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+            else:
+                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
+
+
+        node_strs = [format_node(node) for node in self.nodes]
+        param_str = ', '.join(placeholder_names)
+        s = f'graph({param_str}):'
+        for node_str in node_strs:
+            if node_str:
+                s += '\n    ' + node_str
+        if self.result:
+            s += f'\n    return {format_arg(self.result)}'
+        return s
 
 reflectable_magic_methods = {
     'add': '{} + {}',

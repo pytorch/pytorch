@@ -3758,7 +3758,7 @@ class CommTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_broadcast_coalesced(self, process_group, device):
+    def _test_broadcast_coalesced(self, process_group, device, root_rank):
         half = torch.float16
 
         # No support for float16 for CPU tensors
@@ -3774,17 +3774,22 @@ class CommTest(MultiProcessTestCase):
 
         # The tensors to pass to broadcast are idential to the target
         # only on the process that is the root of the broadcast.
-        if self.rank == 0:
+        if self.rank == root_rank:
             tensors = list(tensor.clone() for tensor in target)
         else:
-            tensors = list(torch.empty_like(tensor) for tensor in target)
+            tensors = list(torch.zeros_like(tensor) for tensor in target)
+
+        if self.rank != root_rank:
+            self.assertNotEqual(tensors, target)
 
         c10d._broadcast_coalesced(
             process_group,
             tensors,
-            buffer_size=256)
+            buffer_size=256,
+            src=root_rank)
 
-        self.assertEqual(tensors, target)
+        if self.rank != root_rank:
+            self.assertEqual(tensors, target)
 
     @requires_nccl()
     @skip_if_not_multigpu
@@ -3792,7 +3797,9 @@ class CommTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device("cuda:%d" % self.rank)
-        self._test_broadcast_coalesced(process_group, device)
+        ranks = [0, 1]
+        for root_rank in ranks:
+            self._test_broadcast_coalesced(process_group, device, root_rank)
 
     @requires_gloo()
     @skip_if_not_multigpu
@@ -3802,7 +3809,9 @@ class CommTest(MultiProcessTestCase):
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cuda:%d" % self.rank)
-        self._test_broadcast_coalesced(process_group, device)
+        ranks = list(range(self.world_size))
+        for root_rank in ranks:
+            self._test_broadcast_coalesced(process_group, device, root_rank)
 
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
@@ -3811,7 +3820,9 @@ class CommTest(MultiProcessTestCase):
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cpu")
-        self._test_broadcast_coalesced(process_group, device)
+        ranks = list(range(self.world_size))
+        for root_rank in ranks:
+            self._test_broadcast_coalesced(process_group, device, root_rank)
 
 
 if __name__ == '__main__':

@@ -169,13 +169,19 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 Common
 ```bash
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 ```
 
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
+```
+
+On MacOS
+```bash
+# Add these packages if torch.distributed is needed
+conda install pkg-config libuv
 ```
 
 #### Get the PyTorch Source
@@ -310,6 +316,9 @@ pip install -r requirements.txt
 ```
 You can then build the documentation by running ``make <format>`` from the
 ``docs/`` folder. Run ``make`` to get a list of all available output formats.
+
+If you get a katex error run ```npm install katex```.  If it persists, try
+```npm install -g katex```
 
 ### Previous Versions
 

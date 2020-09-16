@@ -522,6 +522,8 @@ void initPythonIRBindings(PyObject* module_) {
       .NS(replaceAllUsesWith)
       .NS(insertBefore)
       .NS(insertAfter)
+      .NS(isBefore)
+      .NS(isAfter)
       .NS(moveAfter)
       .NS(moveBefore)
       .NS(removeInput)

@@ -42,6 +42,21 @@ inline std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
   return at::native::std_mean(self, IntArrayRef{dim});
 }
 
+namespace {
+  inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
+    if (options.has_memory_format()) {
+      auto memory_format = *options.memory_format_opt();
+      if (at::MemoryFormat::ChannelsLast == memory_format) {
+        return {0, 0, 0, 0};
+      }
+      if (at::MemoryFormat::ChannelsLast3d == memory_format) {
+        return {0, 0, 0, 0, 0};
+      }
+    }
+    return {0};
+  }
+}
+
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
@@ -65,7 +80,7 @@ inline Tensor from_blob(
       InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
+  return empty(IntArrayRef(zero_sizes(options)), options).set_(storage, 0, sizes, strides);
 }
 
 inline Tensor from_blob(
@@ -96,7 +111,7 @@ inline Tensor from_blob(
       DataPtr(data, nullptr, [](void*) {}, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
+  return empty(IntArrayRef(zero_sizes(options)), options).set_(storage, 0, sizes, strides);
 }
 
 inline Tensor from_blob(

@@ -40,6 +40,18 @@ namespace jit {
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
+  _(ExprSliceHead)                          \
+  _(ExprSliceHeadWhenFactorEqualsSize)      \
+  _(ExprSliceHeadWhenFactorLargerThanSize)  \
+  _(ExprSliceHeadWithLoopOptions)           \
+  _(ExprSliceHeadWithNonZeroStart)          \
+  _(ExprSliceTail)                          \
+  _(ExprSliceTailWhenFactorEqualsSize)      \
+  _(ExprSliceTailWhenFactorLargerThanSize)  \
+  _(ExprSliceTailWithLoopOptions)           \
+  _(ExprSliceAndNormalize)                  \
+  _(ExprSliceWithVariableDimension)         \
+  _(ExprSplitAndSlice)                      \
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
@@ -47,7 +59,23 @@ namespace jit {
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
+  _(ScheduleInlineSimple)                   \
   _(ScheduleInlineFunc01)                   \
+  _(ScheduleInlineRandom)                   \
+  _(ScheduleInlineRandomUnrelated)          \
+  _(ScheduleInlineRandomLowerDimensions)    \
+  _(ScheduleInlineIntrinsics)               \
+  _(ScheduleInlineRandWithIntrinsics)       \
+  _(ScheduleSplitAThenInline)               \
+  _(ScheduleSplitBThenInline)               \
+  _(ScheduleSplitTwiceThenInline)           \
+  _(ScheduleInlineThenSplit)                \
+  _(ScheduleSplitInlineThenSplit)           \
+  _(ScheduleSplitInlineSimplify)            \
+  _(ScheduleInlineThreeMixedOnce)           \
+  _(ScheduleInlineThreeMixedTwice)          \
+  _(ScheduleInlineThreeMixedInner)          \
+  _(ScheduleInlineThreeMixedSplit)          \
   _(ScheduleFuserStyle)                     \
   _(ScheduleFuserThreeArg)                  \
   _(ScheduleDynamicShape2D)                 \
@@ -61,6 +89,11 @@ namespace jit {
   _(ReduceAnyAll)                           \
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
+  _(ReduceAsProducer)                       \
+  _(ReduceAsConsumer)                       \
+  _(SplitReduceAxis)                        \
+  _(SplitNonReduceAxis)                     \
+  _(ReorderedReductionInitializer)          \
   _(ReduceRfactor)                          \
   _(Reduce3DRfactorInternal)                \
   _(Reduce3DRfactorInner)                   \
@@ -78,8 +111,9 @@ namespace jit {
   _(ReduceOverSplitMask)                    \
   _(ReduceSplitRfactor)                     \
   _(ReduceOverSplitRfactor)                 \
-  _(SplitReduceAxis)                        \
-  _(SplitNonReduceAxis)                     \
+  _(ReduceInlineReduction)                  \
+  _(ReduceInlineConsumer)                   \
+  _(ReduceInlineReducerInternal)            \
   _(TypeTest01)                             \
   _(TypePropagation)                        \
   _(Cond01)                                 \
@@ -104,8 +138,6 @@ namespace jit {
   _(ATenmaxFloat)                           \
   _(ATenminInt)                             \
   _(ATenminFloat)                           \
-  _(ATen_sigmoid_backward)                  \
-  _(ATen_tanh_backward)                     \
   _(ATenreciprocal)                         \
   _(ATenreluInt)                            \
   _(ATenreluFloat)                          \
@@ -134,6 +166,7 @@ namespace jit {
   _(UnFoldableExpr)                         \
   _(HashSimple)                             \
   _(HashEquivalence)                        \
+  _(HashEquivalenceRand)                    \
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
@@ -149,6 +182,7 @@ namespace jit {
   _(SimplifyAdds)                           \
   _(SimplifyMuls)                           \
   _(SimplifySubs)                           \
+  _(SimplifyDiv)                            \
   _(SimplifyMultiOp)                        \
   _(SimplifyManyOps)                        \
   _(SimplifyFactorization)                  \
@@ -159,6 +193,8 @@ namespace jit {
   _(SimplifyIfComponents)                   \
   _(SimplifyOpaqueTerms)                    \
   _(SimplifySymbolicMinMax)                 \
+  _(SimplifyNestedMax)                      \
+  _(SimplifyNestedMin)                      \
   _(SimplifyWontReorderFloat)               \
   _(SimplifyRoundModPattern)                \
   _(SimplifyRoundModPatternFactorization)   \
@@ -175,6 +211,7 @@ namespace jit {
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
+  _(DontSimplifyRand)                       \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -191,6 +228,7 @@ namespace jit {
   _(RegisterizerNoInitializer)              \
   _(RegisterizerLoadThenStore)              \
   _(RegisterizerParallelized)               \
+  _(RegisterizerConditions)                 \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -235,6 +273,7 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)             \
   _(NormalizeOnNestedInnerLoop)             \
   _(NormalizeAndSplitWithTail)              \
+  _(DetectInlineRankMismatch)               \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
@@ -245,6 +284,11 @@ namespace jit {
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
   _(FuserPass_3)                            \
+  _(FuserPass_0DimInput)                    \
+  _(FuserPass_UnfusibleDevice)              \
+  _(FuserPass_UnknownShapes)                \
+  _(FuserPass_Multidevice)                  \
+  _(FuserPass_MergeGroups)                  \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -348,10 +392,10 @@ namespace jit {
   _(LLVMElemwiseLog10Float)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
-  _(LLVMElemwiseMaxNumFloat)               \
-  _(LLVMElemwiseMaxNumNaNFloat)            \
-  _(LLVMElemwiseMinNumFloat)               \
-  _(LLVMElemwiseMinNumNaNFloat)            \
+  _(LLVMElemwiseMaxFloat)                  \
+  _(LLVMElemwiseMaxNaNFloat)               \
+  _(LLVMElemwiseMinFloat)                  \
+  _(LLVMElemwiseMinNaNFloat)               \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
   _(LLVMStoreFloat)                        \
@@ -383,7 +427,13 @@ namespace jit {
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)                        \
-  _(CudaSigmoid)
+  _(CudaSigmoid)                           \
+  _(CudaHalfCast)                          \
+  _(CudaHalfSupport)                       \
+  _(CudaPrioritizeDependents)              \
+  _(CudaMaskBlockDim)                      \
+  _(CudaMaskThreadDim)
+// _(CudaMaskBlockAndThreadDim)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
