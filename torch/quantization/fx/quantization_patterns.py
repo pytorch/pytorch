@@ -6,6 +6,9 @@ from ..quantization_mappings import (
     get_static_quant_module_class,
     get_quantized_operator,
 )
+from ..custom_module_class_mappings import (
+    get_quantized_custom_module_class,
+)
 from .pattern_utils import (
     register_quant_pattern,
     register_dynamic_quant_pattern,
@@ -14,9 +17,6 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,
-)
-from .custom_module_class import (
-    get_quantized_custom_module_class,
 )
 
 from abc import ABC, abstractmethod

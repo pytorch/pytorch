@@ -1,7 +1,5 @@
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
-from .fx import register_observed_custom_module_mapping  # noqa: F401
-from .fx import register_quantized_custom_module_mapping  # noqa: F401
 from torch.fx import GraphModule  # type: ignore
 from .fx.utils import graph_pretty_str  # noqa: F401
 

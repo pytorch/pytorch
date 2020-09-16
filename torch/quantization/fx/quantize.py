@@ -18,6 +18,10 @@ from torch.quantization import (
 from ..quantization_mappings import (
     get_qat_module_mappings,
 )
+from ..custom_module_class_mappings import (
+    is_custom_module_class,
+    get_observed_custom_module_class,
+)
 
 from ..quantize import _remove_qconfig
 
@@ -25,11 +29,6 @@ from .pattern_utils import (
     is_match,
     get_quant_patterns,
     get_dynamic_quant_patterns,
-)
-
-from .custom_module_class import (
-    is_custom_module_class,
-    get_observed_custom_module_class,
 )
 
 from .quantization_patterns import *
