@@ -128,4 +128,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
     return wrapper
 
 def _get_torch_cuda_version():
-    return [int(x) for x in torch.version.cuda.split(".")] if torch.version.cuda else [0, 0]
+    if torch.version.cuda is None:
+        return [0, 0]
+    cuda_version = str(torch.version.cuda)
+    return [int(x) for x in cuda_version.split(".")]
