@@ -26,7 +26,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_slow(TensorList tensor
 
 #define FOREACH_BINARY_OP_SCALARLIST(NAME)                                                                              \
 void foreach_tensor_##NAME##_scalarlist_kernel_slow_(TensorList tensors, at::ArrayRef<double> scalars) {                \
-  check_foreach_api_restrictions(tensors);                                                                              \
+  check_foreach_api_restrictions(tensors, scalars);                                                                     \
                                                                                                                         \
   for (int i = 0; i < tensors.size(); i++) {                                                                            \
       tensors[i].NAME##_(scalars[i]);                                                                                   \
@@ -34,7 +34,7 @@ void foreach_tensor_##NAME##_scalarlist_kernel_slow_(TensorList tensors, at::Arr
 }                                                                                                                       \
                                                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_slow(TensorList tensors, at::ArrayRef<double> scalars) {  \
-  check_foreach_api_restrictions(tensors);                                                                              \
+  check_foreach_api_restrictions(tensors, scalars);                                                                     \
   std::vector<Tensor> result;                                                                                           \
   result.reserve(tensors.size());                                                                                       \
   for (int i = 0; i < tensors.size(); i++) {                                                                            \

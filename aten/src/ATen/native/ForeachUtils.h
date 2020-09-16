@@ -31,6 +31,11 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   }
 }
 
+void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+}
+
 // To go via 'fast' path, several conditions must be satisfied
 // - All tensors must be on the same device
 // - All tensors must have strided layout
@@ -130,6 +135,13 @@ bool can_use_fast_route(TensorList tensors) {
   }
 
   return true;
+}
+
+bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+
+  return can_use_fast_route(tensors);
 }
 
 }

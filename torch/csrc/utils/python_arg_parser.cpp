@@ -348,6 +348,7 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
 }
 
 bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+  std::cout << "in tensor list check. arg: " << argnum << std::endl;
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -357,21 +358,28 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {
+        std::cout << "throw!" << std::endl;
         throw TypeError("expected Tensor as element %d in argument %d, but got %s",
             static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
       }
+      std::cout << "in tensor list check return false" << std::endl;
       return false;
     }
   }
+  std::cout << "in tensor list check return true" << std::endl;
   return true;
 }
 
 
 bool is_float_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
   // check if obj is a TensorList
+
+  std::cout << "is_float_list. arg# " << argnum << std::endl;
   if (is_tensor_list_and_append_overloaded(obj, overloaded_args, argnum, false)) {
+    std::cout << "didnt passed the check" << std::endl;
     return false;
   }
+  std::cout << "is_float_list passed the check : " << (PyTuple_Check(obj) || PyList_Check(obj)) << std::endl;
   return (PyTuple_Check(obj) || PyList_Check(obj));
 }
 
