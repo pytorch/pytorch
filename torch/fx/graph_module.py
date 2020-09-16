@@ -159,10 +159,21 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
-        self.regenerate_forward()
 
-    def regenerate_forward(self) -> None:
-        body, result, free_variables = self.graph.python_code(root_module='self')
+    # TorchScript breaks trying to compile the graph setter because of the
+    # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
+    #
+    # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
+    __ignored_properties__ = ['graph']
+
+    @property
+    def graph(self):
+        return self._graph
+
+    @graph.setter
+    def graph(self, val) -> None:
+        self._graph = val
+        body, result, free_variables = self._graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.code = f"""\
 def forward(self, {', '.join(free_variables)}):
@@ -174,7 +185,7 @@ def forward(self, {', '.join(free_variables)}):
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
-        del dict_without_graph['graph']
+        del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph,))
 
     # because __reduce__ is defined for serialization,
