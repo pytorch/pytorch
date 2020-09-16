@@ -12647,9 +12647,7 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
+    @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
     @dtypesIfCPU(*(torch.testing.get_all_int_dtypes()))
