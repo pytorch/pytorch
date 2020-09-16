@@ -23,7 +23,7 @@ struct BinaryOpScalarFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
-        T scalar) {
+        get_opmath_t<T>::opmath_t scalar) {
             using opmath_t = get_opmath_t<T>::opmath_t
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];

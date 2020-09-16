@@ -182,7 +182,7 @@ class GradScaler(object):
 
         # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
         # There could be hundreds of grads, so we'd like to iterate through them just once.
-        # However, we can't know their devices or dtypes in advance.
+        # However, we don't know their devices or dtypes in advance.
         per_device_and_dtype_grads = defaultdict(defaultdict(list))  # https://knowyourmeme.com/memes/xzibit-yo-dawg
         for group in optimizer.param_groups:
             for param in group["params"]:
@@ -201,7 +201,10 @@ class GradScaler(object):
                         else:
                             to_unscale = param.grad
 
-                        per_device_grads[to_unscale.device][to_unscale.dtype] = to_unscale
+                        # I don't like appending in the inner loop, but I can't think of a better way
+                        # to populate per-device-and-dtype lists in one pass where devices and dtypes
+                        # are not known in advance.
+                        per_device_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
 
         with torch.no_grad():
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
