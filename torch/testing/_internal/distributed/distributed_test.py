@@ -2215,12 +2215,6 @@ class DistributedTest:
         def test_DistributedDataParallelCPU_grad_is_view(self):
             self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
 
-        @unittest.skipIf(
-            BACKEND == "nccl", "nccl does not support DDP on CPU models"
-        )
-        def test_tie_weights_grad_is_view(self):
-
-
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         def test_DistributedDataParallel_requires_grad(self):

@@ -1975,7 +1975,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         return 2
 
     def _prepare_single_device_module(
-      self, process_group, devices, device_ids, global_batch_size, gradient_as_bucket_view=False):
+            self, process_group, devices, device_ids, global_batch_size, gradient_as_bucket_view=False):
         model = Net()
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(devices[0]),
