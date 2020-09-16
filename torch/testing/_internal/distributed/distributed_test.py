@@ -3231,8 +3231,10 @@ class DistributedTest:
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, collectives_object_test_list)
 
-        @require_backend({"nccl", "gloo"})
-        @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_namedtuple(self):
             TestNamedTupleInput_0 = namedtuple("NamedTuple", ("a", "b"))
 

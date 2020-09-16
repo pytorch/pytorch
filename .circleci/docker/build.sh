@@ -255,38 +255,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-rocm3.3-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.3
-    # newer cmake version required
-    CMAKE_VERSION=3.6.3
-    ;;
-  pytorch-linux-bionic-rocm3.3-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.3
-    ;;
-  pytorch-linux-xenial-rocm3.5.1-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.5.1
-    # newer cmake version required
-    CMAKE_VERSION=3.6.3
-    ;;
-  pytorch-linux-bionic-rocm3.5.1-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.5.1
-    ;;
   pytorch-linux-bionic-rocm3.7-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
