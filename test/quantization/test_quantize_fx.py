@@ -368,6 +368,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
 
+    @skipIfNoFBGEMM
     def test_qat_and_script(self):
         class TwoLayerLinear(nn.Module):
             def __init__(self):
@@ -406,6 +407,7 @@ class TestQuantizeFx(QuantizationTestCase):
         FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
                    .run(scripted.graph)
 
+    @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
         class TwoLayerLinear(nn.Module):
             def __init__(self):
@@ -429,8 +431,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         model = Model().eval()
-        qengine = torch.backends.quantized.engine
-        qconfig_dict = {'': torch.quantization.get_default_qconfig(qengine)}
+        qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
 
         # symbolically trace
         model = symbolic_trace(model)
