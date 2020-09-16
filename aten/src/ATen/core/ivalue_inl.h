@@ -275,6 +275,21 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   /**
+   * Wait on the future until it completes and throw an
+   * exception if an error exists.
+   */
+  virtual void waitAndThrow() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!completed_) {
+      finished_cv_.wait(lock);
+    }
+
+    if (eptr_) {
+      std::rethrow_exception(eptr_);
+    }
+  }
+
+  /**
    * Explicitly mark the future as completed with the output value.
    */
   virtual void markCompleted(IValue value) {
