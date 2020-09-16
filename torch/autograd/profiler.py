@@ -1156,7 +1156,14 @@ def build_table(
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
     if shapes_column_width > MAX_SHAPES_COLUMN_WIDTH:
         shapes_column_width = MAX_SHAPES_COLUMN_WIDTH
-    SRC_COLUMN_WIDTH = 55
+
+    stacks = []
+    for evt in events:
+        if len(evt.stack) > 0:
+            stacks.append(evt.stack)
+    src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+    MAX_SRC_COLUMN_WIDTH = 75
+    src_column_width = max(src_column_width, MAX_SRC_COLUMN_WIDTH)
 
     headers = [
         'Name',
@@ -1212,7 +1219,7 @@ def build_table(
 
     if has_stack:
         headers.append('Source Location')
-        add_column(SRC_COLUMN_WIDTH)
+        add_column(src_column_width)
 
     row_format = row_format[0]
     header_sep = header_sep[0]
@@ -1291,12 +1298,12 @@ def build_table(
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
-                src_field = evt.stack[0][:SRC_COLUMN_WIDTH]
+                src_field = evt.stack[0][:src_column_width]
             row_values.append(src_field)
         append(row_format.format(*row_values))
         empty_headers = [""] * (len(headers) - 1)
         for entry in evt.stack[1:MAX_STACK_ENTRY]:
-            append(row_format.format(*(empty_headers + [entry[:SRC_COLUMN_WIDTH]])))
+            append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
         empty_headers.append("")
         append(row_format.format(*empty_headers))
 

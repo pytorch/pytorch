@@ -3,6 +3,7 @@ import gc
 import unittest
 
 import torch
+import torch.nn as nn
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
 from torch.autograd.profiler import profile
@@ -54,13 +55,23 @@ class TestProfiler(TestCase):
 
         @torch.jit.script
         def ts_method_2(x, y):
-            return x + y
+            return torch.matmul(x, y)
 
         @torch.jit.script
         def ts_method_1(x, y, z):
             a = x + z
             w = ts_method_2(x, y) + a
             return w.sum()
+
+        class DummyModule(nn.Module):
+            def __init__(self):
+                super(DummyModule, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        mod = DummyModule()
 
         with profile(with_source=True) as p:
             x = torch.randn(10, 10, requires_grad=True)
@@ -69,6 +80,10 @@ class TestProfiler(TestCase):
             w = ts_method_1(x, y, z)
             v = 2 * w
             v.backward()
+            a = torch.randn(2, 3, 2, 2, requires_grad=True)
+            b = mod(a)
+            c = b.sum()
+            c.backward()
 
         print(p.key_averages(
             group_by_stack_n=5).table(
