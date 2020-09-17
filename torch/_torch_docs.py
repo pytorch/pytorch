@@ -106,6 +106,10 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
+tf32_notes = {
+    "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
+}
+
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -290,6 +294,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
@@ -309,7 +315,7 @@ Example::
     tensor([[  6.6311,   0.0503,   6.9768, -12.0362,  -2.1653],
             [ -4.8185,  -1.4255,  -6.6760,   8.9453,   2.5743],
             [ -3.8202,   4.3691,   1.0943,  -1.1109,   5.4730]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.addcdiv, r"""
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
@@ -417,6 +423,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be multiplied
@@ -435,7 +443,7 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.addmv,
            r"""
@@ -833,6 +841,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
@@ -850,7 +860,7 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.bernoulli,
            r"""
@@ -991,6 +1001,8 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 .. math::
     \text{out}_i = \text{input}_i \mathbin{@} \text{mat2}_i
 """ + r"""
+{tf32_note}
+
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
@@ -1012,7 +1024,7 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.bitwise_and,
            r"""
@@ -4612,7 +4624,7 @@ add_docstr(torch.quantile,
 quantile(input, q) -> Tensor
 
 Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
-interpolation when the q-th quantile lies between two data.
+interpolation when the q-th quantile lies between two data points.
 
 Args:
     {input}
@@ -4631,16 +4643,14 @@ Example::
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
 :attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
-data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
-beign flattened before computation.
+data points. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
+being flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
-and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
-If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
-
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
-the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
+If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
+except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
+have size 1. Otherwise, the dimensions being reduced are squeezed (see :func:`torch.squeeze`).
+If :attr:`q` is a 1D tensor, an extra dimension is prepended to the output tensor with the same
+size as :attr:`q` which represents the quantiles.
 
 Args:
     {input}
@@ -4669,6 +4679,42 @@ Example::
             [ 0.9206]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
     torch.Size([3, 2, 1])
+""".format(**single_dim_common))
+
+add_docstr(torch.nanquantile,
+           r"""
+nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+
+This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
+computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
+not exist. If all values in a reduced row are ``NaN`` then the quantiles for
+that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`.
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    {dim}
+    {keepdim}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([float('nan'), 1, 2])
+    >>> t.quantile(0.5)
+    tensor(nan)
+    >>> t.nanquantile(0.5)
+    tensor(1.5000)
+
+    >>> t = torch.tensor([[float('nan'), float('nan')], [1, 2]])
+    >>> t
+    tensor([[nan, nan],
+            [1., 2.]])
+    >>> t.nanquantile(0.5, dim=0)
+    tensor([1., 2.])
+    >>> t.nanquantile(0.5, dim=1)
+    tensor([   nan, 1.5000])
 """.format(**single_dim_common))
 
 add_docstr(torch.min,
@@ -4855,6 +4901,8 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
+{tf32_note}
+
 Args:
     input (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
@@ -4869,7 +4917,7 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.matmul,
            r"""
@@ -4895,6 +4943,8 @@ The behavior depends on the dimensionality of the tensors as follows:
   must be broadcastable).  For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
   tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
+
+{tf32_note}
 
 .. note::
 
@@ -4935,7 +4985,7 @@ Example::
     >>> torch.matmul(tensor1, tensor2).size()
     torch.Size([10, 3, 5])
 
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.mode,
            r"""
@@ -8922,6 +8972,44 @@ Arguments:
 
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.kaiser_window, """
+kaiser_window(window_length, periodic=True, beta=12.0, *, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Computes the Kaiser window with window length :attr:`window_length` and shape parameter :attr:`beta`.
+
+Let I_0 be the zeroth order modified Bessel function of the first kind (see :func:`torch.i0`) and
+``N = L - 1`` if :attr:`periodic` is False and ``L`` if :attr:`periodic` is True,
+where ``L`` is the :attr:`window_length`. This function computes:
+
+.. math::
+    out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
+
+Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+The :attr:`periodic` argument is intended as a helpful shorthand
+to produce a periodic window as input to functions like :func:`torch.stft`.
+
+.. note::
+    If :attr:`window_length` is one, then the returned window is a single element tensor containing a one.
+
+""" + r"""
+Args:
+    window_length (int): length of the window.
+    periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
+        If False, returns a symmetric window suitable for use in filter design.
+    beta (float, optional): shape parameter for the window.
+
+Keyword args:
+    {dtype}
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
 
 """.format(**factory_common_args))
 
