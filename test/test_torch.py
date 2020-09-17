@@ -7762,23 +7762,24 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        x = torch.rand(10, 10, dtype=dtype, device=device) + 1e-1
-        A = torch.mm(x, x.t())
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        A = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
         B = torch.mm(C, C.t())
-        self.assertEqual(A, B, atol=1e-14, rtol=0)
+        self.assertEqual(A, B, atol=1e-5, rtol=0)
 
         # test Upper Triangular
         U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
