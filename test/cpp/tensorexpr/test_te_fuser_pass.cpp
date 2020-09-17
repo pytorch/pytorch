@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -11,7 +12,20 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+struct WithCPUFuser {
+  WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(val);
+  }
+
+  ~WithCPUFuser() {
+    overrideCanFuseOnCPU(cpuFuserEnabled);
+  }
+
+  bool cpuFuserEnabled;
+};
+
 void testFuserPass_1() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -31,13 +45,14 @@ void testFuserPass_1() {
 
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
-      .check("prim::TensorExprGroup_0")
+      .check("prim::TensorExprGroup_")
       ->check("aten::add_")
-      ->check("prim::TensorExprGroup_1")
+      ->check("prim::TensorExprGroup_")
       ->run(*g);
 }
 
 void testFuserPass_2() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -62,6 +77,7 @@ void testFuserPass_2() {
 }
 
 void testFuserPass_3() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128:1, device=cpu),
@@ -89,5 +105,211 @@ void testFuserPass_3() {
     testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
   }
 }
+
+void testFuserPass_0DimInput() {
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(device=cuda),
+          %y : Float(device=cuda)):
+      %one : int = prim::Constant[value=1]()
+      %a : Float(device=cuda) = aten::mul(%x, %y)
+      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      return (%b))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // We should not fuse 0-dim tensors
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_UnfusibleDevice() {
+  WithCPUFuser cf(false);
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(10:1, device=cpu)):
+      %a : Float(10:1, device=cpu) = aten::mul(%x, %y)
+      return (%a))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 1);
+
+  // Test that we're not starting fusion groups from nodes with unfusible device
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_UnknownShapes() {
+  WithCPUFuser cf;
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Tensor,
+          %y : Tensor):
+      %a : Tensor = aten::mul(%x, %y)
+      %b : Tensor = aten::mul(%x, %a)
+      return (%a))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // Test that we're not generating fusion groups when shapes are not known
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_Multidevice() {
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(20:1, device=cpu),
+          %z : Float(30:1, device=cpu)):
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Tensor = aten::cat(%xyz_list, %dim)
+      return (%cat))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 1);
+
+    // We should be able to fuse this
+    testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(20:1, device=cuda:0),
+          %z : Float(30:1, device=cpu)):
+      %dim : int = prim::Constant[value=0]()
+      %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
+      %cat : Tensor = aten::cat(%xyz_list, %dim)
+      return (%cat))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 1);
+
+    // We should not fuse this aten::cat since its inputs are from different
+    // devices
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(20:1, device=cpu),
+          %z : Float(10:1, device=cuda:0)):
+      %dim : int = prim::Constant[value=0]()
+      %xy_list : Tensor[] = prim::ListConstruct(%x, %y)
+      %xy_cat : Tensor = aten::cat(%xy_list, %dim)
+      %r : Tensor = aten::mul(%xy_cat, %z)
+      return (%r))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 2);
+
+    // Test that we check device before merging one node (cat) into another
+    // (mul)
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(20:1, device=cpu),
+          %z : Float(10:1, device=cuda:0)):
+      %z2 : Tensor = aten::mul(%z, %z)
+      %dim : int = prim::Constant[value=0]()
+      %xy_list : Tensor[] = prim::ListConstruct(%x, %y, %z2)
+      %cat : Tensor = aten::cat(%xy_list, %dim)
+      return (%cat))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 2);
+
+    // Test that we check device before merging one node (mul) into another
+    // (cat)
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(20:1, device=cuda:0)):
+      %r : Tensor = aten::mul(%x, %y)
+      return (%r))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 1);
+
+    // We should not fuse this graph since its inputs are from different devices
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    WithCPUFuser cf;
+    KernelScope kernel_scope;
+    const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cuda:0),
+          %y : Float(20:1, device=cuda:1),
+          %z : Float(20:1, device=cpu)):
+      %x2 : Tensor = aten::mul(%x, %x)
+      %y2 : Tensor = aten::mul(%y, %y)
+      %z2 : Tensor = aten::mul(%z, %z)
+      return (%x2, %y2, %z2))IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 2);
+
+    // We should not fuse these two computations since they use different
+    // devices
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+}
+
+void testFuserPass_MergeGroups() {
+  WithCPUFuser cf;
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%a : Float(128:1, device=cpu),
+          %b : Float(128:1, device=cpu)):
+      %x : Float(128:1, device=cpu) = aten::mul(%a, %a)
+      %y : Float(128:1, device=cpu) = aten::mul(%b, %b)
+      return (%x, %y))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 1);
+
+  // The %x and %y computations are completely independent and yet we should put
+  // them into a single fusion group rather than having two separate ones.
+  testing::FileCheck()
+      .check("= prim::TensorExprGroup_")
+      ->check_not("= prim::TensorExprGroup_")
+      ->run(*g);
+}
+
 } // namespace jit
 } // namespace torch

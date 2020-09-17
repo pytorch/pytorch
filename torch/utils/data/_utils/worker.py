@@ -110,10 +110,12 @@ def get_worker_info():
 r"""Dummy class used to signal the end of an IterableDataset"""
 _IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
 
+r"""Dummy class used to resume the fetching when worker reuse is enabled"""
+_ResumeIteration = namedtuple('_ResumeIteration', [])
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
-                 num_workers):
+                 num_workers, persistent_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -167,7 +169,15 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
-            if r is None:
+            if isinstance(r, _ResumeIteration):
+                # Acknowledge the main process
+                data_queue.put(r)
+                iteration_end = False
+                # Recreate the fetcher for worker-reuse policy
+                fetcher = _DatasetKind.create_fetcher(
+                    dataset_kind, dataset, auto_collation, collate_fn, drop_last)
+                continue
+            elif r is None:
                 # Received the final signal
                 assert done_event.is_set() or iteration_end
                 break
