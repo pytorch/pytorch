@@ -336,17 +336,11 @@ static inline void manual_seed(uint64_t seed) {
 // Usage:
 //     NoTF32Guard disable_tf32;
 struct TORCH_API NoTF32Guard {
-  static thread_local bool override_allow_tf32_flag;
-  // override_allow_tf32_flag = true
-  //    means the allow_tf32 flags are overrided and tf32 is force disabled
-  // override_allow_tf32_flag = true
-  //    means the original allow_tf32 flags are followed
-  NoTF32Guard() {
-    override_allow_tf32_flag = true;
-  }
-  ~NoTF32Guard() {
-    override_allow_tf32_flag = false;
-  }
+  NoTF32Guard();
+  ~NoTF32Guard();
+  static bool should_disable_tf32();
+private:
+  bool changed = false;
 };
 
 } // namespace at
