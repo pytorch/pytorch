@@ -145,12 +145,13 @@ def script_add_ones_with_record_function(x, block: str):
 
 
 @torch.jit.script
-def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Future[Any]:
+def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Tensor:
     t: Tensor = torch.ones(1)
     with record_function(block) as rf:
-        fut = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
-        fut = rf._call_end_callbacks_on_future(fut)
-    return fut
+        fut1 = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
+        fut2 = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
+        res = fut1.wait() + fut2.wait()
+    return res
 
 
 
@@ -1139,8 +1140,8 @@ class JitRpcTest(
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
             with torch.autograd.profiler.profile() as prof:
-                fut = record_function_on_caller_rpc_async(dst_worker_name, block_scope)
-                fut.wait()
+                # Runs 2 rpc_async calls within JIT under record_function.
+                record_function_on_caller_rpc_async(dst_worker_name, block_scope)
 
             # Ensure record_function event is profiled.
             function_events = prof.function_events
@@ -1156,15 +1157,18 @@ class JitRpcTest(
                 worker_name(self.rank),
                 dst_worker_name,
             )
-            jit_rpc_event = [
+            jit_rpc_events = [
                 event for event in function_events if event.name == expected_key
             ]
-            self.assertEqual(1, len(jit_rpc_event))
-            jit_rpc_event = jit_rpc_event[0]
-            self.assertTrue(
-                record_function_scope_event.cpu_time_total
-                > jit_rpc_event.cpu_time_total
-            )
+            self.assertEqual(2, len(jit_rpc_events))
+            # Validate that the record_function scope time is greater than both
+            # of the individual RPC async call times. The reason it is not necessarily
+            # greater than the sum is because the two can execute in parallel.
+            for jit_rpc_event in jit_rpc_events:
+                self.assertTrue(
+                    record_function_scope_event.cpu_time_total
+                    > jit_rpc_event.cpu_time_total
+                )
 
     @dist_init
     def test_rpc_torchscript_record_function(self):
