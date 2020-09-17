@@ -363,6 +363,7 @@ test_vec256() {
       $vec256_exec
     done
     popd
+    assert_git_not_dirty
   fi
 }
 

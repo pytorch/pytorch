@@ -399,8 +399,13 @@ namespace jit {
   _(LLVMElemwiseMaxNaNFloat)               \
   _(LLVMElemwiseMinFloat)                  \
   _(LLVMElemwiseMinNaNFloat)               \
+  _(LLVMElemwiseMod)                       \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
+  _(LLVMCompareSelectByteGT)               \
+  _(LLVMCompareSelectByteGE)               \
+  _(LLVMCompareSelectByteLT)               \
+  _(LLVMCompareSelectByteLE)               \
   _(LLVMStoreFloat)                        \
   _(LLVMSimpleMath01)                      \
   _(LLVMComputeMul)                        \
