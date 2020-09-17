@@ -407,6 +407,26 @@ class TestQuantizeFx(QuantizationTestCase):
         FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
                    .run(scripted.graph)
 
+        # disable fake_quant and observer
+        for epoch in range(3):
+            if epoch == 1:
+                scripted.apply(torch.quantization.disable_observer)
+            if epoch == 2:
+                scripted.apply(torch.quantization.disable_fake_quant)
+
+        # ensure the fake_quant and observer have been disabled.
+        matches = ['.fake_quant_enabled', '.observer_enabled']
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([0], dtype=torch.uint8))
+
+        # enable them back
+        scripted.apply(torch.quantization.enable_fake_quant)
+        scripted.apply(torch.quantization.enable_observer)
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([1], dtype=torch.uint8))
+
     @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
         class TwoLayerLinear(nn.Module):
