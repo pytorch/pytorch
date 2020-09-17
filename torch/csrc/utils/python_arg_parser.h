@@ -404,7 +404,7 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception &e) {
-      throw TypeError("%s(): argument '%s' must be %s, but found element of type1 %s at pos %d",
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
