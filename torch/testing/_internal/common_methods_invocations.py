@@ -1374,6 +1374,12 @@ def method_tests():
         ('fft.ifftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
         ('fft.rfftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
         ('fft.irfftn', (S, S, S, S), NO_ARGS, '4d', (), (None, (0, 1)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.fftshift', (S,), NO_ARGS, '1d', (), (None, 0, -1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.fftshift', (S, S), NO_ARGS, '2d', (), (None, 0, (-1, -2)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.fftshift', (S, S, S), NO_ARGS, '3d', (), (None, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.ifftshift', (S,), NO_ARGS, '1d', (), (None, 0, -1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.ifftshift', (S, S), NO_ARGS, '2d', (), (None, 0, (-1, -2)), (skipCPUIfNoMkl, skipCUDAIfRocm)),
+        ('fft.ifftshift', (S, S, S), NO_ARGS, '3d', (), (None, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
