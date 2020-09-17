@@ -2544,6 +2544,13 @@ quantile(q, dim=None, keepdim=False) -> Tensor
 See :func:`torch.quantile`
 """)
 
+add_docstr_all('nanquantile',
+               r"""
+nanquantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.nanquantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
