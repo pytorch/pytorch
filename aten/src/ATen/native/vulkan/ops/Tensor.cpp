@@ -90,14 +90,6 @@ api::Resource::Buffer allocate_buffer(
       });
 }
 
-api::Resource::Buffer maybe_allocate_buffer(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  // Always need a buffer.
-  return allocate_buffer(context, sizes, options);
-}
-
 api::Resource::Image allocate_image(
     api::Context* const context,
     const IntArrayRef sizes,
@@ -233,28 +225,30 @@ void copy_image_to_buffer(
 } // namespace
 
 vTensor::vTensor()
-  : image_{},
+  : context_{},
+    image_{},
     buffer_{},
     staging_{},
-    context_{},
     dirty_{} {
+  enforce_invariants();
 }
 
 vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : image_(maybe_allocate_image(context, sizes, options)),
-    buffer_(maybe_allocate_buffer(context, sizes, options)),
+  : context_(context),
+    image_(maybe_allocate_image(context, sizes, options)),
+    buffer_(allocate_buffer(context, sizes, options)),
     staging_(maybe_allocate_staging(context, sizes, options)),
-    context_(context),
-    sizes_(sizes.cbegin(), sizes.cend()),
-    options_(options),
     dirty_{} {
+  enforce_invariants();
 }
 
-const vTensor* vTensor::host() const & {
-  if ((image_ && dirty_.image) || (buffer_ && dirty_.buffer)) {
+const vTensor* vTensor::host_impl() const {
+  enforce_invariants();
+
+  if (dirty_.image || dirty_.buffer) {
     api::Command::Buffer command_buffer =
         context_->command().pool.primary.allocate();
 
@@ -263,10 +257,13 @@ const vTensor* vTensor::host() const & {
       if (dirty_.image) {
         copy_image_to_buffer(command_buffer, image_, buffer_);
         dirty_.image = 0u;
-        dirty_.buffer = 1u;
+
+        if (staging_) {
+          dirty_.buffer = 1u;
+        }
       }
 
-      if (dirty_.buffer) {
+      if (dirty_.buffer && staging_) {
         copy_buffer_to_staging(command_buffer, buffer_, staging_);
         dirty_.buffer = 0u;
       }
@@ -278,9 +275,9 @@ const vTensor* vTensor::host() const & {
   return this;
 }
 
-vTensor* vTensor::host(const Access::Flags access) & {
+vTensor* vTensor::host_impl(const Access::Flags access) {
   vTensor* const tensor = const_cast<vTensor*>(
-      const_cast<const vTensor&>(*this).host());
+      const_cast<const vTensor&>(*this).host_impl());
 
   if (access & Access::Write) {
     if (staging_) {
@@ -294,8 +291,19 @@ vTensor* vTensor::host(const Access::Flags access) & {
   return tensor;
 }
 
+api::Resource::Memory& vTensor::wait_impl(const Access::Flags access) {
+  enforce_invariants();
+
+  api::Resource::Buffer& buffer = staging_ ? staging_ : buffer_;
+  TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
+
+  return buffer_.memory;
+}
+
 VkBuffer vTensor::buffer() const & {
-  if (buffer_ && ((staging_ && dirty_.staging) || (image_ && dirty_.image))) {
+  enforce_invariants();
+
+  if (dirty_.staging || dirty_.image) {
     api::Command::Buffer command_buffer =
         context_->command().pool.primary.allocate();
 
@@ -328,7 +336,9 @@ VkBuffer vTensor::buffer(const Access::Flags access) & {
 }
 
 VkImage vTensor::image() const & {
-  if (image_ && ((staging_ && dirty_.staging) || (buffer_ && dirty_.buffer))) {
+  enforce_invariants();
+
+  if (dirty_.staging || dirty_.buffer) {
     api::Command::Buffer command_buffer =
         context_->command().pool.primary.allocate();
 
@@ -336,8 +346,8 @@ VkImage vTensor::image() const & {
     {
       if (dirty_.staging) {
         copy_staging_to_buffer(command_buffer, staging_, buffer_);
-        dirty_.buffer = 1u;
         dirty_.staging = 0u;
+        dirty_.buffer = 1u;
       }
 
       if (dirty_.buffer) {
@@ -360,6 +370,16 @@ VkImage vTensor::image(const Access::Flags access) & {
   }
 
   return image;
+}
+
+void vTensor::enforce_invariants() const {
+  TORCH_INTERNAL_ASSERT(!context_ || (context_ && buffer_));
+  TORCH_INTERNAL_ASSERT(!dirty_.image || (image_ && dirty_.image));
+  TORCH_INTERNAL_ASSERT(!dirty_.buffer || (buffer_ && dirty_.buffer));
+  TORCH_INTERNAL_ASSERT(!dirty_.staging || (staging_ && dirty_.staging));
+  TORCH_INTERNAL_ASSERT(
+      !(dirty_.image || dirty_.buffer || dirty_.staging) ||
+      !(dirty_.image ^ dirty_.buffer ^ dirty_.staging));
 }
 
 void verify(const TensorOptions& options) {
