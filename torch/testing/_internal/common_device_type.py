@@ -4,7 +4,6 @@ import inspect
 import runpy
 import threading
 from functools import wraps
-# how to introduce ClassVar without importing typing?
 import typing
 import unittest
 import os
@@ -165,10 +164,7 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', bound=DeviceTypeTestBase)
-# todo: need to fix
-device_type_test_bases : typing.List[typing.Union[CPUTestBase, CUDATestBase]] = []
+device_type_test_bases: typing.List[typing.Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -270,9 +266,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
-                    args = (device_arg, dtype, op)
-                    # todo: need to fix.
-                    args = (arg for arg in args if arg is not None)
+                    args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -432,9 +426,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        # todo: need to fix..
-        # device_type_test_class expects to be either CPUTestBase or CUDATestBase.. How to make it compatible with the right expression?
-        device_type_test_class: type(DeviceTypeTestBase)  = type(class_name, (base, empty_class), {})
+        device_type_test_class: typing.Any  = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
