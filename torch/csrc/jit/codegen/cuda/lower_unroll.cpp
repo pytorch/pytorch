@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
@@ -99,6 +100,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
 // Generate the loop nest structure and place it in lowered_exprs
 void UnrollPass::computeMap() {
+  FUSER_PERF_SCOPE("UnrollPass::computeMap");
+
   FusionGuard fg(fusion_);
 
   // Run through loop nests and further lower the expressions
@@ -111,6 +114,7 @@ std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<Expr*>& exprs,
     const ThreadPredicateMap& thread_predicates) {
+  FUSER_PERF_SCOPE("UnrollPass::runPass");
   FusionGuard fg(fusion);
   UnrollPass up(fusion, exprs, thread_predicates);
   up.computeMap();

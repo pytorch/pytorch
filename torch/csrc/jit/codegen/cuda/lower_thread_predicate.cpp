@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
@@ -92,6 +93,8 @@ void maskSouceMap(
 
 // Update the reduction_deps bitset based on provided Expr
 void ThreadPredicateMap::updateBitSet(Expr* expr) {
+  FUSER_PERF_SCOPE("ThreadPredicateMap::updateBitSet");
+
   // Which predicates were set for the inputs
   ir_utils::ParallelTypeBitmap input_preds;
 
@@ -184,6 +187,7 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
 
 // TODO(kir): revisit this - can we build it from the kernel IR?
 ThreadPredicateMap::ThreadPredicateMap(Fusion* _fusion) : fusion_(_fusion) {
+  FUSER_PERF_SCOPE("ThreadPredicateMap");
   // Initialize mapping for input tensors
   for (auto inp : fusion_->inputs()) {
     if (ir_utils::isTV(inp)) {

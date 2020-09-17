@@ -1,4 +1,6 @@
+
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
@@ -67,6 +69,8 @@ void debugPrint(const TensorTypePtr& type) {
 }
 
 at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("graphReductionAxes");
+
   at::DimVector reduction_axes;
   // TODO: let check that we have only single reduction node in the graph.
   for (const auto& n : graph->nodes()) {
@@ -89,6 +93,8 @@ at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
 }
 
 at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
+  FUSER_PERF_SCOPE("getPermutationPerSortedStride");
+
   // `permute_seq` is the returned permutation to achieve sorted stride;
   at::DimVector permute_seq;
 
@@ -235,6 +241,7 @@ FusionExecutorCache::FusionExecutorCache(
     std::unique_ptr<Fusion>&& fusion,
     at::Device device)
     : device_(device), fusion_(std::move(fusion)) {
+  FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
   // avoid putting `has_reduction_` in the initializer list
   has_reduction_ = fusion_->hasReduction();
 }
@@ -242,6 +249,7 @@ FusionExecutorCache::FusionExecutorCache(
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs,
     size_t unique_id) {
+  FUSER_PERF_SCOPE("runFusionWithInputs");
   if (code_to_fe_lookup_.count(unique_id) == 0) {
     // enter when we get a new input set. We need to search for compatible
     // entries in cached `FusionExecutor` or compile new one as needed.
@@ -370,6 +378,8 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 GraphCache::InputsRequirement::InputsRequirement(
     const std::shared_ptr<Graph>& graph,
     const std::vector<size_t>& reduction_axes) {
+  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+
   // run over inputs to extract common types;
   TensorTypePtr acc_type = TensorType::get();
   for (const auto& input : graph->inputs()) {
@@ -394,6 +404,8 @@ GraphCache::InputsRequirement::InputsRequirement(
 GraphCache::InputsRequirement::InputsRequirement(
     const at::ArrayRef<IValue>& inputs,
     const std::vector<size_t>& reduction_axes) {
+  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+
   // run over inputs to extract common types;
   TensorTypePtr acc_type = TensorType::get();
   for (const auto& input : inputs) {
@@ -444,6 +456,8 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
 // TODO: tests!
 bool GraphCache::InputsRequirement::complyWith(
     const InputsRequirement& expect) {
+  FUSER_PERF_SCOPE("InputsRequirement::complyWith");
+
   if (device_ != expect.device_ ||
       input_permutation_ != expect.input_permutation_ ||
       pw_output_permutation_ != expect.pw_output_permutation_ ||
@@ -526,6 +540,8 @@ void GraphCache::InputsRequirement::extractPermutation(
 
 FusionExecutorCache* GraphCache::appendFusionExecutorCache(
     const InputsRequirement& input_stack) {
+  FUSER_PERF_SCOPE("createFusionExecutorCache");
+
   input_stacks_.emplace_back(input_stack);
   std::shared_ptr<Graph> parsing_graph = graph_->copy();
   // assign inputs on parsing_graph to accommodate legacy executor, where input
@@ -633,6 +649,8 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
 
 GraphCache::GraphCache(std::shared_ptr<Graph> graph)
     : graph_(std::move(graph)) {
+  FUSER_PERF_SCOPE("GraphCache::GraphCache");
+
   // [ NOTE - reduction in graph ]
   //
   // reduction complicates our permutation in integration, it addes two things:
@@ -655,6 +673,7 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("runGraphWithInputs");
   // get unique id `unique_id` for given input set `inputs`;
   auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
   const size_t unique_id = id_lookup_ret.id;

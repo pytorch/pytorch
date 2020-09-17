@@ -3,12 +3,11 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <torch/csrc/jit/resource_guard.h>
-
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
-
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/resource_guard.h>
 
 #include <fstream>
 
@@ -142,6 +141,8 @@ void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
     const c10::Device& device) {
+  FUSER_PERF_SCOPE("validateKernelInputs");
+
   // This is necessary as we were traversing the fusion graph later in the check
   FusionGuard fg(fusion);
   // Check inputs
@@ -164,6 +165,8 @@ void validateKernelOutputs(
     Fusion* fusion,
     const std::vector<at::Tensor>& outputs,
     const c10::Device& device) {
+  FUSER_PERF_SCOPE("validateKernelOutputs");
+
   TORCH_INTERNAL_ASSERT(
       fusion->outputs().size() != 0,
       "Kernel should have at least one output tensor.");
@@ -187,6 +190,8 @@ StatefulExpressionEvaluator statefulBindInputs(
     const at::ArrayRef<IValue>& aten_inputs,
     Fusion* fusion,
     GpuLower* lower) {
+  FUSER_PERF_SCOPE("statefulBindInputs");
+
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
@@ -229,6 +234,8 @@ NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id) {
+  FUSER_PERF_SCOPE("NVRTC");
+
   // lazily construct context if non-existing yet;
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
@@ -251,9 +258,15 @@ NvrtcFunction nvrtcCompile(
   const int major = prop->major;
   const int minor = prop->minor;
   nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+
+  {
+    FUSER_PERF_SCOPE("nvrtcCreateProgram");
+    AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
+        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  }
+
   ResourceGuard holdProgram([&] {
+    FUSER_PERF_SCOPE("nvrtcDestroyProgram");
     AT_CUDA_NVRTC_CHECK(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
@@ -291,30 +304,41 @@ NvrtcFunction nvrtcCompile(
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());
-  const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
-      program, args.size(), args.data());
 
-  if (result != NVRTC_SUCCESS) {
-    size_t logsize;
-    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-    std::vector<char> log(logsize);
-    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+  {
+    FUSER_PERF_SCOPE("nvrtcCompileProgram");
 
-    TORCH_INTERNAL_ASSERT(
-        false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
+    const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
+        program, args.size(), args.data());
+
+    if (result != NVRTC_SUCCESS) {
+      size_t logsize;
+      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
+      std::vector<char> log(logsize);
+      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+      TORCH_INTERNAL_ASSERT(
+          false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
+    }
+
+    AT_CUDA_NVRTC_CHECK(result);
   }
-  const char* lowered_kernel_name;
+
+  const char* lowered_kernel_name = nullptr;
   at::globalContext().getNVRTC().nvrtcGetLoweredName(
       program, func_name.c_str(), &lowered_kernel_name);
 
-  AT_CUDA_NVRTC_CHECK(result);
-  size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
+  size_t ptx_size = 0;
   std::vector<char> ptx;
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+
+  {
+    FUSER_PERF_SCOPE("get PTX");
+    AT_CUDA_NVRTC_CHECK(
+        at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
+    ptx.resize(ptx_size);
+    AT_CUDA_NVRTC_CHECK(
+        at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+  }
 
   NvrtcFunction compiled_kernel_;
 
@@ -322,6 +346,8 @@ NvrtcFunction nvrtcCompile(
   // has an impact on generated binary.
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
   if (prefix_env) {
+    FUSER_PERF_SCOPE("load CUBIN");
+
     // Output ptx file
     std::stringstream ptx_file_name;
     ptx_file_name << prefix_env << "_" << id << ".ptx";
@@ -366,6 +392,8 @@ NvrtcFunction nvrtcCompile(
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
         &(compiled_kernel_.module), cubin));
   } else {
+    FUSER_PERF_SCOPE("load PTX");
+
     // load ptx directly
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
         &(compiled_kernel_.module),

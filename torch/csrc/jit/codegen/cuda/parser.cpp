@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
@@ -669,6 +670,8 @@ bool isNodeParsible(const Node* node) {
 }
 
 std::unique_ptr<Fusion> parseJitIR(std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("parseJitIR");
+
   IrParser parser(graph);
   return parser.parse();
 }

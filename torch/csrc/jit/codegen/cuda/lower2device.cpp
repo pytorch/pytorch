@@ -1,6 +1,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
@@ -16,6 +18,8 @@ namespace fuser {
 thread_local GpuLower* active_gpu_lower = nullptr;
 
 void GpuLower::replaceSymbolicSizes() {
+  FUSER_PERF_SCOPE("replaceSymbolicSizes");
+
   // Grab inputs and outputs
   // TODO: Only run through inputs for the size map, outputs don't actually set
   // any sizes of the problem.
@@ -71,6 +75,8 @@ void GpuLower::replaceSymbolicSizes() {
 }
 
 void GpuLower::lower() {
+  FUSER_PERF_SCOPE("lower");
+
   TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower == nullptr, "Nested lowering passes are not supported");

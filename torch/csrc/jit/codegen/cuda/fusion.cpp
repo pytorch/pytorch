@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
@@ -28,6 +29,8 @@ Fusion* FusionGuard::getCurFusion() {
 }
 
 void swap(Fusion& a, Fusion& b) noexcept {
+  FUSER_PERF_SCOPE("Fusion swap");
+
   using std::swap;
 
   // Swap the content
@@ -80,6 +83,8 @@ void swap(Fusion& a, Fusion& b) noexcept {
 }
 
 Fusion::Fusion(const Fusion& other) {
+  FUSER_PERF_SCOPE("Fusion copy");
+
   IrCloner ir_cloner(this);
 
   for (auto val : other.val_set_) {
@@ -117,10 +122,12 @@ Fusion::Fusion(const Fusion& other) {
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
+  FUSER_PERF_SCOPE("Fusion move");
   swap(*this, other);
 }
 
 Fusion& Fusion::operator=(const Fusion& other) {
+  FUSER_PERF_SCOPE("Fusion copy assign");
   Fusion copy(other);
   clear();
   swap(*this, copy);
@@ -128,6 +135,7 @@ Fusion& Fusion::operator=(const Fusion& other) {
 }
 
 Fusion& Fusion::operator=(Fusion&& other) noexcept {
+  FUSER_PERF_SCOPE("Fusion move assign");
   clear();
   swap(*this, other);
   return *this;
@@ -138,6 +146,8 @@ Fusion::~Fusion() {
 }
 
 void Fusion::clear() noexcept {
+  FUSER_PERF_SCOPE("Fusion clear");
+
   // Free the owned values
   for (auto ptr : val_set_) {
     delete ptr;
@@ -336,6 +346,8 @@ void Fusion::validateInputs() {
 }
 
 void Fusion::print() {
+  FUSER_PERF_SCOPE("Fusion::print");
+
   FusionGuard fg(this);
   std::cout << "%kernel {\n";
   IrMathPrinter op_exprs(std::cout);
@@ -346,16 +358,21 @@ void Fusion::print() {
 }
 
 void Fusion::printKernel() {
+  FUSER_PERF_SCOPE("Fusion::printKernel");
   std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
 }
 
 void Fusion::printMath() {
+  FUSER_PERF_SCOPE("Fusion::printMath");
+
   FusionGuard fg(this);
   for (auto expr : exprs(true))
     std::cout << expr;
 }
 
 void Fusion::printTransforms() {
+  FUSER_PERF_SCOPE("Fusion::printTransforms");
+
   FusionGuard fg(this);
   IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
@@ -531,6 +548,8 @@ bool Fusion::isStochastic() {
 }
 
 bool Fusion::hasReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -541,6 +560,8 @@ bool Fusion::hasReduction() {
 }
 
 bool Fusion::hasBlockReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasBlockReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -551,6 +572,8 @@ bool Fusion::hasBlockReduction() {
 }
 
 bool Fusion::hasGridReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasGridReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -584,6 +607,8 @@ bool Fusion::hasBroadcast() {
 }
 
 std::vector<Val*> Fusion::getTerminatingOutputs() {
+  FUSER_PERF_SCOPE("getTerminatingOutputs");
+
   FusionGuard fg(this);
 
   std::unordered_set<Val*> used_vals;

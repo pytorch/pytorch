@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
 #include <c10/core/ScalarType.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -242,6 +243,7 @@ class NaiveTypePropagator {
 } // namespace
 
 void TypePropagate(std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("TypePropagate");
   NaiveTypePropagator(graph).run();
 }
 

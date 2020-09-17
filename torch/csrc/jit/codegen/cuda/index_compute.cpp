@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -354,6 +355,8 @@ IndexCompute::IndexCompute(
       index_map_(std::move(initial_index_map)),
       extent_map_(std::move(_extent_map)),
       zero_merged_in_(std::move(_zero_merged_in)) {
+  FUSER_PERF_SCOPE("IndexCompute::IndexCompute");
+
   // Make sure we recompute any indices we can that map to a contiguous access
   // in physical memory.
   if (std::any_of(root_contiguity.begin(), root_contiguity.end(), [](bool b) {
@@ -397,6 +400,8 @@ IndexCompute IndexCompute::updateIndexCompute(
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
     std::unordered_map<kir::IterDomain*, Val*> new_index_entries,
     const std::vector<bool>& root_contiguity) {
+  FUSER_PERF_SCOPE("updateIndexCompute");
+
   std::unordered_map<kir::IterDomain*, Val*> updated_index_map =
       std::move(new_index_entries);
   std::unordered_map<kir::IterDomain*, Val*> updated_extent_map;
@@ -451,6 +456,8 @@ std::vector<bool> IndexCompute::contiguityAnd(
 std::vector<bool> IndexCompute::contiguityPasC(
     TensorDomain* producer,
     TensorDomain* consumer) {
+  FUSER_PERF_SCOPE("contiguityPasC");
+
   const std::vector<bool>& producer_contiguity = producer->contiguity();
   std::vector<bool> as_consumer_contiguity;
 
@@ -734,6 +741,8 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
     TensorView* producer_tv,
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("getGlobalProducerIndex");
+
   // Replay producer to look like consumer so we can index on producer since our
   // loop nests look like consumer
   auto producerAsC = TransformReplay::replayPasC(
@@ -961,6 +970,8 @@ kir::TensorIndex* Index::getProducerIndex_impl(
 kir::TensorIndex* Index::getGlobalConsumerIndex(
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("getGlobalConsumerIndex");
+
   // grab all tensor views from producer_tv <- computeAtRoot
   std::deque<TensorView*> tv_stack = getComputeAtTVStackFrom(consumer_tv);
 
@@ -1122,6 +1133,8 @@ kir::TensorIndex* Index::getProducerIndex(
     TensorView* producer,
     TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("Index::getProducerIndex");
+
   if (producer->domain()->noReductions().size() == 0) {
     return new kir::TensorIndex(producer, {});
   }
@@ -1137,6 +1150,8 @@ kir::TensorIndex* Index::getProducerIndex(
 kir::TensorIndex* Index::getConsumerIndex(
     TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
+  FUSER_PERF_SCOPE("Index::getConsumerIndex");
+
   if (consumer->domain()->noReductions().size() == 0) {
     return new kir::TensorIndex(consumer, {});
   }
@@ -1155,6 +1170,8 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
     const std::vector<kir::ForLoop*>& loops,
     const std::vector<bool>& root_contiguity,
     bool unroll) {
+  FUSER_PERF_SCOPE("Index::getConsumerRootPredIndices");
+
   // grab all tensor views from producer_tv <- computeAtRoot
   std::deque<TensorView*> tv_stack = getComputeAtTVStackFrom(consumer_tv);
 

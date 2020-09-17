@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
 #include <vector>
@@ -16,6 +17,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   static std::vector<Expr*> getIndexedExprs(
       Fusion* fusion,
       std::vector<Expr*> incoming_exprs) {
+    FUSER_PERF_SCOPE("IndexLowering::getIndexedExprs");
     FusionGuard fg(fusion);
     IndexLowering il;
     il.generate(incoming_exprs);

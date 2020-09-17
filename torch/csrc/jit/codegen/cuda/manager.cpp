@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -215,6 +216,8 @@ class CudaFusionManager {
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
+  FUSER_PERF_SCOPE("compileCudaFusionGroup");
+
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "Only prim::CudaFusionGroup can be compiled");
@@ -237,6 +240,8 @@ void compileCudaFusionGroup(Node* fusion_node) {
 }
 
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
+  FUSER_PERF_SCOPE("runCudaFusionGroup");
+
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "prim::CudaFusionGroup expected");

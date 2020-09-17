@@ -3,6 +3,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
@@ -102,6 +103,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
       Fusion* _fusion,
       ThreadPredicateMap& _thread_predicates,
       const std::vector<Expr*>& exprs) {
+    FUSER_PERF_SCOPE("LoopNestGenerator::loweredExprs");
     LoopNestGenerator generator(_fusion, _thread_predicates, exprs);
     return generator.lowered_exprs;
   }

@@ -1,5 +1,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -624,6 +625,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
 std::string generateCudaKernel(
     const Kernel* kernel,
     const std::string& kernel_name) {
+  FUSER_PERF_SCOPE("generateCudaKernel");
   return CudaKernelGenerator::generateKernelDefinition(kernel, kernel_name);
 }
 

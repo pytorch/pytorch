@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -62,6 +63,8 @@ unsigned int ComputeAtData::getNewPosition() const {
 }
 
 void ComputeAtData::validateNewComputeAt() const {
+  FUSER_PERF_SCOPE("validateNewComputeAt");
+
   TORCH_INTERNAL_ASSERT(
       getNewPosition() >= original_compute_at_position,
       "Invalid computeAt detected. This computeAt would invalidate the set computeAt on ",
@@ -97,6 +100,7 @@ void ComputeAtData::setComputeAtDomain(TensorDomain* td) {
 }
 
 namespace {
+
 // Wrapper around set_intersection
 template <typename T>
 std::set<T> set_intersection(const std::set<T>& set1, const std::set<T>& set2) {
@@ -135,12 +139,15 @@ std::deque<std::deque<TensorView*>> tvChains(
   }
   return tv_chains;
 }
+
 } // namespace
 
 void ComputeAt::run(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_position) {
+  FUSER_PERF_SCOPE("ComputeAt::run");
+
   // Make sure the correct fusion is setup between this and consumer.
   TORCH_CHECK(
       producer->fusion() == consumer->fusion(),
@@ -205,6 +212,8 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_compute_at_axis) {
+  FUSER_PERF_SCOPE("backwardComputeAt_impl");
+
   auto& producer_entry = tv_data.at(producer);
 
   // Use TensorDomain interface so it doesn't set computeAt automatically
@@ -226,6 +235,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int producer_compute_at_axis) {
+  FUSER_PERF_SCOPE("forwardComputeAt_impl");
+
   auto& consumer_entry = tv_data.at(consumer);
   const auto& producer_entry = tv_data.at(producer);
 
@@ -246,6 +257,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
 }
 
 void ComputeAt::setCommonConsumer() {
+  FUSER_PERF_SCOPE("ComputeAt::setCommonConsumer");
+
   // Convert the first chain to a set.
   std::set<TensorView*> common_consumers(
       producer_use_chains_.front().begin(), producer_use_chains_.front().end());
@@ -298,6 +311,8 @@ void ComputeAt::setCommonConsumer() {
 // Similar to backward traversal in traverseAllKnown but we should only apply
 // computeAt if it will increase computeAt positions.
 void ComputeAt::traverseBackward() {
+  FUSER_PERF_SCOPE("ComputeAt::traverseBackward");
+
   // propagate *backward* through all *producer* use_chains or from *producer*
   // to common_consumer if common_consumer exists. Only apply transform if
   // increases computeAt position.
@@ -324,6 +339,8 @@ void ComputeAt::traverseBackward() {
 }
 
 void ComputeAt::traverseForward() {
+  FUSER_PERF_SCOPE("ComputeAt::traverseForward");
+
   // propagate forward through all *producer* use_chains or from *producer* to
   // common_consumer if common_consumer exists.
   auto chains = producer_use_chains_;
@@ -355,6 +372,8 @@ void ComputeAt::traverseForward() {
 }
 
 void ComputeAt::runPass() {
+  FUSER_PERF_SCOPE("ComputeAt::runPass");
+
   // Initialize tv_data for all TensorViews we may modify
   auto chains = producer_use_chains_;
   if (common_consumer_ != nullptr) {
@@ -399,6 +418,8 @@ void ComputeAt::runPass() {
 }
 
 void ComputeAt::setupOutputs() {
+  FUSER_PERF_SCOPE("ComputeAt::setupOutputs");
+
   if (common_consumer_ != nullptr)
     return;
 

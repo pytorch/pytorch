@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -82,6 +83,8 @@ size_t mergeNonReduction(TensorView* tv) {
 
 // This one is a total mess and it should go.
 bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
+  FUSER_PERF_SCOPE("scheduleFusion");
+
   FusionGuard fg(fusion);
   // maybe has_reduction for scheudling should be done on a per output tensor
   // basis.
@@ -299,6 +302,8 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
     TensorView* red_tv) {
+  FUSER_PERF_SCOPE("scheduleReduction");
+
   FusionGuard fg(fusion);
 
   if (!fusion->hasReduction()) {

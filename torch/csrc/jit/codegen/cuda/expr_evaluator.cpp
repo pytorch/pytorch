@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
@@ -57,6 +58,7 @@ void StatefulExpressionEvaluator::safeBind(
 
 c10::optional<Int::ScalarType> StatefulExpressionEvaluator::inferValue(
     Val* value) {
+  FUSER_PERF_SCOPE("inferValue");
   return maybeHandle(value);
 }
 
