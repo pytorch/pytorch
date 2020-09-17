@@ -822,10 +822,7 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                    # TODO: https://github.com/pytorch/pytorch/issues/33793
-                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.bool:
+                if dt == torch.bool:
                     self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
                 elif dt.is_complex:
