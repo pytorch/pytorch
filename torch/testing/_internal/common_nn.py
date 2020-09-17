@@ -3489,7 +3489,7 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        module_name ='TransformerEncoderLayer',
+        module_name='TransformerEncoderLayer',
         constructor_args=(4, 2, 16, 0.0),
         cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
                                 .dim_feedforward(16)
@@ -4963,7 +4963,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 helper_str = "def _get_lambda_func(test_case, module):"
                 fn_str = "return lambda "
                 in_str = ""
-                for i in range (0, len(inputs)):
+                for i in range(0, len(inputs)):
                     in_str = in_str + "_" + str(i) + ", "
                 fn_str = fn_str + in_str + "*args, **kw: test_case._forward(module, (" + in_str + "))"
                 helper_str = helper_str + fn_str
