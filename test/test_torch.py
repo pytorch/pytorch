@@ -14428,9 +14428,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-
-
-
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
