@@ -1025,7 +1025,7 @@ Operation Node::getOperation() const {
 
 bool Node::isNondeterministic() const {
   static const OperatorSet nondeterministic_ops = {
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
       "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
@@ -1052,7 +1052,7 @@ bool Node::isNondeterministic() const {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") &&
+  if (matches("aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor") &&
       is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
