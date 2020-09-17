@@ -470,7 +470,7 @@ std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
 
 void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!should_rebuild_buckets()) {
+  if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
   }
   const auto replica_count = replicas_.size();
@@ -525,7 +525,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // rebuilt_param_indices_ based on gradient arriving order, and then at the
   // end of finalize_backward(), buckets will be rebuilt based on
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
-  // and intialized. Also we only need to dump tensors and parameter indcies of
+  // and initialized. Also we only need to dump tensors and parameter indcies of
   // one replica.
   push_rebuilt_params(index);
 
@@ -1406,12 +1406,6 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-// This is equivalent to take_tensors but returns indices into the
-// tensor list argument for bucket assignment. Also, it is aware
-// of device placement and will not allow buckets to span devices.
-// The index of tensors[i] assigned to bucket is tensor_indices[i],
-// when tensor_indices is empty, the index of tensors[i] assigned to
-// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,

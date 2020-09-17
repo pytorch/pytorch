@@ -1,5 +1,3 @@
-from __future__ import division
-
 import torch
 from torch import Tensor
 from ._functions import SyncBatchNorm as sync_batch_norm
