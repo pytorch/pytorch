@@ -2,6 +2,7 @@ import torch
 import functools
 import inspect
 from typing import Any, Callable, TypeVar, cast
+from queue import LifoQueue
 
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
@@ -46,7 +47,6 @@ class _DecoratorContextManager:
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         raise NotImplementedError
 
-
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
 
@@ -80,15 +80,17 @@ class no_grad(_DecoratorContextManager):
     def __init__(self):
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        self.prev = False
+        # Since a recursive function that uses this decorator only has one instance of the
+        # decorator class, we need to use a stack structure to keep track of state in order
+        # to support recursive functions
+        self.prev_queue = LifoQueue()
 
     def __enter__(self):
-        self.prev = torch.is_grad_enabled()
+        self.prev_queue.put(torch.is_grad_enabled())
         torch.set_grad_enabled(False)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        torch.set_grad_enabled(self.prev)
-
+        torch.set_grad_enabled(self.prev_queue.get())
 
 class enable_grad(_DecoratorContextManager):
     r"""Context-manager that enables gradient calculation.
@@ -121,13 +123,18 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
+    def __init__(self):
+        # Since a recursive function that uses this decorator only has one instance of the
+        # decorator class, we need to use a stack structure to keep track of state in order
+        # to support recursive functions
+        self.prev_queue = LifoQueue()
+
     def __enter__(self) -> None:
-        self.prev = torch.is_grad_enabled()
+        self.prev_queue.put(torch.is_grad_enabled())
         torch._C._set_grad_enabled(True)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        torch._C._set_grad_enabled(self.prev)
-
+        torch.set_grad_enabled(self.prev_queue.get())
 
 class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
