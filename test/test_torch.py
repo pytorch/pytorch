@@ -4244,8 +4244,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @expectedAlertNondeterministic('_histogram_cuda', fn_has_device_arg=False)
     def test_histogram_alert_nondeterministic(self, device):
-        torch.histogram(torch.tensor([], device=device), min=0, max=3)
-        torch.histogram(torch.tensor([], device=device), bins=torch.tensor([0, 1, 2, 3], device=device))
+        torch.histogram(torch.tensor([], device=device))
 
     def test_histogram(self, device):
         # negative bins
@@ -4260,33 +4259,33 @@ class TestTorchDeviceType(TestCase):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
                             bins=torch.tensor([2, 1], dtype=torch.float, device=device))
         # empty tensor
-        actual = torch.histogram(torch.tensor([], device=device), min=0, max=3)
+        actual = torch.histogram(torch.tensor([], device=device), range=(0, 3))[0]
         expected = torch.zeros(10, dtype=torch.long, device=device)
         self.assertEqual(expected, actual)
         # empty tensor, bins defined as tensor
-        actual = torch.histogram(torch.tensor([], device=device), bins=torch.tensor([0, 1, 2, 3, 4, 5], device=device))
+        actual = torch.histogram(torch.tensor([], device=device), bins=torch.tensor([0, 1, 2, 3, 4, 5], device=device))[0]
         expected = torch.zeros(5, dtype=torch.long, device=device)
         self.assertEqual(expected, actual)
         # scalar input and 1 bin -- should return a 1-dimensional tensor, not a scalar.
         actual = torch.histogram(
             torch.tensor(0, dtype=torch.float, device=device),
-            bins=1, min=0, max=3)
+            bins=1, range=(0, 3))[0]
         self.assertEqual(
             torch.tensor([1], dtype=torch.int64, device=device),
             actual)
-        # tensors with inf; min, max not provided -- should throw a RuntimeError
+        # tensors with inf; range not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
             torch.histogram(torch.tensor([float("inf")], dtype=torch.float, device=device))
         with self.assertRaisesRegex(RuntimeError, r'range of \[1, inf\] is not finite'):
             torch.histogram(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device))
-        # tensors with inf; min, max provided
+        # tensors with inf; range provided
         self.assertEqual(
             torch.histogram(torch.tensor([float("inf")], dtype=torch.float, device=device),
-                            bins=1, min=0, max=3),
+                            bins=1, range=(0, 3))[0],
             torch.tensor([0], dtype=torch.long, device=device))
         self.assertEqual(
             torch.histogram(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
-                            bins=4, max=3),
+                            bins=4, range=(0, 3))[0],
             torch.tensor([0, 1, 1, 0], dtype=torch.long, device=device))
         # tensor with nan -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
@@ -4294,7 +4293,7 @@ class TestTorchDeviceType(TestCase):
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histogram(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
-                            bins=4, min=5, max=1)
+                            bins=4, range=(5, 1))
 
         # test against numpy.histogram()
         def test_against_np_uniformbins(tensor, bins=100, min=0, max=0, weights=None, density=False):
@@ -4306,10 +4305,10 @@ class TestTorchDeviceType(TestCase):
                 npweights = weights.cpu().numpy()
             else:
                 npweights = None
-            actual = torch.histogram(tensor, bins=bins, weights=weights, min=min, max=max, density=density)
-            expected = torch.from_numpy(np.histogram(nparr, bins=bins,
-                                                     range=(min, max), weights=npweights, density=density)[0])
-            self.assertEqual(actual, expected)
+            actual = torch.histogram(tensor, bins=bins, weights=weights, range=(min, max), density=density)
+            expected = np.histogram(nparr, bins=bins, range=(min, max), weights=npweights, density=density)
+            self.assertEqual(actual[0], torch.from_numpy(expected[0]))
+            self.assertEqual(actual[1], torch.from_numpy(expected[1]))
 
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
             nparr = tensor.cpu().numpy()
@@ -4319,8 +4318,9 @@ class TestTorchDeviceType(TestCase):
             else:
                 npweights = None
             actual = torch.histogram(tensor, bins=bins, weights=weights, density=density)
-            expected = torch.from_numpy(np.histogram(nparr, bins=npbins, weights=npweights, density=density)[0])
-            self.assertEqual(actual, expected, rtol=rtol, atol=atol)
+            expected = np.histogram(nparr, bins=npbins, weights=npweights, density=density)
+            self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
+            self.assertEqual(actual[1], torch.from_numpy(expected[1]))
 
         if TEST_NUMPY:
             test_against_np_uniformbins(torch.tensor([1., 2, 1], device=device))
