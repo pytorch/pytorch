@@ -228,7 +228,7 @@ class Quantizer:
                 return get_module_name_qconfig(parent, fallback_qconfig)
 
         # get qconfig for module_name,
-        # fallback to module_name_regex_qconfig, mdoule_type_qconfig, global_qconfig
+        # fallback to module_name_regex_qconfig, module_type_qconfig, global_qconfig
         # if necessary
         def get_qconfig(module_name):
             module_type_qconfig = \

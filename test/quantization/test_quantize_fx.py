@@ -59,6 +59,7 @@ import itertools
 import operator
 import unittest
 
+@skipIfNofBGEMM
 class TestQuantizeFx(QuantizationTestCase):
     def _get_conv_linear_test_cases(self):
         ''' Returns a list of test cases, with format:
