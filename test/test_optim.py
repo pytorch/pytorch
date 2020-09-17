@@ -16,7 +16,6 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-from torch.testing._internal.common_cuda import tf32_off
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -35,15 +34,6 @@ def drosenbrock(tensor):
 
 class TestOptim(TestCase):
     exact_dtype = True
-
-    def setUp(self):
-        super().setUp()
-        self.tf32_disabler = tf32_off()
-        self.tf32_disabler.__enter__()
-
-    def tearDown(self):
-        self.tf32_disabler.__exit__(None, None, None)
-        super().tearDown()
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
