@@ -47,6 +47,8 @@ endif()
 find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
 list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
 
+find_library(TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib")
+
 # We need manually add dependent libraries when they are not linked into the
 # shared library.
 # TODO: this list might be incomplete.
