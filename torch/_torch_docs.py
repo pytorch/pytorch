@@ -4624,7 +4624,7 @@ add_docstr(torch.quantile,
 quantile(input, q) -> Tensor
 
 Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
-interpolation when the q-th quantile lies between two data.
+interpolation when the q-th quantile lies between two data points.
 
 Args:
     {input}
@@ -4643,16 +4643,14 @@ Example::
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
 :attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
-data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
-beign flattened before computation.
+data points. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
+being flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
-and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
-If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
-
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
-the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
+If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
+except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
+have size 1. Otherwise, the dimensions being reduced are squeezed (see :func:`torch.squeeze`).
+If :attr:`q` is a 1D tensor, an extra dimension is prepended to the output tensor with the same
+size as :attr:`q` which represents the quantiles.
 
 Args:
     {input}
@@ -4681,6 +4679,42 @@ Example::
             [ 0.9206]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
     torch.Size([3, 2, 1])
+""".format(**single_dim_common))
+
+add_docstr(torch.nanquantile,
+           r"""
+nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+
+This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
+computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
+not exist. If all values in a reduced row are ``NaN`` then the quantiles for
+that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`.
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    {dim}
+    {keepdim}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([float('nan'), 1, 2])
+    >>> t.quantile(0.5)
+    tensor(nan)
+    >>> t.nanquantile(0.5)
+    tensor(1.5000)
+
+    >>> t = torch.tensor([[float('nan'), float('nan')], [1, 2]])
+    >>> t
+    tensor([[nan, nan],
+            [1., 2.]])
+    >>> t.nanquantile(0.5, dim=0)
+    tensor([1., 2.])
+    >>> t.nanquantile(0.5, dim=1)
+    tensor([   nan, 1.5000])
 """.format(**single_dim_common))
 
 add_docstr(torch.min,
@@ -8938,6 +8972,44 @@ Arguments:
 
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.kaiser_window, """
+kaiser_window(window_length, periodic=True, beta=12.0, *, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Computes the Kaiser window with window length :attr:`window_length` and shape parameter :attr:`beta`.
+
+Let I_0 be the zeroth order modified Bessel function of the first kind (see :func:`torch.i0`) and
+``N = L - 1`` if :attr:`periodic` is False and ``L`` if :attr:`periodic` is True,
+where ``L`` is the :attr:`window_length`. This function computes:
+
+.. math::
+    out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
+
+Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+The :attr:`periodic` argument is intended as a helpful shorthand
+to produce a periodic window as input to functions like :func:`torch.stft`.
+
+.. note::
+    If :attr:`window_length` is one, then the returned window is a single element tensor containing a one.
+
+""" + r"""
+Args:
+    window_length (int): length of the window.
+    periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
+        If False, returns a symmetric window suitable for use in filter design.
+    beta (float, optional): shape parameter for the window.
+
+Keyword args:
+    {dtype}
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
 
 """.format(**factory_common_args))
 
