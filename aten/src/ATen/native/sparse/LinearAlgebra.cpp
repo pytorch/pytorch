@@ -1,17 +1,29 @@
 #include <ATen/native/sparse/SparseGCSTensorMath.h>
 
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/CPUBlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/core/grad_mode.h>
+#include <functional>
+#include <numeric>
+#include <vector>
+#include <limits>
+#include <ATen/NamedTensorUtils.h>
+
 
 namespace at { namespace native {
   using namespace at::sparse;
 
-  Tensor sparse_gcs_mm_cpu(const SparseTensor& sparse_, Tensor& result, const Tensor& t, const Tensor& dense,
-                         const Scalar& alpha, const Scalar& beta) {
+  Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& t, const Tensor& dense,
+                         Scalar alpha, Scalar beta) {
 
     LongTensor indices = sparse_._indices();
     LongTensor pointers = sparse_.pointers();
@@ -28,21 +40,31 @@ namespace at { namespace native {
         scalar_t cast_beta = beta.to<scalar_t>();
 
         if (cast_beta == 0) {
-          result.zero_();
+          res.zero_();
         } else if (cast_beta == 1) {
-          if (!is_same_tensor(result, t)) {
-            result.copy_(t);
+          if (!is_same_tensor(res, t)) {
+            res.copy_(t);
           }
         } else {
-          at::mul_out(result, t, scalar_to_tensor(beta));
+          at::mul_out(res, t, scalar_to_tensor(beta));
         }
 
         scalar_t * dense_ptr = dense.data_ptr<scalar_t>();
-        scalar_t * result_ptr = result.data_ptr<scalar_t>();
+        scalar_t * res_ptr = res.data_ptr<scalar_t>();
+
+        if (at::hasMKL() && (at::native::is_floating_point(res) ||
+                             at::native::is_complex(res)) &&
+            res.is_contiguous()) {
+
+          at::native::sparse_mm_mkl(res, indices, pointers, values, dense, t, alpha, beta);
+        }
+        else {
+          
+        }
 
     });
 
-    return result;
+    return res;
   }
 
 }}                              // namespace at::native 

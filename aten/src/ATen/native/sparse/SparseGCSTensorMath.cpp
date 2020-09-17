@@ -49,7 +49,7 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
 
-  at::sparse_gcs_mm(sparse_, r, t, dense, alpha, beta);
+  at::sparse_gcs_mm(r, sparse_, t, dense, alpha, beta);
 
 
   return r;
