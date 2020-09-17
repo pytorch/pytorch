@@ -106,6 +106,10 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
+tf32_notes = {
+    "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
+}
+
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -290,6 +294,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
@@ -309,7 +315,7 @@ Example::
     tensor([[  6.6311,   0.0503,   6.9768, -12.0362,  -2.1653],
             [ -4.8185,  -1.4255,  -6.6760,   8.9453,   2.5743],
             [ -3.8202,   4.3691,   1.0943,  -1.1109,   5.4730]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.addcdiv, r"""
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
@@ -417,6 +423,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be multiplied
@@ -435,7 +443,7 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.addmv,
            r"""
@@ -833,6 +841,8 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+{tf32_note}
+
 Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
@@ -850,7 +860,7 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.bernoulli,
            r"""
@@ -991,6 +1001,8 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 .. math::
     \text{out}_i = \text{input}_i \mathbin{@} \text{mat2}_i
 """ + r"""
+{tf32_note}
+
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
@@ -1012,7 +1024,7 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.bitwise_and,
            r"""
@@ -4855,6 +4867,8 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
+{tf32_note}
+
 Args:
     input (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
@@ -4869,7 +4883,7 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.matmul,
            r"""
@@ -4895,6 +4909,8 @@ The behavior depends on the dimensionality of the tensors as follows:
   must be broadcastable).  For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
   tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
+
+{tf32_note}
 
 .. note::
 
@@ -4935,7 +4951,7 @@ Example::
     >>> torch.matmul(tensor1, tensor2).size()
     torch.Size([10, 3, 5])
 
-""".format(**common_args))
+""".format(**common_args, **tf32_notes))
 
 add_docstr(torch.mode,
            r"""
