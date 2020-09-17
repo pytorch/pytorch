@@ -305,5 +305,21 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
       size_t n_binders) override;
 };
 
+// Python Slice class.
+struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
+  explicit PythonSliceClass() {}
+
+  std::string kind() const override {
+    return "Python slice class";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+};
+
 } // namespace jit
 } // namespace torch
