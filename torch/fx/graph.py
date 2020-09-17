@@ -2,7 +2,6 @@ from .node import Node, Argument, Target
 
 from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
-import copy
 import torch
 import keyword
 import re
@@ -68,7 +67,7 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
 
 class Graph:
     def __init__(self):
-        self._nodes : List[Node]  = []
+        self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
 
     @property
