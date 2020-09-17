@@ -81,6 +81,70 @@ Tensor pow(Scalar base, const Tensor& exp) {
   return native::pow_out(result, base, exp);
 }
 
+Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
+  auto dtype = (at::isComplexType(base.scalar_type()) || at::isComplexType(exp.scalar_type())) ?
+               at::kComplexDouble : at::kDouble;
+  TORCH_CHECK(result.scalar_type() == dtype,
+              "output type ", result.scalar_type(), "is not the desired output type ", dtype);
+
+  auto iter = TensorIterator::binary_op(result, base.to(dtype), exp.to(dtype));
+  pow_tensor_tensor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& float_power_out(Tensor& result, const Tensor& base, Scalar exp) {
+  // Numpy compatibility check:
+  TORCH_CHECK(!(isIntegralType(base.scalar_type(), true) &&
+              exp.isIntegral(true) && exp.toLong() < 0),
+              "Integers to negative integer powers are not allowed.");
+
+  auto dtype = (at::isComplexType(base.scalar_type()) || exp.isComplex()) ? at::kComplexDouble : at::kDouble;
+  TORCH_CHECK(result.scalar_type() == dtype,
+              "output type ", result.scalar_type(), "is not the desired output type ", dtype);
+
+  if (exp.isComplex() && (exp.toComplexDouble() == 0.0) ) {
+    result.resize_as_(base).fill_(1);
+  } else if (exp.isComplex() && (exp.toComplexDouble() == 1.0) ) {
+    result.resize_as_(base).fill_(base);
+  } else if (!exp.isComplex() && (exp.toDouble() == 0.0)) {
+    result.resize_as_(base).fill_(1);
+  } else if (!exp.isComplex() && (exp.toDouble() == 1.0)) {
+    result.resize_as_(base).copy_(base);
+  } else {
+    auto iter = TensorIterator::unary_op(result, base.to(dtype));
+    pow_tensor_scalar_stub(iter.device_type(), iter, exp);
+  }
+  return result;
+}
+
+Tensor& float_power_out(Tensor& result, Scalar base, const Tensor& exp) {
+  auto dtype = (base.isComplex() || at::isComplexType(exp.scalar_type())) ? at::kComplexDouble : at::kDouble;
+  if (base.toDouble() == 1.0) {
+    result.resize_as_(exp).fill_(1);
+  } else {
+    native::float_power_out(result, c10::scalar_to_tensor(base, exp.device()), exp.to(dtype));
+  }
+  return result;
+}
+
+Tensor float_power(const Tensor& base, const Tensor& exp) {
+  auto dtype = (at::isComplexType(base.scalar_type()) || at::isComplexType(exp.scalar_type())) ? at::kComplexDouble : at::kDouble;
+  Tensor result = at::empty({0}, base.options().dtype(dtype));
+  return native::float_power_out(result, base, exp);
+}
+
+Tensor float_power(const Tensor& base, Scalar exp) {
+  auto dtype = (at::isComplexType(base.scalar_type()) || exp.isComplex()) ? at::kComplexDouble : at::kDouble;
+  Tensor result = at::empty_like(base, base.options().dtype(dtype), MemoryFormat::Preserve);
+  return native::float_power_out(result, base, exp);
+}
+
+Tensor float_power(Scalar base, const Tensor& exp) {
+  auto dtype = (base.isComplex() || at::isComplexType(exp.scalar_type())) ? at::kComplexDouble : at::kDouble;
+  Tensor result = at::empty_like(exp, exp.options().dtype(dtype), MemoryFormat::Preserve);
+  return native::float_power_out(result, base, exp);
+}
+
 } // namespace native
 
 } // namespace at

@@ -328,6 +328,7 @@ Pointwise Ops
     nextafter
     polygamma
     pow
+    float_power
     rad2deg
     real
     reciprocal

@@ -499,6 +499,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
+   .. automethod:: float_power
    .. automethod:: prod
    .. automethod:: put_
    .. automethod:: qr

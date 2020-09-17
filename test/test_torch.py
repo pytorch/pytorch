@@ -6205,6 +6205,73 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
+    @dtypes(*list(product(torch.testing.get_all_dtypes(),
+                          torch.testing.get_all_dtypes())))
+    def test_float_power(self, device, dtypes):
+        base_dtype = dtypes[0]
+        exp_dtype = dtypes[1]
+        if base_dtype.is_complex or exp_dtype.is_complex:
+            dtype = torch.complex128
+        else:
+            dtype = torch.float64
+
+        base = torch.randint(-100, 100, (30,), device=device).to(dtype=base_dtype)
+        base[0] = base[8] = base[9] = 0
+        exp = torch.randint(-100, 100, (30,), device=device).to(dtype=exp_dtype)
+        exp[0] = exp[4] = exp[6] = 0
+
+        expected = torch.pow(base.to(dtype=dtype), exp.to(dtype=dtype))
+
+        result = torch.float_power(base, exp)
+        self.assertEqual(expected, result)
+
+        result = base.float_power(exp)
+        self.assertEqual(expected, result)
+
+        out = torch.empty_like(base).to(device=device, dtype=dtype)
+        torch.float_power(base, exp, out=out)
+        self.assertEqual(expected, out)
+
+        dtype_scalar_exp = torch.complex128 if base_dtype.is_complex else torch.double
+        dtype_scalar_base = torch.complex128 if exp_dtype.is_complex else torch.double
+
+        for i in range(10):
+            expected_scalar_exp = torch.pow(base.to(dtype=dtype_scalar_exp), i)
+            expected_scalar_base = torch.pow(i, exp.to(dtype=dtype_scalar_base))
+
+            result = torch.float_power(base, i)
+            self.assertEqual(expected_scalar_exp, result)
+
+            result = torch.float_power(i, exp)
+            self.assertEqual(expected_scalar_base, result)
+
+            result = base.float_power(i)
+            self.assertEqual(expected_scalar_exp, result)
+
+            out = torch.empty_like(base).to(device=device, dtype=dtype_scalar_exp)
+            torch.float_power(base, i, out=out)
+            self.assertEqual(expected_scalar_exp, out)
+
+            out = torch.empty_like(exp).to(device=device, dtype=dtype_scalar_base)
+            torch.float_power(i, exp, out=out)
+            self.assertEqual(expected_scalar_base, out)
+
+        for output_type in torch.testing.get_all_dtypes():
+            if (output_type != dtype):
+                out = torch.empty_like(base).to(device=device, dtype=output_type)
+                with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
+                    torch.float_power(base, exp, out=out)
+
+            if (output_type != dtype_scalar_exp):
+                out = torch.empty_like(base).to(device=device, dtype=output_type)
+                with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
+                    torch.float_power(base, 2, out=out)
+
+            if (output_type != dtype_scalar_base):
+                out = torch.empty_like(base).to(device=device, dtype=output_type)
+                with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
+                    torch.float_power(2, exp, out=out)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)

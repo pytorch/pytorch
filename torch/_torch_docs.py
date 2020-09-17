@@ -6338,6 +6338,88 @@ Example::
     tensor([  2.,   4.,   8.,  16.])
 """.format(**common_args))
 
+add_docstr(torch.float_power,
+           r"""
+float_power(input, exponent, *, out=None) -> Tensor
+
+Takes the power of each element in :attr:`input` with :attr:`exponent` and
+returns a tensor with the result.
+
+:attr:`exponent` can be either a single ``float`` number or a `Tensor`
+with the same number of elements as :attr:`input`.
+
+When :attr:`exponent` is a scalar value, the operation applied is:
+
+.. math::
+    \text{out}_i = x_i ^ \text{exponent}
+
+When :attr:`exponent` is a tensor, the operation applied is:
+
+.. math::
+    \text{out}_i = x_i ^ {\text{exponent}_i}
+""" + r"""
+When :attr:`exponent` is a tensor, the shapes of :attr:`input`
+and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+.. note:: This differs from the power function :func:`torch.pow` in that integers, float16, and float32 are
+          promoted to floats with a minimum precision of float64 so that the result is always inexact.
+          The intent is that the function will return a usable result for negative powers and
+          seldom overflow for positive powers.
+
+Args:
+    {input}
+    exponent (float or tensor): the exponent value
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randint(10, (4,))
+    >>> a
+    tensor([6, 4, 7, 1])
+    >>> torch.float_power(a, 2)
+    tensor([36., 16., 49.,  1.])
+
+    >>> a = torch.arange(1, 5)
+    >>> a
+    tensor([ 1,  2,  3,  4])
+    >>> exp = torch.arange(1, 5)
+    >>> exp
+    tensor([ 1,  2,  3,  4])
+    >>> torch.float_power(a, exp)
+    tensor([   1.,    4.,   27.,  256.])
+
+.. function:: float_power(self, exponent, *, out=None) -> Tensor
+
+:attr:`self` is a scalar ``float`` value, and :attr:`exponent` is a tensor.
+The returned tensor :attr:`out` is of the same shape as :attr:`exponent`
+
+The operation applied is:
+
+.. math::
+    \text{{out}}_i = \text{{self}} ^ {{\text{{exponent}}_i}}
+
+.. note:: This differs from the power function :func:`torch.pow` in that integers, float16, and float32 are
+          promoted to floats with a minimum precision of float64 so that the result is always inexact.
+          The intent is that the function will return a usable result for negative powers and
+          seldom overflow for positive powers.
+
+Args:
+    self (float): the scalar base value for the power operation
+    exponent (Tensor): the exponent tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> exp = torch.arange(1, 5)
+    >>> base = 2
+    >>> torch.float_power(base, exp)
+    tensor([  2.,   4.,   8.,  16.])
+""".format(**common_args))
+
 add_docstr(torch.prod,
            r"""
 prod(input, *, dtype=None) -> Tensor
