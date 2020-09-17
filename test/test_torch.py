@@ -7747,10 +7747,18 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def cholesky_test_helper(n, batch_dims, upper):
-            A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
+            # TODO: This is a workaround while there is no support for complex svd
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True, dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True, dtype=real_dtype, device=device)
+                A = A_real + 1j*A_imag
+                A = 0.5*(A + A.transpose(-2, -1).conj())
+            else:
+                A = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True, dtype=dtype, device=device)
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
             self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
@@ -7764,21 +7772,29 @@ class TestTorchDeviceType(TestCase):
     def test_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        A = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=dtype, device=device)
+        # TODO: This is a workaround while there is no support for complex svd
+        if dtype.is_complex:
+            real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            A_real = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
+            A_imag = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
+            A = A_real + 1j*A_imag
+            A = 0.5*(A + A.t().conj())
+        else:
+            A = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
-        B = torch.mm(C, C.t())
+        B = torch.mm(C, C.t().conj())
         self.assertEqual(A, B, atol=1e-5, rtol=0)
 
         # test Upper Triangular
         U = torch.cholesky(A, True)
-        B = torch.mm(U.t(), U)
+        B = torch.mm(U.t().conj(), U)
         self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t())
+        B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
