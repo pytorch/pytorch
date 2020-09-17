@@ -19,6 +19,7 @@ from torch.quantization import (
     convert_static_fx,
     quantize_static_fx,
     quantize_dynamic_fx,
+    prepare_qat_fx,
 )
 
 from torch.quantization import (
@@ -52,6 +53,7 @@ from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
+from torch.testing import FileCheck
 
 import itertools
 import operator
@@ -365,6 +367,44 @@ class TestQuantizeFx(QuantizationTestCase):
         for name, module in m.named_modules():
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
+
+    def test_qat_and_script(self):
+        class TwoLayerLinear(nn.Module):
+            def __init__(self):
+                super(TwoLayerLinear, self).__init__()
+                self.fc1 = nn.Linear(5, 5)
+                self.fc2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.subm = TwoLayerLinear()
+                self.fc = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.subm(x)
+                x = self.fc(x)
+                return x
+
+        model = Model()
+        qengine = torch.backends.quantized.engine
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
+
+        # symbolically trace
+        model = symbolic_trace(model)
+        model = prepare_qat_fx(model, qconfig_dict)
+
+        # ensure scripting works
+        scripted = torch.jit.script(model)
+        # run one round to make sure model runs
+        x = torch.randn(5, 5)
+        scripted(x)
+        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="activation_post_process', 4, exactly=True) \
+                   .run(scripted.graph)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
