@@ -650,7 +650,18 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Mod* v) {
-  throw std::runtime_error("Mod unsupported in LLVM codegen yet");
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateSRem(lhs, rhs);
+  } else {
+    throw malformed_input("llvm_codgen: bad type in Mod", v);
+  }
 }
 
 void LLVMCodeGenImpl::visit(const Max* v) {
