@@ -2900,6 +2900,92 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
+    def test_save_load_checkpoint(self):
+        import pdb; pdb.set_trace()
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        model_withload = TestModel().float().to(device_id)
+        model_withoutload = TestModel().float().to(device_id)
+
+        ddp_withload = DistributedDataParallel(
+            model_withload,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+        ddp_withoutload = DistributedDataParallel(
+            model_withoutload,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+
+        optimizer_withload = optim.SGD(ddp_withload.parameters(), lr=0.001)
+        optimizer_withoutload = optim.SGD(ddp_withoutload.parameters(), lr=0.001)
+
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+	# run the model for 6 iterations, with a checkpoint in the middle
+        for _ in range(3):
+            optimizer_withload.zero_grad()
+            output = ddp_withload(input)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer_withload.step()
+
+        checkpoint_path = self.filename + "_model_checkpoint"
+        if rank == 0:
+            torch.save(ddp_withload.state_dict(), checkpoint_path)
+
+        dist.barrier()
+
+        # zero out parameters and reload them from the state dict
+        for p in ddp_withload.parameters():
+            p = 0
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
+        ddp_withload.load_state_dict(
+            torch.load(checkpoint_path, map_location=map_location))
+
+        for _ in range(3):
+            optimizer_withload.zero_grad()
+            output = ddp_withload(input)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer_withload.step()
+
+
+	# re-run the model with the same inputs for 6 iterations with no checkpoint
+        for _ in range(6):
+            optimizer_withoutload.zero_grad()
+            output = ddp_withoutload(input)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer_withoutload.step()
+
+        for p_withload, p_withoutload in zip(ddp_withload.parameters(), ddp_withoutload.parameters()):
+            self.assertEqual(p_withload, p_withoutload)
+
+
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
