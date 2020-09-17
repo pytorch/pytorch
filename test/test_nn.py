@@ -314,13 +314,17 @@ class TestNN(NNTestCase):
 
     def _forward(self, module, input):
         with freeze_rng_state():
-            return module(input)
+            if isinstance(input, tuple):
+                return module(*input)
+            else:
+                return module(input)
 
     def _backward(self, module, input, output, grad_output, create_graph=False):
         output.backward(grad_output, retain_graph=True, create_graph=create_graph)
-        if input.grad is None:
-            return None
-        return input.grad.data
+        if isinstance(input, tuple):
+            return tuple(map(lambda i: i.grad.data if i.grad is not None else None, input))
+        else:
+            return input.grad.data if input.grad is not None else None
 
     def _forward_criterion(self, criterion, input, target, extra_args=None):
         if extra_args is None:
