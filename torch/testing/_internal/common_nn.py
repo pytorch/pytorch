@@ -3505,6 +3505,7 @@ new_module_tests = [
                                 .dropout(0.0)
                                 .activation(torch::kGELU)''',
         input_size=(2, 3, 4),
+        check_gradgrad=False,
         desc='gelu_activation',
     ),
     dict(
@@ -3514,6 +3515,7 @@ new_module_tests = [
                                 .dim_feedforward(8)
                                 .dropout(0.0)''',
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        check_gradgrad=False,
         desc='relu_activation',
     ),
     dict(
@@ -3524,6 +3526,7 @@ new_module_tests = [
                                 .dropout(0.0)
                                 .activation(torch::kGELU)''',
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        check_gradgrad=False,
         desc='gelu_activation',
     ),
     dict(
