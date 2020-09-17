@@ -48,9 +48,8 @@ std::string tmppath() {
   }
 
   char tmp[L_tmpnam_s];
-	errno_t err;
-
-	err = tmpnam_s(tmp, L_tmpnam_s);
+  errno_t err;
+  err = tmpnam_s(tmp, L_tmpnam_s);
   if (err != 0)
   {
     throw std::system_error(errno, std::system_category());
