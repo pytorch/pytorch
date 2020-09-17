@@ -92,11 +92,14 @@ class CallbackManager {
     bool found_needs_ids = false;
     auto init_handles = [
         scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
-          CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
+          CallbackHandles& handles, RecordFunctionCallbacks& cbs, ObserverContextList& ctx_list) {
       handles.clear();
+
+      size_t num_callbacks = 0;
       for (const auto& cb : cbs) {
         if (cb.first.shouldRun(scope)) {
           handles.push_back(cb.second);
+          ++num_callbacks;
           found_active_cb = true;
           if (cb.first.needsInputs()) {
             found_needs_inputs = true;
@@ -106,10 +109,12 @@ class CallbackManager {
           }
         }
       }
+      // Pre-allocate observer context list with nullptr.
+      ctx_list.resize(num_callbacks);
     };
 
-    init_handles(rec_fn.sorted_active_tls_handles_, sorted_tls_callbacks_);
-    init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
+    init_handles(rec_fn.sorted_active_tls_handles_, sorted_tls_callbacks_, rec_fn.tls_ctx_);
+    init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_, rec_fn.global_ctx_);
     rec_fn.active = found_active_cb;
     rec_fn.needs_inputs = found_needs_inputs;
     if (found_needs_ids && found_active_cb) {
@@ -121,11 +126,13 @@ class CallbackManager {
     mergeRunCallbacks(
         sorted_global_callbacks_,
         rf.sorted_active_global_handles_,
+        rf.global_ctx_,
         /* is_start */ true,
         rf);
     mergeRunCallbacks(
         sorted_tls_callbacks_,
         rf.sorted_active_tls_handles_,
+        rf.tls_ctx_,
         /* is_start */ true,
         rf);
     rf.called_start_callbacks_ = true;
@@ -135,21 +142,30 @@ class CallbackManager {
     mergeRunCallbacks(
         sorted_global_callbacks_,
         rf.sorted_active_global_handles_,
+        rf.global_ctx_,
         /* is_start */ false,
         rf);
     mergeRunCallbacks(
         sorted_tls_callbacks_,
         rf.sorted_active_tls_handles_,
+        rf.tls_ctx_,
         /* is_start */ false,
         rf);
   }
 
  private:
   bool tryRunCallback(
-      const std::function<void(const RecordFunction&)>& fn,
-      RecordFunction& rf) {
+      const RecordFunctionCallback& rfcb,
+      RecordFunction& rf,
+      std::unique_ptr<ObserverContext>& ctx,
+      bool is_start) {
     try {
-      fn(rf);
+      if (is_start) {
+        ctx = rfcb.start()(rf);
+      }
+      else {
+        rfcb.end()(rf, ctx.get());
+      }
       return true;
     } catch (const std::exception &e) {
       LOG(WARNING) << "Exception in RecordFunction callback: "
@@ -165,11 +181,12 @@ class CallbackManager {
   void mergeRunCallbacks(
       const RecordFunctionCallbacks& sorted_callbacks,
       const CallbackHandles& sorted_handles,
+      ObserverContextList& ctx_list,
       bool is_start,
       RecordFunction& rf) {
     size_t num_executed = 0;
     size_t idx_c = 0;
-    for (size_t idx_h = 0; idx_h < sorted_handles.size(); ++idx_h) {
+    for (size_t idx_h = 0; idx_h < sorted_handles.size() && idx_h < ctx_list.size(); ++idx_h) {
       while (idx_c < sorted_callbacks.size() &&
             sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
         ++idx_c;
@@ -178,11 +195,7 @@ class CallbackManager {
         break;
       }
       if (sorted_callbacks[idx_c].second == sorted_handles[idx_h]) {
-        if (is_start) {
-          tryRunCallback(sorted_callbacks[idx_c].first.start(), rf);
-        } else {
-          tryRunCallback(sorted_callbacks[idx_c].first.end(), rf);
-        }
+        tryRunCallback(sorted_callbacks[idx_c].first, rf, ctx_list[idx_h], is_start);
         ++num_executed;
       }
     }
