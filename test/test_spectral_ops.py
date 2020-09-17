@@ -356,11 +356,12 @@ class TestFFT(TestCase):
             x = torch.randn(*shape, device=device, dtype=dtype)
 
             for (forward, backward), norm in product(fft_functions, norm_modes):
-                kwargs = {
-                    's': x.size() if dim is None else [x.size(d) for d in dim],
-                    'dim': dim,
-                    'norm': norm,
-                }
+                if isinstance(dim, tuple):
+                    s = [x.size(d) for d in dim]
+                else:
+                    s = x.size() if dim is None else x.size(dim)
+
+                kwargs = {'s': s, 'dim': dim, 'norm': norm}
                 y = backward(forward(x, **kwargs), **kwargs)
                 # For real input, ifftn(fftn(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
