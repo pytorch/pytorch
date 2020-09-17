@@ -496,9 +496,9 @@ class TestFFT(TestCase):
     @dtypes(torch.float, torch.double)
     def test_fftshift_frequencies(self, device, dtype):
         for n in range(10, 15):
-            sorted_fft_freqs = torch.arange(-(n//2), n-(n//2),
+            sorted_fft_freqs = torch.arange(-(n // 2), n - (n // 2),
                                             device=device, dtype=dtype)
-            x = torch.fft.fftfreq(n, d=1/n, device=device, dtype=dtype)
+            x = torch.fft.fftfreq(n, d=1 / n, device=device, dtype=dtype)
 
             # Test fftshift sorts the fftfreq output
             shifted = torch.fft.fftshift(x)
