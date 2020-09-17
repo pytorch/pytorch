@@ -152,7 +152,9 @@ class TensorPipeAgent : public RpcAgent {
   std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
@@ -175,6 +177,8 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
 
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
@@ -204,7 +208,8 @@ class TensorPipeAgent : public RpcAgent {
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
-      std::function<void(const tensorpipe::Error&)>);
+      std::function<void(const tensorpipe::Error&)>,
+      const tensorpipe::DeviceMap& deviceMap = {});
 
   // Callback of listener accept()
   void onListenerAccepted(

@@ -91,7 +91,9 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // put SendWork into a queue and notify the worker thread
   virtual void enqueueSend(SendWork work);

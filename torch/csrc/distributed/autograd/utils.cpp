@@ -52,7 +52,8 @@ void addSendRpcBackward(
 ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
-    rpc::worker_id_t fromWorkerId) {
+    rpc::worker_id_t fromWorkerId,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   auto autogradContext =
@@ -61,7 +62,7 @@ ContextPtr addRecvRpcBackward(
   if (!tensors.empty() && torch::autograd::compute_requires_grad(tensors)) {
     // Attach the tensors as inputs to the autograd function.
     auto grad_fn = std::make_shared<RecvRpcBackward>(
-        autogradMetadata, autogradContext, fromWorkerId);
+        autogradMetadata, autogradContext, fromWorkerId, deviceMap);
     for (auto& tensor : tensors) {
       if (tensor.requires_grad()) {
         torch::autograd::set_history(tensor, grad_fn);
@@ -102,7 +103,8 @@ Message getMessageWithAutograd(
     const rpc::worker_id_t dstId,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     MessageType msgType,
-    bool forceGradRecording) {
+    bool forceGradRecording,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
@@ -125,7 +127,8 @@ Message getMessageWithAutograd(
       RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_,
       msgType,
       autogradMetadata,
-      std::move(wrappedRpcMsg));
+      std::move(wrappedRpcMsg),
+      deviceMap);
 
   if (tensorsRequireGrad) {
     // Record autograd information for 'send'.
@@ -148,7 +151,8 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
-      forceGradRecording);
+      forceGradRecording,
+      agent.getDeviceMap(dst));
 
   std::shared_ptr<FutureMessage> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will

@@ -13,10 +13,12 @@ using torch::autograd::variable_list;
 RecvRpcBackward::RecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     ContextPtr autogradContext,
-    rpc::worker_id_t fromWorkerId)
+    rpc::worker_id_t fromWorkerId,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap)
     : autogradMetadata_(autogradMetadata),
       autogradContext_(std::move(autogradContext)),
-      fromWorkerId_(fromWorkerId) {}
+      fromWorkerId_(fromWorkerId),
+      deviceMap_(deviceMap) {}
 
 variable_list RecvRpcBackward::apply(variable_list&& grads) {
   std::vector<Variable> outputGrads;
@@ -48,7 +50,10 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
   // Send the gradients over to the appropriate node.
   auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
   auto futureMessage = rpcAgent->send(
-      rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());
+      rpcAgent->getWorkerInfo(fromWorkerId_),
+      std::move(gradCall).toMessage(),
+      rpc::kUnsetRpcTimeout,
+      deviceMap_);
 
   // Record the future in the context.
   sharedContext->addOutstandingRpc(futureMessage);

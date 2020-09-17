@@ -181,11 +181,19 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       RpcCommandBase& rpc = *rpcPtr;
       auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
 
+      // Need to reverse the device map for the backward pass of distributed
+      // autograd.
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+      for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+        reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+      }
+
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
+          rpcWithAutograd.fromWorkerId(),
+          reverseDeviceMap);
 
       wrappedMsgType = rpcWithAutograd.wrappedMessageType();
 
@@ -537,8 +545,9 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         jit::getWriteableTensorData(tensorDataVec[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
-    std::string metadata =
-        deviceIndices.empty() ? "" : std::to_string(deviceIndices[i]);
+    std::string metadata = deviceIndices.empty() || deviceIndices[i] == -1
+        ? ""
+        : std::to_string(deviceIndices[i]);
 
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(

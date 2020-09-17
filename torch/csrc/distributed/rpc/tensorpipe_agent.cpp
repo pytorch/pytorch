@@ -44,6 +44,23 @@ inline void checkCPUTensor(const torch::Tensor& tensor) {
 }
 
 std::vector<c10::DeviceIndex> getDevicesForTensors(
+    const std::vector<torch::Tensor>& tensors,
+    const tensorpipe::DeviceMap& deviceMap) {
+  std::vector<c10::DeviceIndex> deviceIndices;
+  deviceIndices.reserve(tensors.size());
+  for (const auto& tensor : tensors) {
+    const auto deviceIter = deviceMap.find(tensor.device().index());
+    if (deviceIter == deviceMap.end()) {
+      checkCPUTensor(tensor);
+      deviceIndices.push_back(-1);
+    } else {
+      deviceIndices.push_back(deviceIter->second);
+    }
+  }
+  return deviceIndices;
+}
+
+std::vector<c10::DeviceIndex> getDevicesForTensors(
     const std::string& remoteName,
     const std::vector<torch::Tensor>& tensors,
     const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMaps) {
@@ -54,19 +71,7 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
     }
     return {};
   } else {
-    std::vector<c10::DeviceIndex> deviceIndices;
-    deviceIndices.reserve(tensors.size());
-    const auto& deviceMap = workerIter->second;
-    for (const auto& tensor : tensors) {
-      const auto deviceIter = deviceMap.find(tensor.device().index());
-      if (deviceIter == deviceMap.end()) {
-        checkCPUTensor(tensor);
-        deviceIndices.push_back(-1);
-      } else {
-        deviceIndices.push_back(deviceIter->second);
-      }
-    }
-    return deviceIndices;
+    return getDevicesForTensors(tensors, workerIter->second);
   }
 }
 
@@ -442,14 +447,22 @@ void TensorPipeAgent::pipeRead(
 void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
-    std::function<void(const tensorpipe::Error&)> fn) {
+    std::function<void(const tensorpipe::Error&)> fn,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-  const auto& deviceMaps =
-      rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
-  auto devices = getDevicesForTensors(
-      pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
+  std::vector<c10::DeviceIndex> devices;
+  if (deviceMap.empty()) {
+    const auto& deviceMaps =
+        rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+    devices = getDevicesForTensors(
+        pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
+  } else {
+    // If the deviceMap is overridden, use that instead.
+    devices = getDevicesForTensors(rpcMessage.tensors(), deviceMap);
+  }
+
   std::tie(tpMessage, tpBuffers) =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
 
@@ -636,7 +649,8 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   TORCH_CHECK(
       requestMessage.isRequest(),
       "TensorPipeAgent::send(..) is only for sending requests.");
@@ -799,7 +813,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                     std::move(responseMessage));
               }
             });
-      });
+      },
+      deviceMap);
 
   return std::shared_ptr<FutureMessage>(
       futureResponseMessage, &futureResponseMessage->futMsg);
@@ -1084,6 +1099,14 @@ void TensorPipeAgent::markFutureWithError(
       decreaseCallCount(clientActiveCalls_);
     });
   }
+}
+
+tensorpipe::DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) {
+  auto it = opts_.deviceMaps.find(dest.name_);
+  if (it == opts_.deviceMaps.end()) {
+    return {};
+  }
+  return it->second;
 }
 
 } // namespace rpc
