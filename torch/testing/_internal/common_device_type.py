@@ -4,6 +4,7 @@ import inspect
 import runpy
 import threading
 from functools import wraps
+from typing import Any, ClassVar, List 
 import unittest
 import os
 import torch
@@ -163,7 +164,7 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-device_type_test_bases = []
+device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -181,7 +182,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
     return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type = 'generic_device_type'
+    device_type: str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -256,7 +257,7 @@ class DeviceTypeTestBase(TestCase):
                                                      self.device_type, dtype):
                     self.skipTest("Skipped!")
 
-                device_arg = cls.get_primary_device()
+                device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
@@ -265,8 +266,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
-                    args = (device_arg, dtype, op)
-                    args = (arg for arg in args if arg is not None)
+                    args = (arg for arg in (device_arg, dtype, op) if arg is not None) 
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -319,6 +319,10 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    primary_device: ClassVar[str]
+    cudnn_version: ClassVar[typing.Any]
+    no_magma: ClassVar[bool]
+    no_cudnn: ClassVar[bool]
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -418,7 +422,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-        device_type_test_class = type(class_name, (base, empty_class), {})
+        device_type_test_class: Any  = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
