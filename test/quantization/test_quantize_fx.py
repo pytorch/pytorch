@@ -444,28 +444,28 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.linear(x)
                 # global + object_type --> object_type
                 x = self.conv(x)
-                # global + global_type + module_name_regex --> module_name_regex
+                # global + object_type + module_name_regex --> module_name_regex
                 x = self.module_conv1(x)
-                # global + global_type + module_name_regex + module_name --> module_name
+                # global + object_type + module_name_regex + module_name --> module_name
                 x = self.module_conv2(x)
                 return x
 
         m = M().eval()
         m = symbolic_trace(m)
-        qconfig1 = default_qconfig
-        qconfig2 = default_dynamic_qconfig
-        qconfig3 = float16_dynamic_qconfig
-        qconfig4 = default_qat_qconfig
+        global_qconfig = default_qconfig
+        object_type_qconfig = default_dynamic_qconfig
+        module_name_regex_qconfig = float16_dynamic_qconfig
+        module_name_qconfig = default_qat_qconfig
         qconfig_dict = {
-            "": qconfig1,
-            "object_type": [(nn.Conv2d, qconfig2)],
-            "module_name_regex": [("module_conv*", qconfig3)],
-            "module_name": [("module_conv2", qconfig4)]}
+            "": global_qconfig,
+            "object_type": [(nn.Conv2d, object_type_qconfig)],
+            "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
+            "module_name": [("module_conv2", module_name_qconfig)]}
         m = prepare_static_fx(m, qconfig_dict)
-        self.assertEqual(m.linear.qconfig, qconfig1)
-        self.assertEqual(m.conv.qconfig, qconfig2)
-        self.assertEqual(m.module_conv1.qconfig, qconfig3)
-        self.assertEqual(m.module_conv2.qconfig, qconfig4)
+        self.assertEqual(m.linear.qconfig, global_qconfig)
+        self.assertEqual(m.conv.qconfig, object_type_qconfig)
+        self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
+        self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
 
     def test_remove_qconfig(self):

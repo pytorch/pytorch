@@ -273,7 +273,7 @@ class Quantizer:
 
         flattened_qconfig_dict, module_name_regex_qconfig_list = \
             preprocess_qconfig_dict(qconfig_dict)
-        print('flattened:', flattened_qconfig_dict)
+        # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
             self._qat_swap_modules(model)
