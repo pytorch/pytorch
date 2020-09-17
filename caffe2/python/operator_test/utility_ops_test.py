@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from hypothesis import assume, given, settings
 from caffe2.proto import caffe2_pb2
@@ -11,7 +6,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import random
-import six
 
 
 class TestUtilityOps(serial.SerializedTestCase):
@@ -474,7 +468,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             names[len(inputs) - 1],
             ["Y"]
         )
-        with six.assertRaisesRegex(self, RuntimeError, 'Step size cannot be 0'):
+        with self.assertRaisesRegex(RuntimeError, 'Step size cannot be 0'):
             self.assertReferenceChecks(
                 device_option=gc,
                 op=op,

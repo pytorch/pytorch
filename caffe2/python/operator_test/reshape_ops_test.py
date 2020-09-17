@@ -1,9 +1,4 @@
-
-
-
-
 import numpy as np
-import six
 from numpy.testing import assert_array_equal
 
 from caffe2.python import core, workspace

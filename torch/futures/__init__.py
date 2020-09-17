@@ -1,20 +1,12 @@
 from typing import cast, Callable, Generic, List, Type, TypeVar
 
 import torch
-from torch._six import PY37
 
 T = TypeVar("T")
 S = TypeVar("S")
 
-if not PY37:
-    # Workaround for https://github.com/python/typing/issues/449 in Python 3.6
-    from typing import GenericMeta
-
-    class _PyFutureMeta(type(torch._C.Future), GenericMeta):   # type: ignore[misc]
-        pass
-else:
-    class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
-        pass
+class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
+    pass
 
 class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     r"""
