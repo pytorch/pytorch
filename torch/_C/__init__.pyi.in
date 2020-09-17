@@ -340,6 +340,8 @@ def _get_deterministic() -> _bool: ...  # THPModule_deterministic
 def _set_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministic
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
+def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
+def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
