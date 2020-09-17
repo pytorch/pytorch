@@ -1,7 +1,8 @@
 #version 450 core
+#define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly highp uniform image3D uImage;
+layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uImage;
 layout(set = 0, binding = 1) readonly buffer destBuffer {
   float data[];
 }
