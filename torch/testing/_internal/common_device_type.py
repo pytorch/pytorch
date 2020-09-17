@@ -6,10 +6,6 @@ import threading
 import typing
 from typing import Union, List, TypeVar, Tuple, Generic, ClassVar, Iterable, Any, Optional
 from functools import wraps
-<<<<<<< HEAD
-=======
-# how to introduce ClassVar without importing typing?
->>>>>>> 64e5a2953d... fixed 8 typing related exceptions
 import typing
 import unittest
 import os
@@ -170,31 +166,7 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 device_type_test_bases: typing.List[typing.Any] = list()
-=======
-
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
-device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
-
-<<<<<<< HEAD
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
-device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', bound=DeviceTypeTestBase)
-# todo: need to fix
-device_type_test_bases : typing.List[typing.Union[CPUTestBase, CUDATestBase]] = []
->>>>>>> 64e5a2953d... fixed 8 typing related exceptions
-=======
-
-#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
-device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
->>>>>>> 62c2bd3c6f... try to fix the errors
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -296,24 +268,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
-<<<<<<< HEAD
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
-=======
-                    args = (device_arg, dtype, op)
-<<<<<<< HEAD
-<<<<<<< HEAD
-                    args = tuple(arg for arg in args if arg is not None)
-<<<<<<< HEAD
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
-                    # todo: need to fix.
-                    args = (arg for arg in args if arg is not None)
->>>>>>> 64e5a2953d... fixed 8 typing related exceptions
-=======
-                    args = tuple(arg for arg in args if arg is not None)
->>>>>>> 62c2bd3c6f... try to fix the errors
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -472,26 +427,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-<<<<<<< HEAD
-<<<<<<< HEAD
 
         device_type_test_class: typing.Any  = type(class_name, (base, empty_class), {})
-=======
-        device_type_test_class = type(class_name, (base, empty_class), {})
-        #: Tuple(DeviceTypeTestBase, Tuple(), Dict[<nothing>, <nothing>])
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
->>>>>>> 62c2bd3c6f... try to fix the errors
-=======
-
-        # todo: need to fix..
-        # device_type_test_class expects to be either CPUTestBase or CUDATestBase.. How to make it compatible with the right expression?
-        device_type_test_class: type(DeviceTypeTestBase)  = type(class_name, (base, empty_class), {})
->>>>>>> 64e5a2953d... fixed 8 typing related exceptions
-=======
->>>>>>> 62c2bd3c6f... try to fix the errors
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
