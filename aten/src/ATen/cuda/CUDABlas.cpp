@@ -561,7 +561,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
 
 template <>
 void getrfBatched<double>(
-    int _m, int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
@@ -569,7 +569,7 @@ void getrfBatched<double>(
 
 template <>
 void getrfBatched<float>(
-    int _m, int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
@@ -577,7 +577,7 @@ void getrfBatched<float>(
 
 template <>
 void getriBatched<double>(
-    int _m, int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
+    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
       handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
@@ -585,7 +585,7 @@ void getriBatched<double>(
 
 template <>
 void getriBatched<float>(
-    int _m, int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
+    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
       handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));

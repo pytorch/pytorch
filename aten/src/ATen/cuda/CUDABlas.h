@@ -145,7 +145,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 #ifdef CUDART_VERSION
 
 #define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
-  int _m, int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
 
 template<class Dtype>
 void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
@@ -158,7 +158,7 @@ void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
 
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
-  int _m, int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
 
 template<class Dtype>
 void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
