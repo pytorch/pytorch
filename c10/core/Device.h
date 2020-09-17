@@ -17,6 +17,34 @@ namespace c10 {
 /// DeviceIndex directly.
 using DeviceIndex = int16_t;
 
+namespace detail {
+
+  // Are you here because this static assert failed?  Make sure you ensure
+  // that the bitmasking code below is updated accordingly!
+  static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
+  static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+
+  inline uint32_t packDevice(DeviceType type_enum, DeviceIndex index) {
+    int16_t type = static_cast<int16_t>(type_enum);
+    uint16_t type_bit;
+    memcpy(&type_bit, &type, sizeof(uint16_t));
+    uint16_t index_bit;
+    memcpy(&index_bit, &index, sizeof(uint16_t));
+    return (static_cast<uint32_t>(type_bit) << 16) | index_bit;
+  }
+
+  inline std::pair<DeviceType, DeviceIndex> unpackDevice(uint32_t pack) {
+    uint16_t type_bit = pack >> 16;
+    uint16_t index_bit = pack & 0xFFFF;
+    int16_t type;
+    memcpy(&type, &type_bit, sizeof(int16_t));
+    int16_t index;
+    memcpy(&index, &index_bit, sizeof(int16_t));
+    return std::make_pair(static_cast<DeviceType>(type), index);
+  }
+
+}
+
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
@@ -33,7 +61,7 @@ struct C10_API Device final {
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
-      : type_(type), index_(index) {
+      : data_(detail::packDevice(type, index)) {
     validate();
   }
 
@@ -47,7 +75,7 @@ struct C10_API Device final {
   /// Returns true if the type and index of this `Device` matches that of
   /// `other`.
   bool operator==(const Device& other) const noexcept {
-    return this->type_ == other.type_ && this->index_ == other.index_;
+    return this->data_ == other.data_;
   }
 
   /// Returns true if the type or index of this `Device` differs from that of
@@ -58,40 +86,45 @@ struct C10_API Device final {
 
   /// Sets the device index.
   void set_index(DeviceIndex index) {
-    index_ = index;
+    auto p = detail::unpackDevice(data_);
+    data_ = detail::packDevice(p.first, index);
   }
 
   /// Returns the type of device this is.
   DeviceType type() const noexcept {
-    return type_;
+    return detail::unpackDevice(data_).first;
   }
 
   /// Returns the optional index.
   DeviceIndex index() const noexcept {
-    return index_;
+    return detail::unpackDevice(data_).second;
   }
 
   /// Returns true if the device has a non-default index.
   bool has_index() const noexcept {
-    return index_ != -1;
+    return index() != -1;
   }
 
   /// Return true if the device is of CUDA type.
   bool is_cuda() const noexcept {
-    return type_ == DeviceType::CUDA;
+    return type() == DeviceType::CUDA;
   }
 
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
-    return type_ == DeviceType::CPU;
+    return type() == DeviceType::CPU;
   }
 
   /// Same string as returned from operator<<.
   std::string str() const;
 
  private:
-  DeviceType type_;
-  DeviceIndex index_ = -1;
+  // Two adjacent int16_t fields has field access miscompiled on NVCC.
+  // To workaround this problem, we do the packing and unpacking
+  // manually.  FB employees can see
+  //   https://fb.workplace.com/groups/llvm.gcc/permalink/4053565044692080/
+  // for more details
+  uint32_t data_;
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
@@ -110,23 +143,7 @@ namespace std {
 template <>
 struct hash<c10::Device> {
   size_t operator()(c10::Device d) const noexcept {
-    // Are you here because this static assert failed?  Make sure you ensure
-    // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
-    // Note [Hazard when concatenating signed integers]
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // We must first convert to a same-sized unsigned type, before promoting to
-    // the result type, to prevent sign extension when any of the values is -1.
-    // If sign extension occurs, you'll clobber all of the values in the MSB
-    // half of the resulting integer.
-    //
-    // Technically, by C/C++ integer promotion rules, we only need one of the
-    // uint32_t casts to the result type, but we put in both for explicitness's sake.
-    uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint16_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
-    return std::hash<uint32_t>{}(bits);
+    return std::hash<uint32_t>{}(detail::packDevice(d.type(), d.index()));
   }
 };
 } // namespace std

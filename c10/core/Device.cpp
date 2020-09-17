@@ -65,16 +65,17 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(
     std::regex_match(device_string, match, regex),
     "Invalid device string: '", device_string, "'");
-  type_ = parse_type(match[1].str());
+  auto type = parse_type(match[1].str());
   if (match[2].matched) {
     try {
-      index_ = c10::stoi(match[2].str());
+      auto index = c10::stoi(match[2].str());
     } catch (const std::exception &) {
       AT_ERROR(
         "Could not parse device index '", match[2].str(),
         "' in device string '", device_string, "'");
     }
   }
+  data_ = detail::packDevice(type, index);
   validate();
 }
 
