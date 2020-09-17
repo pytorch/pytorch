@@ -159,6 +159,7 @@ namespace jit {
   _(ConstantFoldMultiOp)                    \
   _(ConstantFoldMinMax)                     \
   _(ConstantFoldIntrinsics)                 \
+  _(ConstantFoldCastToBool)                 \
   _(ConstantFoldWithVar)                    \
   _(ConditionalSelectFoldSimple)            \
   _(ConditionalSelectFoldTwoLayer)          \
@@ -212,6 +213,7 @@ namespace jit {
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
+  _(SimplifyReorderForCond)                 \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -432,8 +434,15 @@ namespace jit {
   _(CudaHalfSupport)                       \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
-  _(CudaMaskThreadDim)
-// _(CudaMaskBlockAndThreadDim)
+  _(CudaMaskThreadDim)                     \
+  _(CudaMaskMultiBlockDim)                 \
+  _(CudaMaskBlockAndThreadDim)             \
+  _(CudaMaskMultiDim)                      \
+  _(CudaMaskMultiDimSymbolic)              \
+  _(CudaMaskCompoundInnerLoop)             \
+  _(CudaMaskInnerLoopOneBlock)             \
+  _(CudaMaskMultiDimMultiAxis)             \
+  _(CudaMaskMultiDimMultiLevel)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)

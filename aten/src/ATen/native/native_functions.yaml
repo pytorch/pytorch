@@ -1388,7 +1388,7 @@
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
-    QuantizedCPU: empty_per_channel_affine_quantized_cpu
+    QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1673,6 +1673,15 @@
   use_c10_dispatcher: full
 
 - func: hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
+- func: kaiser_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
+- func: kaiser_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
+- func: kaiser_window.beta(int window_length, bool periodic, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
@@ -4114,19 +4123,19 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_scales
+    QuantizedCPU, QuantizedCUDA: q_per_channel_scales
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_zero_points
+    QuantizedCPU, QuantizedCUDA: q_per_channel_zero_points
 
 - func: q_per_channel_axis(Tensor self) -> int
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_axis
+    QuantizedCPU, QuantizedCUDA: q_per_channel_axis
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: full
