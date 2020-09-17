@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class vTensor final {
+class C10_EXPORT vTensor final {
  public:
   vTensor();
   vTensor(
@@ -195,6 +195,7 @@ class vTensor final {
   api::Resource::Image image_;
   api::Resource::Buffer buffer_;
   api::Resource::Buffer staging_;
+
   mutable struct {
     uint32_t image : 1u;
     uint32_t buffer : 1u;
