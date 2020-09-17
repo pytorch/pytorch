@@ -153,21 +153,27 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  TORCH_CHECK(self.dim() == 2,
-              "2D tensor expected, got ", self.dim(), "D tensor for input");
-  TORCH_CHECK(self.size(0) == vec1.size(0) && self.size(1) == vec2.size(0),
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+
+  Tensor self_;
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
+    result.resize_as_(self_);
+  } else {
+    self_ = self;
+  }
+
+  TORCH_CHECK(self_.dim() == 2,
+              "2D tensor expected, got ", self_.dim(), "D tensor for input");
+  TORCH_CHECK(self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
               "size mismatch",
-              ", input: ", self.sizes(),
+              ", input: ", self_.sizes(),
               ", v1: ", vec1.sizes(),
               ", v2: ", vec2.sizes());
 
-  if (&result != &self) {
-    result.resize_as_(self);
-    result.copy_(self);
-  }
-
   // addr is implemented as a composite op through outer
-  result.copy_(beta * self + alpha * at::outer(vec1, vec2));
+  result.copy_(beta * self_ + alpha * at::outer(vec1, vec2));
   return result;
 }
 
