@@ -149,8 +149,7 @@ Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar b
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  Tensor result = at::addr_out(self, self, vec1, vec2, beta, alpha);
-  return result;
+  return at::addr_out(self, self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
