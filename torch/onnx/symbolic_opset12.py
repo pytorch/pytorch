@@ -71,7 +71,7 @@ def celu(g, self, alpha):
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
@@ -82,7 +82,7 @@ def argmax(g, input, dim, keepdim):
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
