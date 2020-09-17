@@ -107,10 +107,10 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-        
+
         ix = grid_sampler_unnormalize(x, inp_W, align_corners);
         iy = grid_sampler_unnormalize(y, inp_H, align_corners);
-        
+
         index_t ix_nw = static_cast<index_t>(::floor(ix));
         index_t iy_nw = static_cast<index_t>(::floor(iy));
 

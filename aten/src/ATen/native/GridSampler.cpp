@@ -730,9 +730,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
                            bool align_corners) {
 
-  // Use native for bicubic interpolation
-  // TODO: implement bicubic interpolation in AVX2.
-  // i.e. aten/src/Aten/native/cpu/GridSamplerKernel.cpp
+  // Bicubic interpolation only support native method
   if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic) {
     return native::_grid_sampler_2d_cpu_fallback(
       input, grid, interpolation_mode, padding_mode, align_corners);
@@ -781,9 +779,7 @@ std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
                              int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
 
-  // Use native for bicubic interpolation
-  // TODO: implement bicubic interpolation in AVX2.
-  // i.e. aten/src/Aten/native/cpu/GridSamplerKernel.cpp
+  // Bicubic interpolation only support native method
   if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic) {
     return native::_grid_sampler_2d_cpu_fallback_backward(
       grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
