@@ -441,13 +441,25 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
 
         if target is Target.DEFINITION:
+            # I don't think there's actually a good reason to generate
+            # these two cases differently
+            # The first case could probably be improved though- it calls dispatchTypeId(),
+            # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
+            if legacy_dispatcher_tensor_args:
+                tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
+                compute_dk = f"""\
+ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
+   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
+   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
+             else:
+                 compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
             return f"""\
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
-  DispatchKey _dk = options.computeDispatchKey();
+  {compute_dk}
   DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
@@ -655,6 +667,7 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
         arg['kwarg_only'] = True
     if a.name in out_arg_set:
         arg['output'] = True
+        arg['allocate'] = True
         # See Note [name and field_name]
         if a.name in name_to_field_name:
             arg['field_name'] = name_to_field_name[a.name]
