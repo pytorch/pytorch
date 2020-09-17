@@ -6,7 +6,7 @@ namespace jit {
 namespace {
 bool isDropoutRemovable(const Node* node) {
   const auto inputs = node->inputs();
-  TORCH_INTERNAL_ASSERT(inputs.size() == 3);
+  TORCH_INTERNAL_ASSERT(inputs.size() == 4);
   const Value* training_input = inputs[2];
   auto optional_ivalue = toIValue(training_input);
   if (!optional_ivalue) {
