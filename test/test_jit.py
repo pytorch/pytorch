@@ -788,6 +788,13 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), foo(x))
 
+    def test_partial(self):
+        def sum_fun(x: torch.Tensor, dim: int = 0) -> torch.Tensor:
+            return torch.sum(x, dim=dim)
+        scripted_partial = torch.jit.script(functools.partial(sum_fun, dim=-1))
+        x = torch.ones(5)
+        self.assertEqual(scripted_partial(x), sum_fun(x))
+
     def test_layout(self):
         @torch.jit.script
         def check(x, y):
@@ -15049,7 +15056,7 @@ a")
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # 🤷🤷🤷🤷
+            # ����
             return torch.nn.functional.relu(a)
 
     def test_dict_in_not_in(self):
