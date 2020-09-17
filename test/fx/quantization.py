@@ -5,7 +5,6 @@ rely on it for anything!**
 from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
-from torch.fx.symbolic_trace import DelegateBase
 import sys
 import torch
 from torch.nn.utils import fuse_conv_bn_weights
@@ -190,7 +189,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
 
 class Quantizer:
     def __init__(self, mod, patterns=DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
-        self.root = mod.root
+        self.root = mod
         self.graph = mod.graph
         self.quant_ctor = quant_ctor
 
@@ -245,7 +244,6 @@ class Quantizer:
 
     def quantize(self):
         self.quantized_graph = Graph()
-        self.delegate = DelegateBase(self.quantized_graph)
 
         env = {}
         quant_env = {}

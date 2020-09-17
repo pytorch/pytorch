@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
 import datetime
@@ -62,6 +61,16 @@ allow_list = [
     ("aten::atan2", datetime.date(2020, 7, 30)),
     ("aten::copy_", datetime.date(2020, 7, 30)),
     ("aten::sort", datetime.date(2020, 7, 30)),
+    ('aten::_convolution', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_transpose', datetime.date(2020, 10, 15)),
+    ('aten::_convolution_double_backward', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_backward_input', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_backward', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_backward_weight', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_transpose_backward', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_transpose_backward_input', datetime.date(2020, 10, 15)),
+    ('aten::cudnn_convolution_transpose_backward_weight', datetime.date(2020, 10, 15)),
     ("aten::_cudnn_init_dropout_state", datetime.date(2020, 7, 30)),
     ("aten::sparse_coo_tensor", datetime.date(2020, 7, 30)),
     ("aten::_sparse_coo_tensor_with_dims", datetime.date(2020, 7, 30)),
@@ -74,8 +83,18 @@ allow_list = [
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
     # WARNING: overload name here doesn't do anything
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
+    ("aten::linalg_norm", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.ord_str", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.out", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.ord_str_out", datetime.date(2020, 9, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
-    ("__getstate__", datetime.date(2020, 9, 1), "Conv[23]dPackedParams"),
+    ("aten::linspace", datetime.date(2020, 9, 30)),
+    ("aten::linspace.out", datetime.date(2020, 9, 30)),
+    ("aten::logspace", datetime.date(2020, 9, 30)),
+    ("aten::logspace.out", datetime.date(2020, 9, 30)),
+    ("__getstate__", datetime.date(2020, 9, 11), "Conv[23]dPackedParams"),
+    ("aten::_var", datetime.date(2020, 10, 1)),
+    ("aten::_std", datetime.date(2020, 10, 1)),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
 ]
 

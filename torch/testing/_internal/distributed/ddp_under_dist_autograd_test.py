@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from typing import NamedTuple
+import contextlib
 import enum
 import logging
 import os
@@ -218,17 +219,50 @@ class Trainer:
         if self.trainer_group:
             dist.destroy_process_group(self.trainer_group)
 
-    def train_batch(self, mini_batch: FeatureSet):
+    def train_batch(
+        self,
+        mini_batch: FeatureSet,
+        trainer_has_less_inputs: bool,
+        simulate_uneven_inputs: bool,
+    ):
         grads_dict = None
-        with dist_autograd.context() as context_id:
-            output = self.hybrid_module.forward(mini_batch)
-            loss = (output * mini_batch.values).sum()
-            dist_autograd.backward(context_id, [loss])
-            grads_dict = dist_autograd.get_gradients(context_id)
-            gLogger.info(
-                f"Loss is {loss} for mini batch: {mini_batch}. "
-                f"Grads dict has {len(grads_dict)} entries: {grads_dict}"
-            )
+
+        if not simulate_uneven_inputs:
+            input_batches = [mini_batch]
+        else:
+            # Split into microbatches, and trim to simulate uneven inputs.
+            dense_features = mini_batch.dense_features
+            sparse_features = mini_batch.sparse_features
+            values = mini_batch.values
+
+            dense_microbatch = torch.split(dense_features, 2)
+            sparse_microbatch = torch.split(sparse_features, 2)
+            values_microbatch = torch.split(values, 2)
+            batches = []
+            for d, s, v in zip(dense_microbatch, sparse_microbatch, values_microbatch):
+                feature_set = FeatureSet(dense_features=d, sparse_features=s, values=v)
+                batches.append(feature_set)
+
+            if trainer_has_less_inputs:
+                input_batches = batches[: len(batches) // 2]
+                gLogger.info(
+                    f"""Trainer reduced input patches from {len(batches)}
+                    to {len(input_batches)} to simulate uneven inputs."""
+                )
+            else:
+                input_batches = batches
+
+        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
+            for b in input_batches:
+                with dist_autograd.context() as context_id:
+                    output = self.hybrid_module.forward(b)
+                    loss = (output * mini_batch.values).sum()
+                    dist_autograd.backward(context_id, [loss])
+                    grads_dict = dist_autograd.get_gradients(context_id)
+                    gLogger.info(
+                        f"Loss is {loss} for mini batch: {mini_batch}. "
+                        f"Grads dict has {len(grads_dict)} entries: {grads_dict}"
+                    )
         return (
             tuple(grads_dict[param] for param in self.ddp_params),
             tuple(grads_dict[param] for param in self.non_ddp_params),
@@ -328,7 +362,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         gLogger.info(f"Exiting the trainer #{rank}...")
         dist.destroy_process_group()
 
-    def _master_process(self, ddp_mode: DdpMode):
+    def _master_process(self, ddp_mode: DdpMode, simulate_uneven_inputs: bool):
         gLogger.info("Running the master process...")
         dist.init_process_group(
             backend="gloo",
@@ -344,14 +378,20 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             args=(D_DENSE + D_SPARSE, D_HID),
         )
         gLogger.info("Created remote rrefs on master")
-        self.do_test_on_master(ddp_mode, remote_em_rref, remote_net_rref)
+        self.do_test_on_master(ddp_mode, simulate_uneven_inputs, remote_em_rref, remote_net_rref)
 
     def do_test_on_master(
         self,
         ddp_mode: DdpMode,
+        simulate_uneven_inputs: bool,
         remote_em_rref: rpc.RRef,
         remote_net_rref: rpc.RRef,
     ):
+        if simulate_uneven_inputs:
+            gLogger.info(
+                "Running DDP + RPC test with simulating uneven inputs across trainers."
+            )
+
         trainer_rrefs = []
         for rank in TRAINER_RANKS:
             trainer = self.trainer_name(rank)
@@ -366,24 +406,35 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         training_examples = get_training_examples()
         for _ in range(3):
             futures = []
+            num_trainers = len(trainer_rrefs)
             for idx, trainer_rref in enumerate(trainer_rrefs):
+                # Half the trainers will deplete inputs earlier than the rest.
+                trainer_has_less_inputs = (
+                    simulate_uneven_inputs and idx < num_trainers // 2
+                )
                 futures.append(
                     _remote_method_async(
                         Trainer.train_batch,
                         trainer_rref,
                         training_examples[idx],
+                        trainer_has_less_inputs,
+                        simulate_uneven_inputs,
                     )
                 )
 
             for future in futures:
                 ddp_grads, non_ddp_grads = future.wait()
-                for grad in ddp_grads:
-                    self.assertEqual(
-                        grad,
-                        torch.zeros_like(grad),
-                        msg="The grad for any ddp parameter should be zeros, because "
-                        "the training examples' grads cancel each other.",
-                    )
+                # When there are uneven inputs, it is not necessary that grads
+                # cancel each other out, since some trainers contribute 0 grad.
+                if not simulate_uneven_inputs:
+                    for grad in ddp_grads:
+                        self.assertEqual(
+                            grad,
+                            torch.zeros_like(grad),
+                            msg=f"The grad for any ddp parameter should be zeros, because "
+                            "the training examples' grads cancel each other. Received "
+                            f"gradient {grad}",
+                        )
                 for grad in non_ddp_grads:
                     self.assertNotEqual(
                         grad,
@@ -405,9 +456,9 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
         rpc.rpc_sync(self.remote_worker_name(), set_shutdown_signal, args=())
 
-    def _do_test(self, ddp_mode):
+    def _do_test(self, ddp_mode, simulate_uneven_inputs=False):
         if self.rank == MASTER_RANK:
-            self._master_process(ddp_mode)
+            self._master_process(ddp_mode, simulate_uneven_inputs)
         elif self.rank == REMOTE_WORKER_RANK:
             self._remote_worker_process()
         elif self.rank in TRAINER_RANKS:
@@ -427,6 +478,11 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
     @requires_gloo()
     @dist_init
+    def test_backward_ddp_outside_uneven_inputs(self):
+        self._do_test(DdpMode.OUTSIDE, simulate_uneven_inputs=True)
+
+    @requires_gloo()
+    @dist_init
     def test_backward_ddp_inside(self):
         self._do_test(DdpMode.INSIDE)
 
@@ -441,9 +497,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
-    @requires_gloo()
-    @dist_init
-    def test_ddp_comparison(self):
+    def _run_test_ddp_comparision(self, simulate_uneven_inputs=False):
         gLogger.info(f"Running trainer rank: {self.rank}")
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
@@ -459,33 +513,58 @@ class DdpComparisonTest(RpcAgentTestFixture):
         ddp_net = DistributedDataParallel(
             net
         )
-        inputs = torch.rand((3, 2))
+
+        # Odd ranks join early if simulate_uneven_inputs.
+        num_inputs = 1
+        if simulate_uneven_inputs:
+            if self.rank % 2 == 0:
+                num_inputs += 2
+        inputs_list = [torch.rand((3, 2)) for _ in range(num_inputs)]
+
+        if simulate_uneven_inputs:
+            gLogger.info(
+                f"Rank {self.rank} training with {len(inputs_list)} inputs."
+            )
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
-        with dist_autograd.context() as context_id:
-            loss = ddp_net(inputs).norm()
-            dist_autograd.backward(context_id, [loss])
-            grads_dict = dist_autograd.get_gradients(context_id)
-        gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+        with ddp_net.join(simulate_uneven_inputs):
+            for i, inputs in enumerate(inputs_list):
+                with dist_autograd.context() as context_id:
+                    loss = ddp_net(inputs).norm()
+                    dist_autograd.backward(context_id, [loss])
+                    grads_dict = dist_autograd.get_gradients(context_id)
+                gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
 
-        # Use local autograd. The gradients will be in each variable's '.grad'.
-        loss = ddp_net(inputs).norm()
-        loss.backward()
+                # Use local autograd. The gradients will be in each variable's '.grad'.
+                ddp_net.zero_grad()
+                loss = ddp_net(inputs).norm()
+                loss.backward()
 
-        # The gradients should be the same
-        for param in net.parameters():
-            self.assertTrue(
-                param in grads_dict,
-                msg=f"Param {param} is not in dist_auto grad dict {grads_dict}",
-            )
-            self.assertEqual(
-                grads_dict[param],
-                param.grad,
-                msg=f"The grads for param {param} are different under local "
-                f"and dist autograd: {param.grad} \n---\n {grads_dict[param]}",
-            )
+                # The gradients should be the same
+                for param in net.parameters():
+                    self.assertTrue(
+                        param in grads_dict,
+                        msg=f"Param {param} is not in dist_auto grad dict {grads_dict} for iteration {i}",
+                    )
+                    self.assertEqual(
+                        grads_dict[param],
+                        param.grad,
+                        msg=f"The grads for param {param} are different under local "
+                        f"and dist autograd: {param.grad} \n---\n {grads_dict[param]} for iteration {i}",
+                    )
         dist.destroy_process_group()
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_comparison(self):
+        self._run_test_ddp_comparision()
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_comparison_uneven_inputs(self):
+        # test with simulating uneven inputs in DDP
+        self._run_test_ddp_comparision(simulate_uneven_inputs=True)
 
     @requires_gloo()
     @dist_init

@@ -8,7 +8,6 @@
 
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
@@ -1037,6 +1036,69 @@ void testRecordFunction() {
 
   clearCallbacks();
 
+  // START: thread local / global context check callbacks
+  struct TestContext : public ObserverContext {
+    int a{0};
+    std::string b;
+  };
+  ids.clear();
+  { // START: global test
+    const int test_val = 123;
+    const std::string test_str = "test str";
+    addGlobalCallback(RecordFunctionCallback(
+        [test_val, test_str, &ids](const RecordFunction& /* unused */) {
+          auto ctx = std::make_unique<TestContext>();
+          ctx->a = test_val;
+          ctx->b = test_str;
+          ids.push_back(1);
+          return ctx;
+        },
+        [test_val, test_str](
+            const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
+          auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
+          TORCH_CHECK(ctx_ptr != nullptr);
+          TORCH_CHECK(ctx->a == test_val);
+          TORCH_CHECK(ctx->b == test_str);
+        }));
+
+    { RECORD_USER_SCOPE("test"); }
+
+    TORCH_CHECK(ids.size() == 1);
+    TORCH_CHECK(ids[0] == 1);
+    ids.clear();
+  } // END: global test
+  { // START: thread local test
+    auto ctx_th = std::thread([&ids]() {
+      const int test_val = 234;
+      const std::string test_str = "test thread str";
+      addThreadLocalCallback(RecordFunctionCallback(
+          [test_val, test_str, &ids](const RecordFunction& /* unused */) {
+            auto ctx = std::make_unique<TestContext>();
+            ctx->a = test_val;
+            ctx->b = test_str;
+            ids.push_back(2);
+            return ctx;
+          },
+          [test_val, test_str](
+              const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
+            auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
+            TORCH_CHECK(ctx_ptr != nullptr);
+            TORCH_CHECK(ctx->a == test_val);
+            TORCH_CHECK(ctx->b == test_str);
+          }));
+
+      // Will call both global and thread local callbacks.
+      { RECORD_USER_SCOPE("test_thread"); }
+    });
+    ctx_th.join();
+    TORCH_CHECK(ids.size() == 2);
+    TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
+    TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
+    ids.clear();
+  } // END: thread local test
+
+  clearCallbacks();
+
   // test should_run
 
   bool ran = false;
@@ -1204,8 +1266,7 @@ void testFallbackGraphs() {
       [](const std::shared_ptr<Graph>& graph) {
         ProfilingRecord::removeProfileCounter(graph->block());
         auto fallback =
-            createFallbackGraph(graph->block(), graph->inputs(), graph.get());
-        graph->prependNode(fallback);
+            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
         for (size_t i = 0; i < graph->outputs().size(); i++) {
           graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
           fallback->output(i)->copyMetadata(graph->outputs()[i]);
@@ -1251,8 +1312,7 @@ void testFallbackGraphs() {
         auto opt_graph = lastExecutedOptimizedGraph();
         // this is safe to do since we are done profiling
         ProfilingRecord::removeProfileCounter(opt_graph->block());
-        replaceBlockWithFallbackGraph(opt_graph->block());
-        GRAPH_DUMP("replaceBlockWithFallbackGraph:", opt_graph);
+        replaceBlockWithFallbackGraph(opt_graph->block(), opt_graph->inputs());
         auto it = opt_graph->block()->nodes().begin();
         ASSERT_EQ(it->kind(), prim::FallbackGraph);
         auto fallback = *it++;

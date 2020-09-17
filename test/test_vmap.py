@@ -123,7 +123,11 @@ class TestVmapAPI(TestCase):
     def test_unsupported_op_err_msg(self):
         # Unsupported view op
         tensor = torch.randn(2, 3)
-        with self.assertRaisesRegex(RuntimeError, "doesn't work on in-place or view ops"):
+        msg = (
+            "Batching rule not implemented for aten::as_strided; the "
+            "fallback path doesn't work on in-place or view ops"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
             vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
 
         # The fallback doesn't support TensorList
@@ -870,11 +874,12 @@ class TestVmapOperators(Namespace.TestVmapBase):
             if not torch.cuda.is_available():
                 continue
 
-            # Test cross-device scalars
-            number = get_number(getter)
-            self._test_unary(lambda t: op(t, number), getter, device='cuda')
-            self._test_unary(lambda t: op(number, t), getter, device='cuda')
-            self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
+            # TODO(rzou): fix the following
+            # # Test cross-device scalars
+            # number = get_number(getter)
+            # self._test_unary(lambda t: op(t, number), getter, device='cuda')
+            # self._test_unary(lambda t: op(number, t), getter, device='cuda')
+            # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
     def test_bmm(self):
         op = torch.bmm
@@ -924,6 +929,35 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, 2), torch.rand(B0, 3)), in_dims=(None, 0))
         test(vmap(get_op(0), in_dims=(0, 0)),
              (torch.rand(B1, 2), torch.rand(B0, B1, 3)), in_dims=(None, 0))
+
+    def test_conj(self):
+        op = torch.conj
+
+        def run_test(dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+            B0, B1 = 7, 11
+            test = self._vmap_test
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3])])
+            test(op, [get([2, 5, B0, 3])], in_dims=2)
+            test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        # correctness tests
+        run_test(torch.float)
+        run_test(torch.cfloat)
+
+        # check that torch.conj on a non-complex tensor returns the same tensor
+        real_tensor = torch.randn(3)
+        result = vmap(op)(real_tensor)
+        self.assertEqual(result.data_ptr(), real_tensor.data_ptr())
 
     def test_chunk(self):
         test = self._vmap_view_test
@@ -991,6 +1025,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)), in_dims=(0, 1))
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
+
+    def test_is_complex(self):
+        ctensor = torch.randn(3, dtype=torch.cfloat)
+        tensor = torch.randn(3)
+
+        def foo(x):
+            if x.is_complex():
+                return torch.tensor(1)
+            else:
+                return torch.tensor(0)
+
+        self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
+        self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
 
     def test_movedim(self):
         op = torch.movedim
@@ -1394,6 +1441,13 @@ def differentiable(args):
     return tuple(arg for arg in as_tuple(args)
                  if isinstance(arg, torch.Tensor) and arg.requires_grad)
 
+def _get_rand_no_zeros(*args, **kwargs):
+    requires_grad = kwargs.get('requires_grad', False)
+    kwargs_without_requires_grad = kwargs.copy()
+    kwargs_without_requires_grad['requires_grad'] = False
+    result = torch.rand(*args, **kwargs_without_requires_grad)
+    return result.clamp_min_(0.1).requires_grad_(requires_grad)
+
 class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
@@ -1451,17 +1505,117 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._vmap_test(vector_hessian_product, batched_vectors,
                         check_propagates_grad=False)
 
+    def _test_arithmetic(self, op, device, test_grad_grad=True):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        y = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
+        scalar = 3.14
+        self._batched_grad_test(op, (x, y), {})
+        self._batched_grad_test(op, (scalar, y), {})
+        self._batched_grad_test(op, (x, scalar), {})
+
+        if test_grad_grad:
+            self._batched_grad_grad_test(op, (x, y), {})
+
+    def test_add(self, device):
+        self._test_arithmetic(torch.add, device, test_grad_grad=False)
+        self._test_arithmetic(lambda x, y: x + y, device, test_grad_grad=False)
+
+    def test_sub(self, device):
+        self._test_arithmetic(torch.sub, device, test_grad_grad=False)
+        self._test_arithmetic(lambda x, y: x - y, device, test_grad_grad=False)
+
+    def test_mul(self, device):
+        self._test_arithmetic(torch.mul, device)
+        self._test_arithmetic(lambda x, y: x * y, device)
+
+    def test_div(self, device):
+        self._test_arithmetic(torch.div, device)
+        self._test_arithmetic(lambda x, y: x / y, device)
+
+    def test_expand(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+
+        def op(x):
+            return x.expand(5, 5, 2, 3)
+        self._batched_grad_test(op, (x,), {})
+
+    def test_lgamma(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(Tensor.lgamma, (x,), {})
+        self._batched_grad_grad_test(Tensor.lgamma, (x,), {})
+
+    def test_log(self, device):
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(torch.log, (x,), {})
+        self._batched_grad_grad_test(torch.log, (x,), {})
+
+    def test_logsumexp(self, device):
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
+
+        def op(x):
+            return torch.logsumexp(x, -1)
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
+    def test_log1p(self, device):
+        x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(torch.log1p, (x,), {})
+        self._batched_grad_grad_test(torch.log1p, (x,), {})
+
+    def test_permute(self, device):
+        x = torch.randn(2, 3, 5, requires_grad=True, device=device)
+
+        def op(x):
+            return x.permute(2, 0, 1)
+
+        self._batched_grad_test(op, (x,), {})
+
+    def test_reshape(self, device):
+        x = torch.randn(2, 3, 5, requires_grad=True, device=device)
+
+        def op(x):
+            return x.reshape([2 * 3, 5])
+
+        self._batched_grad_test(op, (x,), {})
+
     def test_sigmoid(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
         self._batched_grad_test(Tensor.sigmoid, (x,), {})
         self._batched_grad_grad_test(Tensor.sigmoid, (x,), {})
+
+    def test_stack(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        y = torch.randn(2, 3, device=device, requires_grad=True)
+
+        def op(x, y):
+            return torch.stack([x, y])
+        self._batched_grad_test(op, (x, y), {})
+
+    def test_select(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x[1], (x,), {})
+        self._batched_grad_test(lambda x: x.select(1, 2), (x,), {})
+        self._batched_grad_test(lambda x: x.select(-1, 0), (x,), {})
+
+    def test_slice(self, device):
+        x = torch.randn(2, 3, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x[0:1], (x,), {})
+        self._batched_grad_test(lambda x: x[:, 1:3], (x,), {})
+        self._batched_grad_test(lambda x: x[..., 1:3], (x,), {})
+
+    def test_diagonal(self, device):
+        x = torch.randn(4, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x.diagonal(1, 0, 1), (x,), {})
+
+        x = torch.randn(3, 4, 5, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,), {})
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
     # Excluding ROCM
     except_for='cuda' if TEST_WITH_ROCM else None,
-    only_for=['cuda', 'cpu'],
 )
 
 if __name__ == '__main__':
