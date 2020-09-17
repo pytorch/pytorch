@@ -1,4 +1,3 @@
-from __future__ import print_function
 import pytest
 import torch
 from .fuser import set_fuser

@@ -1,4 +1,3 @@
-from __future__ import print_function, division, absolute_import
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
