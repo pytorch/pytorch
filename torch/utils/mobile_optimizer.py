@@ -13,6 +13,21 @@ class LintCode(Enum):
     DROPOUT = 3
     BATCHNORM = 4
 
+def optimize_for_vulkan(script_module):
+    """
+    Args:
+        script_module: An instance of torch script module with type of ScriptModule.
+    Returns:
+        A new optimized torch script module
+    """
+    if not isinstance(script_module, torch.jit.ScriptModule):
+        raise TypeError(
+            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+
+    optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c)
+    return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
+
+
 def optimize_for_mobile(
         script_module,
         optimization_blocklist: Set[MobileOptimizerType] = None,
