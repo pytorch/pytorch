@@ -1132,17 +1132,28 @@ class TestList(JitTestCase):
             5, dtype=torch.double).cuda(),))
 
     def test_no_element_type_annotation(self):
-        def fn(x):
+        def fn_with_comment(x):
             # type: (torch.Tensor) -> List
             a: List = x.tolist()
             return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            cu = torch.jit.CompilationUnit()
-            cu.define(dedent(inspect.getsource(fn)))
+        def annotated_fn(x: torch.Tensor) -> List:
+            a: List = x.tolist()
+            return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            torch.jit.script(fn)
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(annotated_fn)
 
 
 class TestDict(JitTestCase):
