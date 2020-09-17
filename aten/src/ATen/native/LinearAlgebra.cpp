@@ -1223,6 +1223,8 @@ Tensor matrix_exp(const Tensor& a) {
               "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of squared matrices");
 
+  NoTF32Guard disable_tf32;
+
   if (a.size(-1) == 1) {
     return a.exp();
   }
@@ -1231,6 +1233,7 @@ Tensor matrix_exp(const Tensor& a) {
 }
 
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(
     self, grad,
     [](const Tensor& a) {
