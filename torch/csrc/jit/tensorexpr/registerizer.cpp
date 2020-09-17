@@ -57,6 +57,10 @@ void RegisterizerAnalysis::visit(const Store* v) {
     candidates_[accessHash] = info;
     encounterOrder_.push_back(info);
   }
+
+  if (nested_conditions_ > 0) {
+    info->invalid = true;
+  }
   info->addStore(v, enclosingBlock_, loopCost_);
 }
 
@@ -82,7 +86,39 @@ void RegisterizerAnalysis::visit(const Load* v) {
     encounterOrder_.push_back(info);
   }
 
+  if (nested_conditions_ > 0) {
+    info->invalid = true;
+  }
+
   info->addLoad(v, enclosingBlock_, loopCost_, stmtStack_.front());
+}
+
+void RegisterizerAnalysis::visit(const IfThenElse* v) {
+  v->condition()->accept(this);
+  nested_conditions_++;
+  v->true_value()->accept(this);
+  v->false_value()->accept(this);
+  nested_conditions_--;
+}
+
+void RegisterizerAnalysis::visit(const Cond* v) {
+  const Expr* condition = v->condition();
+  Stmt* true_stmt = v->true_stmt();
+  Stmt* false_stmt = v->false_stmt();
+  condition->accept(this);
+
+  stmtStack_.push_front(v);
+  nested_conditions_++;
+
+  if (true_stmt) {
+    true_stmt->accept(this);
+  }
+  if (false_stmt) {
+    false_stmt->accept(this);
+  }
+
+  nested_conditions_--;
+  stmtStack_.pop_front();
 }
 
 std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
