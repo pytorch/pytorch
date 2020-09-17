@@ -463,6 +463,99 @@ void testReduceRfactorLike() {
   ASSERT_EQ(out[0], 99 * 50);
 }
 
+void testReduceAsProducer() {
+  KernelScope kernel_scope;
+
+  const int M = 10;
+  VarHandle m("m", kInt);
+
+  Buffer a(BufHandle("a", {2, 3}, kFloat));
+  Buffer b(BufHandle("b", {2, 3, m}, kFloat));
+
+  Tensor* c = Reduce("sum", {{2, "l1"}, {3, "n1"}}, Sum(), b, {{m, "m1"}});
+  Tensor* d = Compute(
+      "scale",
+      {{2, "l2"}, {3, "n1"}},
+      [&](const VarHandle& l, const VarHandle& n) {
+        return c->call(l, n) * a(l, n);
+      });
+  LoopNest loop({d});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {a, b, d, m});
+
+  std::vector<float> aData(2 * 3, 0);
+  std::vector<float> bData(2 * 3 * M, 0);
+  std::vector<float> dData(2 * 3, 6.0f);
+
+  for (int i = 0; i < 2 * 3; ++i) {
+    aData[i] = 6 - i;
+    for (int j = 0; j < M; ++j) {
+      bData[i * M + j] = j;
+    }
+  }
+
+  cg.call({aData, bData, dData, M});
+  float expected = 0;
+  for (int i = 0; i < M; ++i) {
+    expected += i;
+  }
+  for (int i = 0; i < 2 * 3; ++i) {
+    ASSERT_EQ(dData[i], expected * (6 - i));
+  }
+}
+
+void testReduceAsConsumer() {
+  KernelScope kernel_scope;
+
+  const int M = 10;
+  VarHandle m("m", kInt);
+
+  Buffer a(BufHandle("a", {2, 3, m}, kFloat));
+  Buffer b(BufHandle("b", {2, 3, m}, kFloat));
+
+  Tensor* c = Compute(
+      "scale",
+      {{2, "l2"}, {3, "n1"}, {m, "m1"}},
+      [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
+        return b(l, n, m) * a(l, n, m);
+      });
+  Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
+  LoopNest loop({d});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {a, b, d, m});
+
+  std::vector<float> aData(2 * 3 * M, 0);
+  std::vector<float> bData(2 * 3 * M, 0);
+  std::vector<float> dData(2, 6.0f);
+
+  for (int i = 0; i < 2 * 3; ++i) {
+    for (int j = 0; j < M; ++j) {
+      bData[i * M + j] = j + 1;
+      aData[i * M + j] = 6 - i;
+    }
+  }
+
+  cg.call({aData, bData, dData, M});
+  float expected[2] = {0, 0};
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      for (int k = 0; k < M; ++k) {
+        expected[i] += (k + 1) * (6 - (i * 3 + j));
+      }
+    }
+  }
+
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_EQ(dData[i], expected[i]);
+  }
+}
+
 void testSplitReduceAxis() {
   KernelScope kernel_scope;
 
@@ -1213,6 +1306,151 @@ void testReduceOverSplitRfactor() {
 # CHECK: Free(tmp_buf);)IR";
   // TODO: rfactor output is not consistent yet, will fix (@nickg).
   // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testReduceInlineReduction() {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Buffer a_buf("a", kFloat, {M});
+  Buffer b_buf("b", kFloat, {M, N, K});
+
+  Tensor* x = Reduce("x", {{M, "m1"}}, Sum(), b_buf, {{N, "n1"}, {K, "k1"}});
+  Tensor* y = Compute("y", {{M, "m2"}}, [&](const VarHandle& m) {
+    return a_buf(m) + x->call(m);
+  });
+
+  PaddedBuffer<float> a_v(M);
+  PaddedBuffer<float> b_v(M, N, K);
+
+  for (int i = 0; i < M; i++) {
+    a_v(i) = i * i;
+  }
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      for (int k = 0; k < K; k++) {
+        b_v(i, j, k) = j * j * k;
+      }
+    }
+  }
+
+  LoopNest l1({y});
+  ASSERT_THROWS_WITH(
+      l1.computeInline(x->buf()), "cannot inline a reduction computation");
+}
+
+void testReduceInlineConsumer() {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Buffer a_buf("a", kFloat, {M, N, K});
+  Buffer b_buf("b", kFloat, {M, N, K});
+
+  Tensor* x = Compute(
+      "x",
+      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return a_buf(m, n, k) + b_buf(m, n, k);
+      });
+  Tensor* y = Reduce("y", {{M, "m2"}}, Sum(), x, {{N, "n2"}, {K, "k2"}});
+
+  PaddedBuffer<float> a_v(M, N, K);
+  PaddedBuffer<float> b_v(M, N, K);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      for (int k = 0; k < K; k++) {
+        a_v(i, j, k) = i * i + k;
+        b_v(i, j, k) = j * j + k;
+      }
+    }
+  }
+
+  LoopNest l1({y});
+  LoopNest l2({y});
+  l2.computeInline(x->buf());
+
+  l1.prepareForCodegen();
+  l2.prepareForCodegen();
+
+  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
+
+  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
+  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+
+  PaddedBuffer<float> y_1(M);
+  PaddedBuffer<float> y_2(M);
+
+  eval1(a_v, b_v, y_1);
+  eval2(a_v, b_v, y_2);
+  ExpectAllNear(y_1, y_2, 1e-5);
+  std::ostringstream oss1, oss2;
+  oss1 << *stmt1;
+  oss2 << *stmt2;
+  ASSERT_GT(oss1.str().size(), oss2.str().size());
+}
+
+void testReduceInlineReducerInternal() {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Buffer a_buf("a", kFloat, {M, N, K});
+  Buffer b_buf("b", kFloat, {M, N, K});
+
+  Tensor* x = Compute(
+      "x",
+      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return a_buf(m, n, k) + b_buf(m, n, k);
+      });
+
+  Reducer minimum(ExprHandle(0.f), [&](ExprHandle a, ExprHandle b) {
+    return Add::make(ExprHandle(1.f), Min::make(a, b, false));
+  });
+  Tensor* y = Reduce("y", {{M, "m2"}}, minimum, x, {{N, "n2"}, {K, "k2"}});
+
+  PaddedBuffer<float> a_v(M, N, K);
+  PaddedBuffer<float> b_v(M, N, K);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      for (int k = 0; k < K; k++) {
+        a_v(i, j, k) = i * i + k;
+        b_v(i, j, k) = j * j + k;
+      }
+    }
+  }
+
+  LoopNest l1({y});
+  LoopNest l2({y});
+  l2.computeInline(x->buf());
+
+  l1.prepareForCodegen();
+  l2.prepareForCodegen();
+
+  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
+
+  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
+  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+
+  PaddedBuffer<float> y_1(M);
+  PaddedBuffer<float> y_2(M);
+
+  eval1(a_v, b_v, y_1);
+  eval2(a_v, b_v, y_2);
+  ExpectAllNear(y_1, y_2, 1e-5);
+  std::ostringstream oss1, oss2;
+  oss1 << *stmt1;
+  oss2 << *stmt2;
+  ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
 } // namespace jit
