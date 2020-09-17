@@ -1082,6 +1082,9 @@ struct to_ir {
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      // Already found an exit statement in this block. Do not parse further
+      if (exit_blocks.count(environment_stack->block()))
+        return;
     }
   }
 
