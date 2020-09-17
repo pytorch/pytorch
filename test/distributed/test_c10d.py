@@ -2945,7 +2945,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
 
-	# run the model for 6 iterations, with a checkpoint in the middle
+        # run the model for 6 iterations, with a checkpoint in the middle
         for _ in range(3):
             optimizer_withload.zero_grad()
             output = ddp_withload(input)
@@ -2974,7 +2974,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             optimizer_withload.step()
 
 
-	# re-run the model with the same inputs for 6 iterations with no checkpoint
+        # re-run the model with the same inputs for 6 iterations with no checkpoint
         for _ in range(6):
             optimizer_withoutload.zero_grad()
             output = ddp_withoutload(input)
