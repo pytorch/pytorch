@@ -8942,6 +8942,44 @@ Returns:
 """.format(**factory_common_args))
 
 
+add_docstr(torch.kaiser_window, """
+kaiser_window(window_length, periodic=True, beta=12.0, *, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Computes the Kaiser window with window length :attr:`window_length` and shape parameter :attr:`beta`.
+
+Let I_0 be the zeroth order modified Bessel function of the first kind (see :func:`torch.i0`) and
+``N = L - 1`` if :attr:`periodic` is False and ``L`` if :attr:`periodic` is True,
+where ``L`` is the :attr:`window_length`. This function computes:
+
+.. math::
+    out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
+
+Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+The :attr:`periodic` argument is intended as a helpful shorthand
+to produce a periodic window as input to functions like :func:`torch.stft`.
+
+.. note::
+    If :attr:`window_length` is one, then the returned window is a single element tensor containing a one.
+
+""" + r"""
+Args:
+    window_length (int): length of the window.
+    periodic (bool, optional): If True, returns a periodic window suitable for use in spectral analysis.
+        If False, returns a symmetric window suitable for use in filter design.
+    beta (float, optional): shape parameter for the window.
+
+Keyword args:
+    {dtype}
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+""".format(**factory_common_args))
+
+
 add_docstr(torch.vander,
            """
 vander(x, N=None, increasing=False) -> Tensor

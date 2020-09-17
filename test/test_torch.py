@@ -8013,17 +8013,17 @@ class TestTorchDeviceType(TestCase):
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self.compare_with_numpy(torch_fn, np_fn, data)
 
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_signal_window_functions(self, device):
-        if not TEST_SCIPY:
-            raise unittest.SkipTest('Scipy not found')
 
-        def test(name):
+        def test(name, kwargs):
             torch_method = getattr(torch, name + '_window')
-            for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
-                    res = torch_method(size, periodic=periodic, device=device)
+                    res = torch_method(size, periodic=periodic, **kwargs, device=device)
                     # NB: scipy always returns a float32 result
-                    ref = torch.from_numpy(signal.get_window(name, size, fftbins=periodic))
+                    ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
                 torch_method(3, layout=torch.sparse_coo)
@@ -8033,7 +8033,10 @@ class TestTorchDeviceType(TestCase):
             self.assertFalse(torch_method(3).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
-            test(window)
+            test(window, kwargs={})
+
+        for num_test in range(50):
+            test('kaiser', kwargs={'beta': random.random() * 30})
 
     def test_broadcast(self, device):
 
