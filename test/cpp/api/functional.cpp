@@ -251,7 +251,7 @@ TEST_F(FunctionalTest, SmoothL1LossBeta) {
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
       F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
-  auto expected = torch::tensor(5.52, torch::kFloat);
+  auto expected = torch::tensor(1.67, torch::kFloat);
   auto s = output.sum();
   s.backward();
   ASSERT_TRUE(output.allclose(expected));
