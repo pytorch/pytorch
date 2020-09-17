@@ -159,7 +159,7 @@ class _ValgrindWrapper(object):
                     num_threads=num_threads, error_log=error_log))
 
             valgrind_invocation = subprocess.run(
-                " ".join([
+                [
                     "valgrind",
                     "--tool=callgrind",
                     f"--callgrind-out-file={callgrind_out}",
@@ -168,12 +168,9 @@ class _ValgrindWrapper(object):
                     "--collect-jumps=yes",
                     "--instr-atstart=yes",
                     "--collect-atstart=no",
-                    '--toggle-collect="callgrind_block()"',
                     "python",
                     script_file,
-                ]),
-                shell=True,
-                env={"PATH": os.getenv("PATH")},
+                ],
                 capture_output=True,
             )
             if valgrind_invocation.returncode:
@@ -224,7 +221,6 @@ class _ValgrindWrapper(object):
 
     @staticmethod
     def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str):
-        indented_stmt = textwrap.indent(stmt, " " * 4)
         return textwrap.dedent(r"""
             import gc
             import os
@@ -289,11 +285,12 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            expr = compile("for _ in range({number}):{stmt}", "<callgrind_src>", "exec")
-            bindings.callgrind_block()
+            bindings.toggle()
+            for _ in range({number}):
+            {indented_stmt}
+            bindings.toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(stmt, " " * 4),
-            stmt=stmt,
             number=number,
             setup=setup,
             warmup_number=min(number, 10),
