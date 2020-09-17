@@ -9,7 +9,7 @@ import functools
 import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
