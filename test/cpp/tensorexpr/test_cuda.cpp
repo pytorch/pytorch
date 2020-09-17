@@ -676,6 +676,7 @@ void testCudaNoThreadIdxWrite_1() {
 }
 
 void testCudaSharedMemReduce_1() {
+  // FIXME: this test is flaky in CI.
   KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
