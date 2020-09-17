@@ -120,11 +120,12 @@ class _ValgrindWrapper(object):
 
     def collect_callgrind(self, stmt: str, setup: str, number: int, num_threads: int):
         self._validate()
-        if number not in self._baseline_cache:
-            self._baseline_cache[(number, num_threads)] = self._invoke(
+        cache_key = (number, num_threads)
+        if cache_key not in self._baseline_cache:
+            self._baseline_cache[cache_key] = self._invoke(
                 stmt="pass", setup="pass", number=number, num_threads=num_threads)
         baseline_inclusive_stats, baseline_exclusive_stats = \
-            self._baseline_cache[(number, num_threads)]
+            self._baseline_cache[cache_key]
 
         stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
             stmt=stmt,
@@ -158,18 +159,22 @@ class _ValgrindWrapper(object):
                     num_threads=num_threads, error_log=error_log))
 
             valgrind_invocation = subprocess.run(
-                [
+                " ".join([
                     "valgrind",
                     "--tool=callgrind",
                     f"--callgrind-out-file={callgrind_out}",
                     "--dump-line=yes",
                     "--dump-instr=yes",
                     "--collect-jumps=yes",
-                    "--instr-atstart=no",
+                    "--instr-atstart=yes",
+                    "--collect-atstart=no",
+                    '--toggle-collect="callgrind_block()"',
                     "python",
                     script_file,
-                ],
-                capture_output=True
+                ]),
+                shell=True,
+                env={"PATH": os.getenv("PATH")},
+                capture_output=True,
             )
             if valgrind_invocation.returncode:
                 error_report = ""
@@ -287,28 +292,23 @@ class _ValgrindWrapper(object):
             if f"PID {{PID}}: python {{__file__}}" not in stat_lines:
                 log_failure("Process does not appear to be running callgrind.")
 
-            bindings.stop()
-            bindings.zero()
-
             gc.collect()
-            gc.freeze()
             time.sleep(0.01)
-
-            bindings.start()
 
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            {maybe_unrolled_stmt}
 
-            gc.collect()
-            time.sleep(0.01)
+            # `callgrind_block` will invoke `stmt_fn`
+            def stmt_fn():
+                for _ in range({number}):
+            {double_indented_stmt}
 
-            # Ensure that cleanup / shutdown code is not instrumented.
-            bindings.stop()
+            bindings.callgrind_block()
         """).strip().format(
-            indented_stmt=indented_stmt,
-            maybe_unrolled_stmt=maybe_unrolled_stmt,
+            indented_stmt=textwrap.indent(stmt, " " * 4),
+            double_indented_stmt=textwrap.indent(stmt, " " * 8),
+            number=number,
             setup=setup,
             warmup_number=min(number, 10),
             num_threads=num_threads,
