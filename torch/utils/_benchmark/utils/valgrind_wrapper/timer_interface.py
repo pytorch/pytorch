@@ -25,20 +25,21 @@ class CallgrindStats(object):
     stmt_exclusive_stats: List[Tuple[int, str]]
 
     def __repr__(self):
-        instruction_count = str(sum(c for c, _ in self.stmt_exclusive_stats))
-        baseline_count = str(sum(c for c, _ in self.baseline_exclusive_stats))
-        count_len = max(len(instruction_count), len(baseline_count))
-
         # Pad lines after the first to align properly.
         stmt = self.stmt.replace('\n', '\n' + ' ' * 9)
         setup = self.setup.replace('\n', '\n' + ' ' * 9)
+        baseline_ct = self._counts(
+            self.baseline_exclusive_stats,include_lookdict_unicode=True)
+        baseline_ct_no_unicode = self._counts(
+            self.baseline_exclusive_stats, include_lookdict_unicode=False)
         lines = [
             f"{super().__repr__()}",
             f"  stmt:  {stmt}",
             f"  setup: {setup}",
             f"  {self.num_threads} thread{'s' if self.num_threads > 1 else ''}",
-            f"  Instructions: {instruction_count.rjust(count_len)}",
-            f"  Baseline:     {baseline_count.rjust(count_len)}",
+            f"{'':>25}All{'':>10}Noisy symbols removed",
+            f"  Instructions: {self.counts():>12}{'':>15}{self.counts(include_lookdict_unicode=False):>12}",
+            f"  Baseline:     {baseline_ct:>12}{'':>15}{baseline_ct_no_unicode:>12}",
         ]
         if not self.built_with_debug_symbols:
             lines.extend([
@@ -54,6 +55,17 @@ class CallgrindStats(object):
         else:
             first, second = self.stmt_exclusive_stats, self.baseline_exclusive_stats
         return self._diff(first, second)
+
+    def counts(self, include_lookdict_unicode=True):
+        return self._counts(self.stmt_exclusive_stats, include_lookdict_unicode)
+
+    @staticmethod
+    def _counts(stats, include_lookdict_unicode):
+        return sum(
+            c for c, fn in stats
+            if include_lookdict_unicode
+            or "dictobject.c:lookdict_unicode" not in fn
+        )
 
     def as_standardized(self):
         def strip_prefix(stats):
@@ -221,6 +233,23 @@ class _ValgrindWrapper(object):
 
     @staticmethod
     def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str):
+        # The naive template looks something like:
+        #   "for _ in range({number}): {stmt}"
+        # However a loop in Python is surprisingly expensive, and significantly
+        # increases the number of background Python instructions. So instead we
+        # partially unroll the loops, with a block size of 100 chosen to keep
+        # the instruction overhead from `range` low while also not ballooning
+        # the size of the generated file.
+        block_size = 100
+        loop_count = number // block_size
+        remainder = number - block_size * loop_count
+        blocked_stmt = ""
+        if loop_count:
+            unrolled_stmts = textwrap.indent("\n".join([stmt] * block_size), " " * 4)
+            blocked_stmt += f"for _ in range({loop_count}):\n{unrolled_stmts}\n"
+        if remainder:
+            blocked_stmt += "\n".join([stmt] * remainder)
+
         return textwrap.dedent(r"""
             import gc
             import os
@@ -286,11 +315,15 @@ class _ValgrindWrapper(object):
             # == User code block ==========================================================
             # =============================================================================
             bindings.toggle()
-            for _ in range({number}):
-            {indented_stmt}
+            {blocked_stmt}
+
+            # Sleep is to allow the interpreter to catch up before we stop collecting in
+            # order to reduce jitter.
+            time.sleep(0.01)
             bindings.toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(stmt, " " * 4),
+            blocked_stmt=blocked_stmt,
             number=number,
             setup=setup,
             warmup_number=min(number, 10),
