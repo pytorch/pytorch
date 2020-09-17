@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional
 from collections import OrderedDict
 import torch
 import torch.nn as nn
+import re
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
@@ -1072,9 +1073,40 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+def _is_observer_script_module(mod, obs_type_name):
+    ''' Returns true if given mod is an instance of Observer script module.
+    '''
+    if isinstance(mod, torch.jit.RecursiveScriptModule):
+        # qualified name looks like '__torch__.torch.quantization.observer.___torch_mangle_2.MinMaxObserver'
+        suffix = mod._c.qualified_name.split('.', 1)[1]
+        name = re.sub(r'\.___torch_mangle_\d+', '', suffix)
+        return obs_type_name in name
+    return False
+
 def _is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize))
+            isinstance(module, torch.quantization.FakeQuantize) or
+            _is_observer_script_module(module, 'torch.quantization.observer'))
+
+def _is_per_channel_obs_instance(module):
+    if isinstance(module, torch.jit.RecursiveScriptModule):
+        return _is_observer_script_module(module, "torch.quantization.observer.PerChannelMinMaxObserver") or\
+            _is_observer_script_module(module, "torch.quantization.observer.MovingAveragePerChannelMinMaxObserver")
+    else:
+        return isinstance(module, torch.quantization.PerChannelMinMaxObserver) or\
+            isinstance(module, torch.quantization.MovingAveragePerChannelMinMaxObserver)
+
+def _is_per_tensor_obs_instance(module):
+    if isinstance(module, torch.jit.RecursiveScriptModule):
+        return _is_observer_script_module(module, "torch.quantization.observer.MinMaxObserver")
+    else:
+        return isinstance(module, torch.quantization.MinMaxObserver)
+
+def _is_hist_obs_instance(module):
+    if isinstance(module, torch.jit.RecursiveScriptModule):
+        return _is_observer_script_module(module, "torch.quantization.observer.MinMaxObserver")
+    else:
+        return isinstance(module, torch.quantization.HistogramObserver)
 
 def _get_attr_names_for_obs(module, name):
     r"""
@@ -1084,14 +1116,13 @@ def _get_attr_names_for_obs(module, name):
     """
     qual_names = {}
     qual_names['eps'] = name + '.eps'
-    if isinstance(module, torch.quantization.PerChannelMinMaxObserver) or\
-       isinstance(module, torch.quantization.MovingAveragePerChannelMinMaxObserver):
+    if _is_per_channel_obs_instance(module):
         qual_names['min_vals'] = name + '.min_vals'
         qual_names['max_vals'] = name + '.max_vals'
-    elif isinstance(module, torch.quantization.MinMaxObserver):
+    elif _is_per_tensor_obs_instance(module):
         qual_names['min_val'] = name + '.min_val'
         qual_names['max_val'] = name + '.max_val'
-    elif isinstance(module, torch.quantization.HistogramObserver):
+    elif _is_hist_obs_instance(module):
         qual_names['histogram'] = name + '.histogram'
         qual_names['min_val'] = name + '.min_val'
         qual_names['max_val'] = name + '.max_val'

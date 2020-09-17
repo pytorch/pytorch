@@ -54,6 +54,7 @@ from torch.testing._internal.common_quantization import (
     default_per_channel_qconfig,
     test_only_eval_fn,
     ConvBnModel,
+    LinearModelWithSubmodule,
 )
 # Annotated models
 from torch.testing._internal.common_quantization import (
@@ -1361,6 +1362,23 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         FileCheck().check("quantized::embedding_bag_byte_rowwise_offsets") \
                    .run(m.graph)
 
+    @skipIfNoFBGEMM
+    def test_save_observer_state_dict(self):
+
+
+        model = LinearModelWithSubmodule().eval()
+        scripted = torch.jit.script(model)
+        prepared = prepare_jit(scripted, {'' : default_qconfig})
+        x = torch.randn(5, 5)
+        prepared(x)
+        obs_dict = torch.quantization.get_observer_state_dict(prepared)
+
+        quant = convert_jit(prepared)
+        prep_2 = prepare_jit(scripted, {'' : default_qconfig})
+        torch.quantization.load_observer_state_dict(prep_2, obs_dict)
+
+        quant_2 = convert_jit(prep_2)
+        self.assertEqual(quant(x), quant_2(x))
 
 class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
