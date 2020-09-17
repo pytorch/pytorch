@@ -15,6 +15,9 @@ static PyObject * THCPStream_pynew(
   PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
+  int current_device;
+  THCudaCheck(cudaGetDevice(&current_device));
+
   int priority = 0;
   uint64_t cdata = 0;
 
