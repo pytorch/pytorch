@@ -10,7 +10,7 @@ from future.utils import viewitems, viewkeys
 from hypothesis import assume, given, settings, HealthCheck
 import hypothesis.strategies as st
 import unittest
-import os
+import threading
 
 from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
@@ -2695,6 +2695,62 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0, 1])
         self.assertReferenceChecks(gc, op, [X], histogram)
 
+
+
+    @settings(max_examples=1, deadline=None)
+    @given(
+        queue_capacity=st.integers(2, 2),
+        time_sleep=st.integers(5, 10),
+        num_blobs_to_equeue=st.integers(1, 1),
+        num_blobs_to_dequeue=st.integers(2, 2),
+    )
+    def test_safe_dequeue_blob__raises_exception_when_hang(
+        self,
+        queue_capacity,
+        time_sleep,
+        num_blobs_to_equeue,
+        num_blobs_to_dequeue,
+    ):
+        r"""
+        Tests SafeDequeueBlobsOp being cancellable.
+
+        Create a queue with the number of BlobsQueue less than the number
+        SafeDequeueBlobs to cause the hanging behavior when running the Net.
+
+        Then call cancel from the previous sleeping thread to ensure exception
+        is raised.
+        """
+
+        def _net_instance_cancel(net_instance):
+            time.sleep(time_sleep)
+            net_instance.cancel()
+
+        init_net = core.Net("init_net")
+        init_net.Proto().type = "deferrable_async_scheduling"
+
+        queue = init_net.CreateBlobsQueue(
+            [],
+            "queue_name",
+            capacity=queue_capacity,
+            num_blobs=num_blobs_to_equeue,
+        )
+
+        ws = workspace.Workspace()
+        ws.create_net(init_net).run()
+
+        net = core.Net("net")
+        net.Proto().type = "deferrable_async_scheduling"
+
+        blobs = net.SafeDequeueBlobs([queue], num_blobs_to_dequeue)
+
+        net_instance = ws.create_net(net)
+
+        t = threading.Thread(target=_net_instance_cancel, args=[net_instance])
+        t.start()
+
+        with self.assertRaises(Exception):
+            net_instance.run()
+            t.join()
 
 
 if __name__ == "__main__":
