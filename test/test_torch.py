@@ -24,6 +24,7 @@ from itertools import product, combinations, combinations_with_replacement, perm
 from functools import reduce
 from functools import partial
 from torch import multiprocessing as mp
+import torch.nn.functional as F
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
 from torch.testing._internal.common_utils import \
@@ -2790,6 +2791,22 @@ class AbstractTestCases:
             g2.set_state(default_state)
             g2_normal = q.normal_(generator=g2)
             self.assertEqual(g1_normal, g2_normal)
+
+        def test_dropout_generator(self):
+            # test default generators are equal
+            self.assertEqual(torch.default_generator, torch.default_generator)
+
+            # tests Generator API
+            # manual_seed, seed, initial_seed, get_state, set_state
+            g1 = torch.Generator()
+            g2 = torch.Generator()
+            g1.manual_seed(12345)
+            g2.manual_seed(12345)
+            self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+            input = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
+
+            self.assertEqual(F.dropout(input, 0.5, training=True, generator=g1),F.dropout(input, 0.5, training=True, generator=g2))
 
         def test_invalid_generator_raises(self):
             self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
