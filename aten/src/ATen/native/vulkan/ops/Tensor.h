@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class C10_EXPORT vTensor final {
+class vTensor final {
  public:
   vTensor();
   vTensor(
