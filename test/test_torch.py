@@ -7780,8 +7780,8 @@ class TestTorchDeviceType(TestCase):
             real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
             A_real = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
             A_imag = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
-            A = A_real + 1j*A_imag
-            A = 0.5*(A + A.t().conj())
+            A = A_real + 1j * A_imag
+            A = 0.5 * (A + A.t().conj())
         else:
             A = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=dtype, device=device)
 
