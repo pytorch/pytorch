@@ -908,6 +908,180 @@ void testLLVMCompareSelectFloatEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
+void testLLVMCompareSelectByteGT() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kByte));
+  Buffer b(BufHandle("B", {N}, kByte));
+  Buffer c(BufHandle("C", {N}, kInt));
+  std::vector<uint8_t> a_buffer(N, 0);
+  std::vector<uint8_t> b_buffer(N, 0);
+  std::vector<int> c_buffer(N, 0);
+  std::vector<int> c_ref(N, 0);
+
+  for (int i = 0; i < N / 2; i++) {
+    a_buffer[i] = 128;
+    c_ref[i] = 1;
+  }
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kGT),
+          mask));
+
+  LLVMCodeGen cg(expr, {a, b, c});
+
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(b_buffer, uint8_t(0));
+  for (int i = 0; i < N; i++) {
+    ASSERT_EQ(c_ref[i], c_buffer[i]);
+  }
+}
+
+void testLLVMCompareSelectByteGE() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kByte));
+  Buffer b(BufHandle("B", {N}, kByte));
+  Buffer c(BufHandle("C", {N}, kInt));
+  std::vector<uint8_t> a_buffer(N, 0);
+  std::vector<uint8_t> b_buffer(N, 0);
+  std::vector<int> c_buffer(N, 0);
+  std::vector<int> c_ref(N, 1);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kGE),
+          mask));
+
+  LLVMCodeGen cg(expr, {a, b, c});
+
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(b_buffer, uint8_t(0));
+  for (int i = 0; i < N; i++) {
+    ASSERT_EQ(c_ref[i], c_buffer[i]);
+  }
+}
+
+void testLLVMCompareSelectByteLT() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kByte));
+  Buffer b(BufHandle("B", {N}, kByte));
+  Buffer c(BufHandle("C", {N}, kInt));
+  std::vector<uint8_t> a_buffer(N, 0);
+  std::vector<uint8_t> b_buffer(N, 128);
+  std::vector<int> c_buffer(N, 0);
+  std::vector<int> c_ref(N, 1);
+
+  for (int i = 0; i < N / 2; i++) {
+    a_buffer[i] = 128;
+    c_ref[i] = 0;
+  }
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kLT),
+          mask));
+
+  LLVMCodeGen cg(expr, {a, b, c});
+
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(b_buffer, uint8_t(128));
+  for (int i = 0; i < N; i++) {
+    ASSERT_EQ(c_ref[i], c_buffer[i]);
+  }
+}
+
+void testLLVMCompareSelectByteLE() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kByte));
+  Buffer b(BufHandle("B", {N}, kByte));
+  Buffer c(BufHandle("C", {N}, kInt));
+  std::vector<uint8_t> a_buffer(N, 0);
+  std::vector<uint8_t> b_buffer(N, 128);
+  std::vector<int> c_buffer(N, 0);
+  std::vector<int> c_ref(N, 1);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kLE),
+          mask));
+
+  LLVMCodeGen cg(expr, {a, b, c});
+
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(b_buffer, uint8_t(128));
+  for (int i = 0; i < N; i++) {
+    ASSERT_EQ(c_ref[i], c_buffer[i]);
+  }
+}
+
 void testLLVMStoreFloat() {
   KernelScope kernel_scope;
   Buffer result(BufHandle("result", {1}, kFloat));
