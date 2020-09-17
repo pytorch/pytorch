@@ -1,12 +1,7 @@
 ## @package context
 # Module caffe2.python.context
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
+import functools
 import threading
-import six
 
 
 class _ContextInfo(object):
@@ -76,7 +71,7 @@ def __exit__(self, *args):
 
 
 def __call__(self, func):
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         with self:
             return func(*args, **kwargs)

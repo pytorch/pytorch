@@ -1,10 +1,5 @@
 # @package parallel_workers
 # Module caffe2.python.parallel_workers
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 '''
 This module provides a python-land multithreaded mechanism for executing work.
@@ -38,7 +33,6 @@ import threading
 import atexit
 import time
 import collections
-import six
 import traceback
 
 from abc import ABCMeta, abstractmethod
@@ -109,8 +103,8 @@ class Metrics(object):
             self._metrics[count_key] += 1
 
 
-class State():
-    six.add_metaclass(ABCMeta)
+class State(object):
+    __metaclass__ = ABCMeta
 
     @abstractmethod
     def start(self):

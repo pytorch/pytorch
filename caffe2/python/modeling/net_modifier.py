@@ -1,13 +1,8 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import abc
-import six
 
 
-class NetModifier(six.with_metaclass(abc.ABCMeta, object)):
+class NetModifier(object):
+    __metaclass__ = abc.ABCMeta
     """
     An abstraction class for supporting modifying a generated net.
     Inherited classes should implement the modify_net method where

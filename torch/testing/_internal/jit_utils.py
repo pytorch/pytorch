@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
-from torch._six import StringIO
 
 import inspect
 import io
@@ -99,7 +98,7 @@ class JitTestCase(TestCase):
         """
         def __enter__(self):
             self.sys_stdout = sys.stdout
-            self.stringio = StringIO()
+            self.stringio = io.StringIO()
             sys.stdout = self.stringio
             return self
 

@@ -1,12 +1,7 @@
 ## @package tags
 # Module caffe2.python.layers.tags
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import six
-
+import functools
 from caffe2.python import context
 
 
@@ -61,7 +56,7 @@ class Tags(object):
     COMPONENT = 'component:'
     PIPELINE = 'pipeline:'
     """
-    Indicate it's a dense layer or dense param init, 
+    Indicate it's a dense layer or dense param init,
     but we use hogwild across multiple trainers
     """
     HOGWILD_DENSE = "hogwild_dense"
@@ -105,7 +100,7 @@ class Tags(object):
         TagContext.current().remove_tags(self.tags)
 
     def __call__(self, func):
-        @six.wraps(func)
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)

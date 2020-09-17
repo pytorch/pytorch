@@ -36,7 +36,6 @@ from jit.test_slice import TestSlice  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.testing import FileCheck
@@ -6433,8 +6432,7 @@ a")
         checkMathWrap("ceil", ret_type="int")
         checkMathWrap("gcd", 2, is_float=False, ret_type="int")
         checkMath("isfinite", 1, ret_type="bool")
-        if PY37:
-            checkMathWrap("remainder", 2)
+        checkMathWrap("remainder", 2)
         checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
 
     def test_if_nest_while(self):
@@ -14749,7 +14747,7 @@ a")
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
-            out = StringIO()
+            out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
 
