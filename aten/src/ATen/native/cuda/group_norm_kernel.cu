@@ -216,9 +216,9 @@ __global__ void GroupNormBackwardSimpleCUDAKernel(
 
 template <typename T>
 __global__ void GroupNormBackwardCUDAKernel(
-    const int64_t C,
-    const int64_t HxW,
-    const int64_t group,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
     const T* dY,
     const T* X,
     const acc_type<T, true>* c1,
