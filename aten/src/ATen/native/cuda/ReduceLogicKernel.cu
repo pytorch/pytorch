@@ -8,22 +8,22 @@
 namespace at { namespace native {
 
 void and_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "and_kernel", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "and_kernel", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
         iter,
         func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return static_cast<scalar_t>(bool(a) && bool(b));
+          return static_cast<scalar_t>(static_cast<uint8_t>(a) && static_cast<uint8_t>(b));
         }),
         static_cast<scalar_t>(true));
   });
 }
 
 void or_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "or_kernel", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "or_kernel", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
         iter,
         func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return static_cast<scalar_t>(bool(a) || bool(b));
+          return static_cast<scalar_t>(static_cast<uint8_t>(a) || static_cast<uint8_t>(b));
         }),
         static_cast<scalar_t>(true));
   });
