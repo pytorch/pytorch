@@ -940,11 +940,15 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
       switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
         HANDLE_INTERP(GridSamplerInterpolation::Bilinear, true);
         HANDLE_INTERP(GridSamplerInterpolation::Nearest, true);
+        case GridSamplerInterpolation::Bicubic:
+          throw std::runtime_error("Bicubic grid sampler is not supported in AVX2");
       }
     } else {
       switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
         HANDLE_INTERP(GridSamplerInterpolation::Bilinear, false);
         HANDLE_INTERP(GridSamplerInterpolation::Nearest, false);
+        case GridSamplerInterpolation::Bicubic:
+          throw std::runtime_error("Bicubic grid sampler is not supported in AVX2");
       }
     }
   });
@@ -1014,11 +1018,15 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
       switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
         HANDLE_INTERP(GridSamplerInterpolation::Bilinear, true);
         HANDLE_INTERP(GridSamplerInterpolation::Nearest, true);
+        case GridSamplerInterpolation::Bicubic:
+          throw std::runtime_error("Bicubic grid sampler is not supported in AVX2");
       }
     } else {
       switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
         HANDLE_INTERP(GridSamplerInterpolation::Bilinear, false);
         HANDLE_INTERP(GridSamplerInterpolation::Nearest, false);
+        case GridSamplerInterpolation::Bicubic:
+          throw std::runtime_error("Bicubic grid sampler is not supported in AVX2");
       }
     }
   });
