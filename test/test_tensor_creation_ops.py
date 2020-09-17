@@ -7,7 +7,7 @@ import torch
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, suppress_warnings,
-     IS_WINDOWS, torch_to_numpy_dtype_dict, slowTest)
+     torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
      onlyCPU, skipCUDAIfNotRocm, largeCUDATensorTest, precisionOverride, dtypes,
