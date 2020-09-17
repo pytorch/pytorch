@@ -959,7 +959,14 @@ class TestTypePromotion(TestCase):
         self.assertNotEqual(result, a.double() - b, exact_dtype=False)
 
     def test_atan2_type_promotion(self, device):
-        dtypes = torch.testing.get_all_fp_dtypes(include_half=True)
+        include_half = False
+        if self.device_type == 'cuda':
+            # Half is not supported on CPU.
+            include_half = True
+
+        dtypes = torch.testing.get_all_fp_dtypes(include_half=include_half, include_bfloat16=False) + \
+            torch.testing.get_all_int_dtypes()
+
         for dtype1, dtype2 in itertools.permutations(dtypes, r=2):
             x = torch.tensor(1, dtype=dtype1, device=device)
             y = torch.tensor(2, dtype=dtype2, device=device)
