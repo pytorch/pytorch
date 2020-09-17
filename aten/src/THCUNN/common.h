@@ -10,7 +10,7 @@ const int CUDA_NUM_THREADS = 1024;
 // CUDA: number of blocks for threads.
 inline int GET_BLOCKS(const int64_t N)
 {
-  // Round up division for positive number
+  // Round up non-overflow division for non-negative number
   auto block_num = N / CUDA_NUM_THREADS + (N % CUDA_NUM_THREADS == 0 ? 0 : 1);
 
   constexpr int64_t max_int = std::numeric_limits<int>::max();
