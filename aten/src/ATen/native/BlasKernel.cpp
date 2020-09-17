@@ -10,8 +10,6 @@ extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
-extern "C" void dger_(int *m, int *n, double *alpha, double *x, int *incx, double *y, int *incy, double *a, int *lda);
-extern "C" void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *y, int *incy, float *a, int *lda);
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -357,89 +355,5 @@ INSTANTIATE_VDOT_IMPL(c10::complex<float>);
 INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 
 #undef INSTANTIATE_DOT_IMPL
-
-namespace blas_impl {
-
-// this is the fallback implementation of sger/dger routines
-// sger is to accelerate float inputs, while dger is for double inputs
-template <typename scalar_t>
-void addr_naive(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda) {
-  for (int64_t j = 0; j < n; j++) {
-    scalar_t* column_ = a + j * lda;
-    scalar_t z = alpha * y[j * incy];
-    for (int64_t i = 0; i < m; i++)
-      column_[i] += z * x[i * incx];
-  }
-}
-
-// blas routines sger and dger can only handle the float and double numbers
-// return false for other dtypes so that fallback implementation could be triggered
-template <typename scalar_t>
-bool addr_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
-  return false;
-}
-
-template <typename scalar_t>
-void addr_fast_path(int m, int n, scalar_t alpha, scalar_t *x, int incx, scalar_t *y, int incy, scalar_t *a, int lda) {
-  TORCH_INTERNAL_ASSERT(
-    false,
-    "addr_fast_path shouldn't be called for this configuration"
-  );
-}
-
-#if AT_BUILD_WITH_BLAS()
-
-template <>
-bool addr_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
-  return (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
-         (incx > 0) && (incx <= INT_MAX) && (incy > 0) && (incy <= INT_MAX);
-}
-
-template <>
-bool addr_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
-  return addr_use_fast_path<float>(m, n, lda, incx, incy);
-}
-
-template <>
-void addr_fast_path(int m, int n, float alpha, float *x, int incx, float *y, int incy, float *a, int lda) {
-  sger_(&m, &n, &alpha, x, &incx, y, &incy, a, &lda);
-}
-
-template <>
-void addr_fast_path(int m, int n, double alpha, double *x, int incx, double *y, int incy, double *a, int lda) {
-  dger_(&m, &n, &alpha, x, &incx, y, &incy, a, &lda);
-}
-#endif
-}
-
-template<typename scalar_t>
-void addr_impl(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda) {
-  if (n == 1) {
-    lda = m;
-  }
-  if (blas_impl::addr_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
-    TORCH_CHECK(
-      lda >= std::max<int64_t>(1L, m),
-      "lda should be at least max(1, ", m, "), but have ", lda
-    );
-    int i_m = static_cast<int32_t>(m);
-    int i_n = static_cast<int32_t>(n);
-    int i_lda = static_cast<int32_t>(lda);
-    int i_incx = static_cast<int32_t>(incx);
-    int i_incy = static_cast<int32_t>(incy);
-    blas_impl::addr_fast_path<scalar_t>(i_m, i_n, alpha, x, i_incx, y, i_incy, a, i_lda);
-  } else {
-    blas_impl::addr_naive(m, n, alpha, x, incx, y, incy, a, lda);
-  }
-}
-
-#define INSTANTIATE_ADDR_IMPL(scalar_t)  \
-  template void addr_impl<scalar_t>( \
-      int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda);
-INSTANTIATE_ADDR_IMPL(float);
-INSTANTIATE_ADDR_IMPL(double);
-INSTANTIATE_ADDR_IMPL(c10::Half);
-INSTANTIATE_ADDR_IMPL(c10::BFloat16);
-#undef INSTANTIATE_ADDR_IMPL
 
 }} // namespace at::native

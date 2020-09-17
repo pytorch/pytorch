@@ -14,9 +14,6 @@ scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t inc
 template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
-template<typename scalar_t>
-void addr_impl(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda);
-
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
 }
@@ -138,81 +135,6 @@ Tensor dot(const Tensor &self, const Tensor &other){
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
-}
-
-// NOTE: this is to port the below LDA_COND macro from the TH codebase
-//   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
-// lda_cond function in this file is not used
-// because it requires `lda > std::max<int64_t>(1L, m)`
-// instead of `>=` as defined in the TH implementation
-// this function is to check whether the input `m` and `n`
-// could be used as the row and column numbers for the blas functions
-constexpr inline bool lda_cond_addr(int64_t m, int64_t n, int64_t lda) {
-  return n == 1 || lda >= std::max<int64_t>(1L, m);
-}
-
-template<typename scalar_t>
-Tensor &addr_impl_cpu(Tensor &result, const Tensor &self,
-                    const Tensor& vec1, const Tensor& vec2,
-                    scalar_t beta, scalar_t alpha) {
-  if (&result != &self) {
-    at::native::resize_as_(result, self);
-    // if beta is zero, no need to copy the input tensor to result
-    if (beta == 0.0) {
-      at::native::zero_(result);
-    } else {
-      at::native::copy_(result, self);
-    }
-  }
-
-  if (beta == 0.0) {
-    at::native::zero_(result);
-  } else if (beta != 1.0) {
-    at::native::mul_(result, beta);
-  }
-
-  // prepare the parameters following the style of blas level 2 routines
-  // sger and dger to calculate the outer product of vec1 and vec2
-  if (result.stride(0) == 1 &&
-    lda_cond_addr(vec1.size(0), vec2.size(0), result.stride(1))) {
-    addr_impl<scalar_t>(
-      vec1.size(0), vec2.size(0),
-      alpha, vec1.data_ptr<scalar_t>(), vec1.stride(0),
-      vec2.data_ptr<scalar_t>(), vec2.stride(0),
-      result.data_ptr<scalar_t>(), result.stride(1)
-    );
-  } else if (result.stride(1) == 1 &&
-    lda_cond_addr(vec2.size(0), vec1.size(0), result.stride(0))) {
-    addr_impl<scalar_t>(
-      vec2.size(0), vec1.size(0),
-      alpha, vec2.data_ptr<scalar_t>(), vec2.stride(0),
-      vec1.data_ptr<scalar_t>(), vec1.stride(0),
-      result.data_ptr<scalar_t>(), result.stride(0)
-    );
-  } else {
-    Tensor cr = result.clone();
-    addr_impl<scalar_t>(
-      vec2.size(0), vec1.size(0),
-      alpha, vec2.data_ptr<scalar_t>(), vec2.stride(0),
-      vec1.data_ptr<scalar_t>(), vec1.stride(0),
-      cr.data_ptr<scalar_t>(), cr.stride(0)
-    );
-    result.set_(cr);
-  }
-  return result;
-}
-
-Tensor& addr_out_cpu(Tensor &result, const Tensor& self,
-                      const Tensor& vec1, const Tensor& vec2,
-                      Scalar beta, Scalar alpha) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "addr_out_cpu", [&] {
-    addr_impl_cpu<scalar_t>(
-      result, self,
-      vec1, vec2,
-      beta.to<scalar_t>(), alpha.to<scalar_t>()
-    );
-  });
-  return result;
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){

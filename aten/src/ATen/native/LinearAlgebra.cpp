@@ -154,18 +154,6 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
-
-  TORCH_CHECK(result.device() == self.device() &&
-              result.device() == vec1.device() &&
-              result.device() == vec2.device(),
-              "Expected all tensors to be on the same device. Found: ",
-              result.device(), ", ", self.device(), ", ",
-              vec1.device(), " and ", vec2.device());
   TORCH_CHECK(self.dim() == 2,
               "2D tensor expected, got ", self.dim(), "D tensor for input");
   TORCH_CHECK(self.size(0) == vec1.size(0) && self.size(1) == vec2.size(0),
@@ -174,33 +162,46 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
               ", v1: ", vec1.sizes(),
               ", v2: ", vec2.sizes());
 
-  at::addr_out(result, b_self, vec1, vec2, beta, alpha);
+  if (&result != &self) {
+    result.resize_as_(self);
+    result.copy_(self);
+  }
+
+  // addr is implemented as a composite op through outer
+  result.copy_(beta * self + alpha * at::outer(vec1, vec2));
   return result;
 }
 
 Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
-    result.resize_({ self.size(0), vec2.size(0) });
-  }
-  // resize_ does the "broadcasting", don't need to broadcast again.
-  return at::addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+  TORCH_WARN("torch.ger is deprecated and may be removed, "
+             "please use torch.outer instead.");
+  return at::outer_out(result, self, vec2);
 }
 
+// torch.ger, alias for torch.outer
 Tensor ger(const Tensor& self, const Tensor& vec2) {
   Tensor result = at::empty({0}, self.options());
   at::ger_out(result, self, vec2);
   return result;
 }
 
-// torch.outer, alias for torch.ger
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
-  return at::ger_out(result, self, vec2);
+  check_1d(self, "self", "outer");
+  check_1d(vec2, "vec2", "outer");
+
+  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
+    result.resize_({ self.size(0), vec2.size(0) });
+  }
+
+  // torch.outer is implemented as a composite op using reshape and mul
+  result.copy_(self.reshape({self.size(0), 1}) * vec2);
+  return result;
 }
 
 Tensor outer(const Tensor& self, const Tensor& vec2) {
-  return self.ger(vec2);
+  Tensor result = at::empty({0}, self.options());
+  at::outer_out(result, self, vec2);
+  return result;
 }
 
 static void addmm_impl_cpu_(
