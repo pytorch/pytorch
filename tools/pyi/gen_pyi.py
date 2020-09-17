@@ -560,8 +560,8 @@ def gen_pyi(declarations_path, out):
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
-        'contiguous': ['def contiguous(self) -> Tensor: ...'],
-        'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
+        'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
+        'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
@@ -680,6 +680,7 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

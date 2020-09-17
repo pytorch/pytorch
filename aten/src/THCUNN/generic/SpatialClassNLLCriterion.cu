@@ -55,6 +55,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index)
 {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   at::globalContext().alertNotDeterministic("SpatialClassNLLCriterion_updateOutput");
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)

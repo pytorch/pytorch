@@ -496,7 +496,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // rebuilt_param_indices_ based on gradient arriving order, and then at the
   // end of finalize_backward(), buckets will be rebuilt based on
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
-  // and intialized. Also we only need to dump tensors and parameter indcies of
+  // and initialized. Also we only need to dump tensors and parameter indcies of
   // one replica.
   push_rebuilt_params(index);
 
@@ -843,24 +843,30 @@ void Reducer::initialize_bucket_views(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views_out.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
+            contents.as_strided(v.sizes(), v.strides(), offset));
+      } else {
+        replica.bucket_views_out.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
       }
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views_out.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
-      // If calling from `initialize_buckets`, push_back to views_in too.
       if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
-            contents.as_strided(v.sizes(), v.strides(), offset));
+            contents.narrow(0, offset, length).view(v.sizes()));
+      } else {
+        replica.bucket_views_out.push_back(
+            contents.narrow(0, offset, length).view(v.sizes()));
       }
+    }
+    // If `initialize_bucket_views` was called from `initialize_buckets`,
+    // by default `bucket_views_out` and `bucket_views_in` are
+    // essentially the same thing.
+    if (populate_bucket_views_in) {
+      replica.bucket_views_out = replica.bucket_views_in;
     }
   }
 }
@@ -1281,12 +1287,6 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-// This is equivalent to take_tensors but returns indices into the
-// tensor list argument for bucket assignment. Also, it is aware
-// of device placement and will not allow buckets to span devices.
-// The index of tensors[i] assigned to bucket is tensor_indices[i],
-// when tensor_indices is empty, the index of tensors[i] assigned to
-// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
