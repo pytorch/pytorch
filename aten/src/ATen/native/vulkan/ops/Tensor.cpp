@@ -41,7 +41,8 @@ api::Resource::Buffer allocate_staging(
             std::multiplies<int64_t>()),
         // Usage
         {
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VMA_MEMORY_USAGE_CPU_ONLY,
         },
       });
@@ -67,12 +68,9 @@ api::Resource::Buffer allocate_buffer(
 
   VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-  if (can_be_image(sizes)) {
-    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-  }
-
   if (!context->gpu().adapter->has_unified_memory()) {
-    usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+             VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
 
   return context->resource().pool.allocate(
@@ -139,8 +137,7 @@ api::Resource::Image allocate_image(
         },
         // Usage
         {
-          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-            VK_IMAGE_USAGE_SAMPLED_BIT |
+          VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_STORAGE_BIT,
           VMA_MEMORY_USAGE_GPU_ONLY,
         },
@@ -297,7 +294,7 @@ api::Resource::Memory& vTensor::wait_impl(const Access::Flags access) {
   api::Resource::Buffer& buffer = staging_ ? staging_ : buffer_;
   TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
 
-  return buffer_.memory;
+  return buffer.memory;
 }
 
 VkBuffer vTensor::buffer() const & {
@@ -373,13 +370,16 @@ VkImage vTensor::image(const Access::Flags access) & {
 }
 
 void vTensor::enforce_invariants() const {
+  // std::cout << "dirty_.image: " << dirty_.image << std::endl;
+  // std::cout << "dirty_.buffer: " << dirty_.buffer << std::endl;
+  // std::cout << "dirty_.staging: " << dirty_.staging << std::endl;
   TORCH_INTERNAL_ASSERT(!context_ || (context_ && buffer_));
   TORCH_INTERNAL_ASSERT(!dirty_.image || (image_ && dirty_.image));
   TORCH_INTERNAL_ASSERT(!dirty_.buffer || (buffer_ && dirty_.buffer));
   TORCH_INTERNAL_ASSERT(!dirty_.staging || (staging_ && dirty_.staging));
   TORCH_INTERNAL_ASSERT(
       !(dirty_.image || dirty_.buffer || dirty_.staging) ||
-      !(dirty_.image ^ dirty_.buffer ^ dirty_.staging));
+      (dirty_.image ^ dirty_.buffer ^ dirty_.staging));
 }
 
 void verify(const TensorOptions& options) {
