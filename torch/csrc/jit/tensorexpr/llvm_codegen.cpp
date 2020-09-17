@@ -1257,6 +1257,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #endif
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
         SIMD_UNARY_MATH_CASE(kLog, "logf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kLog1p, "log1pf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kLog2, "log2f", FloatTy_)
         SIMD_UNARY_MATH_CASE(kExp, "expf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
@@ -1401,6 +1402,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #endif
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kLog, "log", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kLog1p, "log1p", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kLog2, "log2", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kExp, "exp", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
