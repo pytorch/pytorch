@@ -2,6 +2,12 @@ import sys
 
 import torch
 from torch._C import _add_docstr, _fft  # type: ignore
+from torch._torch_docs import factory_common_args
+
+__all__ = ['fft', 'ifft', 'fftn', 'ifftn',
+           'rfft', 'irfft', 'rfftn', 'irfftn', 'hfft', 'ihfft',
+           'fftfreq', 'rfftfreq', 'fftshift', 'ifftshift',
+           'Tensor']
 
 Tensor = torch.Tensor
 
@@ -543,3 +549,178 @@ Example:
     tensor([ 2.0000+-0.0000j, -0.5000-0.6882j, -0.5000-0.1625j, -0.5000+0.1625j,
         -0.5000+0.6882j])
 """)
+
+fftfreq = _add_docstr(_fft.fft_fftfreq, r"""
+fftfreq(n, d=1.0, *, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns Discrete Fourier Transform sample frequencies for signal size :attr:`n`.
+
+Note:
+
+    By convention, the FFT returns positive frequency terms first, followed by
+    the negative frequencies in reverse order, so that ``f[-i]`` in python
+    gives the negative frequency terms. For an FFT of length :attr:`n` and
+    with inputs spaced in length unit :attr:`d`, the frequencies are::
+
+        f = [0, 1, ..., (n - 1) // 2, -(n // 2), ..., -1] / (d * n)
+
+Note:
+    For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
+    either negative or positive. :func:`~torch.fft.fftfreq` follows NumPy's
+    convention of taking it to be negative.
+
+
+Args:
+    n (int): the FFT length
+    d (float, optional): The sampling length scale.
+        The unit length (or time) between individual samples in the FFT input.
+        If given, the frequencies are given in physical units of 1/unit.
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Example:
+
+    >>> import torch.fft
+    >>> torch.fft.fftfreq(5)
+    tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
+
+    In this example, the Nyquist frequency at ``f[2]`` is given as negative:
+    >>> torch.fft.fftfreq(4)
+    tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
+ 
+""".format(**factory_common_args))
+
+rfftfreq = _add_docstr(_fft.fft_rfftfreq, r"""
+rfftfreq(n, d=1.0, *, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+
+Returns sample frequencies for :func:`~torch.fft.rfft` with signal size :attr:`n`.
+
+Note:
+
+    :func:`~torch.fft.rfft` returns Hermitian one-sided output. So, only the
+    positive frequency terms are included. For a real FFT of length :attr:`n`
+    and with inputs spaced in length unit :attr:`d`, the frequencies are::
+
+        f = torch.arange((n + 1) // 2) / (d * n)
+
+Note:
+    For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
+    either negative or positive. Unlike :func:`~torch.fft.fftfreq`,
+    :func:`~torch.fft.rfftfreq` always considers it to be positive.
+
+
+Args:
+    n (int): the real FFT length
+    d (float, optional): The sampling length scale.
+        The unit length (or time) between individual samples in the FFT input.
+        If given, the frequencies are given in physical units of 1/unit.
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Example:
+
+    >>> import torch.fft
+    >>> torch.fft.rfftfreq(5)
+    tensor([ 0.0000,  0.2000,  0.4000])
+
+    >>> torch.fft.rfftfreq(4)
+    tensor([ 0.0000,  0.2500, 0.5000])
+
+    Compared to the output from :func:`~torch.fft.fftfreq`, we see that the
+    Nyquist frequency at ``f[2]`` has changed sign:
+    >>> torch.fft.fftfreq(4)
+    tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
+
+""".format(**factory_common_args))
+
+fftshift = _add_docstr(_fft.fft_fftshift, r"""
+fftshift(x, dim=None) -> Tensor
+
+Shift zero-frequency FFT terms to the center of the tensor.
+
+Note:
+    By convention, the FFT returns positive frequency terms first, followed by
+    the negative frequencies in reverse order, so that ``f[-i]`` in python
+    gives the negative frequency terms. :func:`~torch.fft.fftshift` rearranges
+    all frequencies into ascending order from negative to positive with the
+    zero-frequency term in the center.
+
+Note:
+    For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
+    either negative or positive. Like :func:`~torch.fft.fftfreq`,
+    :func:`~torch.fft.fftshift` always considers it to be negative.
+
+Args:
+    x (Tensor): the tensor in FFT order
+    dim (int, Tuple[int], optional): The dimensions to rearrange.
+        Only dimensions specified here will be rearranged, any other dimensions
+        will be left in their original order.
+        Default: All dimensions of :attr:`x`.
+
+Example:
+
+    >>> import torch.fft
+    >>> f = torch.fft.fftfreq(4)
+    >>> f
+    tensor([ 0.0000,  0.2500,  -0.5000, -0.2500])
+
+    >>> torch.fftshift(f)
+    tensor([-0.5000, -0.2500, 0.0000, 0.2500])
+
+    Also notice that the Nyquist frequency at `f[2]` was considered negative
+    and so was moved to the beginning of the tensor.
+
+    This also works for multi-dimensional transforms:
+    >>> x = torch.fft.fftfreq(5, d=1/5) + 0.1 * torch.fft.fftfreq(5, d=1/5).unsqueeze(1)
+    >>> x
+    tensor([[ 0.0000,  1.0000,  2.0000, -2.0000, -1.0000],
+            [ 0.1000,  1.1000,  2.1000, -1.9000, -0.9000],
+            [ 0.2000,  1.2000,  2.2000, -1.8000, -0.8000],
+            [-0.2000,  0.8000,  1.8000, -2.2000, -1.2000],
+            [-0.1000,  0.9000,  1.9000, -2.1000, -1.1000]])
+
+    >>> torch.fft.fftshift(x)
+    tensor([[-2.2000, -1.2000, -0.2000,  0.8000,  1.8000],
+            [-2.1000, -1.1000, -0.1000,  0.9000,  1.9000],
+            [-2.0000, -1.0000,  0.0000,  1.0000,  2.0000],
+            [-1.9000, -0.9000,  0.1000,  1.1000,  2.1000],
+            [-1.8000, -0.8000,  0.2000,  1.2000,  2.2000]])
+
+""")
+
+ifftshift = _add_docstr(_fft.fft_ifftshift, r"""
+ifftshift(x, dim=None) -> Tensor
+
+Inverse of :func:`fftshift`.
+
+This takes the FFT representation with zero-frequency FFT terms in the center
+of the tensor and shifts it into the normal FFT output, with zero-frequency
+terms at the beginning and negative frequency terms at the end.
+
+Args:
+    x (Tensor): the tensor in FFT order
+    dim (int, Tuple[int], optional): The dimensions to rearrange.
+        Only dimensions specified here will be rearranged, any other dimensions
+        will be left in their original order.
+        Default: All dimensions of :attr:`x`.
+
+Example:
+
+    >>> import torch.fft
+    >>> f = torch.fft.fftfreq(5)
+    >>> f
+    tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
+
+    A round-trip through :func:`~torch.fft.fftshift` and
+    :func:`~torch.fft.ifftshift` gives the same result:
+
+    >>> shifted = torch.fftshift(f)
+    >>> torch.ifftshift(shifted)
+    tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
+
+""")
+

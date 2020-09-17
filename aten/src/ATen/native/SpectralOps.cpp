@@ -395,6 +395,66 @@ Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
   return native::fft_irfft(x, last_shape, last_dim, norm);
 }
 
+Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "fftfreq requires a floating point or complex dtype");
+  Tensor result = native::arange(n, options);
+  auto right_slice = result.slice(0, (n + 1) / 2, 0);
+  at::arange_out(right_slice, -(n/2), 0, 1);
+  result.mul_(1.0 / (n * d));
+  return result;
+}
+
+Tensor fft_rfftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "rfftfreq requires a floating point or complex dtype");
+  Tensor result = native::arange(n/2 + 1, options);
+  result.mul_(1.0 / (n * d));
+  return result;
+}
+
+DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt) {
+  DimVector dim;
+  if (dim_opt) {
+    IntArrayRef dim_unwrapped = *dim_opt;
+    dim.resize(dim_unwrapped.size());
+    for (int64_t i = 0; i < dim.size(); ++i) {
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
+    }
+  } else {
+    dim.resize(self.dim());
+    std::iota(dim.begin(), dim.end(), 0);
+  }
+  return dim;
+}
+
+Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = x_sizes[dim[i]] / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
+Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = (x_sizes[dim[i]] + 1) / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
+
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
 // at::_fft_with_size which dispatches to _fft_cufft (CUDA) or _fft_mkl (CPU).

@@ -7745,6 +7745,26 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_rfftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fftshift(Tensor x, int[1]? dim=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ifftshift(Tensor x, int[1]? dim=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

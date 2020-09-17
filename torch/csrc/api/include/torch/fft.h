@@ -166,4 +166,65 @@ inline Tensor ihfft(const Tensor& self,
   return torch::fft_ihfft(self, n, dim, norm);
 }
 
+/// Returns Discrete Fourier Transform sample frequencies for signal size n.
+///
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.fftfreq
+///
+/// Example:
+/// ```
+/// auto frequencies = torch::fft::fftfreq(128, torch::kDouble);
+/// ```
+inline Tensor fftfreq(int64_t n, double d, const TensorOptions& options={}) {
+  return torch::fft_fftfreq(n, d, options);
+}
+
+inline Tensor fftfreq(int64_t n, const TensorOptions& options={}) {
+  return torch::fft_fftfreq(n, /*d=*/1.0, options);
+}
+
+/// Returns Discrete Fourier Transform sample frequencies for signal size n.
+///
+/// Like torch.fft.rfft, only the positive frequencies are included.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.rfftfreq
+///
+/// Example:
+/// ```
+/// auto frequencies = torch::fft::rfftfreq(128, torch::kDouble);
+/// ```
+inline Tensor rfftfreq(int64_t n, double d, const TensorOptions& options) {
+  return torch::fft_rfftfreq(n, d, options);
+}
+
+inline Tensor rfftfreq(int64_t n, const TensorOptions& options) {
+  return torch::fft_rfftfreq(n, /*d=*/1.0, options);
+}
+
+/// Shift zero-frequency FFT terms to the centre of the array.
+///
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.fftshift
+///
+/// Example:
+/// ```
+/// auto x = torch::randn({127, 4});
+/// auto centred_fft = torch::fft::fftshift(torch::fft::fftn(x));
+/// ```
+inline Tensor fftshift(const Tensor& x, c10::optional<IntArrayRef> dim=c10::nullopt) {
+  return torch::fft_fftshift(x, dim);
+}
+
+/// Inverse of torch.fft.fftshift
+///
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.ifftshift
+///
+/// Example:
+/// ```
+/// auto x = torch::randn({127, 4});
+/// auto shift = torch::fft::fftshift(x)
+/// auto unshift = torch::fft::ifftshift(shift);
+/// assert(torch::allclose(x, unshift));
+/// ```
+inline Tensor ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim=c10::nullopt) {
+  return torch::fft_ifftshift(x, dim);
+}
+
 }} // torch::fft
