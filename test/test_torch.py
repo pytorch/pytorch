@@ -20018,7 +20018,7 @@ tensor_op_tests = [
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-1, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
-    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5,
+    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 5e-2, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
