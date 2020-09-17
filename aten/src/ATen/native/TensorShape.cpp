@@ -1094,6 +1094,16 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
   return result;
 }
 
+std::vector<Tensor> hsplit(const Tensor& self, int64_t split_size) {
+  if (self.dim() > 1) {
+    return at::split(self, split_size, 1);
+  }
+  return at::split(self, split_size, 0);
+}
+
+std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) { return at::split(self, split_size, 0); }
+std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) { return at::split(self, split_size, 2); }
+
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
@@ -1123,6 +1133,17 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   }
   return result;
 }
+
+std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef split_sizes) {
+  if (self.dim() > 1) {
+    return at::split_with_sizes(self, split_sizes, 1);
+  }
+  return at::split_with_sizes(self, split_sizes, 0);
+}
+
+std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) { return at::split_with_sizes(self, split_sizes, 0); }
+std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) { return at::split_with_sizes(self, split_sizes, 2); }
+
 
 // Precondition: tensors is non-empty
 static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
