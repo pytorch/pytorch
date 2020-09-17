@@ -95,7 +95,7 @@ Computes the N dimensional discrete Fourier transform of :attr:`input`.
 Note:
 
     The Fourier domain representation of any real signal satisfies the
-    Hermitian property: `X[i_1, ..., i_n] = conj(X[-i_1, ..., -i_n])`. This
+    Hermitian property: ``X[i_1, ..., i_n] = conj(X[-i_1, ..., -i_n])``. This
     function always returns all positive and negative frequency terms, even
     though for real inputs, half of these values are redundant.
     :func:`~torch.fft.rfftn` returns the more efficient "half-complex"
@@ -118,9 +118,9 @@ Args:
 
         Where ``n = prod(s)`` is the logical FFT size.
         Calling the backward transform (:func:`~torch.fft.ifftn`) with the same
-        normalization mode will apply an overall normalization of ``1/n`` between
-        the two transforms. This is required to make :func:`~torch.fft.ifftn`
-        the exact inverse.
+        normalization mode will apply an overall normalization of ``1/n``
+        between the two transforms. This is required to make
+        :func:`~torch.fft.ifftn` the exact inverse.
 
         Default is ``"backward"`` (no normalization).
 
@@ -131,7 +131,7 @@ Example:
     >>> fftn = torch.fft.fftn(t)
 
     The Fourier transform is separable, so :func:`~torch.fft.fftn` here is
-    equivalent to two one-dimensional :func:`~torch.fft.fft`s:
+    equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
 
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.allclose(fftn, two_ffts)
@@ -172,7 +172,7 @@ Example:
     >>> ifftn = torch.fft.ifftn(t)
 
     The Fourier transform is separable, so :func:`~torch.fft.ifftn` here is
-    equivalent to two one-dimensional :func:`~torch.fft.ifft`s:
+    equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
 
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.allclose(ifftn, two_iffts)
