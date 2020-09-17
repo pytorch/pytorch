@@ -442,8 +442,6 @@ namespace jit {
   _(CudaMaskInnerLoopOneBlock)             \
   _(CudaMaskMultiDimMultiAxis)             \
   _(CudaMaskMultiDimMultiLevel)
-  _(CudaMaskThreadDim)
-// _(CudaMaskBlockAndThreadDim)
 // _(CudaSharedMemReduce_1)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
