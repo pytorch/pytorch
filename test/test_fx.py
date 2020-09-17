@@ -563,6 +563,165 @@ class TestFX(JitTestCase):
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
 
+    def test_split_module_into_submodules(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x, y):
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)  # first subgraph target
+                w = self.linear(y).clamp(min=0.0, max=1.0)  # second subgraph target
+                return z + w
+
+        my_module = MyModule()
+        traced = torch.fx.symbolic_trace(my_module)
+
+        def make_module_have_submodules(
+            orig_graph_module: torch.fx.GraphModule, orig_torch_nn_module: torch.nn.Module
+        ):
+            # Creates a module from the nodes and root torch.nn.module of a sybmolically traced
+            # torch.fx.GraphModule
+            #
+            # TODO currently relies on idea that no node name changes are made between original graph and subgraph
+            # module_name: name for new module's root torch.nn.module
+            # module_node_names: list of node names to add to new graph, need to match names in orig_nodes
+            # orig_nodes: nodes from original torch.fx.GraphModule
+            # orig_base_module: original torch.nn.module which orig_nodes's torch.fx.GraphModule was traced from
+            # submodule_hints: if adding submodules from modules created by this function, add their names here
+            #                  and add their names to module_node_names and add their nodes to orig_nodes
+            def create_module_from_nodes(
+                module_name: str,
+                module_node_names,
+                orig_nodes: Dict[str, torch.fx.Node],
+                orig_base_module: torch.nn.Module,
+                submodule_hints=[]
+            ) -> (torch.fx.GraphModule, torch.fx.Node):
+                # create new graph
+                new_nodes: Dict[str, torch.fx.Node] = {}
+                graph = torch.fx.Graph()
+                graph_placeholders = (
+                    []
+                )  # used to keep track of placeholders to make torch.fx.Node out of created module
+
+                # copy over nodes from original graph
+                for node_name in module_node_names:
+                    orig_node = orig_nodes[node_name]
+
+                    # perform arg transformation
+                    new_args = []
+                    for orig_arg in orig_node.args:
+                        if isinstance(orig_arg, torch.fx.Node):
+                            # TODO assumption that nodes aren't nested in lists/tuples
+                            new_args.append(new_nodes[orig_arg.name])
+                        else:
+                            # TODO assumption that non-nodes are directly copyable
+                            new_args.append(orig_arg)
+                    new_args = tuple(new_args)
+
+                    # perform kwarg tranformation
+                    new_kwargs: Dict[str, torch.fx.Argument] = {}
+                    for key, value in orig_node.kwargs.items():
+                        if isinstance(value, torch.fx.Node):
+                            new_kwargs[key] = new_nodes[value.name]
+                        else:
+                            new_kwargs[key] = value
+
+                    # create target
+                    target = (
+                        module_name + "." + orig_node.name
+                        if orig_node.op in ["get_param", "call_module"]
+                        else orig_node.target
+                    )
+
+                    # create new node
+                    new_nodes[node_name] = graph.create_node(
+                        op=orig_node.op,
+                        target=target,
+                        args=new_args,
+                        kwargs=new_kwargs,
+                        name=orig_node.name,
+                    )
+                    if node_name == module_node_names[-1]:
+                        graph.output(new_nodes[node_name])
+
+                    if orig_node.op == "placeholder":
+                        graph_placeholders.append(new_nodes[node_name])
+
+                # set up dict for copying over targets
+                subgraph_targets = {}
+                for node_name, node in new_nodes.items():
+                    if node.op in ["get_param", "call_module"]:
+                        if node_name in submodule_hints:
+                            # when node is a module created from this function, target is
+                            # in orig_node's target directly
+                            node_target = orig_nodes[node_name].target
+                        else:
+                            # the actual target still lives in the original torch.nn.module's hiearchy
+                            node_target = orig_base_module
+                            for atom in orig_nodes[node_name].target.split("."):
+                                node_target = getattr(node_target, atom)
+                        subgraph_targets[str(node.target)] = node_target
+
+                module: torch.fx.GraphModule = torch.fx.GraphModule(subgraph_targets, graph)
+                module_as_node = torch.fx.Node(
+                    graph=graph,
+                    name=module_name,
+                    op="call_module",
+                    target=module,
+                    args=tuple(graph_placeholders),
+                    kwargs={},
+                )
+
+                return (module, module_as_node)
+
+            # get nodes from original GraphModule
+            orig_nodes: Dict[str, torch.fx.Node] = {}
+            for node in orig_graph_module.graph.nodes:
+                orig_nodes[node.name] = node
+
+            # create subgraph A
+            subgraph_a_partition = ["x", "param", "add_1", "linear_1", "clamp_1"]
+            submodule_a, submodule_node_a = create_module_from_nodes(
+                "submod_a", subgraph_a_partition, orig_nodes, orig_torch_nn_module
+            )
+
+            # create subgraph B
+            subgraph_b_partition = ["y", "linear_2", "clamp_2"]
+            submodule_b, submodule_node_b = create_module_from_nodes(
+                "submod_b", subgraph_b_partition, orig_nodes, orig_torch_nn_module
+            )
+
+            # add new nodes to list of original nodes so outer graph can access them
+            orig_nodes["submod_a"] = submodule_node_a
+            orig_nodes["submod_b"] = submodule_node_b
+
+            # rewire original node to use subgraphs as inputs
+            orig_nodes["add_2"].args = (orig_nodes["submod_a"], orig_nodes["submod_b"])
+
+            # create outer graph
+            outer_graph_group = ["x", "y", "submod_a", "submod_b", "add_2"]
+            outer_module, _ = create_module_from_nodes(
+                "outer_graph",
+                outer_graph_group,
+                orig_nodes,
+                orig_torch_nn_module,
+                ["submod_a", "submod_b"],
+            )
+
+            x = torch.rand(3, 4)
+            y = torch.rand(3, 4)
+
+            orig_out = orig_graph_module(x, y)
+            subgraphs_out = outer_module(x, y)
+
+            self.assertEqual(orig_out, subgraphs_out)
+
+
+        
+        make_module_have_submodules(traced, my_module)
+
 
 if __name__ == '__main__':
     run_tests()
