@@ -141,13 +141,16 @@ def get_class_properties(cls, self_name):
     """
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
+    # Any property that should not compiled must be in this list on the Module.
+    ignored_properties = getattr(cls, "__ignored_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+        if prop[0] not in ignored_properties:
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
 
     return properties
 
@@ -204,13 +207,16 @@ def get_jit_def(fn, def_name, self_name=None):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
-        fn_def.body = unused_fn_def.body
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
+        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
+            raise RuntimeError("Expected a single top-level function")
+        unused_def = unused_fn_def.body[0]
+        fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
             # Replace potentially unsupported type annotations by "Any"
-            arg.annotation = unused_fn_def.args.args[0].annotation
+            arg.annotation = unused_def.args.args[0].annotation
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
@@ -565,10 +571,9 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         if op_token is None:
-            err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
-            raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
+            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod

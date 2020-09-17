@@ -1,8 +1,9 @@
 import torch
 import torch.overrides
 import linecache
-from typing import Type, Dict, List, Any
+from typing import Type, Dict, List, Any, Union
 from .graph import Graph
+from copy import deepcopy
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -26,6 +27,74 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+def _forward_from_src(src : str):
+    gbls: Dict[str, Any] = {
+        'torch': torch
+    }
+    exec_with_source(src, gbls)
+    return gbls['forward']
+
+
+def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+    """
+    Deserialize a GraphModule given the dictionary of the original module,
+    using the code to reconstruct the graph. We delete the actual graph before
+    saving the dictionary so that changes to the in-memory graph format do not
+    get serialized.
+    """
+    # We create a dummy class here because symbolic_trace pulls the forward()
+    # function off of the class, rather than the instance
+    class CodeOnlyModule(torch.nn.Module):
+        def __init__(self, body):
+            super().__init__()
+            self.__dict__ = body
+
+    CodeOnlyModule.forward = _forward_from_src(body['code'])
+
+    from .symbolic_trace import Tracer
+
+    # we shouldn't trace into any of the submodules, they were not
+    # because they were not traced in the original GraphModule
+    class KeepModules(Tracer):
+        def is_leaf_module(self, _: torch.nn.Module) -> bool:
+            return True
+
+    return KeepModules().trace(CodeOnlyModule(body))
+
+# copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
+# This installs empty Modules where none exist yet if they are subpaths of target
+def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target: str):
+    *prefix, field = target.split('.')
+    for item in prefix:
+        f = getattr(from_module, item)
+        t = getattr(to_module, item, None)
+        if f is t:
+            # we have already installed one of its parents
+            # (e.g. target = root.linear.weight, but we have already installed root.linear)
+            # once we install a parent, we no longer need to copy the children
+            # since all the needed properties will already be present
+            return
+
+        if t is None:
+            t = torch.nn.Module()
+            setattr(to_module, item, t)
+        from_module, to_module = f, t
+
+    setattr(to_module, field, getattr(from_module, field))
+
+# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
+# This installs empty Modules where none exist yet if they are subpaths of target
+def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
+    *prefix, field = target.split('.')
+    for item in prefix:
+        t = getattr(to_module, item, None)
+
+        if t is None:
+            t = torch.nn.Module()
+            setattr(to_module, item, t)
+        to_module = t
+
+    setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
@@ -38,10 +107,46 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: torch.nn.Module, graph: Graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+        """
+        Construct a GraphModule.
+        root - `root` can either be an nn.Module instance or a Dict mapping strings to any attribute type.
+               - In the case that `root` is a Module, any references to Module-based objects (via qualified
+                 name) in the Graph's Nodes' `target` field will be copied over from the respective place
+                 within `root`'s Module hierarchy into the GraphModule's module hierarchy.
+               - In the case that `root` is a dict, the qualified name found in a Node's `target` will be
+                 looked up directly in the dict's keys. The object mapped to by the Dict will be copied
+                 over into the appropriate place within the GraphModule's module hierarchy.
+        graph - `graph` contains the nodes this GraphModule should use for code generation
+        """
         super().__init__()
-        self.root = root
-        self.training = self.root.training
+        if isinstance(root, torch.nn.Module):
+            if hasattr(root, 'training'):
+                self.training = root.training
+            for node in graph.nodes:
+                if node.op in ['get_param', 'call_module']:
+                    assert isinstance(node.target, str)
+                    _copy_attr(root, self, node.target)
+        elif isinstance(root, dict):
+            targets_to_copy = []
+            for node in graph.nodes:
+                if node.op in ['get_param', 'call_module']:
+                    assert isinstance(node.target, str)
+                    if node.target not in root:
+                        raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
+                                           ' but that target was not provided in `root`!')
+                    targets_to_copy.append(node.target)
+            # Sort targets in ascending order of the # of atoms.
+            # This will ensure that less deeply nested attributes are assigned
+            # before more deeply nested attributes. For example, foo.bar
+            # will be assigned before foo.bar.baz. Otherwise, we might assign
+            # the user-provided `foo.bar` and wipe out the previously-assigned
+            # `foo.bar.baz`
+            targets_to_copy.sort(key=lambda t: t.count('.'))
+            for target_to_copy in targets_to_copy:
+                _assign_attr(root[target_to_copy], self, target_to_copy)
+        else:
+            raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
         self._generate_forward()
 
@@ -50,21 +155,29 @@ class GraphModule(torch.nn.Module):
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.code = f"""\
 def forward(self, {', '.join(free_variables)}):
-    self = self.root
 {body}
     return {result}
 """
-        # print(self.code)
-        # install forward into the classes dictionary, this is what normally happens in the
-        # 'class' statement
-        # __new__ ensured that each instance has its own class
-        gbls: Dict[str, Any] = {
-            'torch': torch
-        }
-        exec_with_source(self.code, gbls)
         cls = type(self)
-        for k, v in gbls.items():
-            setattr(cls, k, v)
+        cls.forward = _forward_from_src(self.code)
+
+    def __reduce__(self):
+        dict_without_graph = self.__dict__.copy()
+        del dict_without_graph['graph']
+        return (deserialize_graphmodule, (dict_without_graph,))
+
+    # because __reduce__ is defined for serialization,
+    # we need to define deepcopy otherwise it will call __reduce__
+    # and cause symbolic tracing to occur every time we try to copy the object
+    def __deepcopy__(self, memo):
+        the_copy = self.__new__(type(self))
+        the_copy.__dict__ = deepcopy(self.__dict__, memo)
+        return the_copy
+
+
+    def __str__(self) -> str:
+        orig_str = super().__str__()
+        return '\n'.join([orig_str, self.code])
 
 # workarounds for issues in __torch_function__
 

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
 import glob
 import imp
@@ -372,9 +371,11 @@ class BuildExtension(build_ext, object):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
+            _ccbin = os.getenv("CC")
             return (COMMON_NVCC_FLAGS +
                     ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags))
+                    cflags + _get_cuda_arch_flags(cflags) +
+                    (['-ccbin', _ccbin] if _ccbin is not None else []))
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
@@ -1611,6 +1612,8 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
                 cuda_flags.append('-std=c++14')
+            if os.getenv("CC") is not None:
+                cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
     else:
         cuda_flags = None
 

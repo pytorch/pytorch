@@ -78,6 +78,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
+}
+
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
+}
+
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 

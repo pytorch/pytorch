@@ -474,11 +474,9 @@ constexpr int kTpMessageTypeIdx = 0;
 constexpr int kTpMessageIdIdx = 1;
 // Then comes the rpc::Message::payload();
 constexpr int kTpMessagePayloadIdx = 2;
-// Then comes the destination device indices for all tensors in the message.
-constexpr int kTpMessageDevicesIdx = 3;
 // Last comes the pickle of rpc::Message::tensors() (with the tensors themselves
 // stored as, well, tensors in the tensorpipe::Message).
-constexpr int kTpMessagePickleIdx = 4;
+constexpr int kTpMessagePickleIdx = 3;
 
 } // namespace
 
@@ -508,16 +506,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
-  // Device indices
-  buffers.deviceIndices = std::move(deviceIndices);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto indicesPtr = const_cast<c10::DeviceIndex*>(buffers.deviceIndices.data());
-  auto size = buffers.deviceIndices.size() * sizeof(c10::DeviceIndex);
-  // kTpMessageDevicesIdx = 3
-  tpMessage.payloads.push_back(tensorpipe::Message::Payload{indicesPtr, size});
-
   // Tensors
-  if (buffers.deviceIndices.empty()) {
+  if (deviceIndices.empty()) {
     buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
   } else {
     std::vector<torch::Tensor> tensors;
@@ -538,26 +528,31 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.protocol();
   pickler.pushIValue(buffers.tensors);
   pickler.stop();
-  // kTpMessagePickleIdx = 4
+  // kTpMessagePickleIdx = 3
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
-  for (const auto& tensor : pickler.tensorData()) {
-    const auto& tensorData = jit::getWriteableTensorData(tensor);
+  const auto& tensorDataVec = pickler.tensorData();
+  for (size_t i = 0; i < tensorDataVec.size(); ++i) {
+    const auto& tensorData =
+        jit::getWriteableTensorData(tensorDataVec[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
+    std::string metadata =
+        deviceIndices.empty() ? "" : std::to_string(deviceIndices[i]);
+
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
-      tpMessage.tensors.push_back(
-          tensorpipe::Message::Tensor{storageData.data(), storageData.size()});
+      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+          storageData.data(), storageData.size(), std::move(metadata)});
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
       // TensorPipe uses the same Message class for both reading and writing, so
       // it uses non-const ptrs even though it doesn't modify them when writing.
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
-      tpMessage.tensors.push_back(
-          tensorpipe::Message::Tensor{tensorPtr, tensorData.sizeInBytes()});
+      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+          tensorPtr, tensorData.sizeInBytes(), std::move(metadata)});
     }
   }
 
@@ -568,8 +563,8 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
   TensorpipeReadBuffers buffers;
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads.size() == 5,
-      "message expected to contain 5 payloads, whereas it contained ",
+      tpMessage.payloads.size() == 4,
+      "message expected to contain 4 payloads, whereas it contained ",
       tpMessage.payloads.size(),
       " payloads");
 
@@ -594,26 +589,15 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
   tpMessage.payloads[kTpMessageIdIdx].data = buffers.id.get();
 
   // FIXME The two resizes below zero out the vectors, which is not needed.
-
   buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
   tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
-
-  auto deviceIndexSize = sizeof(c10::DeviceIndex);
-  TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads[kTpMessageDevicesIdx].length % deviceIndexSize == 0,
-      "Invalid number of bytes for device index payload, total bytes: ",
-      tpMessage.payloads[kTpMessageDevicesIdx].length,
-      ", device index size: ",
-      deviceIndexSize);
-  buffers.deviceIndices.resize(
-      tpMessage.payloads[kTpMessageDevicesIdx].length / deviceIndexSize);
-  tpMessage.payloads[kTpMessageDevicesIdx].data = buffers.deviceIndices.data();
 
   buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
-    buffers.tensors.push_back(at::getCPUAllocator()->allocate(tensor.length));
+    buffers.tensors.emplace_back(
+        at::getCPUAllocator()->allocate(tensor.length));
     tensor.data = buffers.tensors.back().get();
   }
 
@@ -651,20 +635,21 @@ Message tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
-  if (!buffers.deviceIndices.empty()) {
-    TORCH_INTERNAL_ASSERT(
-        buffers.deviceIndices.size() == tensors.size(),
-        "Number of device indices must match the number of tensors in the "
-        "RPC message. But got ",
-        tensors.size(),
-        " tensors with ",
-        buffers.deviceIndices.size(),
-        " device indices.");
-    for (size_t i = 0; i < tensors.size(); ++i) {
-      auto index = buffers.deviceIndices[i];
-      if (tensors[i].device().index() != index) {
-        tensors[i] = tensors[i].to(indexToDevice(index));
-      }
+  // NB: This is a temporary solution. When TensorPipe Tensor.data can point to
+  // a CUDA memory address, we should directly use CUDACachingAllocator to
+  // create CUDA buffers in tensorpipeAllocate.
+  for (size_t i = 0; i < message.tensors.size(); ++i) {
+    auto& tensor = message.tensors[i];
+    if (!tensor.metadata.empty()) {
+      TORCH_INTERNAL_ASSERT(
+          message.tensors.size() == tensors.size(),
+          "Number of device indices must match the number of tensors in the "
+          "RPC message. But got ",
+          tensors.size(),
+          " tensors with ",
+          message.tensors.size(),
+          " device indices.");
+      tensors[i] = tensors[i].to(indexToDevice(std::stoi(tensor.metadata)));
     }
   }
 

@@ -144,7 +144,8 @@ DONT_REQUIRE_DERIVATIVE = {
     # Quantize functions should not record gradients
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
-    'argmax', 'argmin', 'argsort', 'searchsorted'
+    'argmax', 'argmin', 'argsort', 'searchsorted',
+    'bucketize'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -1255,7 +1256,7 @@ def unpack_args(env, declaration):
             if declaration['use_c10_dispatcher'] == 'full':
                 body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
             else:
-                declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 body.append(LEGACY_UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
