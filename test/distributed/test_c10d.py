@@ -1936,7 +1936,7 @@ class Task(nn.Module):
         return self.p + x
 
 
-class TestDdpCommHook(nn.Module):
+class DdpComHook(nn.Module):
     def __init__(self):
         super().__init__()
         self.t0 = Task()
@@ -3094,7 +3094,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
-            TestDdpCommHook().cpu(), process_group=process_group
+            DdpComHook().cpu(), process_group=process_group
         )
 
         # Register DDP Communication Hook
@@ -3107,7 +3107,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
-            TestDdpCommHook().to(device_id),
+            DdpComHook().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
         )
@@ -3240,7 +3240,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
 
         with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
             model._register_comm_hook(state=None, hook=1)
@@ -3264,7 +3264,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
 
         with self.assertRaisesRegex(
             ValueError,
@@ -3301,7 +3301,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
