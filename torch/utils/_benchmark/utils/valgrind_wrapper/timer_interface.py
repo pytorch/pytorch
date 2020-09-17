@@ -225,15 +225,6 @@ class _ValgrindWrapper(object):
     @staticmethod
     def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str):
         indented_stmt = textwrap.indent(stmt, " " * 4)
-
-        # Running a loop takes a surprising number of instructions in Python.
-        # Unrolling the loop eliminates those instructions, though if `number`
-        # is too high it's not worth ballooning the generated file.
-        if number <= 1000:
-            maybe_unrolled_stmt = "\n".join([stmt for _ in range(number)])
-        else:
-            maybe_unrolled_stmt = f"for _ in range({number}):\n{indented_stmt}"
-
         return textwrap.dedent(r"""
             import gc
             import os
@@ -298,16 +289,11 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-
-            # `callgrind_block` will invoke `stmt_fn`
-            def stmt_fn():
-                for _ in range({number}):
-            {double_indented_stmt}
-
+            expr = compile("for _ in range({number}):{stmt}", "<callgrind_src>", "exec")
             bindings.callgrind_block()
         """).strip().format(
             indented_stmt=textwrap.indent(stmt, " " * 4),
-            double_indented_stmt=textwrap.indent(stmt, " " * 8),
+            stmt=stmt,
             number=number,
             setup=setup,
             warmup_number=min(number, 10),
