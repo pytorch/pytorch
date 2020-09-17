@@ -1345,6 +1345,24 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
+Stmt* handleForCondReordering(const For* loop, Cond* cond) {
+  if (cond->false_stmt()) {
+    return nullptr;
+  }
+
+  auto condition_vars = VarFinder::find(cond->condition());
+  for (auto* v : condition_vars) {
+    // If the condition depends on a Var that is modified in the loop body, it
+    // may not be safe to reorder.
+    if (ModifiesVarChecker::check(loop, v)) {
+      return nullptr;
+    }
+  }
+
+  For* new_f = loop->cloneWithNewBody(Stmt::clone(cond->true_stmt()));
+  return cond->cloneWithNewBody(new_f);
+}
+
 Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -1377,6 +1395,15 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
   if (auto* block = dynamic_cast<Block*>(body_new)) {
     if (block->nstmts() == 0) {
       return new Block({});
+    }
+
+    if (block->nstmts() == 1) {
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
     }
   }
 
