@@ -555,6 +555,7 @@ _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
+_(aten, nanquantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
