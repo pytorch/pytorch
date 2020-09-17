@@ -853,6 +853,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
         self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
         self.assertEqual((0,), torch.hann_window(0, device=device).shape)
+        self.assertEqual((0,), torch.kaiser_window(0, device=device).shape)
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
