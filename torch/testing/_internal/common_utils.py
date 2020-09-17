@@ -602,7 +602,6 @@ def iter_indices(tensor):
 def is_iterable(obj):
     try:
         iter(obj)
-        print("Is iterable")
         return True
     except TypeError:
         return False
@@ -1148,8 +1147,6 @@ class TestCase(expecttest.TestCase):
             # See TestTorch.test_assert_equal_generic_meta
             super().assertEqual(x, y, msg=msg)
         elif is_iterable(x) and is_iterable(y):
-            print(x)
-            print(y)
             super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
@@ -1165,6 +1162,8 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg is not None
                 msg = "Scalars failed to compare as equal! " + debug_msg
             self.assertTrue(result, msg=msg)
+        elif isinstance(x, torch.jit.RecursiveScriptClass) and isinstance(y, torch.jit.RecursiveScriptClass):
+            self.assertTrue(x._c.equals(y._c), msg=msg)
         else:
             super().assertEqual(x, y, msg=msg)
 
@@ -1453,9 +1452,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * span - (span / 2)).to(torch.bfloat16)
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            t = torch.rand(size, device=device, dtype=dtype) * span - (span / 2)
+            t = torch.rand(size, device=device, dtype=dtype) * span + low
         t.requires_grad = requires_grad
         return t
     else:
@@ -1464,8 +1463,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         high = 9 if high is None else min(high, 10)
         span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        real = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
-        imag = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         c = torch.complex(real, imag)
         c.requires_grad = requires_grad
         return c

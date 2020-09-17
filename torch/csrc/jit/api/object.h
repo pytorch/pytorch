@@ -131,6 +131,8 @@ struct TORCH_API Object {
   // `ClassType`, including deepcopy of Tensors
   Object deepcopy() const;
 
+  bool equals(const Object& rhs) const;
+
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;

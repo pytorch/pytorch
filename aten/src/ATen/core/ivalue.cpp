@@ -687,6 +687,23 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
   return object;
 }
 
+bool ivalue::Object::equals(const ivalue::Object& rhs) const {
+  bool types_match = type() == rhs.type();
+  bool same_num_slots = slots().size() == rhs.slots().size();
+
+  if (!types_match || !same_num_slots) {
+    return false;
+  }
+
+  bool equal = true;
+  for (size_t i = 0, e = slots().size(); (i < e) && equal; ++i) {
+    equal = slots()[i] == rhs.slots()[i];
+  }
+
+  return equal;
+}
+
+
 StrongTypePtr::StrongTypePtr(
     std::shared_ptr<torch::jit::CompilationUnit> cu,
     std::shared_ptr<Type> type) {

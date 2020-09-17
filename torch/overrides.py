@@ -137,7 +137,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.zeros,
         torch.nn.functional.assert_int_or_pair,
         torch.nn.functional.boolean_dispatch,
-        torch.nn.functional.division,
         torch.nn.functional.upsample,
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
@@ -339,6 +338,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.erfc: lambda input, out=None: -1,
         torch.erfinv: lambda input, out=None: -1,
         torch.exp: lambda input, out=None: -1,
+        torch.exp2: lambda input, out=None: -1,
         torch.expm1: lambda input, out=None: -1,
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
@@ -1164,3 +1164,12 @@ def is_tensor_method_or_property(func: Callable) -> bool:
        of ``torch.Tensor``.
     """
     return func in get_tensor_methods() or func.__name__ == "__get__"
+
+def is_tensor_like(inp):
+    """
+    Returns ``True`` if the passed-in input is a tensor-like.
+
+    Currently, this occurs whenever there's a ``__torch_function__``
+    attribute on the input.
+    """
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")

@@ -638,7 +638,8 @@ inline IValue toIValue(
       }
 
       if (py::isinstance(
-              obj, py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
+              obj,
+              py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
         auto inst = py::cast<Object>(obj.attr("_c"));
         return inst._ivalue();
       }
@@ -918,7 +919,8 @@ inline py::object toPyObject(IValue ivalue) {
       return py::cast(Module(obj));
     }
 
-    return py::cast(Object(obj));
+    return py::module::import("torch.jit._recursive")
+        .attr("wrap_cpp_class")(py::cast(Object(obj)));
     // auto pyCu = get_python_cu();
     // if (obj->name().find("__torch__.torch.classes") == 0) {
     // }
