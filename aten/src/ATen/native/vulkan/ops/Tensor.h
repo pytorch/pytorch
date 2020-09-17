@@ -107,13 +107,19 @@ class C10_EXPORT vTensor final {
             Type,
             kAccess>> Payload;
 
+    // This is a blocking operation as the name suggests.  A call to host() will
+    // trigger an async copy if pending writes are detected.  Consequently, for
+    // optimal performance, put as much time and distance between the place
+    // where a vTensor::host() call occurs and the location where the returned
+    // future is explicitly waited on as a result of a call to this function.
+
     Payload wait() const &;
 
    private:
     // Intentionally disabed to enforce a usage pattern wherein the Future's
     // lifetime exceeds that of the Payload as we use the Future's destructor
     // to eagerly (as opposed to lazily and upon first use) upload the
-    // modifications back onto GPU in an effort to hide the copy latency.
+    // modifications back onto the GPU in an effort to hide the copy latency.
 
     Payload wait() const && = delete;
 
@@ -126,7 +132,12 @@ class C10_EXPORT vTensor final {
   };
 
   /*
-    Host access - these functions can be expensive.
+    Host access - these functions will be expensive if they trigger a GPU -> CPU
+    sync due to pending writes.  A call to host() will trigger an async copy in
+    such scenarios, which is then explictly waited on as part of Future::wait().
+    Consequently, for optimal performance, put as much time and distance between
+    the place where this function is called, and the location where the future is
+    waited on.
   */
 
   template<typename Type>
@@ -136,7 +147,16 @@ class C10_EXPORT vTensor final {
   Future<Type, kAccess> host() &;
 
   /*
-    Device access - these functions can be expensive.
+    Device access - these functions will be expensive if they trigger a buffer
+    <-> image or CPU -> GPU sync due to pending writes.  These functions are
+    non-blocking on the host as the copy operation is carried out by the GPU
+    asynchronously.  Regardless, they result in extra work that could have been
+    avoided or at least minimized if all data access had occured through one
+    single processor (GPU in this case) and on one type of resource (image for
+    best performance.)  Consequently, for optimal performance, avoid mixed reads
+    and writes across processor boundaries, and do your best to minimize layout
+    transitions as a result of working with images only (as opposed to mixed
+    buffer - image usage.)
   */
 
   VkBuffer buffer() const &;
@@ -146,13 +166,14 @@ class C10_EXPORT vTensor final {
   VkImage image(Access::Flags access) &;
 
  private:
-  const vTensor* host() const;
-  vTensor* host(Access::Flags access);
+  const vTensor* host_impl() const;
+  vTensor* host_impl(Access::Flags access);
+  api::Resource::Memory& wait_impl(Access::Flags access);
 
   // These overloads are intentionally disabled to enforce a usage pattern
   // wherein the Tensor's lifetime exceeds that of the scope in which the
-  // underlying data is accessed.  Allowing below overloads to be invoked
-  // on a temporary would open the door to the possibility of accessing the
+  // underlying data is accessed.  Allowing below overloads to be invoked on
+  // a temporary would open the door to the possibility of accessing the
   // underlying memory out of the expected scope.
 
   template<typename Type>
@@ -168,13 +189,12 @@ class C10_EXPORT vTensor final {
   VkImage image(Access::Flags access) && = delete;
 
  private:
+  void enforce_invariants() const;
+
+  api::Context* context_;
   api::Resource::Image image_;
   api::Resource::Buffer buffer_;
   api::Resource::Buffer staging_;
-  api::Context* context_;
-  c10::SmallVector<int64_t, 4u> sizes_;
-  TensorOptions options_;
-
   mutable struct {
     uint32_t image : 1u;
     uint32_t buffer : 1u;
@@ -240,29 +260,24 @@ inline vTensor::Future<Type, kAccess>::~Future() {
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
-inline typename vTensor::Future<Type, kAccess>::Data
+inline typename vTensor::Future<Type, kAccess>::Payload
 vTensor::Future<Type, kAccess>::wait() const & {
   TORCH_CHECK(
       tensor_,
       "vTensor::Future is in an invalid state!  "
       "Potential reason: This future is moved from.");
 
-  api::Resource::Buffer& buffer =
-      tensor_->staging_ ?
-          tensor_->staging_ :
-          tensor_->buffer_;
-
-  return buffer.memory.template map<Type, kAccess>();
+  return tensor_->wait_impl(kAccess).template map<Type, kAccess>();
 }
 
 template<typename Type>
 inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
-  return Future<Type, vTensor::Access::Read>(host());
+  return Future<Type, vTensor::Access::Read>(host_impl());
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess> vTensor::host() & {
-  return Future<Type, kAccess>(host(kAccess));
+  return Future<Type, kAccess>(host_impl(kAccess));
 }
 
 } // namespace ops
