@@ -576,6 +576,9 @@ class DistributedDataParallel(Module):
 
     def forward(self, *inputs, **kwargs):
         if self.ddp_join_enabled:
+            ones = torch.ones(
+                1, device=self.device
+            )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
                 work, self.ddp_join_divide_by_initial_world_size
