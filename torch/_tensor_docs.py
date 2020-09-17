@@ -2934,7 +2934,7 @@ Args:
     value (float): the source element(s) to scatter,
       incase `src` is not specified
     reduce (string): reduction operation to apply,
-      can be either 'add', 'subtract', 'multiply' or 'divide'.
+      can be either 'add' or 'multiply'.
 
 Example::
 
