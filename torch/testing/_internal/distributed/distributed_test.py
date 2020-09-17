@@ -689,7 +689,7 @@ class DistributedTest:
 
         # BROADCAST
         def _test_broadcast_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, with_options=False
         ):
             for dtype, value, requires_cuda in [
                 (torch.float, -1e-10, False),
@@ -707,12 +707,24 @@ class DistributedTest:
                     if cuda:
                         expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     if rank == src:
-                        dist.broadcast(expected_tensor, src, group_id)
+                        if with_options:
+                            opts = dist.BroadcastOptions()
+                            opts.rootTensor = 0
+                            opts.rootRank = src
+                            group_id.broadcast([expected_tensor], opts).wait()
+                        else:
+                            dist.broadcast(expected_tensor, src, group_id)
                     else:
                         tensor = _build_tensor(src + 1, -1, dtype)
                         if cuda:
                             tensor = tensor.cuda(rank_to_GPU[rank][0])
-                        dist.broadcast(tensor, src, group_id)
+                        if with_options:
+                            opts = dist.BroadcastOptions()
+                            opts.rootTensor = 0
+                            opts.rootRank = src
+                            group_id.broadcast([tensor], opts).wait()
+                        else:
+                            dist.broadcast(tensor, src, group_id)
                         self.assertEqual(tensor.size(), expected_tensor.size())
                         self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
@@ -743,6 +755,28 @@ class DistributedTest:
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_broadcast_helper(group, group_id, rank)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports high priority stream",
+        )
+        @skip_if_no_gpu
+        @skip_if_rocm
+        def test_nccl_high_priority_stream(self):
+            group, _, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+
+            new_port = str(MASTER_PORT + 1)
+            os.environ['MASTER_PORT'] = new_port
+            gen_iterator = dist.rendezvous('env://', rank, dist.get_world_size())
+            store, rank, size = next(gen_iterator)
+            store = dist.PrefixStore(new_port, store)
+
+            opts = dist.ProcessGroupNCCL.Options()
+            opts.is_high_priority = False
+            group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
+
+            self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
 
         # REDUCE
         def _test_reduce_helper(

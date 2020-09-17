@@ -161,6 +161,13 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
+  struct Options {
+    explicit Options();
+
+    std::chrono::milliseconds opTimeout;
+    bool isHighPriorityStream;
+  };
+
   // FutureNCCL is a subclass of ivalue's Future. The goal is to use
   // this class in getFuture API of WorkNCCL. This Future is mostly a
   // wrapper to synchronize streams appropriately and it mostly enables
@@ -341,8 +348,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::shared_ptr<Store>& store,
       int rank,
       int size,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis));
+      Options options = Options());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
@@ -352,9 +358,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int rank,
       int size,
       const std::string& groupName,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis))
-      : ProcessGroupNCCL(store, rank, size, opTimeout) {}
+      Options options = Options())
+      : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
 
@@ -626,6 +631,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
   // before.
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
+
+  // Schedule NCCL operations on high priority CUDA streams.
+  bool isHighPriorityStream_ = false;
 };
 
 } // namespace c10d

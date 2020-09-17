@@ -30,22 +30,36 @@ struct LiteJITCallGuard {
 } // namespace
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
+  constexpr static int kDeviceCPU = 1;
+  constexpr static int kDeviceVulkan = 2;
+
  private:
   friend HybridBase;
   torch::jit::mobile::Module module_;
+  c10::DeviceType deviceType_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/LiteNativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
-      facebook::jni::alias_ref<jstring> modelPath) {
-    return makeCxxInstance(modelPath);
+      facebook::jni::alias_ref<jstring> modelPath,
+      jint device) {
+    return makeCxxInstance(modelPath, device);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
     LiteJITCallGuard guard;
     module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
+    if (device == kDeviceCPU) {
+      deviceType_ = at::kCPU;
+    } else if (device == kDeviceVulkan) {
+      deviceType_ = at::kVulkan;
+    } else {
+      facebook::jni::throwNewJavaException(
+          facebook::jni::gJavaLangIllegalArgumentException,
+          "Unknown device specified");
+    }
   }
 
   static void registerNatives() {
@@ -65,7 +79,14 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
 
     auto output = [&]() {
