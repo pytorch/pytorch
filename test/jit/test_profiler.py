@@ -146,6 +146,19 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_not("TensorExpr").run(g)
 
+    def test_not_optimizing_property(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x + y + 1 + 2 + 3, x.size()
+
+        x = torch.ones(1)
+        foo(x, x)
+        foo(x, x)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("aten::size").run(g)
+        x = torch.ones([2, 3, 5])
+        self.assertEqual(foo(x, x), (x + x + 1 + 2 + 3, x.size()))
+
     def test_fallback_graph_not_specialized(self):
         @torch.jit.script
         def foo(a, b):
