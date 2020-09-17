@@ -306,6 +306,8 @@ def try_ann_to_type(ann, loc):
         return StringType.get()
     if ann is bool:
         return BoolType.get()
+    if ann is Generator:
+        return GeneratorType.get()
     if ann is Any:
         return AnyType.get()
     if ann is type(None):
@@ -363,6 +365,7 @@ __all__ = [
     'ListType',
     'StringType',
     'DictType',
+    'GeneratorType',
     'AnyType',
     'Module',
     # TODO: Consider not exporting these during wildcard import (reserve

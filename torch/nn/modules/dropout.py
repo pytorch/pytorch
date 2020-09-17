@@ -9,16 +9,17 @@ class _DropoutNd(Module):
     p: float
     inplace: bool
 
-    def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
+    def __init__(self, p: float = 0.5, inplace: bool = False, generator = None) -> None:
         super(_DropoutNd, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
         self.p = p
         self.inplace = inplace
+        self.generator = generator
 
     def extra_repr(self) -> str:
-        return 'p={}, inplace={}'.format(self.p, self.inplace)
+        return 'p={}, inplace={}, generator={}'.format(self.p, self.inplace, self.generator)
 
 
 class Dropout(_DropoutNd):
@@ -55,7 +56,7 @@ class Dropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.dropout(input, self.p, self.training, self.inplace)
+        return F.dropout(input, self.p, self.training, self.inplace, self.generator)
 
 
 class Dropout2d(_DropoutNd):
@@ -97,7 +98,7 @@ class Dropout2d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.dropout2d(input, self.p, self.training, self.inplace)
+        return F.dropout2d(input, self.p, self.training, self.inplace, self.generator)
 
 
 class Dropout3d(_DropoutNd):
@@ -139,7 +140,7 @@ class Dropout3d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.dropout3d(input, self.p, self.training, self.inplace)
+        return F.dropout3d(input, self.p, self.training, self.inplace, self.generator)
 
 
 class AlphaDropout(_DropoutNd):
@@ -181,7 +182,7 @@ class AlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.alpha_dropout(input, self.p, self.training)
+        return F.alpha_dropout(input, self.p, self.training, self.generator)
 
 
 class FeatureAlphaDropout(_DropoutNd):
@@ -230,4 +231,4 @@ class FeatureAlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.feature_alpha_dropout(input, self.p, self.training)
+        return F.feature_alpha_dropout(input, self.p, self.training, self.generator)
