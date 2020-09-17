@@ -416,6 +416,20 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2(torch.rand(4, 4))
 
+    def test_symbolic_trace_sequential(self):
+        class Simple(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        seq = torch.nn.Sequential(
+            Simple(),
+            Simple(),
+            Simple()
+        )
+        traced = symbolic_trace(seq)
+        x = torch.rand(3, 4)
+        self.assertEqual(traced(x), seq(x))
+
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):
             def forward(self, x):
@@ -524,10 +538,10 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
-        input = torch.rand(3) 
+        input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
-        self.assertEqual(r, ref) 
+        self.assertEqual(r, ref)
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()

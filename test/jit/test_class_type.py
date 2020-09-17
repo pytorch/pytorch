@@ -384,6 +384,14 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_sorted_copies(), (3, 1))
 
+        @torch.jit.script
+        def test_nested_inside_tuple():
+            li = [(1, Foo(12)), (1, Foo(11))]
+            li.sort()
+            return [(li[0][0], li[0][1].getVal()), (li[1][0], li[1][1].getVal())]
+
+        self.assertEqual(test_nested_inside_tuple(), [(1, 11), (1, 12)])
+
         with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
