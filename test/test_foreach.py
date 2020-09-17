@@ -543,9 +543,9 @@ class TestForeach(TestCase):
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
             torch._foreach_add_(tensors1, tensors2)
 
         # Lists have different amount of tensors

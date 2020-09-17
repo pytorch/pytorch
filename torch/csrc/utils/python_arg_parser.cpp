@@ -366,13 +366,20 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
   return true;
 }
 
-
-bool is_float_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
-  // check if obj is a TensorList
-  if (is_tensor_list_and_append_overloaded(obj, overloaded_args, argnum, false)) {
+bool is_float_list_and_append_overloaded(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
     return false;
   }
-  return (PyTuple_Check(obj) || PyList_Check(obj));
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (size_t idx = 0; idx < size; idx++) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -430,7 +437,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return size > 0 && THPUtils_checkLong(obj);
     }
     case ParameterType::FLOAT_LIST: {
-      return is_float_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
+      return is_float_list_and_append_overloaded(obj);
     }
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
