@@ -588,15 +588,15 @@ class TestFX(JitTestCase):
             # module_name: name for new module's root torch.nn.module
             # module_node_names: list of node names to add to new graph, need to match names in orig_nodes
             # orig_nodes: nodes from original torch.fx.GraphModule
-            # orig_base_module: original torch.nn.module which orig_nodes's torch.fx.GraphModule was traced from
+            # orig_root_module: original torch.nn.module which orig_nodes's torch.fx.GraphModule was traced from
             # submodule_hints: if adding submodules from modules created by this function, add their names here
             #                  and add their names to module_node_names and add their nodes to orig_nodes
             def create_module_from_nodes(
                 module_name: str,
                 module_node_names,
                 orig_nodes: Dict[str, torch.fx.Node],
-                orig_base_module: torch.nn.Module,
-                submodule_hints=[]
+                orig_root_module: torch.nn.Module,
+                submodule_hints,
             ) -> (torch.fx.GraphModule, torch.fx.Node):
                 # create new graph
                 new_nodes: Dict[str, torch.fx.Node] = {}
@@ -609,24 +609,11 @@ class TestFX(JitTestCase):
                 for node_name in module_node_names:
                     orig_node = orig_nodes[node_name]
 
-                    # perform arg transformation
-                    new_args = []
-                    for orig_arg in orig_node.args:
-                        if isinstance(orig_arg, torch.fx.Node):
-                            # TODO assumption that nodes aren't nested in lists/tuples
-                            new_args.append(new_nodes[orig_arg.name])
-                        else:
-                            # TODO assumption that non-nodes are directly copyable
-                            new_args.append(orig_arg)
-                    new_args = tuple(new_args)
-
-                    # perform kwarg tranformation
-                    new_kwargs: Dict[str, torch.fx.Argument] = {}
-                    for key, value in orig_node.kwargs.items():
-                        if isinstance(value, torch.fx.Node):
-                            new_kwargs[key] = new_nodes[value.name]
-                        else:
-                            new_kwargs[key] = value
+                    # perform arg and kwarg transformation
+                    def replace_args(old_node: Node, new_nodes: Dict[str, torch.fx.Node]):
+                        return new_nodes[old_node.name]
+                    new_args = torch.fx.map_arg(orig_node.args, lambda n: replace_args(n, new_nodes))
+                    new_kwargs = torch.fx.map_arg(orig_node.kwargs, lambda n: replace_args(n, new_nodes))
 
                     # create target
                     target = (
@@ -659,7 +646,7 @@ class TestFX(JitTestCase):
                             node_target = orig_nodes[node_name].target
                         else:
                             # the actual target still lives in the original torch.nn.module's hiearchy
-                            node_target = orig_base_module
+                            node_target = orig_root_module
                             for atom in orig_nodes[node_name].target.split("."):
                                 node_target = getattr(node_target, atom)
                         subgraph_targets[str(node.target)] = node_target
@@ -684,13 +671,21 @@ class TestFX(JitTestCase):
             # create subgraph A
             subgraph_a_partition = ["x", "param", "add_1", "linear_1", "clamp_1"]
             submodule_a, submodule_node_a = create_module_from_nodes(
-                "submod_a", subgraph_a_partition, orig_nodes, orig_torch_nn_module
+                module_name="submod_a",
+                module_node_names=subgraph_a_partition,
+                orig_nodes=orig_nodes,
+                orig_root_module=orig_torch_nn_module,
+                submodule_hints=[],
             )
 
             # create subgraph B
             subgraph_b_partition = ["y", "linear_2", "clamp_2"]
             submodule_b, submodule_node_b = create_module_from_nodes(
-                "submod_b", subgraph_b_partition, orig_nodes, orig_torch_nn_module
+                module_name="submod_b",
+                module_node_names=subgraph_b_partition,
+                orig_nodes=orig_nodes,
+                orig_root_module=orig_torch_nn_module,
+                submodule_hints=[],
             )
 
             # add new nodes to list of original nodes so outer graph can access them
@@ -701,13 +696,13 @@ class TestFX(JitTestCase):
             orig_nodes["add_2"].args = (orig_nodes["submod_a"], orig_nodes["submod_b"])
 
             # create outer graph
-            outer_graph_group = ["x", "y", "submod_a", "submod_b", "add_2"]
+            outer_graph_grouping = ["x", "y", "submod_a", "submod_b", "add_2"]
             outer_module, _ = create_module_from_nodes(
-                "outer_graph",
-                outer_graph_group,
-                orig_nodes,
-                orig_torch_nn_module,
-                ["submod_a", "submod_b"],
+                module_name="outer_graph",
+                module_node_names=outer_graph_grouping,
+                orig_nodes=orig_nodes,
+                orig_root_module=orig_torch_nn_module,
+                submodule_hints=["submod_a", "submod_b"],
             )
 
             x = torch.rand(3, 4)
@@ -718,8 +713,6 @@ class TestFX(JitTestCase):
 
             self.assertEqual(orig_out, subgraphs_out)
 
-
-        
         make_module_have_submodules(traced, my_module)
 
 
