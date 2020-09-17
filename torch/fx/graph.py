@@ -5,6 +5,7 @@ import builtins
 import copy
 import torch
 import keyword
+import re
 
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist
@@ -65,46 +66,25 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     else:
         return a
 
-class FinalizableList(list):
-    def __init__(self, *args, **kwargs):
-        self.finalized = False
-        super().__init__(*args, **kwargs)
-
-    mutation_methods = ['append', 'extend', 'insert', 'remove', 'pop', 'clear', 'sort', 'reverse']
-
-    def _raise_finalized(self):
-        raise RuntimeError('This Graph has already been finalized! FX graphs are immutable after '
-                           'setting output(). Please make a new graph')
-
-    def finalize(self):
-        self.finalized = True
-
-    def __deepcopy__(self, memo):
-        instance = FinalizableList()
-        instance.extend([copy.deepcopy(item, memo) for item in self])
-        if self.finalized:
-            instance.finalize()
-        return instance
-
-for method in FinalizableList.mutation_methods:
-    def scope(method):
-        def wrapper(self, *args, **kwargs):
-            if self.finalized:
-                self._raise_finalized()
-            getattr(super(FinalizableList, self), method)(*args, **kwargs)
-        return wrapper
-    setattr(FinalizableList, method, scope(method))
-
 class Graph:
-    def __init__(self, from_graph : Optional['Graph'] = None):
+    def __init__(self):
+        self._nodes : List[Node]  = []
         self._used_names : Dict[str, int] = {}  # base name -> number
-        if from_graph:
-            self.nodes : FinalizableList = FinalizableList()
-            val_map = {}
-            for node in from_graph.nodes:
-                val_map[node] = self.node_copy(node, lambda n: val_map[n])
-        else:
-            self.nodes : FinalizableList = FinalizableList()
+
+    @property
+    def nodes(self):
+        return tuple(self._nodes)
+
+    def copy_graph(self):
+        """
+        Create a new graph containing the same nodes as `self` but without
+        `output` set. Thus, you can add new nodes to this graph copy.
+        """
+        g = Graph()
+        val_map = {}
+        for node in self._nodes:
+            val_map[node] = g.node_copy(node, lambda n : val_map[n])
+        return g
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -122,7 +102,7 @@ class Graph:
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        self.nodes.append(n)
+        self._nodes.append(n)
         return n
 
     # sugar for above when you know the op
@@ -132,20 +112,20 @@ class Graph:
     def get_param(self, name: str) -> Node:
         return self.create_node('get_param', name)
 
-    def call_module(self, 
-                    module_name: str, 
+    def call_module(self,
+                    module_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_module', module_name, args, kwargs)
 
-    def call_method(self, 
-                    method_name: str, 
+    def call_method(self,
+                    method_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_method', method_name, args, kwargs)
 
-    def call_function(self, 
-                      the_function: Callable[..., Any], 
+    def call_function(self,
+                      the_function: Callable[..., Any],
                       args: Optional[Tuple[Argument, ...]] = None,
                       kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_function', the_function, args, kwargs)
@@ -167,7 +147,6 @@ class Graph:
     def output(self, result: Argument):
         self.result = result
         self._mark_uses(result)
-        self.nodes.finalize()
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -178,8 +157,11 @@ class Graph:
             if _is_magic(op):
                 op = op[2:-2]
         op = op.replace('.', '_')
-        op = op.replace('*', '')
+        # delete all characters that are illegal in a Python identifier
+        op = re.sub('[^0-9a-zA-Z_]+', '_', op)
         op = snake_case(op)
+        if op[0].isdigit():
+            op = f'_{op}'
 
         if op not in self._used_names:
             self._used_names[op] = 0
@@ -195,7 +177,7 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
-        for node in self.nodes:
+        for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
@@ -271,7 +253,7 @@ class Graph:
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
-        node_strs = [format_node(node) for node in self.nodes]
+        node_strs = [format_node(node) for node in self._nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}):'
         for node_str in node_strs:

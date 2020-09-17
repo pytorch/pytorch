@@ -172,7 +172,7 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        new_g = torch.fx.Graph(g)
+        new_g = g.copy_graph()
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
@@ -417,6 +417,20 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2(torch.rand(4, 4))
 
+    def test_symbolic_trace_sequential(self):
+        class Simple(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        seq = torch.nn.Sequential(
+            Simple(),
+            Simple(),
+            Simple()
+        )
+        traced = symbolic_trace(seq)
+        x = torch.rand(3, 4)
+        self.assertEqual(traced(x), seq(x))
+
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):
             def forward(self, x):
@@ -439,7 +453,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
 
         def transform(traced):
-            new_graph = torch.fx.Graph(traced.graph)
+            new_graph = traced.graph.copy_graph()
             relu_out = new_graph.create_node(
                 op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
             new_graph.output(relu_out)
