@@ -64,6 +64,13 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
   }
 
+#define IS_RAND(node)                                    \
+  {                                                      \
+    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
+    ASSERT_NE(nullptr, node_);                           \
+    ASSERT_EQ(node_->op_type(), kRand);                  \
+  }
+
 void testConstantFoldSimple() {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -182,6 +189,14 @@ void testConstantFoldIntrinsics() {
   SimpleIRExprEval ref(fn);
 
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
+}
+
+void testConstantFoldCastToBool() {
+  KernelScope kernel_scope;
+  ExprHandle f = Cast::make(kBool, IntImm::make(0));
+  ExprHandle newF = IRSimplifier::simplify(f);
+  SimpleIRExprEval eval(newF);
+  ASSERT_EQ(eval.value<bool>(), false);
 }
 
 void testConstantFoldWithVar() {
@@ -405,6 +420,26 @@ void testHashEquivalence() {
   // Intrinsics sanity check.
   ExprHandle f5 = Intrinsics::make(kSin, x) * Intrinsics::make(kCos, x);
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
+}
+
+void testHashEquivalenceRand() {
+  KernelScope kernel_scope;
+  ExprHandle f =
+      Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
+
+  const Add* root = f.AsNode<Add>();
+  ASSERT_NE(root, nullptr);
+
+  HashProvider hasher;
+  auto hash_f = hasher.hash(f.node());
+  auto hash_l = hasher.hash(root->lhs());
+  auto hash_r = hasher.hash(root->rhs());
+
+  // Root not equal to either branch.
+  ASSERT_NE(hash_f, hash_l);
+  ASSERT_NE(hash_f, hash_r);
+  // and branches are NOT equal.
+  ASSERT_NE(hash_l, hash_r);
 }
 
 void testHashEquivalenceAfterFolding() {
@@ -3166,6 +3201,240 @@ void testSimplifyEliminateZeroLengthAlloc() {
     Stmt* simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
+  }
+}
+
+void testDontSimplifyRand() {
+  KernelScope kernel_scope;
+
+  {
+    // rand() + rand() = rand() + rand() NOT 2 * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) + Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_RAND(add->lhs());
+    IS_RAND(add->rhs());
+  }
+
+  {
+    // rand() - rand() = rand() - rand() NOT 0.
+    ExprHandle body =
+        Intrinsics::make(kRand, kFloat) - Intrinsics::make(kRand, kFloat);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_RAND(sub->lhs());
+    IS_RAND(sub->rhs());
+  }
+
+  {
+    // rand() * rand() = rand() * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) * Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_RAND(mul->lhs());
+    IS_RAND(mul->rhs());
+  }
+}
+
+void testSimplifyReorderForCond() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {4}, kInt));
+  Buffer b(BufHandle("B", {1}, kInt));
+  Buffer c(BufHandle("C", {4}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  {
+    // for ( if ( ... ) ) => if ( for ( ... ) ).
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Can't reorder if condition is dependent on the loop var.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Can't reorder if condition is dependent on a var that is modified inside
+    // the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition based on buffer not referenced in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(b, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition based on buffer read only in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition depends on Let in the loop. Cannot reorder.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Block::make(
+            {Let::make(j, 3),
+             Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                 nullptr)}));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Let, loop->body()->front(), let);
+    IS_NODE_WITH_NAME(Cond, loop->body()->back(), cond);
+  }
+
+  {
+    // Multi level Ifs where all conditions are distinct. Move BOTH Cond
+    // statements outside the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(Cond, true_block->front(), cond2);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_block2);
+    IS_NODE_WITH_NAME(For, true_block2->front(), loop);
+  }
+
+  {
+    // Multi level Ifs where the inner condition does depend on a loop var,
+    // reorder only the first Cond.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+    IS_NODE_WITH_NAME(Block, loop->body(), loop_body);
+    IS_NODE_WITH_NAME(Cond, loop_body->front(), cond2);
+  }
+
+  {
+    // Don't reorder if there's an else block of the Cond.
+    // We could, but is it much better?
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            Store::make(c, {0}, 0, mask)));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition uses distinct region of Tensor.
+    // We could reorder here wih better analysis, but we don't. Included for
+    // completeness.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {1}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
 }
 
