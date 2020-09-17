@@ -12,9 +12,9 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
         vec_res.emplace_back(at::native::empty_like(t));
     }
 
-    tensor_lists.emplace_back(std::move(input.vec()));
-    tensor_lists.emplace_back(std::move(tensors1.vec()));
-    tensor_lists.emplace_back(std::move(tensors2.vec()));
+    tensor_lists.emplace_back(input.vec());
+    tensor_lists.emplace_back(tensors1.vec());
+    tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
@@ -27,17 +27,16 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 template<template<class> class Op>
 void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
-    tensor_lists.emplace_back(std::move(input.vec()));
-    tensor_lists.emplace_back(std::move(tensors1.vec()));
-    tensor_lists.emplace_back(std::move(tensors2.vec()));
+    tensor_lists.emplace_back(input.vec());
+    tensor_lists.emplace_back(tensors1.vec());
+    tensor_lists.emplace_back(tensors2.vec());
 
     AT_DISPATCH_ALL_TYPES_AND(kHalf, input[0].scalar_type(), "foreach_pointwise_op__cuda", [&]() {
         multi_tensor_apply<3>(tensor_lists, PointwiseOpFunctor_<scalar_t, Op>(), scalar.to<scalar_t>());
     });
 }
 
-
-#define FOREACH_UNARY_OP(NAME, OP)                      \
+#define FOREACH_UNARY_OP(NAME, OP)                                                                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
     TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                               \
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");                                 \
@@ -65,7 +64,6 @@ void foreach_tensor_##NAME##_cuda_(TensorList input, TensorList tensors1, Tensor
                                                                                                                                \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);                                                              \
 }
-
 
 FOREACH_UNARY_OP(addcmul, std::multiplies);
 FOREACH_UNARY_OP(addcdiv, std::divides);

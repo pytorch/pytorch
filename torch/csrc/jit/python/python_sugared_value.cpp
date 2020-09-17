@@ -573,6 +573,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr;
   }
 
+  // Check if it's a property.
+  auto prop =
+      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+  if (prop) {
+    return MethodValue(self_, prop->getter->name())
+        .call(loc, m, {}, {}, /*n_binders=*/1);
+  }
+
   // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
@@ -712,8 +720,12 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
 
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-      py::hasattr(obj, "_fields");
+  int is_tuple_class = PyObject_IsSubclass(obj.ptr(), tuple_type);
+  if (is_tuple_class == -1) {
+    PyErr_Clear();
+    return false;
+  }
+  return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
@@ -762,14 +774,13 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 }
 
 bool isEnumClass(py::object obj) {
-  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
-  if (!py::cast<bool>(is_class)) {
-    return false;
-  }
-
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
+  if (ret == -1) {
+    PyErr_Clear();
+    return false;
+  }
   return ret == 1;
 }
 
@@ -855,11 +866,20 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
+    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
       py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("rpc_sync").ptr()) {
+    return SpecialFormValue::create(prim::rpc_sync);
+  } else if (
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
+    return SpecialFormValue::create(prim::rpc_remote);
 #endif
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"

@@ -68,7 +68,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   int depthwiseMultiplier = outputChannels / inputChannels;
 
   // One thread per output value
-  int n = THCTensor_(nElement)(state, output);
+  int64_t n = THCTensor_(nElement)(state, output);
   int blocks = GET_BLOCKS(n);
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
@@ -151,7 +151,7 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   THAssert(dWeight.isContiguous());
 
   // One thread per gradInput value
-  int n = THCTensor_(nElement)(state, gradInput);
+  int64_t n = THCTensor_(nElement)(state, gradInput);
   int blocks = GET_BLOCKS(n);
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);

@@ -144,6 +144,12 @@ alias_infos = (
     AliasInfo('multiply_', torch.Tensor.multiply_, 'mul_', torch.Tensor.mul_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d),),
               decorators=(onlyCPU,)),
+    AliasInfo('true_divide', torch.true_divide, 'div', torch.div,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
+              decorators=(onlyCPU,)),
+    AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
+              decorators=(onlyCPU,)),
 )
 
 # Placeholder test class for validating that aliases are correctly

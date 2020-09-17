@@ -286,6 +286,7 @@ Pointwise Ops
     erfc
     erfinv
     exp
+    exp2
     expm1
     fix
     floor
@@ -416,6 +417,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations

@@ -143,6 +143,8 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, rpc_sync)                  \
+  _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
@@ -190,6 +192,8 @@ namespace c10 {
   _(aten, div_)                      \
   _(aten, divide)                    \
   _(aten, divide_)                   \
+  _(aten, true_divide)               \
+  _(aten, true_divide_)              \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
   _(aten, addcdiv_)                  \

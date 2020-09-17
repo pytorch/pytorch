@@ -3,7 +3,7 @@ from .pattern_utils import (
     register_fusion_pattern,
 )
 from .utils import _parent_name
-from ..fuse_modules import OP_LIST_TO_FUSER_METHOD
+from ..fuser_method_mappings import get_fuser_method
 
 # ---------------------
 # Fusion Patterns
@@ -60,7 +60,7 @@ class ConvBNReLUFusion():
         op_list.reverse()
         op_type_list = tuple(type(m) for m in op_list)
         conv_parent_name, conv_name = _parent_name(self.conv_node.target)
-        fuser_method = OP_LIST_TO_FUSER_METHOD.get(op_type_list, None)
+        fuser_method = get_fuser_method(op_type_list)
         if fuser_method is None:
             raise NotImplementedError("Cannot fuse modules: {}".format(types))
         setattr(quantizer.modules[conv_parent_name], conv_name, fuser_method(*op_list))
@@ -104,8 +104,6 @@ class ModuleReLUFusion():
         op_list.reverse()
         op_type_list = tuple(type(m) for m in op_list)
         module_parent_name, module_name = _parent_name(self.module_node.target)
-        fuser_method = OP_LIST_TO_FUSER_METHOD.get(op_type_list, None)
-        if fuser_method is None:
-            raise NotImplementedError("Cannot fuse modules: {}".format(types))
+        fuser_method = get_fuser_method(op_type_list)
         setattr(quantizer.modules[module_parent_name], module_name, fuser_method(*op_list))
         return quantizer.fused_graph.node_copy(self.module_node, load_arg)

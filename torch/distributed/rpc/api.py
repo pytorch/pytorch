@@ -324,6 +324,18 @@ def _to_worker_info(name_or_info):
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
 
+def _rref_typeof_on_owner(rref):
+    return type(rref.local_value())
+
+
+def _rref_typeof_on_user(rref):
+    return rpc_sync(
+        rref.owner(),
+        _rref_typeof_on_owner,
+        args=(rref,)
+    )
+
+
 T = TypeVar("T")
 GenericWithOneTypeVar = Generic[T]
 

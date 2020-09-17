@@ -122,29 +122,14 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_CHECK(false,
-      "Integer division of tensors using div or / is no longer supported, ",
-      "and in a future release div will perform true division as in Python 3. ",
-      "Use true_divide or floor_divide (// in Python) instead.");
-  }
-
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
-  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
-      && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_CHECK(false,
-      "Integer division of tensors using div or / is no longer supported, ",
-      "and in a future release div will perform true division as in Python 3. ",
-      "Use true_divide or floor_divide (// in Python) instead.");
-  }
-
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return iter.output();
 }
@@ -188,6 +173,27 @@ Tensor& divide_(Tensor& self, Scalar other) {
   return self.div_(other);
 }
 
+// true_divide, an alias for div
+Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
+  return native::div_out(result, self, divisor);
+}
+
+Tensor true_divide(const Tensor& self, const Tensor& divisor) {
+  return self.div(divisor);
+}
+
+Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
+  return self.div_(divisor);
+}
+
+Tensor true_divide(const Tensor& self, Scalar divisor) {
+  return self.div(divisor);
+}
+
+Tensor& true_divide_(Tensor& self, Scalar divisor) {
+  return self.div_(divisor);
+}
+
 Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   remainder_stub(iter.device_type(), iter);
@@ -203,49 +209,6 @@ Tensor remainder(const Tensor& self, const Tensor& other) {
 
 Tensor& remainder_(Tensor& self, const Tensor& other) {
   return native::remainder_out(self, self, other);
-}
-
-Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  TensorIterator iter = TensorIteratorConfig()
-     .add_output(result)
-     .add_input(self)
-     .add_input(divisor)
-     .allow_cpu_scalars(true)
-     .promote_inputs_to_common_dtype(true)
-     .promote_integer_inputs_to_float(true)
-     .cast_common_dtype_to_outputs(true)
-     .enforce_safe_casting_to_output(true)
-     .build();
-
-  div_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor true_divide(const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, creates
-  // temporary float copies as new inputs and sets the result's type to
-  // the default scalar type
-  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
-   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-    auto iter = TensorIterator::binary_op(result,
-                                          self.to(scalar_type),
-                                          divisor.to(scalar_type));
-    div_stub(iter.device_type(), iter);
-    return result;
-  }
-
-  // If at least one input is non-integral (or bool) participates in
-  // type promotion like other binary ufuncs
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, divisor);
-  div_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
-  return native::true_divide_out(self, self, divisor);
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -1018,14 +981,6 @@ Tensor nextafter(const Tensor& self, const Tensor& other) {
 
 Tensor& nextafter_(Tensor& self, const Tensor& other) {
   return at::nextafter_out(self, self, other);
-}
-
-Tensor true_divide(const Tensor& self, Scalar divisor) {
-  return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
-}
-
-Tensor& true_divide_(Tensor& self, Scalar divisor) {
-  return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
 // Note: this function is only for testing.
