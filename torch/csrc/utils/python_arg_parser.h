@@ -371,24 +371,7 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
 }
 
 inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
-  if (!args[i]) {
-    return {};
-  }
-  PyObject* arg = args[i];
-  auto tuple = PyTuple_Check(arg);
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  std::vector<double> res(size);
-  for (int idx = 0; idx < size; idx++) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    try {
-      res[idx] = THPUtils_unpackDouble(obj);
-    } catch (const std::exception &e) {
-      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
-          signature.name.c_str(), signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
-    }
-  }
-  return res;
+  return this->doublelist(i);
 }
 
 inline std::vector<double> PythonArgs::doublelist(int i) {

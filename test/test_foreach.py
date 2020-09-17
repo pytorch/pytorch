@@ -268,12 +268,12 @@ class TestForeach(TestCase):
                 return
 
             if dtype in torch.testing.integral_types() and "cuda" in device:
-               # see TODO[Fix scalar list]
-               self.assertEqual(res, [e.to(dtype) for e in expected])
+                # see TODO[Fix scalar list]
+                self.assertEqual(res, [e.to(dtype) for e in expected])
 
-               foreach_bin_op_(tensors, scalars)
-               self.assertEqual(tensors, res)
-               return
+                foreach_bin_op_(tensors, scalars)
+                self.assertEqual(tensors, res)
+                return
             else:
                 self.assertEqual(res, expected)
 
@@ -345,16 +345,16 @@ class TestForeach(TestCase):
                 return
 
             with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
-               res = foreach_bin_op(tensors, scalars)
+                res = foreach_bin_op(tensors, scalars)
 
             with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
-               foreach_bin_op_(tensors, scalars)
+                foreach_bin_op_(tensors, scalars)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalar(self, device, dtype):
         for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                self.foreach_bin_ops_,
-                                                                self.torch_bin_ops):
+                                                                 self.foreach_bin_ops_,
+                                                                 self.torch_bin_ops):
             tensors = self._get_test_data(device, dtype, 3)
             scalar = True
 
@@ -464,7 +464,7 @@ class TestForeach(TestCase):
                         self.assertEqual(res, tensors)
                 else:
                     if device == "cpu":
-                        expected = [torch_bin_op(t, s) for t,s in zip(tensors, scalars)]
+                        expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
                         res = foreach_bin_op(tensors, scalars)
 
                         # see TODO[Fix scalar list]
@@ -480,7 +480,7 @@ class TestForeach(TestCase):
                             foreach_bin_op_(tensors, scalars)
                             self.assertEqual(tensors, expected)
                     else:
-                        expected = [torch_bin_op(t, s) for t,s in zip(tensors, scalars)]
+                        expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
                         res = foreach_bin_op(tensors, scalars)
 
                         if dtype in torch.testing.integral_types():
