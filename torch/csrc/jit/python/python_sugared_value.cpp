@@ -720,8 +720,12 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
 
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-      py::hasattr(obj, "_fields");
+  int is_tuple_class = PyObject_IsSubclass(obj.ptr(), tuple_type);
+  if (is_tuple_class == -1) {
+    PyErr_Clear();
+    return false;
+  }
+  return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
@@ -770,14 +774,13 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 }
 
 bool isEnumClass(py::object obj) {
-  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
-  if (!py::cast<bool>(is_class)) {
-    return false;
-  }
-
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
+  if (ret == -1) {
+    PyErr_Clear();
+    return false;
+  }
   return ret == 1;
 }
 
