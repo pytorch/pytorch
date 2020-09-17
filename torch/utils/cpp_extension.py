@@ -832,9 +832,11 @@ def include_paths(cuda: bool = False) -> List[str]:
     ]
     if cuda and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
-        paths.append(_join_rocm_home('include'))
+        rocm_include_path = _join_rocm_home('include')
+        paths.append(rocm_include_path)
         if MIOPEN_HOME is not None:
             paths.append(os.path.join(MIOPEN_HOME, 'include'))
+        paths.extend([f.path for f in os.scandir(rocm_include_path) if f.is_dir()])
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
