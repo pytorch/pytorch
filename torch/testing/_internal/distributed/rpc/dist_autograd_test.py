@@ -2263,5 +2263,7 @@ class TensorPipeDistAutogradTest(RpcAgentTestFixture):
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(torch.ones(10), grads[t1])
             self.assertEqual(torch.ones(10), grads[t2])
+            self.assertEqual(t1.device, grads[t1].device)
+            self.assertEqual(t2.device, grads[t2].device)
 
         rpc.shutdown()
