@@ -8,10 +8,6 @@ namespace {
 // For FP16 or BFloat16 inputs, ops should perform internal math in FP32.
 template<typename scalar_t> struct get_opmath_t {
   using opmath_t = scalar_t;
-  // or equivalently:
-  // (https://en.cppreference.com/w/cpp/language/typedef says
-  // "type aliases provide the same functionality as typedefs using a different syntax")
-  // typedef float opmath_t;
 };
 
 template<> struct get_opmath_t<at::Half> {

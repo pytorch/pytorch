@@ -36,29 +36,14 @@ static __host__ __device__ __forceinline__ int isfinite_ensure_cuda_math(float v
 namespace at {
 namespace native {
 
-// Multiplies scaled_grad in-place by inv_scale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.0.
-//
-// Args:
-// scaled_grad:  A (scaled) gradient tensor.  May contain infs or NaNs.
-// found_inf:  A single-element float tensor to which 1.0 will be written if any gradients contain infs/nans.
-//             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
-// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
-//
-// Returns:
-// A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
-// which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
+namespace {
+// Single-tensor fallback for _amp_foreach_non_finite_check_and_unscale_cuda_.
+// Handles individual tensors that are acceptable to unscale but not MTA-safe.
 void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
                                              Tensor& found_inf,
                                              const Tensor& inv_scale)
 {
-  TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
-  TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
-  TORCH_CHECK(found_inf.is_cuda(), "found_inf must be a CUDA tensor.");
-  TORCH_CHECK(inv_scale.numel() == 1, "inv_scale must be a 1-element tensor.");
-  TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
-  TORCH_CHECK(inv_scale.scalar_type() == at::ScalarType::Float, "inv_scale must be a float tensor.");
-  TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
-  TORCH_CHECK(scaled_grad.layout() == at::kStrided, "scaled_grad must be a strided (not sparse) Tensor.");
+  // The only way we reach this function is through _amp_foreach_non_finite_check_and_unscale_cuda_, so no input checks.
 
   // Acts on scaled_grad in place.
   auto iter = TensorIterator::unary_op(scaled_grad, scaled_grad);
@@ -74,7 +59,7 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
 
       gpu_kernel(iter,
                  [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (scalar_t val_in) -> scalar_t {
-                   opmath_t val = static_cast<opmath_t>(val_in);
+                   auto val = static_cast<opmath_t>(val_in);
                    if (!isfinite_ensure_cuda_math(val)) {
                      *found_inf_ptr = 1.f;
                    }
@@ -84,9 +69,17 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
                  });
     });
 }
+} // anonymous namespace
 
 
-// Same as _amp_non_finite_check_and_unscale_cuda_, but uses multi tensor apply to act on a list of gradients.
+// Multiplies each Tensor in scaled_grads by inv_scale in-place.
+// If any element of any Tensor in scaled_grads is inf or NaN, sets found_inf to 1.0.
+//
+// Args:
+// scaled_grads:  A TensorList of scaled gradient tensors.  May contain infs or NaNs.
+// found_inf:  A single-element float tensor to which 1.0 will be written if any gradient contain infs/nans.
+//             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
+// inv_scale:  The inverse of the scale factor by which scaled_grads are currently multiplied.
 void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
                                                      Tensor& found_inf,
                                                      const Tensor& inv_scale)
@@ -126,18 +119,19 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     // If a tensor is acceptable but not MTA-safe, we fall back to the TensorIterator kernel.
     // If a tensor is unacceptable, we throw an error to blame GradScaler.
     tensor_lists.resize(1);
+    tensor_lists[0].reserve(scaled_grads.size());
     auto expected_device = scaled_grads[0].device();
     for (const Tensor& t : scaled_grads) {
       // Ensures GradScaler filtered scaled_grads by device.
       TORCH_CHECK(t.is_cuda(), "one of scaled_grads was not a CUDA tensor.");
       TORCH_CHECK(t.device() == expected_device, "scaled_grads must be on the same device.");
+      TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
       if (!t.is_non_overlapping_and_dense()) {
         // t is acceptable but not MTA-safe.  Falls back to single-tensor TensorIterator kernel.
-        at::native::_amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
-                                                            found_inf,
-                                                            inv_scale);
+        _amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
+                                                found_inf,
+                                                inv_scale);
       } else {
-        TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
         tensor_lists[0].push_back(t);
       }
     }

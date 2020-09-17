@@ -5963,12 +5963,6 @@
   dispatch:
     CPU: legacy::cpu::_th_std
 
-- func: _amp_non_finite_check_and_unscale_(Tensor(a!) self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CUDA: _amp_non_finite_check_and_unscale_cuda_
-
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   use_c10_dispatcher: full
   device_guard: False

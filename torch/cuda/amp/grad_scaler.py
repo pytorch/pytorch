@@ -183,7 +183,7 @@ class GradScaler(object):
         # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
         # There could be hundreds of grads, so we'd like to iterate through them just once.
         # However, we don't know their devices or dtypes in advance.
-        per_device_and_dtype_grads = defaultdict(defaultdict(list))  # https://knowyourmeme.com/memes/xzibit-yo-dawg
+        per_device_and_dtype_grads = defaultdict(defaultdict(list))
         for group in optimizer.param_groups:
             for param in group["params"]:
                 if param.grad is not None:
@@ -201,17 +201,15 @@ class GradScaler(object):
                         else:
                             to_unscale = param.grad
 
-                        # I don't like appending in the inner loop, but I can't think of a better way
-                        # to populate per-device-and-dtype lists in one pass where devices and dtypes
-                        # are not known in advance.
-                        per_device_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
+                        # TODO: is there a way to split by device and dtype without appending in the inner loop?
+                        per_device_and_dtype_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
 
         with torch.no_grad():
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
-                for dtype, grads in per_dtype_grads.items():
+                for grads in per_dtype_grads.values():
                     torch._amp_foreach_non_finite_check_and_unscale_(grads,
-                                                                     per_device_found_inf.get(param.grad.device),
-                                                                     per_device_inv_scale.get(param.grad.device))
+                                                                     per_device_found_inf.get(device),
+                                                                     per_device_inv_scale.get(device))
 
         return per_device_found_inf._per_device_tensors
 
