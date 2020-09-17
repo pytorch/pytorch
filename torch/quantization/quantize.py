@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
 import itertools
@@ -10,14 +9,15 @@ import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic.qat as nniqat
 
-from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
-                               DEFAULT_MODULE_MAPPING,
-                               DEFAULT_QAT_MODULE_MAPPING,
-                               DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
+from .quantization_mappings import (get_dynamic_quant_module_mappings,
+                                    get_static_quant_module_mappings,
+                                    get_qat_module_mappings,
+                                    get_qconfig_propagation_list)
+
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
 
-def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
+def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig_`
 
@@ -25,7 +25,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
         module: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
-        white_list: list of quantizable modules
+        allow_list: list of quantizable modules
         qconfig_parent: quantization config of parent module, we will fallback to
                        this config when there is no specified config for current
                        module
@@ -36,8 +36,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
         None, module is modified inplace with qconfig attached
     """
     # TODO: Add test
-    if white_list is None:
-        white_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+    if allow_list is None:
+        allow_list = get_qconfig_propagation_list()
 
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
@@ -46,11 +46,11 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
     module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        _propagate_qconfig_helper(child, qconfig_dict, white_list,
+        _propagate_qconfig_helper(child, qconfig_dict, allow_list,
                                   module_qconfig, module_prefix)
 
-# TODO(jerryzh): expose white_list
-def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
+# TODO(jerryzh): expose allow_list
+def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
 
@@ -66,7 +66,7 @@ def propagate_qconfig_(module, qconfig_dict=None, white_list=None):
     """
     if qconfig_dict is None:
         qconfig_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict, white_list)
+    _propagate_qconfig_helper(module, qconfig_dict, allow_list)
 
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
@@ -100,7 +100,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         None, module is modified inplace with added observer modules and forward_hooks
     """
     if qconfig_propagation_list is None:
-        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+        qconfig_propagation_list = get_qconfig_propagation_list()
+
     # respect device affinity when adding observers
     if device is None:
         devices = get_unique_devices_(module)
@@ -175,7 +176,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=None,
+def prepare(model, inplace=False, allow_list=None,
             observer_non_leaf_module_list=None, prehook=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
@@ -188,15 +189,16 @@ def prepare(model, inplace=False, white_list=None,
     Args:
         model: input model to be modified in-place
         inplace: carry out model transformations in-place, the original module is mutated
-        white_list: list of quantizable modules
+        allow_list: list of quantizable modules
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
         prehook: observer we want to add to forward_pre_hook
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_list = white_list
-    if propagate_qconfig_list is None:
-        propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+
+    qconfig_propagation_list = allow_list
+    if qconfig_propagation_list is None:
+        qconfig_propagation_list = get_qconfig_propagation_list()
     propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
@@ -205,7 +207,7 @@ def prepare(model, inplace=False, white_list=None,
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
 
-    add_observer_(model, propagate_qconfig_list, observer_non_leaf_module_list, prehook=prehook)
+    add_observer_(model, qconfig_propagation_list, observer_non_leaf_module_list, prehook=prehook)
     return model
 
 def _remove_qconfig(module):
@@ -239,7 +241,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         Quantized model.
     """
     if mapping is None:
-        mapping = DEFAULT_MODULE_MAPPING
+        mapping = get_static_quant_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
@@ -316,7 +318,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
 
     if mapping is None:
-        mapping = DEFAULT_DYNAMIC_MODULE_MAPPING
+        mapping = get_dynamic_quant_module_mappings()
 
     if not inplace:
         model = copy.deepcopy(model)
@@ -341,7 +343,7 @@ def prepare_qat(model, mapping=None, inplace=False):
                  is mutated
     """
     if mapping is None:
-        mapping = DEFAULT_QAT_MODULE_MAPPING
+        mapping = get_qat_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -406,7 +408,7 @@ def _convert(module, mapping=None, inplace=False):
 
     """
     if mapping is None:
-        mapping = DEFAULT_MODULE_MAPPING
+        mapping = get_static_quant_module_mappings()
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}

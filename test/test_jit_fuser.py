@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 import torch
 import torch.nn as nn
@@ -768,7 +763,7 @@ class TestFuser(JitTestCase):
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
                               'because the kernels sometimes trigger bugs in compilers '
                               '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
+                raise unittest.SkipTest('Failed to compile') from e
             else:
                 raise
 
