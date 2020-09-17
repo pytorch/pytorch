@@ -68,27 +68,22 @@ Tensor _histogram_cpu_template_uniformbins(
     input_t min,
     input_t max,
     bool density) {
-  input_t minval = min;
-  input_t maxval = max;
+
   if (min == max) {
-    minval = self.min().item<input_t>();
-    maxval = self.max().item<input_t>();
-  }
-  if (minval == maxval) {
-    minval -= 1.0;
-    maxval += 1.0;
+    min -= 1;
+    max += 1;
   }
   TORCH_CHECK(nbins > 0, "bins must be > 0");
   // Check if range is finite, hack to keep MSVC from complaining
   TORCH_CHECK(
-      !(std::isinf((double)minval) || std::isinf((double)maxval) ||
-        std::isnan((double)minval) || std::isnan((double)maxval)),
+      !(std::isinf((double)min) || std::isinf((double)max) ||
+        std::isnan((double)min) || std::isnan((double)max)),
       "range of [",
-      minval,
+      min,
       ", ",
-      maxval,
+      max,
       "] is not finite");
-  TORCH_CHECK(minval < maxval, "max must be larger than min");
+  TORCH_CHECK(min < max, "max must be larger than min");
 
   bool has_weights = weights.defined();
   TORCH_CHECK(
@@ -104,15 +99,15 @@ Tensor _histogram_cpu_template_uniformbins(
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= minval && self_p[i] <= maxval)
-        output_p[getbin(self_p[i],minval,maxval,nbins)] += weights_p[i];
+      if (self_p[i] >= min && self_p[i] <= max)
+        output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
     }
   } else {
     output = native::zeros({nbins}, kLong);
     int64_t* output_p = output.data_ptr<int64_t>();
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= minval && self_p[i] <= maxval)
-        output_p[getbin(self_p[i], minval, maxval, nbins)] += 1L;
+      if (self_p[i] >= min && self_p[i] <= max)
+        output_p[getbin(self_p[i], min, max, nbins)] += 1L;
     }
   }
 
@@ -133,13 +128,23 @@ Tensor _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlengt
 }
 
 
-Tensor _histogram_cpu(
+std::tuple<Tensor,Tensor> _histogram_cpu(
     const Tensor& self,
     int64_t bins,
+    c10::optional<ArrayRef<double>> range,
     const Tensor& weights,
-    Scalar min,
-    Scalar max,
     bool density) {
+
+  // If range is not defined, compute min and max
+  Scalar min;
+  Scalar max;
+  if (range.has_value()) {
+    min = range.value()[0];
+    max = range.value()[1];
+  } else {
+    min = self.min().item();
+    max = self.max().item();
+  }
 
   auto hist = AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histogram_cpu_uniformbins", [&] {
     const auto scalar = weights.scalar_type();
@@ -160,26 +165,23 @@ Tensor _histogram_cpu(
             density);
   });
 
-
   if (density) { // Compute the density
     double minval = min.to<double>();
     double maxval = max.to<double>();
     if (minval == maxval) {
-      minval = self.min().to(kDouble).item<double>();
-      maxval = self.max().to(kDouble).item<double>();
-    }
-    if (minval == maxval) {
-      minval -= 1.0;
-      maxval += 1.0;
+      minval -= 1;
+      maxval += 1;
     }
     hist = hist.to(kDouble);
     hist *= bins / (maxval - minval) / hist.sum();
   }
 
-  return hist;
+  Tensor edges = at::linspace(min, max, bins + 1, self.options());
+
+  return std::make_tuple(hist, edges);
 }
 
-Tensor _histogram_cpu(
+std::tuple<Tensor, Tensor> histogram(
     const Tensor& self,
     const Tensor& bins,
     const Tensor& weights,
@@ -191,7 +193,7 @@ Tensor _histogram_cpu(
           .item<bool>(),
       "bins must increase monotonically");
   int64_t nbins = bins.size(0) - 1;
-  Tensor index = searchsorted_cpu(bins, self, false, true);
+  Tensor index = searchsorted(bins, self, false, true);
   index.clamp_(0, nbins + 2);
   index = index.where(self != bins[-1], index - 1);
   Tensor hist = bincount(index.flatten(0), weights, nbins + 2);
@@ -204,7 +206,7 @@ Tensor _histogram_cpu(
         (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1)).to(kDouble);
     }
 
-  return hist;
+  return std::make_tuple(hist, bins);
 }
 
 

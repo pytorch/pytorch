@@ -5,6 +5,8 @@
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
+#include <tuple>
+
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
@@ -365,20 +367,13 @@ Tensor _histogram_uniformbins_cuda_template(
     const Tensor& weights,
     input_t min,
     input_t max) {
-  if (nbins <= 0) {
-    AT_ERROR("bins must be > 0");
-  }
   input_t minvalue = min;
   input_t maxvalue = max;
-  if (min == max) {
-    minvalue = *self.min().cpu().data_ptr<input_t>();
-    maxvalue = *self.max().cpu().data_ptr<input_t>();
-  }
   if (minvalue == maxvalue) {
-    minvalue = minvalue - 1;
-    maxvalue = maxvalue + 1;
+    minvalue -= 1;
+    maxvalue += 1;
   }
-
+  TORCH_CHECK(nbins > 0, "bins must be > 0");
 #ifndef __HIP_PLATFORM_HCC__
   TORCH_CHECK(
       !(THCNumerics<input_t>::isinf(minvalue) ||
@@ -415,44 +410,6 @@ Tensor _histogram_uniformbins_cuda_template(
     output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue); 
-  }
-
-
-  return output;
-}
-
-
-template <typename input_t, typename weights_t>
-Tensor _histogram_custombins_cuda_template(
-    const Tensor& self,
-    const Tensor& bins,
-    const Tensor& weights) {
-
-  bool has_weights = weights.defined();
-  TORCH_CHECK(
-      !has_weights || weights.numel() == self.numel(),
-      "input and weights should have the same length");
-  TORCH_CHECK(bins.dim() == 1, "bins must be 1d, when a tensor");
-  TORCH_CHECK(
-      at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
-          .item<bool>(),
-      "bins must increase monotonically");
-
-  Tensor output;
-  Tensor binindex = native::searchsorted_cuda(bins, self, false, true) - 1;
-  binindex = binindex.where(self <= bins[-1], binindex + 1); //Remove the out of bounds values, this is a hack and can be optimized.
-  int64_t nbins = bins.size(0) - 1;
-  int64_t minvalue = 0;
-  int64_t maxvalue = nbins;
-
-  if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
-    auto ret = cuda::CUDA_tensor_histogram<weights_t, int64_t, true>(
-        output, binindex, weights, nbins, minvalue, maxvalue);
-  } else {
-    output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, int64_t, false>( 
-        output, binindex, weights, nbins, minvalue, maxvalue);
   }
   return output;
 }
@@ -499,18 +456,29 @@ Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar
   return result;
 }
 
-Tensor _histogram_cuda(
+std::tuple<Tensor,Tensor> _histogram_cuda(
     const Tensor& self,
     int64_t nbins,
+    c10::optional<ArrayRef<double>> range,
     const Tensor& weights,
-    Scalar min,
-    Scalar max,
     bool density) {
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
+
+  // If range is not defined, compute min and max
+  Scalar min;
+  Scalar max;
+  if (range.has_value()) {
+    min = range.value()[0];
+    max = range.value()[1];
+  } else {
+    min = self.min().item();
+    max = self.max().item();
+  }
+
   Tensor hist =
       AT_DISPATCH_ALL_TYPES(
       self.scalar_type(), "histogram_cuda_uniform", [&] {
@@ -540,37 +508,9 @@ Tensor _histogram_cuda(
     hist = hist.to(kDouble);
     hist *= nbins / (maxval - minval) / hist.sum();
   }
-  return hist;
-}
 
-Tensor _histogram_cuda(
-    const Tensor& self,
-    const Tensor& bins,
-    const Tensor& weights,
-    bool density) {
-  if (self.scalar_type() == ScalarType::Half) {
-    AT_ERROR("HalfTensor is not supported");
-  }
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("_histogram_cuda");
-  Tensor hist = AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cuda_uniform", [&] {
-        const auto scalar = weights.scalar_type();
-        if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
-          return _histogram_custombins_cuda_template<scalar_t, float>(
-              self, bins, weights);
-        }
-        return _histogram_custombins_cuda_template<scalar_t, double>(
-            self,
-            bins,
-            weights.to(kDouble));
-      });
-  if (density) {
-    hist = hist.to(kDouble);
-    hist /= hist.sum() *
-        (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1)).to(kDouble);
-  }
-  return hist;
+  Tensor edges = at::native::linspace(min, max, nbins + 1, self.options());
+  return std::make_tuple(hist, edges);
 }
 
 } // namespace native
