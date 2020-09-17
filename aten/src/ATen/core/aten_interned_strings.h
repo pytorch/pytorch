@@ -399,6 +399,7 @@ _(aten, isreal) \
 _(aten, istft) \
 _(aten, isposinf) \
 _(aten, isneginf) \
+_(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
