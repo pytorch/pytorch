@@ -353,7 +353,7 @@ test_cpp_extensions() {
 }
 
 test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platform might not support AVX/AVX2)
+  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
     echo "Testing vec256 instructions"
     pushd build/bin
