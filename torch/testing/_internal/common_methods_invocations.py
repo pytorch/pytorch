@@ -8,11 +8,9 @@ from torch._six import inf, istuple
 from torch.autograd import Variable
 
 from torch.testing import \
-    (make_non_contiguous,
-     _dispatch_dtypes,
-     floating_types, floating_types_and, floating_types_and_half,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and)
+    (make_non_contiguous, _dispatch_dtypes,
+     floating_types, floating_types_and, floating_and_complex_types,
+     floating_and_complex_types_and, all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
