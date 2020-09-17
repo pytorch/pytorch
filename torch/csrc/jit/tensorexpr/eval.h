@@ -226,11 +226,35 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   template <typename T>
-  Value binary_op(
-      const Value& lhs,
-      const Value& rhs,
-      IRNodeType op_type,
-      bool option = false) {
+  typename std::enable_if_t<std::is_floating_point<T>::value, T> max_value(
+      T a,
+      T b) {
+    return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? b : a));
+  }
+
+  template <typename T>
+  typename std::enable_if_t<!std::is_floating_point<T>::value, T> max_value(
+      T a,
+      T b) {
+    return a < b ? b : a;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<std::is_floating_point<T>::value, T> min_value(
+      T a,
+      T b) {
+    return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? a : b));
+  }
+
+  template <typename T>
+  typename std::enable_if_t<!std::is_floating_point<T>::value, T> min_value(
+      T a,
+      T b) {
+    return a < b ? a : b;
+  }
+
+  template <typename T>
+  Value binary_op(const Value& lhs, const Value& rhs, IRNodeType op_type) {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
@@ -252,30 +276,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMax:
-          if (option) {
-            // Propagate NaNs
-            if (is_floating_point(lhs.dtype().scalar_type()) &&
-                is_floating_point(rhs.dtype().scalar_type())) {
-              result_v[i] = lhs_v[i];
-            } else if (std::isnan((float)rhs_v[i])) {
-              result_v[i] = rhs_v[i];
-            }
-          } else {
-            result_v[i] = lhs_v[i] > rhs_v[i] ? lhs_v[i] : rhs_v[i];
-          }
+          result_v[i] = max_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMin:
-          if (option) {
-            // Propagate NaNs
-            if (is_floating_point(lhs.dtype().scalar_type()) &&
-                is_floating_point(rhs.dtype().scalar_type())) {
-              result_v[i] = lhs_v[i];
-            } else if (std::isnan((float)rhs_v[i])) {
-              result_v[i] = rhs_v[i];
-            }
-          } else {
-            result_v[i] = lhs_v[i] < rhs_v[i] ? lhs_v[i] : rhs_v[i];
-          }
+          result_v[i] = min_value(lhs_v[i], rhs_v[i]);
           break;
         default:
           // TODO: change to a proper error report

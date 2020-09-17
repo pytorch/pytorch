@@ -204,8 +204,8 @@ Disable JIT for Debugging
 
 Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
 and tracing annotations. If there is hard-to-debug error in one of your
-TorchScript model, you can use this flag to force everything to run using native
-Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
 you can use tools like ``pdb`` to debug the model code.  For example::
 
     @torch.jit.script

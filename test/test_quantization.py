@@ -13,7 +13,7 @@ from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
-from quantization.test_quantized_op import TestQuantizedEmbeddingBag  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -63,6 +63,7 @@ from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F
 # 3. GraphModule based graph mode quantization
 from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
 from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401

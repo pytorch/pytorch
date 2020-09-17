@@ -55,6 +55,9 @@ namespace {
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
+  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
+  checkAllSameGPU("addmm", args);
+
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
@@ -71,7 +74,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   if (&result != &self) {
     at::native::resize_as_(result, self_);
-    if (beta.to<double>() != 0.0) {
+    if (beta.toComplexDouble() != 0.0) {
       at::native::copy_(result, self_);
     }
   }
@@ -108,6 +111,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self_.scalar_type();
 
   if (mat1.numel() == 0) {
+    // By definition, when beta==0, values in self should be ignored. nans and infs
+    // should not propagate
+    if (beta.toComplexDouble() == 0.) {
+      return result.zero_();
+    }
     return at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
   }
 
@@ -349,9 +357,9 @@ Tensor addbmm_cuda(const Tensor& self,
   return out;
 }
 
-Tensor dot_cuda(const Tensor& self, const Tensor& other) {
-  at::NoNamesGuard guard;
+namespace {
 
+inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
       "1D tensors expected, but got ",
@@ -387,6 +395,14 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
           (other.stride(0) <= INT_MAX),
       "dot only supports n, incx, incy with the bound [val] <= %d",
       INT_MAX);
+}
+
+} // anonymous namespace
+
+Tensor dot_cuda(const Tensor& self, const Tensor& other) {
+  at::NoNamesGuard guard;
+
+  dot_check(self, other);
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));
@@ -414,4 +430,38 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
   });
 }
 
+Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
+  if (!self.is_complex()) {
+    return dot_cuda(self, other);
+  }
+
+  at::NoNamesGuard guard;
+  dot_check(self, other);
+
+  const int n = static_cast<int>(self.numel());
+  int incx = static_cast<int>(self.stride(0));
+  int incy = static_cast<int>(other.stride(0));
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
+    Tensor result = at::empty({}, self.options());
+
+    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    at::cuda::blas::PointerModeGuard pointerModeGuard(
+        handle, CUBLAS_POINTER_MODE_DEVICE);
+    at::cuda::blas::vdot<scalar_t>(
+        handle,
+        n,
+        self.data_ptr<scalar_t>(),
+        incx,
+        other.data_ptr<scalar_t>(),
+        incy,
+        result.data_ptr<scalar_t>());
+
+    return result;
+  });
+}
 } }
