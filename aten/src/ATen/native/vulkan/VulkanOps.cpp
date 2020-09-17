@@ -853,12 +853,12 @@ void conv2d_depthwise(
 }
 
 ImageSizes conv2d_prepack_weights_image_sizes(
-    int64_t _OC,
-    int64_t _C,
+    int64_t argOC,
+    int64_t argC,
     int64_t KH,
     int64_t KW) {
-  const int32_t C = safe_downcast<int32_t>(_C);
-  const int32_t OC = safe_downcast<int32_t>(_OC);
+  const int32_t C = safe_downcast<int32_t>(argC);
+  const int32_t OC = safe_downcast<int32_t>(argOC);
   const int32_t Cup4 = ALIGN_UP4(C);
   const int32_t OC_4 = UP_DIV(OC, 4);
   const int32_t Z = safe_downcast<int32_t>(KH) * safe_downcast<int32_t>(KW);
