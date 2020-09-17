@@ -5,6 +5,8 @@ import sys
 import torch
 import torch.nn as nn
 
+from typing import Any
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -495,6 +497,36 @@ class TestAsync(JitTestCase):
             @torch.jit.script
             def forward(self, x):
                 futs = torch.jit.annotate(List[torch.jit.Future], [])
+
+    def test_future_subtyping(self):
+        """
+        Test that futures subtype each other properly.
+        """
+        # Successful subtyping.
+        def returns_int(x: int) -> int:
+            return x + x + 1
+
+        def returns_future_any(x: int) -> torch.jit.Future[Any]:
+            return torch.jit._fork(returns_int, (x))
+
+        @torch.jit.script
+        def fn_int(x: int) -> Any:
+            fut = returns_future_any(x)
+            return fut.wait()
+
+        # Unsuccessful subtyping.
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
+        ):
+            def returns_future_float(x: int) -> torch.jit.Future[float]:
+                return torch.jit._fork(returns_int, (x))
+
+            @torch.jit.script
+            def fn_float(x: int) -> Any:
+                fut = returns_future_float(x)
+                return fut.wait()
+
 
 
 if __name__ == '__main__':
