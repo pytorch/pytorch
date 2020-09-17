@@ -3,6 +3,8 @@ import gc
 import inspect
 import runpy
 import threading
+import typing
+from typing import Union, List, TypeVar, Tuple, Generic, ClassVar, Iterable, Any, Optional
 from functools import wraps
 import typing
 import unittest
@@ -164,7 +166,13 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
+<<<<<<< HEAD
 device_type_test_bases: typing.List[typing.Any] = list()
+=======
+
+#TDeviceTypeTestBase = TypeVar('TDeviceTypeTestBase', CPUTestBase, CUDATestBase)
+device_type_test_bases : List[Union[CPUTestBase, CUDATestBase]] = []
+>>>>>>> 62c2bd3c6f... try to fix the errors
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -266,7 +274,12 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
+<<<<<<< HEAD
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
+=======
+                    args = (device_arg, dtype, op)
+                    args = tuple(arg for arg in args if arg is not None)
+>>>>>>> 62c2bd3c6f... try to fix the errors
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -311,11 +324,11 @@ class DeviceTypeTestBase(TestCase):
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
 
-class CPUTestBase(DeviceTypeTestBase):
+class CPUTestBase(Generic[DeviceTypeTestBase]):
     device_type = 'cpu'
 
 
-class CUDATestBase(DeviceTypeTestBase):
+class CUDATestBase(Generic[DeviceTypeTestBase]):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -425,8 +438,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
+<<<<<<< HEAD
 
         device_type_test_class: typing.Any  = type(class_name, (base, empty_class), {})
+=======
+        device_type_test_class = type(class_name, (base, empty_class), {})
+        #: Tuple(DeviceTypeTestBase, Tuple(), Dict[<nothing>, <nothing>])
+>>>>>>> 62c2bd3c6f... try to fix the errors
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
