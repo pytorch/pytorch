@@ -70,16 +70,17 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
+      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+
       gpu_kernel(iter,
-                 [found_inf_ptr, inv_scale_ptr]GPU_LAMBDA(scalar_t val) -> scalar_t {
-                   float fval = static_cast<float>(val);
-                   // See isfinite_ensure_cuda_math above.
-                   if (!isfinite_ensure_cuda_math(fval)) {
+                 [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (scalar_t val_in) -> scalar_t {
+                   opmath_t val = static_cast<opmath_t>(val_in);
+                   if (!isfinite_ensure_cuda_math(val)) {
                      *found_inf_ptr = 1.f;
                    }
                    // Every thread accesses inv_scale, but it will hit in cache.
                    const auto inv_scale_val = *inv_scale_ptr;
-                   return static_cast<scalar_t>(inv_scale_val == 1.f ? fval : fval*inv_scale_val);
+                   return static_cast<scalar_t>(inv_scale_val == 1.f ? val : val * inv_scale_val);
                  });
     });
 }
@@ -104,12 +105,11 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
   // Ensures client code (GradScaler) filtered scaled_grads by dtype.
   check_foreach_api_restrictions(scaled_grads);
 
-  // is_non_overlapping_and_dense() is not available in Python.
-  // GradScaler can't filter for it. We must do so here.
-  TensorList filtered_scaled_grads;
-  std::vector<at::Tensor> filtered_scaled_grads_storage;
+  std::vector<std::vector<at::Tensor>> tensor_lists;
 
-  if (can_use_fast_route(scaled_grads) {
+  // is_non_overlapping_and_dense() is not available in Python.
+  // GradScaler can't filter for it. We need to filter here.
+  if (can_use_fast_route(scaled_grads)) {
     // Hopefully common case.
     // can_use_fast_route is true, which confirms:
     //  - all scaled_grads are strided
@@ -117,52 +117,55 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     //  - all scaled_grads are on the same device
     TORCH_CHECK(scaled_grads[0].is_cuda(), "scaled_grads must be CUDA tensors.");
     // Sets up MTA launch to use scaled_grads as-is.
-    filtered_scaled_grads = scaled_grads;
+    tensor_lists.emplace_back(scaled_grads.vec());
   } else {
     // Hopefully uncommon case.
     // can_use_fast_route is an all-or-nothing check.  In this path it was false,
     // so any of the above confirmations could have gone wrong.
-    // We filter MTA-safe tensors into an MTA-able list,
-    // fall back to the TensorIterator kernel for acceptable but not MTA-safe tensors,
-    // and blame GradScaler for unacceptable tensors.
-    filtered_scaled_grads_storage.reserve(scaled_grads.size());
+    // We filter MTA-safe tensors into an MTA-able list.
+    // If a tensor is acceptable but not MTA-safe, we fall back to the TensorIterator kernel.
+    // If a tensor is unacceptable, we throw an error to blame GradScaler.
+    tensor_lists.resize(1);
     auto expected_device = scaled_grads[0].device();
-    for (const auto& t : scaled_grads) {
+    for (const Tensor& t : scaled_grads) {
       // Ensures GradScaler filtered scaled_grads by device.
       TORCH_CHECK(t.is_cuda(), "one of scaled_grads was not a CUDA tensor.");
       TORCH_CHECK(t.device() == expected_device, "scaled_grads must be on the same device.");
       if (!t.is_non_overlapping_and_dense()) {
-        // No error, but falls back to single-tensor TensorIterator kernel.
-        at::native::_amp_non_finite_check_and_unscale_cuda_(t, found_inf, inv_scale);
+        // t is acceptable but not MTA-safe.  Falls back to single-tensor TensorIterator kernel.
+        at::native::_amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
+                                                            found_inf,
+                                                            inv_scale);
       } else {
         TORCH_CHECK(t.layout() == at::kStrided, "one of scaled_grads was not a strided tensor.");
-        filtered_scaled_grads_storage.push_back(t);
+        tensor_lists[0].push_back(t);
       }
     }
-    if (filtered_scaled_grads_storage.size() == 0) {
+    if (tensor_lists[0].size() == 0) {
       return;
     }
-    filtered_scaled_grads = filtered_scaled_grads_storage;
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    iter.dtype(),
+    tensor_lists[0][0].scalar_type(),
     "_amp_foreach_non_finite_check_and_unscale_cuda",
-    [&filtered_scaled_grads, &found_inf, &inv_scale] {
+    [&tensor_lists, &found_inf, &inv_scale] {
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      multi_tensor_apply<1>(filtered_scaled_grads,
-                            THIS WONT COMPILE YET, multi_tensor_apply expects a template functor.
-                            [found_inf_ptr, inv_scale_ptr]GPU_LAMBDA(scalar_t val) -> scalar_t {
-                              float fval = static_cast<float>(val);
-                              // See isfinite_ensure_cuda_math above.
-                              if (!isfinite_ensure_cuda_math(fval)) {
+      using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+
+      multi_tensor_apply<1>(tensor_lists,
+                            UnaryOpFunctor_<scalar_t>(),
+                            [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (opmath_t val) -> opmath_t {
+                              // There is a slight asymmetry here with the TensorIterator kernel above.
+                              // MTA Functors ensure val comes in as opmath_t rather than scalar_t.
+                              if (!isfinite_ensure_cuda_math(val)) {
                                 *found_inf_ptr = 1.f;
                               }
                               // Every thread accesses inv_scale, but it will hit in cache.
                               const auto inv_scale_val = *inv_scale_ptr;
-                              return static_cast<scalar_t>(inv_scale_val == 1.f ? fval : fval*inv_scale_val);
+                              return static_cast<opmath_t>(inv_scale_val == 1.f ? val : val * inv_scale_val);
                             });
     });
 }

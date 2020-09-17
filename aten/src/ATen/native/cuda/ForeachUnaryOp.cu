@@ -17,7 +17,9 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        multi_tensor_apply<2>(tensor_lists, UnaryOpFunctor<scalar_t, Op<opmath_t>>());
+        multi_tensor_apply<2>(tensor_lists,
+                              UnaryOpFunctor<scalar_t>(),
+                              Op<opmath_t>());
     });
     return tensor_lists[1];
 }
@@ -29,7 +31,9 @@ void foreach_unary_op_(TensorList tensors) {
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        multi_tensor_apply<1>(tensor_lists, UnaryOpFunctor_<scalar_t, Op<opmath_t>>());
+        multi_tensor_apply<1>(tensor_lists,
+                              UnaryOpFunctor_<scalar_t>(),
+                              Op<opmath_t>());
     });
 }
 

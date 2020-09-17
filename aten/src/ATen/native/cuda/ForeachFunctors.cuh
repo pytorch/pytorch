@@ -16,19 +16,20 @@ template<typename scalar_t> struct get_opmath_t {
 
 template<> struct get_opmath_t<at::Half> {
   using opmath_t = float;
-}
+};
 
 template<> struct get_opmath_t<at::BFloat16> {
   using opmath_t = float;
-}
+};
 
-template<typename T, typename Op>
+template<typename T>
 struct BinaryOpScalarFunctor_ {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
-        get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        Op op,
+        typename get_opmath_t<T>::opmath_t scalar) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -48,8 +49,8 @@ struct BinaryOpScalarFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    static_cast<opmath_t>(scalar)));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -67,8 +68,8 @@ struct BinaryOpScalarFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -81,13 +82,14 @@ struct BinaryOpScalarFunctor_ {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct BinaryOpScalarFunctor {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
-        get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        Op op,
+        typename get_opmath_t<T>::opmath_t scalar) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -110,8 +112,8 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    static_cast<opmath_t>(scalar)));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -129,8 +131,8 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      static_cast<opmath_t>(scalar)));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    static_cast<opmath_t>(scalar)));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -143,13 +145,14 @@ struct BinaryOpScalarFunctor {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct BinaryOpListAlphaFunctor_ {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListMetadata<2>& tl, 
-        get_opmath_t<T>::opmath_t alpha) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        TensorListMetadata<2>& tl,
+        Op op,
+        typename get_opmath_t<T>::opmath_t alpha) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -174,8 +177,8 @@ struct BinaryOpListAlphaFunctor_ {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      alpha * static_cast<opmath_t>(r_y[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    alpha * static_cast<opmath_t>(r_y[ii])));
                     }
                     // store
                     load_store(x, r_x, i_start , 0);
@@ -195,8 +198,8 @@ struct BinaryOpListAlphaFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      alpha * static_cast<opmath_t>(r_y[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    alpha * static_cast<opmath_t>(r_y[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -209,13 +212,14 @@ struct BinaryOpListAlphaFunctor_ {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct BinaryOpListAlphaFunctor {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl,
-        get_opmath_t<T>::opmath_t alpha) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        Op op,
+        typename get_opmath_t<T>::opmath_t alpha) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -243,8 +247,8 @@ struct BinaryOpListAlphaFunctor {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      alpha * static_cast<opmath_t>(r_y[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    alpha * static_cast<opmath_t>(r_y[ii])));
                     }
                     // store
                     load_store(out, r_x, i_start , 0);
@@ -264,8 +268,8 @@ struct BinaryOpListAlphaFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii]),
-                                                      alpha * static_cast<opmath_t>(r_y[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]),
+                                                    alpha * static_cast<opmath_t>(r_y[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -278,12 +282,13 @@ struct BinaryOpListAlphaFunctor {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct UnaryOpFunctor_ {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListMetadata<1>& tl) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        TensorListMetadata<1>& tl,
+        Op op) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -303,7 +308,7 @@ struct UnaryOpFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii])));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -321,7 +326,7 @@ struct UnaryOpFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -334,12 +339,13 @@ struct UnaryOpFunctor_ {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct UnaryOpFunctor {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListMetadata<2>& tl) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        TensorListMetadata<2>& tl,
+        Op op) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -362,7 +368,7 @@ struct UnaryOpFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii])));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -380,7 +386,7 @@ struct UnaryOpFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<T>(Op()(static_cast<opmath_t>(r_x[ii])));
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -393,13 +399,14 @@ struct UnaryOpFunctor {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct PointwiseOpFunctor_ {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl,
-        get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        Op op,
+        typename get_opmath_t<T>::opmath_t scalar) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -430,8 +437,8 @@ struct PointwiseOpFunctor_ {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_x[ii] = static_cast<T>(static_cast<opmath_t>(r_x[ii]) +
-                                                 scalar * Op()(static_cast<opmath_t>(r_y[ii]),
-                                                               static_cast<opmath_t>(r_z[ii])));
+                                                 scalar * op(static_cast<opmath_t>(r_y[ii]),
+                                                             static_cast<opmath_t>(r_z[ii])));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -454,8 +461,8 @@ struct PointwiseOpFunctor_ {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_x[ii] = static_cast<T>(static_cast<opmath_t>(r_x[ii]) +
-                                                 scalar * Op()(static_cast<opmath_t>(r_y[ii]),
-                                                               static_cast<opmath_t>(r_z[ii])));
+                                                 scalar * op(static_cast<opmath_t>(r_y[ii]),
+                                                             static_cast<opmath_t>(r_z[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -468,13 +475,14 @@ struct PointwiseOpFunctor_ {
         }
 };
 
-template<typename T, typename Op>
+template<typename T>
 struct PointwiseOpFunctor {
-    __device__ void operator() (
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<4>& tl,
-        get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = get_opmath_t<T>::opmath_t
+        Op op,
+        typename get_opmath_t<T>::opmath_t scalar) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
 
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -508,8 +516,8 @@ struct PointwiseOpFunctor {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_x[ii] = static_cast<T>(static_cast<opmath_t>(r_x[ii]) +
-                                                 scalar * Op()(static_cast<opmath_t>(r_y[ii]),
-                                                               static_cast<opmath_t>(r_z[ii])));
+                                                 scalar * op(static_cast<opmath_t>(r_y[ii]),
+                                                             static_cast<opmath_t>(r_z[ii])));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -533,8 +541,8 @@ struct PointwiseOpFunctor {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         r_x[ii] = static_cast<T>(static_cast<opmath_t>(r_x[ii]) +
-                                                 scalar * Op()(static_cast<opmath_t>(r_y[ii]),
-                                                               static_cast<opmath_t>(r_z[ii])));
+                                                 scalar * op(static_cast<opmath_t>(r_y[ii]),
+                                                             static_cast<opmath_t>(r_z[ii])));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
