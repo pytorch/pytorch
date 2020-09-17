@@ -213,6 +213,7 @@ namespace jit {
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
+  _(SimplifyReorderForCond)                 \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
