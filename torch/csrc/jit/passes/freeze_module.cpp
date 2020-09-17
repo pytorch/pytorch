@@ -189,7 +189,7 @@ class AttributePropagator {
     }
 
     auto attr = attrModule.attr(name);
-    if (!AliasDb::isMutableType(attr.type())) {
+    if (!AliasDb::isMutableType(attr.type()) || attr.isNone()) {
       auto it = preservedScalarAttrs_.find(attrModule._ivalue());
       return it == preservedScalarAttrs_.end() || !it->second.count(name);
     }
@@ -211,7 +211,7 @@ class AttributePropagator {
       const std::string& name,
       const IValue& attr,
       const ModulePtr& attrModule) {
-    if (AliasDb::isMutableType(attr.type())) {
+    if (AliasDb::isMutableType(attr.type()) && !attr.isNone()) {
       preservedAttrs_.insert(attr);
     } else {
       preservedScalarAttrs_[attrModule].insert(name);
@@ -572,7 +572,7 @@ class AttributePropagator {
       auto attrTy = attr.type();
 
       bool isMutable;
-      if (AliasDb::isMutableType(attrTy)) {
+      if (AliasDb::isMutableType(attrTy) && !attr.isNone()) {
         isMutable = preservedAttrs_.count(attr);
       } else {
         isMutable =

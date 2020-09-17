@@ -101,16 +101,19 @@ class TestFreezing(JitTestCase):
                 self.sub2 = SubModule2()
                 self.a = 3
                 self.b = 4
+                self.c = None
+                self.d = None
 
             def forward(self, x):
                 self.b = 20
+                self.d = torch.tensor([1.2])
                 return self.sub1(x) + self.a + self.b + self.sub2(x)
 
         m = torch.jit.script(TestModule())
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch.jit.freeze(m)
+        mf = torch.jit.freeze(m, ["c"])
 
         # Check if frozen module looks as below:
         # module m {
@@ -124,6 +127,7 @@ class TestFreezing(JitTestCase):
         #       attributes {
         #         sub2 = ...
         #         b =
+        #         c = None
         #       }
         #       ...
         #     }
@@ -133,6 +137,8 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub1'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
+        self.assertTrue(mf.hasattr('c'))
+        self.assertFalse(mf.hasattr('d'))
         self.assertTrue(mf.hasattr('sub2'))
         self.assertTrue(mf.sub2.hasattr('b'))   # verify b is preserved in sub2
         self.assertFalse(mf.sub2.hasattr('a'))  # verify a is removed in sub2
