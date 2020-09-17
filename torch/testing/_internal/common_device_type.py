@@ -182,7 +182,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
     return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type : str = 'generic_device_type'
+    device_type: str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
