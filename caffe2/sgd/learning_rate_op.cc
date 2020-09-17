@@ -144,3 +144,45 @@ Example usage:
 
 NO_GRADIENT(LearningRate);
 } // namespace caffe2
+
+using LearningRateOpFloatCPU =
+    caffe2::LearningRateOp<float, caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LearningRate,
+    "_caffe2::LearningRate("
+    "Tensor iterations, "
+    "float base_lr,"
+    "str policy, "
+    "float? power = 1.0, "
+    "float? gamma = 1.0, "
+    "int? stepsize = 1, "
+    "float? max_lr = 0.005, "
+    "bool? active_first = True, "
+    "int? active_period = -1, "
+    "int? inactive_period = -1, "
+    "int? max_iter = -1, "
+    "int? num_iter = 0, "
+    "float? start_multiplier = 0, "
+    "float? end_mulitplier = 0, "
+    "float? multiplier = 0.5, "
+    "float? multiplier_1 = 1.0, "
+    "float? multiplier_2 = 1.0, "
+    "int[]? sub_policy_num_iters = None, "
+    "float? m1 = 0.5, "
+    "float? n1 = 0, "
+    "float? m2 = 0.5, "
+    "float? n2 = 0, "
+    "float? m3 = 0.5, "
+    "float? start_warmup_multiplier = 0.1, "
+    "int? constant_warmup_num_iter = 10000000, "
+    "int? linear_warmup_num_iter = 10000000, "
+    "float? cyclical_max_lr = 0.05, "
+    "int? cyclical_step_size = 1000000, "
+    "float? cyclical_decay = 0.999, "
+    "float? cosine_min_lr = 0.01, "
+    "float? cosine_max_lr = 0.05, "
+    "int? cosine_period = 50, "
+    "float? cosine_t_mult = 1.0, "
+    "float? cosine_lr_shrink = 0.99) -> Tensor output",
+    LearningRateOpFloatCPU);

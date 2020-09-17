@@ -1014,7 +1014,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             return pp.str();
@@ -1023,7 +1023,7 @@ void initJitScriptBindings(PyObject* module) {
           "code_with_constants",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
@@ -1055,7 +1055,7 @@ void initJitScriptBindings(PyObject* module) {
           "find_method",
           [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
-            return method != nullptr;
+            return method != c10::nullopt;
           },
           py::arg("method_name"))
       .def(
@@ -1067,7 +1067,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method(method_name, stack);
+            return m.get_method(method_name)(stack);
           },
           py::arg("method_name"),
           py::arg("input_tuple"))
@@ -1078,7 +1078,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method("forward", stack);
+            return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));
 
@@ -1177,7 +1177,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](const StrongFunctionPtr& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
 
             PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
@@ -1222,14 +1222,14 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Method& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
-        std::vector<c10::NamedTypePtr> deps;
+        PrintDepsTable deps;
         PythonPrint pp(constants, deps);
         pp.printMethod(self.function());
         std::map<std::string, at::IValue> consts;
@@ -1533,7 +1533,13 @@ void initJitScriptBindings(PyObject* module) {
       std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
       .def(py::init<py::object>())
-      .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
+      .def(
+          "add_constant",
+          [](ConcreteModuleTypeBuilder& self,
+             std::string name,
+             py::object value) {
+            self.addConstant(std::move(name), std::move(value));
+          })
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
       .def(
           "add_function_attribute",
@@ -1584,17 +1590,27 @@ void initJitScriptBindings(PyObject* module) {
             return self.equals(other);
           })
       .def(
-          "_create_methods",
+          "_create_methods_and_properties",
           [](std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
+             const std::vector<Property>& properties,
+             const std::vector<ResolutionCallback>& propertyRcbs,
+             const std::vector<Def>& methodDefs,
+             const std::vector<ResolutionCallback>& methodRcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
+            TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
+            TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
+
+            std::vector<ResolverPtr> methodResolvers, propertyResolvers;
+            methodResolvers.reserve(methodRcbs.size());
+            for (auto& callback : methodRcbs) {
+              methodResolvers.push_back(pythonResolver(callback));
             }
+
+            propertyResolvers.reserve(propertyRcbs.size());
+            for (auto& callback : propertyRcbs) {
+              propertyResolvers.push_back(pythonResolver(callback));
+            }
+
             const auto& selfType =
                 concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
@@ -1602,15 +1618,15 @@ void initJitScriptBindings(PyObject* module) {
             auto cu = selfType->compilation_unit();
             cu->define(
                 prefix,
-                /*properties=*/{},
-                /*propResolvers=*/{},
-                defs,
-                resolvers,
+                properties,
+                propertyResolvers,
+                methodDefs,
+                methodResolvers,
                 &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
+            auto defs_it = methodDefs.begin();
+            while (defs_it != methodDefs.end()) {
               const auto method_name =
                   QualifiedName(prefix, (*defs_it).name().name());
               auto& method = cu->get_function(method_name);
