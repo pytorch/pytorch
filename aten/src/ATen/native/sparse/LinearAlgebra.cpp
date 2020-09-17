@@ -34,7 +34,7 @@ namespace at { namespace native {
     auto pointers_accessor = pointers.accessor<int64_t, 1>();
     auto indices_accessor = indices.accessor<int64_t, 1>();
 
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
         scalar_t cast_alpha = alpha.to<scalar_t>();
         scalar_t cast_beta = beta.to<scalar_t>();
@@ -48,21 +48,18 @@ namespace at { namespace native {
         } else {
           at::mul_out(res, t, scalar_to_tensor(beta));
         }
-
-        scalar_t * dense_ptr = dense.data_ptr<scalar_t>();
-        scalar_t * res_ptr = res.data_ptr<scalar_t>();
-
-        if (at::hasMKL() && (at::native::is_floating_point(res) ||
-                             at::native::is_complex(res)) &&
-            res.is_contiguous()) {
-
-          at::native::sparse_mm_mkl(res, indices, pointers, values, dense, t, alpha, beta);
-        }
-        else {
-          
-        }
-
     });
+
+    if (at::hasMKL() && (at::native::is_floating_point(res) ||
+                         at::native::is_complex(res)) &&
+        res.is_contiguous()) {
+          
+      at::native::sparse_mm_mkl(res, indices, pointers, values, dense, t, alpha, beta);
+    }
+    else {
+          
+    }
+
 
     return res;
   }

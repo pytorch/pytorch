@@ -26,9 +26,29 @@ namespace at { namespace native {
 #include <ATen/mkl/Limits.h>
 
 namespace at { namespace native {
-  Tensor& sparse_mm_mkl(Tensor& res, const Tensor& indices, const Tensor& pointers,
+
+    static inline void sparse_mm_mkl_impl(double * res, long * indicies, long * pointers, double * values,
+                                          double * dense, double * t, double alpha, double beta) {
+      
+    }
+
+    template <typename scalar_t>
+    static inline void sparse_mm_mkl_template(Tensor& res, const LongTensor& indices, const LongTensor& pointers,
+      const Tensor& values, const Tensor& dense, const Tensor& t, Scalar alpha, Scalar beta) {
+      
+      sparse_mm_mkl_impl(res.data(), indices.data(), pointers.data(), values.data(), dense.data(),
+                         t.data(), alpha, beta);
+    }
+
+  Tensor& sparse_mm_mkl(Tensor& res, const LongTensor& indices, const LongTensor& pointers,
                                         const Tensor& values, const Tensor& dense, const Tensor& t,
                                         Scalar alpha, Scalar beta) {
+
+    AT_DISPATCH_FLOATING_TYPES(
+      values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+                                                        sparse_mm_mkl_template<scalar_t>(res, indices, pointers,
+                                                                                         values, dense, t, alpha, beta);
+    });
     return res;
   }
 }}
