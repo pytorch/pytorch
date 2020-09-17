@@ -46,14 +46,6 @@ except ImportError:
 #     the dispatcher API, and the legacy disaptcher API.  See each
 #     of these respective files for more information
 
-
-# Note [Byte-for-byte compatibility]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Some special cases we have made in this codegen have been strictly
-# to make sure that git diff -w reports no changes, but we believe
-# they are not semantically meaningful.  After landing the new codegen,
-# we should remove these special cases
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                         HELPER FUNCTIONS
@@ -111,8 +103,6 @@ def with_native_function(func: Callable[[NativeFunction], T]) -> Callable[[Nativ
         with context(f'in {f.loc}:\n  {f.func}'):
             with local.parametrize(
                 use_c10_dispatcher=f.use_c10_dispatcher,
-                # See Note [Byte-for-byte compatibility]
-                hack_const_mutable_self=str(f.func.name) in ["set_data", "retain_grad"],
             ):
                 return func(f)
     return wrapper
@@ -224,11 +214,7 @@ def compute_type_method(
 
             args_exprs_str = ', '.join(map(lambda a: a.name, args))
 
-            # See Note [Byte-for-byte compatibility]
-            # (return void_func() is valid C++)
             return_kw = "    return "
-            if returns_type == "void":
-                return_kw = " "
 
             cuda_guard = ""
             if dispatch is None or 'CUDA' in dispatch or 'Vulkan' == dispatch:
@@ -241,14 +227,6 @@ def compute_type_method(
                 # Only tensor like arguments are eligible
                 device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
 
-                # See Note [Byte-for-byte compatibility]
-                # I wasn't able to figure out the internal logic for
-                # these device guards
-                if str(f.func.name) == "_thnn_fused_lstm_cell_backward":
-                    device_of = "cx"
-                elif str(f.func.name) == "_thnn_differentiable_lstm_cell_backward":
-                    device_of = "input_gates"
-
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
                 # TODO: There is probably a simpler version of this that
@@ -257,9 +235,6 @@ def compute_type_method(
                     cuda_guard = """\
     const DeviceGuard device_guard(options.device());
 """
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
                     cuda_guard = """\
     globalContext().lazyInitCUDA();
@@ -269,16 +244,10 @@ def compute_type_method(
                     cuda_guard = f"""\
     const OptionalDeviceGuard device_guard(device_of({device_of}));
 """
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
                 else:
                     cuda_guard = """\
     // DeviceGuard omitted
 """
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
 
             return f"""\
 {returns_type} {name}({args_str}) {{
@@ -304,14 +273,9 @@ def compute_type_method(
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        nl = "\n"
-                    else:
-                        nl = ""
 
                     payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
-                        f"{returns_type} ({dispatcher_args_types_str})>({nl}TORCH_FN({type_name}))"
+                        f"{returns_type} ({dispatcher_args_types_str})>(TORCH_FN({type_name}))"
 
                 else:
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
@@ -477,24 +441,13 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
 
         if target is Target.DEFINITION:
-            # See Note [Byte-for-byte compatibility]
-            # I don't think there's actually a good reason to generate
-            # these two cases differently
-            if legacy_dispatcher_tensor_args:
-                tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
-                compute_dk = f"""\
-DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
-  DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
-  DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
-            else:
-                compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
             return f"""\
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
-  {compute_dk}
+  DispatchKey _dk = options.computeDispatchKey();
   DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
@@ -638,23 +591,8 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
             name = f.func.out_arguments[i].name
         # If the return argument is explicitly named...
         elif r.name:
-            # See Note [Byte-for-byte compatibility]
-            #
-            # Check if it would conflict with an existing argument.
-            # Downstream codegen assumes that return names and argument
-            # names don't conflict with each other, so we disambiguate
-            # (by adding a trailing _return) this case.  Notice that
-            # historically, the collision check was buggy: it just did a
-            # straight string contains test on the entirety of the
-            # inputs part of the format string, meaning that it also
-            # picked up occurrences of the argument name in the NAME of
-            # the function, as well as substring occurrences of the name
-            # in arguments.  We have simulated the old logic here...
-            buggy_name_conflict = r.name in str(f.func.name) or \
-                any(r.name in a.name for a in f.func.schema_order_arguments())
-            # ... but a more correct version is simply
-            # name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
-            if buggy_name_conflict and not f.func.is_out_fn():
+            name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
+            if name_conflict and not f.func.is_out_fn():
                 name = f'{r.name}_return'
             else:
                 name = r.name
@@ -715,20 +653,8 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
         arg['default'] = pythonify_default(cpp.default_expr(a.default, a.type))
     if a.name in kwarg_only_set:
         arg['kwarg_only'] = True
-    # See Note [Byte-for-byte compatibility]
-    # The default value of kwarg_only is False; this case exists for
-    # byte-for-byte compatibility
-    elif a.name in out_arg_set:
-        arg['kwarg_only'] = False
     if a.name in out_arg_set:
         arg['output'] = True
-        # See Note [Byte-for-byte compatibility]
-        # This is probably a bug in the original implementation, where
-        # the specification of allocate was not properly propagated to
-        # the schema-order arguments.  In any case, this field
-        # is redundant with the output field
-        if not schema_order:
-            arg['allocate'] = True
         # See Note [name and field_name]
         if a.name in name_to_field_name:
             arg['field_name'] = name_to_field_name[a.name]
@@ -756,9 +682,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         for cpp_a in cpp_args
     ]
 
-    # See Note [Byte-for-byte compatibility]
-    # NB: NOT actually schema order.  This is almost certainly a BUG.
-    schema_order_jit_arguments = list(itertools.chain(f.func.arguments, f.func.out_arguments, f.func.kwarg_only_arguments))
+    schema_order_jit_arguments = list(f.func.schema_order_arguments())
 
     schema_order_arguments = [
         compute_argument_yaml(
@@ -1058,8 +982,6 @@ def main() -> None:
             schema_registrations = list(mapMaybe(
                 compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=None, def_only=True),
                 native_functions))
-            # See Note [Byte-for-byte compatibility]
-            schema_registrations.sort()
             return {
                 'schema_registrations': schema_registrations,
             }
