@@ -7745,7 +7745,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky_batched(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
@@ -7760,7 +7760,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
         x = torch.rand(10, 10, dtype=dtype, device=device) + 1e-1
         A = torch.mm(x, x.t())
