@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
+#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -796,6 +797,56 @@ std::shared_ptr<SugaredValue> createSimpleEnumValue(
   return toSimple(m.graph()->insertConstant(enum_ivalue, loc));
 }
 
+std::shared_ptr<SugaredValue> PythonSliceClass::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  if (!attributes.empty()) {
+    throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
+  }
+
+  static constexpr int64_t default_start = 0;
+  static constexpr int64_t default_stop = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t default_step = 1;
+  Graph& graph = *(caller.graph());
+
+  auto ValOr = [&](Value* given, int64_t default_val) {
+    if (!given || given->type()->isSubtypeOf(NoneType::get())) {
+      return graph.insertConstant(default_val, loc);
+    }
+    return given;
+  };
+
+  Value* start;
+  Value* stop;
+  Value* step;
+  size_t n = inputs.size();
+  // Slice's constructor signature is Slice(start=None, stop, step=None)
+  if (n == 1) {
+    // Case where only `stop` is specified.
+    start = ValOr(nullptr, default_start);
+    stop = ValOr(inputs[0].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 2) {
+    // Case where `start` and `stop` are specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 3) {
+    // Case where `start`, `stop` and `step` are all specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(inputs[2].value(graph), default_step);
+  } else {
+    throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
+                           << n;
+  }
+
+  return std::make_shared<SliceValue>(start, stop, step);
+}
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
@@ -990,6 +1041,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto rcb = py::module::import("torch._jit_internal")
                    .attr("createResolutionCallbackFromClosure")(obj);
     return std::make_shared<PythonValue>(obj, rcb);
+  }
+
+  if (obj.is(py::module::import("builtins").attr("slice"))) {
+    return std::make_shared<PythonSliceClass>();
   }
 
   return std::make_shared<PythonValue>(obj);
