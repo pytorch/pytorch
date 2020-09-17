@@ -529,5 +529,26 @@ class TestFX(JitTestCase):
         ref = torch.sin(mod.linear(input) + mod.bias)
         self.assertEqual(r, ref) 
 
+    def test_construct_root_dict(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+
+        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
+        add_param : torch.Tensor = torch.rand(3, 4)
+        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+            {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
+
+        assert 'self.foo.bar.baz' in gm.code
+
+        x : torch.Tensor = torch.rand(3, 3)
+        out : torch.Tensor = gm(x)
+        ref_out : torch.Tensor = linear_mod(x) + add_param
+        self.assertEqual(out, ref_out)
+
+
 if __name__ == '__main__':
     run_tests()

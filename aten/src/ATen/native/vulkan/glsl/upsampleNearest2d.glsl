@@ -1,8 +1,9 @@
 #version 450 core
+#define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly mediump uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform mediump sampler3D uInput;
+layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
+layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
 layout(set = 0, binding = 2) uniform constBlock {
   int IW;
   int IH;
