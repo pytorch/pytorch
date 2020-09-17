@@ -3,7 +3,6 @@
  */
 
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/Exceptions.h>
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
@@ -365,12 +364,12 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
 template <>
 void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
+  // gemv is bw bound, and does not benefit from TF32. But the precision
+  // loss still happens on TF32. So we disable it here.
+  NoTF32Guard disable_tf32;
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  // gemv is bw bound, and does not benefit from TF32. But the precision
-  // loss still happens on TF32. So we disable it here.
-  NoTF32Guard disable_tf32(handle);
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(c10::complex<float>);
@@ -395,12 +394,12 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
 
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
+  // gemv is bw bound, and does not benefit from TF32. But the precision
+  // loss still happens on TF32. So we disable it here.
+  NoTF32Guard disable_tf32;
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  // gemv is bw bound, and does not benefit from TF32. But the precision
-  // loss still happens on TF32. So we disable it here.
-  NoTF32Guard disable_tf32(handle);
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(float);

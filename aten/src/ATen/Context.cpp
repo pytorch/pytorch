@@ -230,4 +230,6 @@ Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
 
+thread_local bool NoTF32Guard::override_allow_tf32_flag = false;
+
 } // namespace at
