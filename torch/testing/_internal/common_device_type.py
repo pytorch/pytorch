@@ -4,7 +4,7 @@ import inspect
 import runpy
 import threading
 from functools import wraps
-import typing
+from typing import List, Any, ClassVar
 import unittest
 import os
 import torch
@@ -164,7 +164,9 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-device_type_test_bases: typing.List[typing.Any] = list()
+
+# set type to List[Any] due to mypy list-of-union issue: https://github.com/python/mypy/issues/3351
+device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -319,10 +321,10 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-    primary_device: typing.ClassVar[str]
-    cudnn_version: typing.ClassVar[typing.Any]
-    no_magma: typing.ClassVar[bool]
-    no_cudnn: typing.ClassVar[bool]
+    primary_device: ClassVar[str]
+    cudnn_version: ClassVar[Any]
+    no_magma: ClassVar[bool]
+    no_cudnn: ClassVar[bool]
 
 
     def has_cudnn(self):
@@ -357,8 +359,6 @@ class CUDATestBase(DeviceTypeTestBase):
 
 
 # Adds available device-type-specific test base classes
-# Todo: Error: Argument 1 to "append" of "list" has incompatible type "Type[CUDATestBase]"; expected "Type[CPUTestBase]"
-# tried to add Union to include both..
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
@@ -426,7 +426,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        device_type_test_class: typing.Any  = type(class_name, (base, empty_class), {})
+        # type set to Any and suppressed due to unsupport runtime class: https://github.com/python/mypy/wiki/Unsupported-Python-Features
+        device_type_test_class: Any  = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
