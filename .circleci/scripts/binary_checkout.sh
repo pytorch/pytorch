@@ -52,13 +52,6 @@ else
 fi
 retry git submodule update --init --recursive
 
-rm -r -f third_party/gloo
-cd third_party
-git clone https://github.com/gunandrose4u/gloo.git
-cd gloo
-git.exe checkout -b jozh/test_build remotes/origin/jozh/test_build
-cd ../..
-
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
