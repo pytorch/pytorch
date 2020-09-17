@@ -376,7 +376,7 @@ template<>
 void magmaCholeskyBatched<c10::complex<double>>(
     magma_uplo_t uplo, magma_int_t n, c10::complex<double>** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_zpotrf_batched(uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
+  magma_zpotrf_batched(uplo, n, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -384,7 +384,7 @@ template<>
 void magmaCholeskyBatched<c10::complex<float>>(
     magma_uplo_t uplo, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex*>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
+  magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
