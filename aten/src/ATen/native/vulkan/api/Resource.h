@@ -18,35 +18,18 @@ struct C10_EXPORT Resource final {
     VmaAllocation allocation;
     VmaAllocationInfo allocation_info;
 
-    struct Access final {
-      typedef uint8_t Flags;
-
-      enum Type : Flags {
-        Read = 1u << 0u,
-        Write = 1u << 1u,
-      };
-
-      template<typename Type, Flags access>
-      using Pointer = std::add_pointer_t<
-          std::conditional_t<
-              0u != (access & Write),
-              Type,
-              std::add_const_t<Type>>>;
-    };
-
     class Scope;
     template<typename Type>
     using Data = Handle<Type, Scope>;
 
     template<
         typename Type,
-        typename Pointer = Access::Pointer<Type, Access::Read>>
+        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
     Data<Pointer> map() const &;
 
     template<
         typename Type,
-        Access::Flags kAccess,
-        typename Pointer = Access::Pointer<Type, kAccess>>
+        typename Pointer = std::add_pointer_t<Type>>
     Data<Pointer> map() &;
 
    private:
@@ -59,7 +42,7 @@ struct C10_EXPORT Resource final {
     template<typename Type, typename Pointer>
     Data<Pointer> map() const && = delete;
 
-    template<typename Type, Access::Flags kAccess, typename Pointer>
+    template<typename Type, typename Pointer>
     Data<Pointer> map() && = delete;
   };
 
@@ -125,7 +108,7 @@ struct C10_EXPORT Resource final {
 
   class Pool final {
    public:
-    explicit Pool(const GPU& gpu);
+    Pool(const GPU& gpu);
 
     Buffer allocate(const Buffer::Descriptor& descriptor);
     Image allocate(const Image::Descriptor& descriptor);
@@ -142,7 +125,7 @@ struct C10_EXPORT Resource final {
     std::vector<Handle<Image, void(*)(const Image&)>> images_;
   } pool;
 
-  explicit Resource(const GPU& gpu)
+  Resource(const GPU& gpu)
     : pool(gpu) {
   }
 };
@@ -153,17 +136,18 @@ struct C10_EXPORT Resource final {
 
 class Resource::Memory::Scope final {
  public:
-  Scope(
-      VmaAllocator allocator,
-      VmaAllocation allocation,
-      Resource::Memory::Access::Flags access);
+  enum class Access {
+    Read,
+    Write,
+  };
 
+  Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
   void operator()(const void* data) const;
 
  private:
   VmaAllocator allocator_;
   VmaAllocation allocation_;
-  Resource::Memory::Access::Flags access_;
+  Access access_;
 };
 
 template<typename, typename Pointer>
@@ -172,23 +156,17 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
 
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Access::Read),
+    Scope(allocator, allocation, Scope::Access::Read),
   };
 }
 
-template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
+template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
-  static_assert(
-      (kAccess == Access::Read) ||
-      (kAccess == Access::Write) ||
-      (kAccess == (Access::Read | Access::Write)),
-      "Invalid memory access!");
-
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, kAccess),
+    Scope(allocator, allocation, Scope::Access::Write),
   };
 }
 
