@@ -22,6 +22,10 @@ namespace tensorexpr {
 // A class that analyzes the given program relevant for Cuda backends.
 class CudaAnalysis : public IRVisitor {
  public:
+  CudaAnalysis() {
+    gpu_block_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+    gpu_thread_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+  }
   bool is_buf_store_target(const Buf* buf) const {
     return store_targets_.count(buf) > 0;
   }
@@ -34,34 +38,6 @@ class CudaAnalysis : public IRVisitor {
     return cross_block_bufs_;
   }
 
- private:
-  void visit(const Store* v) override {
-    store_targets_.insert(v->buf());
-  }
-
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
-
-  std::unordered_set<const Buf*> store_targets_;
-  std::unordered_set<const Var*> thread_local_bufs_;
-  std::unordered_set<const Var*> cross_block_bufs_;
-};
-
-// An IRMutator that replaces binding loop options with Cuda metavars.
-class GPUMetaVarRewriter : public IRMutator {
- public:
-  explicit GPUMetaVarRewriter() {
-    gpu_block_vars_ = {new Var("blockIdx.x", kInt),
-                       new Var("blockIdx.y", kInt),
-                       new Var("blockIdx.z", kInt)};
-    gpu_thread_vars_ = {new Var("threadIdx.x", kInt),
-                        new Var("threadIdx.y", kInt),
-                        new Var("threadIdx.z", kInt)};
-  }
-
-  Stmt* mutate(const For* v) override;
-  Stmt* mutate(const Block* v) override;
-
   const std::vector<const Expr*>& gpu_block_extents() const {
     return gpu_block_extents_;
   }
@@ -69,6 +45,47 @@ class GPUMetaVarRewriter : public IRMutator {
   const std::vector<const Expr*>& gpu_thread_extents() const {
     return gpu_thread_extents_;
   }
+
+ private:
+  void visit(const Store* v) override {
+    store_targets_.insert(v->buf());
+  }
+
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
+  void visit(const For* v) override;
+
+  std::unordered_set<const Buf*> store_targets_;
+  std::unordered_set<const Var*> thread_local_bufs_;
+  std::unordered_set<const Var*> cross_block_bufs_;
+
+  std::vector<const Expr*> gpu_block_extents_;
+  std::vector<const Expr*> gpu_thread_extents_;
+};
+
+// An IRMutator that replaces binding loop options with Cuda metavars, and masks
+// statements blocks which should execute with less reach than the launch
+// parameter extent.
+//
+// We do this by segmenting each block into chunks which should have the same
+// execution parameters, then if those params differ from the max mask each dim.
+class GPUMetaVarRewriter : public IRMutator {
+ public:
+  explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
+      : cuda_analysis_(cuda_analysis) {
+    gpu_block_vars_ = {new Var("blockIdx.x", kInt),
+                       new Var("blockIdx.y", kInt),
+                       new Var("blockIdx.z", kInt)};
+    gpu_thread_vars_ = {new Var("threadIdx.x", kInt),
+                        new Var("threadIdx.y", kInt),
+                        new Var("threadIdx.z", kInt)};
+
+    current_block_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+    current_thread_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
+  }
+
+  Stmt* mutate(const For* v) override;
+  Stmt* mutate(const Block* v) override;
 
   const std::vector<const Var*>& gpu_block_vars() const {
     return gpu_block_vars_;
@@ -78,15 +95,52 @@ class GPUMetaVarRewriter : public IRMutator {
     return gpu_thread_vars_;
   }
 
+  const std::vector<const Expr*>& gpu_block_extents() const {
+    return cuda_analysis_->gpu_block_extents();
+  }
+
+  const std::vector<const Expr*>& gpu_thread_extents() const {
+    return cuda_analysis_->gpu_thread_extents();
+  }
+
  private:
-  std::vector<const Expr*> gpu_block_extents_;
-  std::vector<const Expr*> gpu_thread_extents_;
+  // When processing a block, stores the contents of each sub-segment.
+  class Segment {
+   public:
+    void reset(bool mask) {
+      stmts_.clear();
+      mask_ = mask;
+    }
+
+    bool empty() const {
+      return stmts_.empty();
+    }
+
+    std::vector<Stmt*>& stmts() {
+      return stmts_;
+    }
+    bool mask() {
+      return mask_;
+    }
+
+   private:
+    std::vector<Stmt*> stmts_;
+    bool mask_{true};
+  };
+
+  // Returns true if the current execution scope is equivalent to the launch
+  // parameters.
+  bool isFullExtent();
 
   std::vector<const Var*> gpu_block_vars_;
   std::vector<const Var*> gpu_thread_vars_;
 
+  std::vector<const Expr*> current_block_reach_;
+  std::vector<const Expr*> current_thread_reach_;
+
   bool need_sync_ = false;
   const Expr* last_thread_dim_ = nullptr;
+  const CudaAnalysis* cuda_analysis_;
 };
 
 // A class that overrides the underlying IRPrinter to produce Cuda C.
@@ -157,6 +211,14 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
   template <typename... Ts>
   void operator()(const Ts&... ts) {
     call(std::vector<CallArg>({CallArg(ts)...}));
+  }
+
+  const std::vector<const Expr*>& gpu_block_extents() const {
+    return cuda_analysis_->gpu_block_extents();
+  }
+
+  const std::vector<const Expr*>& gpu_thread_extents() const {
+    return cuda_analysis_->gpu_thread_extents();
   }
 
  private:
