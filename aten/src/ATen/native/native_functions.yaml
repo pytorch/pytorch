@@ -629,7 +629,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: sparse_mm_mkl(Tensor(a!) res, Tensor indices, Tensor pointers, Tensor values, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor(a!)
+- func: sparse_mm_mkl(Tensor(a!) res, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
 

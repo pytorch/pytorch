@@ -53,8 +53,8 @@ namespace at { namespace native {
     if (at::hasMKL() && (at::native::is_floating_point(res) ||
                          at::native::is_complex(res)) &&
         res.is_contiguous()) {
-          
-      at::native::sparse_mm_mkl(res, indices, pointers, values, dense, t, alpha, beta);
+
+      at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);
     }
     else {
           
