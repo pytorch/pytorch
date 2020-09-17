@@ -115,16 +115,34 @@ def quantize_static_fx(model, qconfig_dict, run_fn, run_args, inplace=False, deb
 
     Args:
         `model`: input float TorchScript model
-        `qconfig_dict`: qconfig_dict is a dictionary with names of sub modules as key and
-        qconfig for that module as value, empty key means the qconfig will be applied
-        to whole model unless it’s overwritten by more specific configurations, the
-        qconfig for each module is either found in the dictionary or fallback to
-         the qconfig of parent module.
+        `qconfig_dict`: qconfig_dict is a dictionary with the following configurations:
+    qconfig_dict = {
+    # optional, global config
+    "": qconfig?,
 
-        Right now qconfig_dict is the only way to configure how the model is quantized,
-        and it is done in the granularity of module, that is, we only support one type
-        of qconfig for each torch.nn.Module, and the qconfig for sub module will
-        override the qconfig for parent module, empty string means global configuration.
+    # optional, used for module and function types
+    # could also be split into module_types and function_types if we prefer
+    "object_type": [
+      (nn.Conv2d, qconfig?),
+      (F.add, qconfig?),
+      ...,
+    ],
+
+    # optional, used for module names
+    "module_name": [
+      ("foo.bar", qconfig?)
+      ...,
+    ],
+
+    # optional, matched in order, first match takes precedence
+    "module_name_regex": [
+      ("foo.*bar.*conv[0-9]+", qconfig?)
+      ...,
+    ]
+    # priority (in increasing order): global, object_type, module_name_regex, module_name
+    # qconfig == None means fusion and quantization should be skipped for anything
+    # matching the rule
+    }
         `run_fn`: a calibration function for calibrating the prepared model
         `run_args`: positional arguments for `run_fn`
         `inplace`: carry out model transformations in-place, the original module is

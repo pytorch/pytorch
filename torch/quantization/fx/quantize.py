@@ -35,6 +35,7 @@ from .utils import (
 )
 
 import copy
+import re
 
 # ------------------------
 # Helper Functions
@@ -123,6 +124,29 @@ def assert_and_get_unique_device(module):
     return device
 
 
+def preprocess_qconfig_dict(qconfig_dict):
+    """ Split the original qconfig_dict to
+    a flattened dict (global, object_type and module_name) and
+    a list of tuples of regex and qconfig (module_name_regex)
+    since order is important for regex matching (there might be conflicts and we
+    will take the first match)
+    and is not important for other qconfig types.
+    """
+    flattened = dict()
+    if '' in qconfig_dict:
+        flattened[''] = qconfig_dict['']
+
+    def flatten_key(key):
+        if key in qconfig_dict:
+            for obj, qconfig in qconfig_dict[key]:
+                flattened[obj] = qconfig
+
+    flatten_key('object_type')
+    flatten_key('module_name')
+    module_name_regex_qconfig_list = qconfig_dict.get('module_name_regex', None)
+    return flattened, module_name_regex_qconfig_list
+
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -168,23 +192,74 @@ class Quantizer:
     def _qat_swap_modules(self, root):
         convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
-    def _generate_qconfig_map(self, root, input_graph):
-        def get_qconfig(module):
-            return module.qconfig if hasattr(module, 'qconfig') else None
+    def _generate_qconfig_map(self,
+                              root,
+                              input_graph,
+                              flattened_qconfig_dict,
+                              module_name_regex_qconfig_list):
+        global_qconfig = flattened_qconfig_dict.get('', None)
+
+        def get_module_type_qconfig(
+                module_type, fallback_qconfig=global_qconfig):
+            return flattened_qconfig_dict.get(module_type, fallback_qconfig)
+
+        def get_function_qconfig(
+                function, fallback_qconfig=global_qconfig):
+            return flattened_qconfig_dict.get(function, fallback_qconfig)
+
+        def get_module_name_regex_qconfig(
+                module_name, fallback_qconfig=global_qconfig):
+            if module_name_regex_qconfig_list is not None:
+                for regex_pattern, qconfig in module_name_regex_qconfig_list:
+                    if re.match(regex_pattern, module_name):
+                        # first match wins
+                        return qconfig
+            return fallback_qconfig
+
+        def get_module_name_qconfig(
+                module_name, fallback_qconfig=global_qconfig):
+            if module_name == '':
+                # module name qconfig not found
+                return fallback_qconfig
+            if module_name in flattened_qconfig_dict:
+                return flattened_qconfig_dict[module_name]
+            else:
+                parent, _ = _parent_name(module_name)
+                return get_module_name_qconfig(parent, fallback_qconfig)
+
+        # get qconfig for module_name,
+        # fallback to module_name_regex_qconfig, mdoule_type_qconfig, global_qconfig
+        # if necessary
+        def get_qconfig(module_name):
+            module_type_qconfig = \
+                get_module_type_qconfig(type(self.modules[module_name]))
+            module_name_regex_qconfig = \
+                get_module_name_regex_qconfig(module_name, module_type_qconfig)
+            module_name_qconfig = \
+                get_module_name_qconfig(module_name, module_name_regex_qconfig)
+            return module_name_qconfig
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
             if node.op == 'get_param':
-                parent, _ = _parent_name(node.target)
-                self.qconfig_map[node.name] = get_qconfig(self.modules[parent])
+                module_name, _ = _parent_name(node.target)
+                self.qconfig_map[node.name] = get_qconfig(module_name)
             elif node.op == 'call_function':
-                self.qconfig_map[node.name] = get_qconfig(root)
+                # precedence: [TODO] module_name_qconfig (need scope support from fx)
+                # > function_qconfig > global_qconfig
+                function_qconfig = get_function_qconfig(node.target)
+                self.qconfig_map[node.name] = function_qconfig
             elif node.op == 'call_method':
                 self_obj = node.args[0]
                 # qconfig for call_method should be the same as the `self` object for the call
                 self.qconfig_map[node.name] = self.qconfig_map[self_obj.name]
             elif node.op == 'call_module':
-                self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
+                module_qconfig = get_qconfig(node.target)
+                # regex is not supported eager mode propagate_qconfig_, we'll need to
+                # set the qconfig explictly here in case regex
+                # is used
+                self.modules[node.target].qconfig = module_qconfig
+                self.qconfig_map[node.name] = module_qconfig
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         if not inplace:
@@ -196,14 +271,18 @@ class Quantizer:
         else:
             self.patterns = get_quant_patterns()
 
-        propagate_qconfig_(model, qconfig_dict)
+        flattened_qconfig_dict, module_name_regex_qconfig_list = \
+            preprocess_qconfig_dict(qconfig_dict)
+        print('flattened:', flattened_qconfig_dict)
+        propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
             self._qat_swap_modules(model)
 
         self.modules = dict(model.named_modules())
 
         # map from node name to qconfig, used in _find_matches
-        self._generate_qconfig_map(model, model.graph)
+        self._generate_qconfig_map(
+            model, model.graph, flattened_qconfig_dict, module_name_regex_qconfig_list)
 
         # match the patterns that will get quantized
         matches = self._find_matches(model.graph, self.modules, self.patterns)
