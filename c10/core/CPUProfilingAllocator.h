@@ -142,8 +142,6 @@ class C10_API WithProfilingAllocatorGuard {
     WithProfilingAllocatorGuard(
         CPUProfilingAllocator* allocator, const AllocationPlan* plan);
     ~WithProfilingAllocatorGuard();
-  private:
-    CPUProfilingAllocator* prev_allocator_ptr_{nullptr};
 };
 
 CPUProfilingAllocator* GetThreadLocalProfilingAllocator();

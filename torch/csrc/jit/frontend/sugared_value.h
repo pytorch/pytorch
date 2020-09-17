@@ -773,5 +773,29 @@ struct TORCH_API SugaredEnumClass : public SugaredValue {
   EnumTypePtr enum_type_;
 };
 
+struct TORCH_API SliceValue : public SugaredValue {
+  explicit SliceValue(Value* start, Value* stop, Value* step)
+      : start_(start), stop_(stop), step_(step) {}
+
+  std::string kind() const override {
+    return "Python slice value";
+  }
+
+  Value* start() {
+    return start_;
+  };
+  Value* stop() {
+    return stop_;
+  };
+  Value* step() {
+    return step_;
+  };
+
+ private:
+  Value* start_;
+  Value* stop_;
+  Value* step_;
+};
+
 } // namespace jit
 } // namespace torch
