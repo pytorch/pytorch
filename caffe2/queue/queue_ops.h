@@ -113,12 +113,6 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
         1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
   }
-
-  void Cancel() override {
-    auto queue = Operator<Context>::Inputs()[0]
-                     ->template Get<std::shared_ptr<BlobsQueue>>();
-    queue->close();
-  }
 };
 
 template <typename Context>
@@ -196,12 +190,6 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     math::Set<bool, Context>(
         1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
-  }
-
-  void Cancel() override {
-    auto queue = Operator<Context>::Inputs()[0]
-                     ->template Get<std::shared_ptr<BlobsQueue>>();
-    queue->close();
   }
 
  private:
