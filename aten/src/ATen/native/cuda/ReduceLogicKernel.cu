@@ -25,7 +25,7 @@ void or_kernel_cuda(TensorIterator& iter) {
         func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           return static_cast<scalar_t>(static_cast<uint8_t>(a) || static_cast<uint8_t>(b));
         }),
-        static_cast<scalar_t>(true));
+        static_cast<scalar_t>(false));
   });
 }
 
