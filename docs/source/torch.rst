@@ -356,6 +356,7 @@ Reduction Ops
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -415,6 +416,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations

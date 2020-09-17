@@ -670,6 +670,13 @@ def is_dict(ann):
             getattr(ann, '__origin__', None) is dict)
 
 def is_optional(ann):
+    if ann is Optional:
+        raise RuntimeError(
+            "Attempted to use Optional without a "
+            "contained type. Please add a contained type, e.g. "
+            "Optional[int]"
+        )
+
     # Optional[T] is just shorthand for Union[T, None], so check for both
     def safe_is_subclass(the_type, super_type):
         # Don't throw if `the_type` isn't a class type (e.g. if it is
