@@ -31,6 +31,48 @@ DEFINE_TRIGGER(llvm_codegen_executed);
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+namespace {
+
+bool is_unsigned_integral(const ScalarType& type) {
+  switch (type) {
+    case ScalarType::Bool:
+    case ScalarType::Byte:
+      return true;
+    default:
+      return false;
+  }
+
+  return false;
+}
+
+llvm::CmpInst::Predicate llvm_comparison_predicate(
+    CompareSelectOperation compare_op,
+    const ScalarType& type) {
+  switch (compare_op) {
+    case CompareSelectOperation::kEQ:
+      return llvm::ICmpInst::ICMP_EQ;
+    case CompareSelectOperation::kNE:
+      return llvm::ICmpInst::ICMP_NE;
+    case CompareSelectOperation::kGT:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGT
+                                        : llvm::ICmpInst::ICMP_SGT;
+    case CompareSelectOperation::kGE:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGE
+                                        : llvm::ICmpInst::ICMP_SGE;
+    case CompareSelectOperation::kLT:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULT
+                                        : llvm::ICmpInst::ICMP_SLT;
+    case CompareSelectOperation::kLE:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULE
+                                        : llvm::ICmpInst::ICMP_SLE;
+    default:
+      // TODO: change to a proper error report
+      throw std::runtime_error("invalid operator type");
+  }
+}
+
+} // namespace
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   llvm::orc::ThreadSafeContext context_;
@@ -671,29 +713,8 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
   CompareSelectOperation cmp_op_ = v->compare_select_op();
 
   if (is_integral(type_used)) {
-    switch (cmp_op_) {
-      case CompareSelectOperation::kEQ:
-        cmp_ = irb_.CreateICmpEQ(lhs, rhs);
-        break;
-      case CompareSelectOperation::kNE:
-        cmp_ = irb_.CreateICmpNE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGT:
-        cmp_ = irb_.CreateICmpSGT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGE:
-        cmp_ = irb_.CreateICmpSGE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLT:
-        cmp_ = irb_.CreateICmpSLT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLE:
-        cmp_ = irb_.CreateICmpSLE(lhs, rhs);
-        break;
-      default:
-        // TODO: change to a proper error report
-        throw std::runtime_error("invalid operator type");
-    }
+    cmp_ = irb_.CreateICmp(
+        llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
   } else if (is_floating_point(type_used)) { // FP32
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
