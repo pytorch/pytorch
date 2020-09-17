@@ -9,7 +9,6 @@ graph {
     attribute {
       name: "value"
       t {
-        dims: 1
         data_type: 7
         raw_data: "\377\377\377\377\377\377\377\377"
       }
@@ -30,7 +29,6 @@ graph {
     attribute {
       name: "value"
       t {
-        dims: 1
         data_type: 7
         raw_data: "\377\377\377\377\377\377\377\377"
       }
@@ -51,7 +49,6 @@ graph {
     attribute {
       name: "value"
       t {
-        dims: 1
         data_type: 7
         raw_data: "\377\377\377\377\377\377\377\377"
       }
