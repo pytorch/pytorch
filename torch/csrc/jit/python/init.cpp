@@ -660,8 +660,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
-          [](script::Module& module) {
-            return vulkanOptimizeForMobile(module);
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return vulkanOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
