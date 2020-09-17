@@ -342,7 +342,7 @@ class TestFFT(TestCase):
             (5, (1, 3, 4)),
             (3, (0, -1)),
             (3, (1,)),
-            (1, (0,)),
+            (1, 0),
         ]
 
         fft_functions = [(torch.fft.fftn, torch.fft.ifftn)]

@@ -130,8 +130,8 @@ Example:
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> fftn = torch.fft.fftn(t)
 
-    The Fourier transform is separable, so :func:`torch.fft.fftn` here is
-    equivalent to two one-dimensional :func:`torch.fft.fft`s:
+    The Fourier transform is separable, so :func:`~torch.fft.fftn` here is
+    equivalent to two one-dimensional :func:`~torch.fft.fft`s:
 
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.allclose(fftn, two_ffts)
@@ -171,8 +171,8 @@ Example:
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> ifftn = torch.fft.ifftn(t)
 
-    The Fourier transform is separable, so :func:`torch.fft.ifftn` here is
-    equivalent to two one-dimensional :func:`torch.fft.ifft`s:
+    The Fourier transform is separable, so :func:`~torch.fft.ifftn` here is
+    equivalent to two one-dimensional :func:`~torch.fft.ifft`s:
 
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.allclose(ifftn, two_iffts)
@@ -339,7 +339,7 @@ Example:
     >>> torch.allclose(fftn[..., :6], rfftn)
     True
 
-    The Fourier transform is separable, so :func:`torch.fft.rfftn` here is
+    The Fourier transform is separable, so :func:`~torch.fft.rfftn` here is
     equivalent to a combination of :func:`~torch.fft.fft` and
     :func:`~torch.fft.rfft`:
 
