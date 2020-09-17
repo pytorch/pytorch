@@ -627,6 +627,13 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann):
+    if ann is Tuple:
+        raise RuntimeError(
+            "Attempted to use Tuple without a "
+            "contained type. Please add a contained type, e.g. "
+            "Tuple[int]"
+        )
+
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, '__module__'):
         return False
@@ -635,6 +642,13 @@ def is_tuple(ann):
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann):
+    if ann is List:
+        raise RuntimeError(
+            "Attempted to use List without a "
+            "contained type. Please add a contained type, e.g. "
+            "List[int]"
+        )
+
     if not hasattr(ann, '__module__'):
         return False
     return ann.__module__ == 'typing' and \
@@ -642,6 +656,13 @@ def is_list(ann):
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann):
+    if ann is Dict:
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+
     if not hasattr(ann, '__module__'):
         return False
     return ann.__module__ == 'typing' and \
