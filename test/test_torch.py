@@ -226,6 +226,8 @@ class AbstractTestCases:
             s = torch.tensor(7)
             self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
             self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
+            self.assertRaises(RuntimeError, lambda: torch.outer(v, s))
+            self.assertRaises(RuntimeError, lambda: torch.outer(s, v))
             self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
             self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
             self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
@@ -13781,7 +13783,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,)))
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,), test_out=True))
 
-        # ger, addr
+        # outer, ger, addr
+        self.assertEqual((0, 0), fn(torch.outer, (0,), (0,)).shape)
+        self.assertEqual((5, 0), fn(torch.outer, (5,), (0,)).shape)
+        self.assertEqual((0, 4), fn(torch.outer, (0,), (4,)).shape)
+
         self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
         self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
         self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
@@ -16288,6 +16294,40 @@ torch.lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | ortho
 scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_dtypes()))
+    def test_outer(self, device, dtype):
+        if dtype == torch.bfloat16:
+            v1_np = np.random.randn(100).astype(np.float64)
+            v2_np = np.random.randn(100).astype(np.float64)
+        else:
+            v1_np = np.random.randn(100).astype(torch_to_numpy_dtype_dict[dtype])
+            v2_np = np.random.randn(100).astype(torch_to_numpy_dtype_dict[dtype])
+        np_res = np.outer(v1_np, v2_np)
+
+        vec1 = torch.from_numpy(v1_np).to(device=device, dtype=dtype)
+        vec2 = torch.from_numpy(v2_np).to(device=device, dtype=dtype)
+
+        out = torch.empty(vec1.size(0), vec2.size(0))
+        torch_res = torch.outer(vec1, vec2)
+        self.assertEqual(np_res, torch_res)
+        torch.outer(vec1, vec2, out=out)
+        self.assertEqual(np_res, out)
+
+        # Tests 0-strided
+        if dtype == torch.bfloat16:
+            v0_np = np.array(v1_np[0]).repeat(100).astype(np.float64)
+        else:
+            v0_np = np.array(v1_np[0]).repeat(100).astype(torch_to_numpy_dtype_dict[dtype])
+        np_res = np.outer(v0_np, v2_np)
+        vec0 = torch.tensor([v1_np[0]], device=device, dtype=dtype).expand(100)
+
+        torch_res = torch.outer(vec0, vec2)
+        self.assertEqual(np_res, torch_res)
+        torch.outer(vec0, vec2, out=out)
+        self.assertEqual(np_res, out)
 
     @slowTest
     @onlyCPU
