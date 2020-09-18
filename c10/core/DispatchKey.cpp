@@ -1,113 +1,61 @@
 #include <c10/core/DispatchKey.h>
 
 namespace c10 {
+#define FOR_EACH_DISPATCH_KEY(_) \
+  _(Undefined)                   \
+  _(CPU)                         \
+  _(CUDA)                        \
+  _(HIP)                         \
+  _(FPGA)                        \
+  _(MSNPU)                       \
+  _(XLA)                         \
+  _(Vulkan)                      \
+  _(MKLDNN)                      \
+  _(OpenGL)                      \
+  _(OpenCL)                      \
+  _(IDEEP)                       \
+  _(QuantizedCPU)                \
+  _(QuantizedCUDA)               \
+  _(ComplexCPU)                  \
+  _(ComplexCUDA)                 \
+  _(CustomRNGKeyId)              \
+  _(MkldnnCPU)                   \
+  _(SparseCPU)                   \
+  _(SparseCUDA)                  \
+  _(SparseHIP)                   \
+  _(PrivateUse1)                 \
+  _(PrivateUse2)                 \
+  _(PrivateUse3)                 \
+  _(Meta)                        \
+  _(Autograd)                    \
+  _(AutogradOther)               \
+  _(AutogradCPU)                 \
+  _(AutogradCUDA)                \
+  _(AutogradXLA)                 \
+  _(AutogradPrivateUse1)         \
+  _(AutogradPrivateUse2)         \
+  _(AutogradPrivateUse3)         \
+  _(BackendSelect)               \
+  _(Named)                       \
+  _(Tracer)                      \
+  _(Autocast)                    \
+  _(Batched)                     \
+  _(VmapMode)                    \
+  _(Math)                        \
+  _(TESTING_ONLY_GenericWrapper) \
+  _(TESTING_ONLY_GenericMode)
 
 const char* toString(DispatchKey t) {
+#define DEFINE_CASE(dk) \
+  case DispatchKey::dk: \
+    return #dk;
+
   switch (t) {
-    case DispatchKey::Undefined:
-      return "Undefined";
-
-    case DispatchKey::CPU:
-      return "CPU";
-    case DispatchKey::CUDA:
-      return "CUDA";
-    case DispatchKey::HIP:
-      return "HIP";
-    case DispatchKey::FPGA:
-      return "FPGA";
-    case DispatchKey::MSNPU:
-      return "MSNPU";
-    case DispatchKey::XLA:
-      return "XLA";
-    case DispatchKey::Vulkan:
-      return "Vulkan";
-
-    case DispatchKey::MKLDNN:
-      return "MKLDNN";
-    case DispatchKey::OpenGL:
-      return "OpenGL";
-    case DispatchKey::OpenCL:
-      return "OpenCL";
-    case DispatchKey::IDEEP:
-      return "IDEEP";
-
-    case DispatchKey::QuantizedCPU:
-      return "QuantizedCPU";
-    case DispatchKey::QuantizedCUDA:
-      return "QuantizedCUDA";
-
-    case DispatchKey::ComplexCPU:
-      return "ComplexCPU";
-    case DispatchKey::ComplexCUDA:
-      return "ComplexCUDA";
-
-    case DispatchKey::CustomRNGKeyId:
-      return "CustomRNGKeyId";
-
-    case DispatchKey::MkldnnCPU:
-      return "MkldnnCPU";
-    case DispatchKey::SparseCPU:
-      return "SparseCPU";
-    case DispatchKey::SparseCUDA:
-      return "SparseCUDA";
-    case DispatchKey::SparseHIP:
-      return "SparseHIP";
-
-    case DispatchKey::PrivateUse1:
-      return "PrivateUse1";
-    case DispatchKey::PrivateUse2:
-      return "PrivateUse2";
-    case DispatchKey::PrivateUse3:
-      return "PrivateUse3";
-
-    case DispatchKey::Meta:
-      return "Meta";
-
-    case DispatchKey::Autograd:
-      return "Autograd";
-    case DispatchKey::AutogradCPU:
-      return "AutogradCPU";
-    case DispatchKey::AutogradCUDA:
-      return "AutogradCUDA";
-    case DispatchKey::AutogradXLA:
-      return "AutogradXLA";
-    case DispatchKey::AutogradPrivateUse1:
-      return "AutogradPrivateUse1";
-    case DispatchKey::AutogradPrivateUse2:
-      return "AutogradPrivateUse2";
-    case DispatchKey::AutogradPrivateUse3:
-      return "AutogradPrivateUse3";
-    case DispatchKey::AutogradOther:
-      return "AutogradOther";
-    case DispatchKey::BackendSelect:
-      return "BackendSelect";
-    case DispatchKey::Named:
-      return "Named";
-
-    case DispatchKey::Tracer:
-      return "Tracer";
-
-    case DispatchKey::Autocast:
-      return "Autocast";
-
-    case DispatchKey::Batched:
-      return "Batched";
-
-    case DispatchKey::VmapMode:
-      return "VmapMode";
-
-    case DispatchKey::Math:
-      return "Math";
-
-    case DispatchKey::TESTING_ONLY_GenericWrapper:
-      return "TESTING_ONLY_GenericWrapper";
-
-    case DispatchKey::TESTING_ONLY_GenericMode:
-      return "TESTING_ONLY_GenericMode";
-
+    FOR_EACH_DISPATCH_KEY(DEFINE_CASE)
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
+#undef DEFINE_CASE
 }
 
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
