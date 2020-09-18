@@ -732,7 +732,7 @@ class TestTensorCreation(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
-    @dtypes(torch.float, torch.double)
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     def test_logspace_vs_numpy(self, device, dtype):
         start = -0.0316082797944545745849609375
         end = .0315315723419189453125
@@ -1050,9 +1050,8 @@ class TestTensorCreation(TestCase):
             self._test_logspace(device, dtype, steps=steps)
             self._test_logspace_base2(device, dtype, steps=steps)
 
-    @precisionOverride({torch.half: 1e-1, torch.float: 1e-5, torch.double: 1e-10})
-    @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
