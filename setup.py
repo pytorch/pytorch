@@ -647,19 +647,6 @@ def configure_extension_build():
                        language='c')
         extensions.append(DL)
 
-        # FIXME: This is a hacky prototype.
-        extensions.append(
-            Extension(
-                "torch.utils._benchmark.utils.valgrind_wrapper.bindings",
-                ["torch/utils/_benchmark/utils/valgrind_wrapper/callgrind_control.cpp"],
-                include_dirs=[
-                    "third_party/pybind11/include",
-                    "torch/utils/_benchmark/utils/valgrind_wrapper/",
-                ],
-                language='c++'
-            ),
-        )
-
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
     extensions.append(
