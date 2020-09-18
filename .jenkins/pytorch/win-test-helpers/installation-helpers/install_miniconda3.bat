@@ -17,13 +17,6 @@ if "%REBUILD%"=="" (
 
 :: Get installed libuv path
 @echo off
-FOR /f "tokens=1,2,3* delims=: " %%a IN ('conda info') DO (
- IF "%%a %%b %%c"=="active env location" SET "active_conda_path=%%d\Library"
-)
-mkdir %active_conda_path%\lib\release
-copy %active_conda_path%\bin\uv.dll %active_conda_path%\lib\release
-copy %active_conda_path%\lib\uv.lib %active_conda_path%\lib\release
-copy %active_conda_path%\lib\uv_a.lib %active_conda_path%\lib\release
-set libuv_ROOT=%active_conda_path%
+set libuv_ROOT=%CONDA_PARENT_DIR%\Miniconda3\Library
 @echo on
-echo libuv_ROOT=%active_conda_path%
+echo libuv_ROOT=%libuv_ROOT%
