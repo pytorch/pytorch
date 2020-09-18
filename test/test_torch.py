@@ -4326,6 +4326,9 @@ class TestTorchDeviceType(TestCase):
             test_against_np_uniformbins(torch.tensor([1., 2, 1], device=device))
             test_against_np_uniformbins(torch.randn(5000, device=device))
 
+            # test integer input
+            test_against_np_uniformbins(torch.tensor([1, 2, 3, 4], device=device))
+
             # test weights arg
             test_against_np_uniformbins(torch.randn(5000, device=device), weights=torch.rand(5000, device=device))
 
