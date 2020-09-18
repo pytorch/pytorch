@@ -28,10 +28,14 @@ class CallgrindStats(object):
         instruction_count = str(sum(c for c, _ in self.stmt_exclusive_stats))
         baseline_count = str(sum(c for c, _ in self.baseline_exclusive_stats))
         count_len = max(len(instruction_count), len(baseline_count))
+
+        # Pad lines after the first to align properly.
+        stmt = self.stmt.replace('\n', '\n' + ' ' * 9)
+        setup = self.setup.replace('\n', '\n' + ' ' * 9)
         lines = [
             f"{super().__repr__()}",
-            f"  stmt:  {self.stmt}",
-            f"  setup: {self.setup}",
+            f"  stmt:  {stmt}",
+            f"  setup: {setup}",
             f"  {self.num_threads} thread{'s' if self.num_threads > 1 else ''}",
             f"  Instructions: {instruction_count.rjust(count_len)}",
             f"  Baseline:     {baseline_count.rjust(count_len)}",
@@ -215,13 +219,15 @@ class _ValgrindWrapper(object):
 
     @staticmethod
     def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str):
+        indented_stmt = textwrap.indent(stmt, " " * 4)
+
         # Running a loop takes a surprising number of instructions in Python.
         # Unrolling the loop eliminates those instructions, though if `number`
         # is too high it's not worth ballooning the generated file.
         if number <= 1000:
             maybe_unrolled_stmt = "\n".join([stmt for _ in range(number)])
         else:
-            maybe_unrolled_stmt = f"for _ in range({number}):\n    {stmt}"
+            maybe_unrolled_stmt = f"for _ in range({number}):\n{indented_stmt}"
 
         return textwrap.dedent(r"""
             import gc
@@ -267,7 +273,7 @@ class _ValgrindWrapper(object):
             {setup}
 
             for _ in range({warmup_number}):
-                {stmt}
+            {indented_stmt}
 
             # =============================================================================
             # == Callgrind management =====================================================
@@ -301,7 +307,7 @@ class _ValgrindWrapper(object):
             # Ensure that cleanup / shutdown code is not instrumented.
             bindings.stop()
         """).strip().format(
-            stmt=stmt,
+            indented_stmt=indented_stmt,
             maybe_unrolled_stmt=maybe_unrolled_stmt,
             setup=setup,
             warmup_number=min(number, 10),
