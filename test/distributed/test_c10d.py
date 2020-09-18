@@ -2904,7 +2904,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
-        import pdb; pdb.set_trace()
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
