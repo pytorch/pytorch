@@ -1179,8 +1179,7 @@ class RpcTest(RpcAgentTestFixture):
                 for fut in futs:
                     fut.result()
 
-    @dist_init
-    def test_profiler_remote_events_profiled(self):
+    def _run_test_profiler_remote_events_profiled(self):
         # Tests that we can successfully invoke the profiler on a remote node,
         # and collect the remote events back in the local profiler.
         if self.rank != 1:
@@ -1234,6 +1233,15 @@ class RpcTest(RpcAgentTestFixture):
                 if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
             self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
+
+    @dist_init
+    def test_profiler_remote_events_profiled(self):
+        self._run_test_profiler_remote_events_profiled()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_remote_events_profiled_single_threaded(self):
+        self._run_test_profiler_remote_events_profiled()
 
     def run_profiling_workload(self, dst):
         fut = rpc.rpc_async(
@@ -1366,8 +1374,7 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.ASYNC,
         )
 
-    @dist_init
-    def test_profiler_with_autograd_context(self):
+    def _run_test_profiler_with_autograd_context(self):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
@@ -1384,6 +1391,15 @@ class RpcTest(RpcAgentTestFixture):
                     self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_autograd_context_single_threaded(self):
+        self._run_test_profiler_with_autograd_context()
+
+    @dist_init
+    def test_profiler_with_autograd_context(self):
+        self._run_test_profiler_with_autograd_context()
 
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
@@ -1448,8 +1464,26 @@ class RpcTest(RpcAgentTestFixture):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_sync_rpc_udf_single_threaded(self):
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
+
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin_single_threaded(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1464,8 +1498,26 @@ class RpcTest(RpcAgentTestFixture):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_async_rpc_udf_single_threaded(self):
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
+
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_async_rpc_builtin_single_threaded(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1485,8 +1537,38 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
         )
 
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_remote_udf_single_threaded(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
+        )
+
     @dist_init
     def test_profiler_with_remote_builtin(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            torch.mul,
+            args=(torch.ones(1), torch.ones(1)),
+            dst=self.rank,
+        )
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_remote_builtin_single_threaded(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1514,6 +1596,19 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_async_rpc_single_threaded(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
@@ -1526,8 +1621,38 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_sync_rpc_single_threaded(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            my_script_func,
+            args=(torch.tensor(1),),
+            use_record_function=True,
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
+        )
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_remote_rpc_single_threaded(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
         )
