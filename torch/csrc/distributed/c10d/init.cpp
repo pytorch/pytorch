@@ -685,19 +685,34 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #endif
 
 #ifdef USE_C10D_NCCL
-  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+  auto processGroupNCCL = shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
+      .def(py::init<
+           const std::shared_ptr<::c10d::Store>&,
+           int,
+           int,
+           ::c10d::ProcessGroupNCCL::Options>())
       .def(
-          py::init<
-              const std::shared_ptr<::c10d::Store>&,
-              int,
-              int,
-              const std::chrono::milliseconds&>(),
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      const std::chrono::milliseconds& timeout){
+            ::c10d::ProcessGroupNCCL::Options options;
+            options.isHighPriorityStream = false;
+            options.opTimeout = timeout;
+            return std::make_shared<::c10d::ProcessGroupNCCL>(
+                store, rank, size, options);
+          }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(
               ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+
+  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+      .def(py::init<>())
+      .def_readwrite("is_high_priority", &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
+      .def_readwrite("op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
 #endif
 
 #ifdef USE_C10D_MPI
