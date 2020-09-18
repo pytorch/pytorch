@@ -20,6 +20,7 @@ _thread_local_tensor_tables = threading.local()
 class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
+    ASYNC_JIT = "async_jit"
     REMOTE = "remote"
 
 
