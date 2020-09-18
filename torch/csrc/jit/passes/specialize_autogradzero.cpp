@@ -117,6 +117,8 @@ struct AutogradZeroSpecializer {
     WithInsertPoint wip{graph_->block()->param_node()->next()};
     Value* none_val = graph_->insertConstant(IValue());
     std::vector<Value*> checks;
+    std::vector<Value*> zero_values;
+    std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
       if (auto profile_optional_node = getUse(inp, prim::profile_optional)) {
@@ -146,21 +148,34 @@ struct AutogradZeroSpecializer {
       }
 
       state_[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
-      auto check = graph_->insert(prim::AutogradAnyNonZero, {inp});
+
       if (*pttp->undefined()) {
-        check = graph_->insert(aten::__not__, {check});
+        zero_values.push_back(inp);
+      } else {
+        nonzero_values.push_back(inp);
       }
-      checks.push_back(check);
     }
 
     // unable to specialize any of the inputs
-    if (checks.size() == 0) {
+    if (nonzero_values.size() == 0 && zero_values.size() == 0) {
       GRAPH_DUMP("Unable to add any specialization guards", graph_);
       versioning_if->destroy();
       // the checks we inserted will be cleaned up
       // by any subsequent DCE pass
       return nullptr;
     }
+
+    Value* nonzero_values_list =
+        graph_
+            ->insertNode(graph_->createList(TensorType::get(), nonzero_values))
+            ->output();
+    checks.push_back(
+        graph_->insert(prim::AutogradAnyNonZero, {nonzero_values_list}));
+
+    Value* zero_values_list =
+        graph_->insertNode(graph_->createList(TensorType::get(), zero_values))
+            ->output();
+    checks.push_back(graph_->insert(prim::AutogradAllZero, {zero_values_list}));
 
     Value* bool_list =
         graph_->insertNode(graph_->createList(BoolType::get(), checks))

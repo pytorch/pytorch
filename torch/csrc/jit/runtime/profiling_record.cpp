@@ -171,6 +171,7 @@ bool needsProfiledInputs(Node* n) {
     // specialize_autogradzero
     case prim::AutogradAdd:
     case prim::AutogradAnyNonZero:
+    case prim::AutogradAllZero:
     case prim::AutogradZero:
     // peephole
     case aten::dim:

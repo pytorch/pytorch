@@ -59,6 +59,7 @@ namespace c10 {
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
+  _(prim, AutogradAllZero)           \
   _(prim, Starred)                   \
   _(prim, TupleConstruct)            \
   _(prim, TupleUnpack)               \

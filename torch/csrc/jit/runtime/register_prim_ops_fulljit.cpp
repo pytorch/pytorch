@@ -442,6 +442,34 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::AutogradAllZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = false;
+           for (const IValue& v : last(stack, num_inputs)) {
+             if (v.isTensor()) {
+               if (!v.toTensor().defined()) {
+                 result = true;
+                 break;
+               }
+             } else if (v.isTensorList()) {
+               for (const at::Tensor& t : v.toTensorVector()) {
+                 if (!t.defined()) {
+                   result = true;
+                 }
+               }
+               if (result) {
+                 break;
+               }
+             } else {
+               TORCH_INTERNAL_ASSERT(false);
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::AutogradAdd(Any a, Any b) -> Any",
          [](Stack* stack) {
            at::Tensor a, b;
