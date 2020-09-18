@@ -1,11 +1,13 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
+import re
 import timeit
 from typing import List, Optional
 
 import numpy as np
 import torch
 from torch.utils._benchmark.utils import common
+from torch.utils._benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
 __all__ = ["Timer"]
@@ -42,11 +44,13 @@ class Timer(object):
         globals.setdefault("torch", torch)
 
         self._stmt = stmt
+        self._setup = setup
         self._label = label
         self._sub_label = sub_label
         self._description = description
         self._env = env
         self._num_threads = num_threads
+        self._globals = globals
         self._timer = timeit.Timer(stmt=stmt, setup=setup, timer=timer, globals=globals)
 
     def _construct_measurement(self, number_per_run: int, times: List[float]):
@@ -134,3 +138,24 @@ class Timer(object):
         times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time,
                                                 callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
+
+    def collect_callgrind(self, number=100):
+        if not isinstance(self._stmt, str):
+            raise ValueError("`collect_callgrind` currently only supports string `stmt`")
+
+        # __init__ adds torch, and Timer adds __builtins__
+        allowed_keys = {"torch", "__builtins__"}
+        if any(k not in allowed_keys for k in self._globals.keys()):
+            raise ValueError(
+                "`collect_callgrind` does not currently support passing globals. "
+                "Please define a `setup` str instead.")
+
+        if self._globals.get("torch", torch) is not torch:
+            raise ValueError("`collect_callgrind` does not support mocking out `torch`.")
+
+        # Check that the statement is valid. It doesn't guarantee success, but it's much
+        # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
+        # the parent process rather than the valgrind subprocess.
+        self._timer.timeit(1)
+        return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
+            stmt=self._stmt, setup=self._setup, number=number, num_threads=self._num_threads)
