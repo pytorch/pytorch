@@ -167,6 +167,10 @@ void CudaAnalysis::visit(const For* v) {
 
     if (prev == nullptr) {
       gpu_block_extents_[gpu_block_index] = v->stop();
+    } else if (prev->isConstant() && immediateEquals(prev, 1)) {
+      // extents must be positive so if the current extent is 1 then even if the
+      // stop is symbolic it's the max.
+      gpu_block_extents_[gpu_block_index] = v->stop();
     } else {
       gpu_block_extents_[gpu_block_index] =
           IRSimplifier::simplify(new Max(prev, v->stop(), true));
@@ -189,6 +193,10 @@ void CudaAnalysis::visit(const For* v) {
     }
 
     if (prev == nullptr) {
+      gpu_thread_extents_[gpu_thread_index] = v->stop();
+    } else if (prev->isConstant() && immediateEquals(prev, 1)) {
+      // extents must be positive so if the current extent is 1 then even if the
+      // stop is symbolic it's the max.
       gpu_thread_extents_[gpu_thread_index] = v->stop();
     } else {
       gpu_thread_extents_[gpu_thread_index] =
@@ -637,40 +645,62 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   return func_prefix + "_" + std::to_string(value);
 }
 
-Stmt* GPUMetaVarRewriter::mutate(const For* v) {
-  // Recurse first.
-  Stmt* body = v->body()->accept_mutator(this);
+bool GPUMetaVarRewriter::isFullExtent() {
+  {
+    auto& extents = cuda_analysis_->gpu_block_extents();
+    for (int i = 0; i < 3; ++i) {
+      if (!exprEquals(current_block_reach_[i], extents[i])) {
+        return false;
+      }
+    }
+  }
 
+  {
+    auto& extents = cuda_analysis_->gpu_thread_extents();
+    for (int i = 0; i < 3; ++i) {
+      if (!exprEquals(current_thread_reach_[i], extents[i])) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+Stmt* GPUMetaVarRewriter::mutate(const For* v) {
+  Stmt* body = v->body();
+  const Expr* old_reach = nullptr;
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
-    auto& extents = cuda_analysis_->gpu_block_extents();
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_index >= 3) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
+    old_reach = current_block_reach_[gpu_block_index];
+
+    // Extents must be positive, assume >= 1.
+    if (old_reach->isConstant() && immediateEquals(old_reach, 1)) {
+      current_block_reach_[gpu_block_index] = v->stop();
+    } else {
+      current_block_reach_[gpu_block_index] =
+          IRSimplifier::simplify(new Max(old_reach, v->stop(), true));
+    }
 
     const Var* metaVar = gpu_block_vars_[gpu_block_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
-
-    // extents is the max found, if we don't equal that we may be smaller.
-    // Mask it with the current loops stop.
-    if (!exprEquals(extents[gpu_block_index], v->stop())) {
-      body = new Cond(
-          new CompareSelect(
-              metaVar,
-              v->stop(),
-              new IntImm(1),
-              new IntImm(0),
-              CompareSelectOperation::kLT),
-          body,
-          nullptr);
-    }
-    return body;
   } else if (loop_options.is_gpu_thread_index()) {
-    auto& extents = cuda_analysis_->gpu_thread_extents();
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_index >= 3) {
       throw std::runtime_error("support only 3D gpu_thread_index");
+    }
+    old_reach = current_thread_reach_[gpu_thread_index];
+
+    // Extents must be positive, assume >= 1.
+    if (old_reach->isConstant() && immediateEquals(old_reach, 1)) {
+      current_thread_reach_[gpu_thread_index] = v->stop();
+    } else {
+      current_thread_reach_[gpu_thread_index] =
+          IRSimplifier::simplify(new Max(old_reach, v->stop(), true));
     }
 
     // If a thread dimension has changed, insert a syncThreads in the enclosing
@@ -682,176 +712,135 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
 
     const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
+  }
 
-    // extents is the max found, if we don't equal that we may be smaller.
-    // Mask it with the current loops stop.
-    if (!exprEquals(extents[gpu_thread_index], v->stop())) {
-      body = new Cond(
-          new CompareSelect(
-              metaVar,
-              v->stop(),
-              new IntImm(1),
-              new IntImm(0),
-              CompareSelectOperation::kLT),
-          body,
-          nullptr);
-    }
+  // Recurse into body block.
+  body = Stmt::clone(body->accept_mutator(this));
+
+  // pop the internal reach off the stack.
+  if (loop_options.is_gpu_block_index()) {
+    current_block_reach_[loop_options.gpu_block_index()] = old_reach;
+    return body;
+  } else if (loop_options.is_gpu_thread_index()) {
+    current_thread_reach_[loop_options.gpu_thread_index()] = old_reach;
     return body;
   }
 
-  return new For(
-      v->var(), v->start(), v->stop(), Stmt::clone(body), loop_options);
+  return v->cloneWithNewBody(body);
 }
 
 Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
-  bool any_change = false;
+  std::vector<Segment> innerSegments;
+  Segment current;
 
-  std::vector<Stmt*> stmts;
+  auto pushAndReset = [&](bool mask) {
+    if (!current.empty()) {
+      innerSegments.push_back(current);
+    }
+    current.reset(mask);
+  };
+
+  // Here's we're slicing the Block's contents into segments that should have
+  // the same launch reach. Segments are comprised of all statements that aren't
+  // loops - which are their own segments. Some operations, such as threading
+  // and memory ops should never be masked and so also get their own segment.
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
-    if (stmt != stmt_new) {
-      any_change = true;
-    } else {
-      stmt_new = Stmt::clone(stmt);
+    if (stmt == stmt_new) {
+      stmt_new = Stmt::clone(stmt_new);
     }
 
     if (need_sync_) {
-      stmts.push_back(new SyncThreads());
+      // sync is special, we never want to mask it and it is never part of
+      // another segment.
+      pushAndReset(false);
+      current.stmts().push_back(new SyncThreads());
+      pushAndReset(true);
+
       need_sync_ = false;
     }
 
-    if (stmt_new) {
-      stmts.push_back(stmt_new);
+    // Likewise, Allocate and Free should never be masked.
+    if (dynamic_cast<Allocate*>(stmt) || dynamic_cast<Free*>(stmt)) {
+      pushAndReset(false);
+    }
+
+    // If the current stmt *was* a loop, it's a segment boundary.
+    if (For* f = dynamic_cast<For*>(stmt)) {
+      pushAndReset(false);
+    }
+
+    current.stmts().push_back(stmt_new);
+    // if the current segment should not be masked, it's a segment boundary on
+    // the far side as well.
+    if (!current.mask()) {
+      pushAndReset(true);
     }
   }
-  if (!any_change) {
-    return (Stmt*)v;
+
+  if (!current.empty()) {
+    innerSegments.push_back(current);
   }
-  return Block::make(stmts);
+
+  // We are max extent in all dimensions, so need no masks at this level.
+  if (isFullExtent()) {
+    // flatten inner segments.
+    std::vector<Stmt*> stmts;
+    for (auto& v : innerSegments) {
+      for (auto* s : v.stmts()) {
+        stmts.push_back(s);
+      }
+    }
+
+    return new Block(stmts);
+  }
+
+  std::vector<Stmt*> stmts;
+  int rsqi = 0;
+  for (auto& segment : innerSegments) {
+    // We never mask loops, they'll mask their contents.
+    if (!segment.mask()) {
+      TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
+      stmts.push_back(segment.stmts()[0]);
+      continue;
+    }
+
+    // If we get here, we must mask since we're not full reach and our direct
+    // child isn't a For.
+    Stmt* inner = new Block(segment.stmts());
+    // threads inside blocks.
+    auto& thread_extents = cuda_analysis_->gpu_thread_extents();
+    for (size_t i = 0; i < gpu_thread_vars_.size(); ++i) {
+      if (!exprEquals(current_thread_reach_[i], thread_extents[i])) {
+        // Mask it against the current dimensions.
+        inner = new Cond(
+            new CompareSelect(
+                gpu_thread_vars_[i],
+                current_thread_reach_[i],
+                CompareSelectOperation::kLT),
+            inner,
+            nullptr);
+      }
+    }
+    auto& block_extents = cuda_analysis_->gpu_block_extents();
+    for (size_t i = 0; i < gpu_block_vars_.size(); ++i) {
+      if (!exprEquals(current_block_reach_[i], block_extents[i])) {
+        // Mask it against the current dimensions.
+        inner = new Cond(
+            new CompareSelect(
+                gpu_block_vars_[i],
+                current_block_reach_[i],
+                CompareSelectOperation::kLT),
+            inner,
+            nullptr);
+      }
+    }
+
+    stmts.push_back(inner);
+  }
+
+  return new Block(stmts);
 }
-
-// Find all the statements that are not covered by any thread-idx axes,
-// and wrap them under a trivial thread idx.
-class NoThreadIdxRewriter : public IRMutator {
- private:
-  Stmt* rewrite(const std::vector<Stmt*>& stmts) {
-    Stmt* new_block = Block::make(stmts);
-    // Wrap the new block under a trivial thread-idx
-    //   for t in 0..1: // threadIdx
-    //       new_block
-    // Note: the insertion of this for loop serves two purpose. First it is
-    // turned into a mask; Second, it will make sure a sync point is inserted
-    // when we switch to another thread-idx axis.
-    VarHandle t("t", kInt);
-    LoopOptions thread_idx_opt;
-    // TODO: the added trivial threadIdx needs to match the kernel threadIdx
-    // dimensions
-    thread_idx_opt.set_gpu_thread_index(0);
-    For* trivial_loop = For::make(t, 0, 1, new_block, thread_idx_opt);
-    return trivial_loop;
-  }
-
-  Stmt* mutate(const For* v) override {
-    if (v->loop_options().is_gpu_block_index()) {
-      gpu_blocks_.push_back(v);
-      need_rewrite_ = false;
-    } else if (v->loop_options().is_gpu_thread_index()) {
-      gpu_threads_.push_back(v);
-    }
-
-    Stmt* new_for = IRMutator::mutate(v);
-
-    if (v->loop_options().is_gpu_block_index()) {
-      gpu_blocks_.pop_back();
-      need_rewrite_ = false;
-    } else if (v->loop_options().is_gpu_thread_index()) {
-      gpu_threads_.pop_back();
-    }
-
-    return new_for;
-  }
-
-  Stmt* mutate(const Block* v) override {
-    std::list<Stmt*> old_stmts(v->begin(), v->end());
-    std::vector<bool> need_rewrites(old_stmts.size());
-    std::vector<Stmt*> new_stmts(old_stmts.size());
-    int index = 0;
-    for (auto old_stmt : old_stmts) {
-      need_rewrite_ = false;
-      Stmt* new_stmt = Stmt::clone(old_stmt->accept_mutator(this));
-      need_rewrites[index] = need_rewrite_;
-      new_stmts[index] = new_stmt;
-      index++;
-    }
-
-    bool any_need_fix = false;
-    bool all_need_fix = need_rewrites.empty();
-    for (auto need_fix : need_rewrites) {
-      if (need_fix) {
-        any_need_fix = true;
-      } else {
-        all_need_fix = false;
-      }
-    }
-
-    need_rewrite_ = false;
-    // If nothing needs fix, return as it is
-    if (!any_need_fix) {
-      return Block::make(new_stmts);
-    }
-
-    // If all needs fix, then we could have its parent statement to merge
-    // further. Unless the parent is a block-indx axis, then we should handle
-    // the rewrite now.
-    if (all_need_fix) {
-      Stmt* parent = v->get_parent();
-      For* loop_parent = dynamic_cast<For*>(parent);
-      if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
-        Stmt* new_block = rewrite(new_stmts);
-        return new_block;
-      }
-      need_rewrite_ = true;
-      return Block::make(new_stmts);
-    }
-
-    // if some needs fix, rewrites the consecutive parts
-    int start = 0;
-    int count = new_stmts.size();
-    std::vector<Stmt*> rewrite_stmts;
-    while (start < count) {
-      while (start < count && !need_rewrites[start]) {
-        rewrite_stmts.push_back(Stmt::clone(new_stmts[start]));
-        start++;
-      }
-      if (start >= count) {
-        break;
-      }
-      int stop = start + 1;
-      while (stop < count && need_rewrites[stop]) {
-        stop++;
-      }
-
-      // Rewrite the stmts from [start, stop)
-      std::vector<Stmt*> stmts_to_rewrite(
-          new_stmts.begin() + start, new_stmts.begin() + stop);
-      Stmt* rewritten_stmt = rewrite(stmts_to_rewrite);
-      rewrite_stmts.push_back(rewritten_stmt);
-
-      start = stop;
-    }
-    Stmt* rewritten_block = Block::make(rewrite_stmts);
-    return rewritten_block;
-  }
-
-  Stmt* mutate(const Store* v) override {
-    need_rewrite_ = gpu_threads_.empty();
-    return (Stmt*)v;
-  }
-
-  std::vector<const For*> gpu_blocks_;
-  std::vector<const For*> gpu_threads_;
-  bool need_rewrite_ = false;
-};
 
 static std::ostream& operator<<(
     std::ostream& out,
@@ -953,8 +942,6 @@ void CudaCodeGen::Initialize() {
 
   stmt_v->accept(cuda_analysis_.get());
 
-  NoThreadIdxRewriter no_thread_idx;
-  stmt_v = stmt_v->accept_mutator(&no_thread_idx);
   stmt_v = stmt_v->accept_mutator(metavar_rewriter_.get());
 
   AtomicAddFuser atomic_add_fuser(
