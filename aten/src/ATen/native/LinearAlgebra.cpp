@@ -172,8 +172,15 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
               ", v1: ", vec1.sizes(),
               ", v2: ", vec2.sizes());
 
+  Tensor result_;
   // addr is implemented as a composite op through outer
-  result.copy_(beta * self_ + alpha * at::outer(vec1, vec2));
+  if (beta == 0.0) {
+    // If beta is 0, self would be ignored and `nan` and `inf` in it would not be propagated
+    result_ = alpha * at::outer(vec1, vec2);
+  } else {
+    result_ = beta * self_ + alpha * at::outer(vec1, vec2);
+  }
+  result.copy_(result_);
   return result;
 }
 
