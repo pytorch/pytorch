@@ -2,23 +2,11 @@
 
 namespace c10 {
 
-constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
-});
-
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
     case DispatchKey::Autograd:
       return autograd_dispatch_keyset;
-    case DispatchKey::Undefined:
-     return DispatchKeySet();
    default:
      return DispatchKeySet(t);
   }
@@ -26,10 +14,6 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
   return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
-}
-
-DispatchKeySet getRuntimeAutogradKeySet() {
-  return autograd_dispatch_keyset;
 }
 
 std::string toString(DispatchKeySet ts) {
