@@ -126,6 +126,8 @@ TORCH_API std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message);
 
+// Takes a list of events from autograd profiler and populates them into
+// profiledEvents to be carried over RPC.
 TORCH_API void populateRemoteProfiledEvents(
     std::vector<torch::autograd::profiler::Event>& profiledEvents,
     const torch::autograd::profiler::ProfilerConfig& profilerConfig,
