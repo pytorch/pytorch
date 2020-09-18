@@ -286,7 +286,7 @@ should be a plain mathematical composition of other `at::` functions and works f
 If you add `dispatch` section to any API that didn't have it before, you **have to** move
 the old implementation to `Math` field so that it's still available for other backends to use.
 
-This work in currently WIP and you can find the design proposal in
+This work is currently WIP and you can find the design proposal in
 https://github.com/pytorch/pytorch/issues/44680.
 
 ### `device_guard`
