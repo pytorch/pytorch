@@ -173,9 +173,9 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
               ", v2: ", vec2.sizes());
 
   Tensor result_;
-  // addr is implemented as a composite op through outer
-  if (beta == 0) {
-    // If beta is 0, self would be ignored and `nan` and `inf` in it would not be propagated
+  // addr is implemented as a composite op through torch.outer
+  // If beta is 0, self would be ignored and `nan` and `inf` in it would not be propagated
+  if (beta.to<double>() == 0.0) {
     result_ = alpha * at::outer(vec1, vec2);
   } else {
     result_ = beta * self_ + alpha * at::outer(vec1, vec2);
