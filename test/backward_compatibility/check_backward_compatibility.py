@@ -113,6 +113,7 @@ def allow_listed(schema, allow_list):
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
+    ("test_backend", datetime.date(2099, 9, 17)),
 ]
 
 def dont_parse(schema_line):
