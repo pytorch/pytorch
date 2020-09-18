@@ -2,18 +2,6 @@
 
 namespace c10 {
 
-// autograd_dispatch_keyset should include all runtime autograd keys.
-// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
-constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
-});
-
 // backend dispatch keys that map to DispatchKey::AutogradOther
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::HIP,
@@ -56,8 +44,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return autograd_dispatch_keyset;
     case DispatchKey::Math:
       return math_dispatch_keyset;
-   default:
-     return DispatchKeySet(t);
+    default:
+      return DispatchKeySet(t);
   }
 }
 
@@ -84,10 +72,6 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
   return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
-}
-
-DispatchKeySet getRuntimeAutogradKeySet() {
-  return autograd_dispatch_keyset;
 }
 
 std::string toString(DispatchKeySet ts) {
