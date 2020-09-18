@@ -17,7 +17,6 @@ if not dist.is_available():
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
-
 def single_threaded_process_group_agent(f):
     """
     Forces ProcessGroupAgent to use only a single thread in the ThreadPool for

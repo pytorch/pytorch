@@ -486,9 +486,11 @@ void RequestCallbackNoPython::processRpc(
       const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
       // Enable the profiler with the config from the sender.
-      torch::autograd::profiler::ProfilerDisableOptions requestThreadOptions;
-      requestThreadOptions.cleanupTLSState = true;
-      requestThreadOptions.consolidate = false;
+      // When enabling on the main thread, ensure profiler states are cleaned
+      // up, but defer consolidation of all profiled events to the continuation
+      // below.
+      torch::autograd::profiler::ProfilerDisableOptions requestThreadOptions(
+          true /* cleanup TLS state */, false /* consolidate events */);
       {
         torch::autograd::profiler::TLSProfilerGuard g(
             profilingConfig, c10::nullopt, requestThreadOptions);
@@ -503,13 +505,11 @@ void RequestCallbackNoPython::processRpc(
             messageId,
             wrappedRpcResponseFuture);
 
-        auto tid = std::this_thread::get_id();
         wrappedRpcResponseFuture->addCallback(
             at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
                                              responseFuture,
                                              profilingKeyId,
-                                             profilingConfig,
-                                             tid] {
+                                             profilingConfig] {
               std::vector<torch::autograd::profiler::Event> profiledEvents;
               // Defer consolidation of profiler events until async work has
               // completed (such as async UDF)
@@ -518,11 +518,13 @@ void RequestCallbackNoPython::processRpc(
                   torch::autograd::profiler::profilerEnabled(),
                   "Expected profiler to be enabled!");
 
-              // Only clean up TLS states of profiler if we are disabling on
-              // the main thread.
-              bool shouldCleanUpTLSStates = (std::this_thread::get_id() == tid);
-              auto event_lists = torch::autograd::profiler::disableProfiler(
-                  shouldCleanUpTLSStates, true);
+              // On continuation thread, don't clean up profiler states, since
+              // they will be cleaned up by main thread, and consolidate all
+              // events so we obtain asynchronously run events.
+              torch::autograd::profiler::ProfilerDisableOptions opts(
+                  false, true);
+              auto event_lists =
+                  torch::autograd::profiler::disableProfiler(std::move(opts));
               if (wrappedRpcResponseFuture->hasError()) {
                 // Propagate error
                 // No need to propagate remote events in the case of an error.

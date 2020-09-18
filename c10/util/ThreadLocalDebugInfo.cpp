@@ -54,10 +54,10 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
 /* static */
 std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
   TORCH_CHECK(
-    debug_info && debug_info->kind_ == kind,
-    "Expected debug info of type ", (size_t) kind);
-    auto res = debug_info;
-    return res->info_;
+      debug_info && debug_info->kind_ == kind,
+      "Expected debug info of type ",
+      (size_t)kind);
+  return debug_info->info_;
 }
 
 

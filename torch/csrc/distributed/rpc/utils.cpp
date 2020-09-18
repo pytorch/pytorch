@@ -739,8 +739,7 @@ void populateRemoteProfiledEvents(
     if (!found_cpu_start && 0 == strcmp(e.name(), "__start_profile")) {
       profilerStart = &e;
       found_cpu_start = true;
-    }
-    if (cuda_profiling_enabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
+    } else if (cuda_profiling_enabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
       e.setCudaUs(e.cpu_us());
       auto device = e.device();
       TORCH_CHECK(
@@ -751,6 +750,7 @@ void populateRemoteProfiledEvents(
           c10::str("Duplicate __cuda_start_event found for ", device));
       cudaProfilerStarts[device] = &e;
     }
+
     // TODO: determine no. of CUDA devices and break here if we have
     // a cudaProfilerStart for all of them, in the case of cuda
     // profiling.
@@ -761,7 +761,7 @@ void populateRemoteProfiledEvents(
   // We should always find __start_profile.
   TORCH_CHECK(
       profilerStart != nullptr, "Expected to find __start_profile event.");
-  // Should have >= 1 CUDA start event.
+  // Should have >= 1 CUDA start event if cuda_profiling_enabled.
   // TODO: we can enhance this assert by ensuring we have found a
   // start for every available CUDA device.
   TORCH_CHECK(

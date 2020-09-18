@@ -1246,14 +1246,14 @@ class RpcTest(RpcAgentTestFixture):
         )
         fut.wait()
 
-    def _run_rpc_profiling_async_function(self):
+    def _run_rpc_profiling_async_function(self, device="cpu"):
         if self.rank != 1:
             return
 
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
-        x = torch.ones(2)
-        y = torch.ones(2)
+        x = torch.ones(2, device=device)
+        y = torch.ones(2, device=device)
         with torch.autograd.profiler.profile() as prof:
             ret = rpc.rpc_async(dst1, slow_async_add, args=(dst2, x, y), timeout=20)
             out = ret.wait()
@@ -1291,11 +1291,17 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_rpc_profiling_async_function(self):
         self._run_rpc_profiling_async_function()
+        if torch.cuda.is_available():
+            dist.barrier()
+            self._run_rpc_profiling_async_function(device="cuda:0")
 
     @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
         self._run_rpc_profiling_async_function()
+        if torch.cuda.is_available():
+            dist.barrier()
+            self._run_rpc_profiling_async_function(device="cuda:0")
 
     @dist_init
     def test_rpc_profiling_remote_record_function(self):
