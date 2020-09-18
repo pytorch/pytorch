@@ -1,6 +1,7 @@
 from functools import reduce
 from operator import mul, itemgetter
 import collections
+import typing
 
 import torch
 import numpy as np
