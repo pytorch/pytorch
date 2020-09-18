@@ -233,45 +233,26 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     int64_t k = nInputPlane*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    if (kW != 1 || kH != 1) {
-      #ifdef THC_REAL_IS_FLOAT
-      THCudaBlas_Sgemm(
-      #elif defined(THC_REAL_IS_HALF)
-      THCudaBlas_Hgemm(
-      #elif defined(THC_REAL_IS_DOUBLE)
-      THCudaBlas_Dgemm(
-      #elif defined(THC_REAL_IS_BFLOAT16)
-      THCudaBlas_Bgemm(
-      #endif
-          state,
-          'n', 'n',
-          n, m, k,
-          ScalarConvert<int, scalar_t>::to(1),
-          THCTensor_(data)(state, columns), n,
-          THCTensor_(data)(state, weight), k,
-          ScalarConvert<int, scalar_t>::to(1),
-          THCTensor_(data)(state, output_n), n
-      );
-    } else {
-      #ifdef THC_REAL_IS_FLOAT
-      THCudaBlas_Sgemm(
-      #elif defined(THC_REAL_IS_HALF)
-      THCudaBlas_Hgemm(
-      #elif defined(THC_REAL_IS_DOUBLE)
-      THCudaBlas_Dgemm(
-      #elif defined(THC_REAL_IS_BFLOAT16)
-      THCudaBlas_Bgemm(
-      #endif
-          state,
-          'n', 'n',
-          n, m, k,
-          ScalarConvert<int, scalar_t>::to(1),
-          THCTensor_(data)(state, input_n), n,
-          THCTensor_(data)(state, weight), k,
-          ScalarConvert<int, scalar_t>::to(1),
-          THCTensor_(data)(state, output_n), n
-      );
-    }
+    auto gemm_in_ptr = (kW != 1 || kH != 1) ?
+        THCTensor_(data)(state, columns) : THCTensor_(data)(state, input_n);
+    #ifdef THC_REAL_IS_FLOAT
+    THCudaBlas_Sgemm(
+    #elif defined(THC_REAL_IS_HALF)
+    THCudaBlas_Hgemm(
+    #elif defined(THC_REAL_IS_DOUBLE)
+    THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_BFLOAT16)
+    THCudaBlas_Bgemm(
+    #endif
+        state,
+        'n', 'n',
+        n, m, k,
+        ScalarConvert<int, scalar_t>::to(1),
+        gemm_in_ptr, n,
+        THCTensor_(data)(state, weight), k,
+        ScalarConvert<int, scalar_t>::to(1),
+        THCTensor_(data)(state, output_n), n
+    );
   }
 
   // Free
@@ -499,45 +480,26 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       int64_t k = columns->size(1);
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-      if (kW != 1 || kH != 1) {
-        #ifdef THC_REAL_IS_FLOAT
-        THCudaBlas_Sgemm(
-        #elif defined(THC_REAL_IS_HALF)
-        THCudaBlas_Hgemm(
-        #elif defined(THC_REAL_IS_DOUBLE)
-        THCudaBlas_Dgemm(
-        #elif defined(THC_REAL_IS_BFLOAT16)
-        THCudaBlas_Bgemm(
-        #endif
-            state,
-            't', 'n',
-            n, m, k,
-            scale,
-            THCTensor_(data)(state, columns), k,
-            THCTensor_(data)(state, gradOutput_n), k,
-            ScalarConvert<int, scalar_t>::to(1),
-            THCTensor_(data)(state, gradWeight), n
-        );
-      } else {
-        #ifdef THC_REAL_IS_FLOAT
-        THCudaBlas_Sgemm(
-        #elif defined(THC_REAL_IS_HALF)
-        THCudaBlas_Hgemm(
-        #elif defined(THC_REAL_IS_DOUBLE)
-        THCudaBlas_Dgemm(
-        #elif defined(THC_REAL_IS_BFLOAT16)
-        THCudaBlas_Bgemm(
-        #endif
-            state,
-            't', 'n',
-            n, m, k,
-            scale,
-            THCTensor_(data)(state, input_n), k,
-            THCTensor_(data)(state, gradOutput_n), k,
-            ScalarConvert<int, scalar_t>::to(1),
-            THCTensor_(data)(state, gradWeight), n
-        );
-      }
+      auto gemm_in_ptr = (kW != 1 || kH != 1) ?
+          THCTensor_(data)(state, columns) : THCTensor_(data)(state, input_n);
+      #ifdef THC_REAL_IS_FLOAT
+      THCudaBlas_Sgemm(
+      #elif defined(THC_REAL_IS_HALF)
+      THCudaBlas_Hgemm(
+      #elif defined(THC_REAL_IS_DOUBLE)
+      THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(
+      #endif
+          state,
+          't', 'n',
+          n, m, k,
+          scale,
+          gemm_in_ptr, k,
+          THCTensor_(data)(state, gradOutput_n), k,
+          ScalarConvert<int, scalar_t>::to(1),
+          THCTensor_(data)(state, gradWeight), n
+      );
     }
 
     // Do Bias:

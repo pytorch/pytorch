@@ -481,37 +481,22 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          if (kernel_height != 1 || kernel_width != 1) {
-            cpublas::gemm(
-                cpublas::NoTranspose,
-                cpublas::NoTranspose,
-                n,
-                m,
-                k,
-                1,
-                grad_columns.data_ptr<scalar_t>(),
-                n,
-                weight.data_ptr<scalar_t>(),
-                k,
-                0,
-                grad_input_n.data_ptr<scalar_t>(),
-                n);
-          } else {
-            cpublas::gemm(
-                cpublas::NoTranspose,
-                cpublas::NoTranspose,
-                n,
-                m,
-                k,
-                1,
-                grad_output_n.data_ptr<scalar_t>(),
-                n,
-                weight.data_ptr<scalar_t>(),
-                k,
-                0,
-                grad_input_n.data_ptr<scalar_t>(),
-                n);
-          }
+          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
+              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          cpublas::gemm(
+              cpublas::NoTranspose,
+              cpublas::NoTranspose,
+              n,
+              m,
+              k,
+              1,
+              gemm_in_ptr,
+              n,
+              weight.data_ptr<scalar_t>(),
+              k,
+              0,
+              grad_input_n.data_ptr<scalar_t>(),
+              n);
         }
 
         // Resize output
@@ -691,37 +676,22 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            if (kernel_height != 1 || kernel_width != 1) {
-              cpublas::gemm(
-                  cpublas::Transpose,
-                  cpublas::NoTranspose,
-                  n,
-                  m,
-                  k,
-                  scale,
-                  columns.data_ptr<scalar_t>(),
-                  k,
-                  input_n.data_ptr<scalar_t>(),
-                  k,
-                  1,
-                  grad_weight.data_ptr<scalar_t>(),
-                  n);
-            } else {
-              cpublas::gemm(
-                  cpublas::Transpose,
-                  cpublas::NoTranspose,
-                  n,
-                  m,
-                  k,
-                  scale,
-                  grad_output_n.data_ptr<scalar_t>(),
-                  k,
-                  input_n.data_ptr<scalar_t>(),
-                  k,
-                  1,
-                  grad_weight.data_ptr<scalar_t>(),
-                  n);
-            }
+            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
+                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            cpublas::gemm(
+                cpublas::Transpose,
+                cpublas::NoTranspose,
+                n,
+                m,
+                k,
+                scale,
+                gemm_in_ptr,
+                k,
+                input_n.data_ptr<scalar_t>(),
+                k,
+                1,
+                grad_weight.data_ptr<scalar_t>(),
+                n);
           }
 
           // Do Bias:

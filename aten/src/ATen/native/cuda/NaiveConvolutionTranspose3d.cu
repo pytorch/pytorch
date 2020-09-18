@@ -579,37 +579,22 @@ void slow_conv_transpose3d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) {
-            at::cuda::blas::gemm<scalar_t>(
-                'n',
-                'n',
-                n,
-                m,
-                k,
-                static_cast<scalar_t>(1),
-                grad_columns.data_ptr<scalar_t>(),
-                n,
-                weight.data_ptr<scalar_t>(),
-                k,
-                static_cast<scalar_t>(0),
-                grad_input_n.data_ptr<scalar_t>(),
-                n);
-          } else {
-            at::cuda::blas::gemm<scalar_t>(
-                'n',
-                'n',
-                n,
-                m,
-                k,
-                static_cast<scalar_t>(1),
-                grad_output_n.data_ptr<scalar_t>(),
-                n,
-                weight.data_ptr<scalar_t>(),
-                k,
-                static_cast<scalar_t>(0),
-                grad_input_n.data_ptr<scalar_t>(),
-                n);
-          }
+          auto gemm_in_ptr = (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) ?
+              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          at::cuda::blas::gemm<scalar_t>(
+              'n',
+              'n',
+              n,
+              m,
+              k,
+              static_cast<scalar_t>(1),
+              gemm_in_ptr,
+              n,
+              weight.data_ptr<scalar_t>(),
+              k,
+              static_cast<scalar_t>(0),
+              grad_input_n.data_ptr<scalar_t>(),
+              n);
         }
 
         // Resize output
@@ -835,37 +820,22 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            if (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) {
-              at::cuda::blas::gemm<scalar_t>(
-                  't',
-                  'n',
-                  n,
-                  m,
-                  k,
-                  scale,
-                  columns.data_ptr<scalar_t>(),
-                  k,
-                  input_n.data_ptr<scalar_t>(),
-                  k,
-                  static_cast<scalar_t>(1),
-                  grad_weight.data_ptr<scalar_t>(),
-                  n);
-            } else {
-              at::cuda::blas::gemm<scalar_t>(
-                  't',
-                  'n',
-                  n,
-                  m,
-                  k,
-                  scale,
-                  grad_output_n.data_ptr<scalar_t>(),
-                  k,
-                  input_n.data_ptr<scalar_t>(),
-                  k,
-                  static_cast<scalar_t>(1),
-                  grad_weight.data_ptr<scalar_t>(),
-                  n);
-            }
+            auto gemm_in_ptr = (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1) ?
+                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            at::cuda::blas::gemm<scalar_t>(
+                't',
+                'n',
+                n,
+                m,
+                k,
+                scale,
+                gemm_in_ptr,
+                k,
+                input_n.data_ptr<scalar_t>(),
+                k,
+                static_cast<scalar_t>(1),
+                grad_weight.data_ptr<scalar_t>(),
+                n);
           }
 
           // Do Bias:
