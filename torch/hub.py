@@ -311,59 +311,83 @@ def help(github, model, force_reload=False):
 # but Python2 complains syntax error for it. We have to skip force_reload in function
 # signature here but detect it in kwargs instead.
 # TODO: fix it after Python2 EOL
-def load(github, model, *args, **kwargs):
+def load(repo_or_dir, model, *args, **kwargs):
     r"""
-    Load a model from a github repo, with pretrained weights.
+    Load a model from a github repo or a local directory.
+
+    Note: Loading a model is the typical use case, but this can also be used to
+    for loading other objects such as tokenizers, loss functions, etc.
+
+    If :attr:`source` is ``'github'``, :attr:`repo_or_dir` is expected to be
+    of the form ``repo_owner/repo_name[:tag_name]`` with an optional
+    tag/branch.
+
+    If :attr:`source` is ``'local'``, :attr:`repo_or_dir` is expected to be a
+    path to a local directory.
 
     Args:
-        github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
-        model (string): a string of entrypoint name defined in repo's hubconf.py
-        *args (optional): the corresponding args for callable `model`.
-        force_reload (bool, optional): whether to force a fresh download of github repo unconditionally.
-            Default is `False`.
-        verbose (bool, optional): If False, mute messages about hitting local caches. Note that the message
-            about first download is cannot be muted.
-            Default is `True`.
-        **kwargs (optional): the corresponding kwargs for callable `model`.
+        repo_or_dir (string): repo name (``repo_owner/repo_name[:tag_name]``)
+            or a path to a local directory. See :attr:`source`.
+        model (string): the name of a callable (entrypoint) defined in the
+            repo/dir's ``hubconf.py``.
+        *args (optional): the corresponding args for callable :attr:`model`.
+        source (string, optional): ``'github'`` | ``'local'``. Specifies how
+            ``repo_or_dir`` is to be interpreted. Default is ``'github'``.
+        force_reload (bool, optional): whether to force a fresh download of
+            the github repo unconditionally. Default is ``False``.
+        verbose (bool, optional): If ``False``, mute messages about hitting
+            local caches. Note that the message about first download cannot be
+            muted. Default is ``True``.
+        **kwargs (optional): the corresponding kwargs for callable
+            :attr:`model`.
 
     Returns:
-        a single model with corresponding pretrained weights.
+        The output of the :attr:`model` callable when called with the given
+        ``*args`` and ``**kwargs``.
 
     Example:
-        >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
+        >>> # from a github repo
+        >>> repo = 'pytorch/vision'
+        >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
+        >>> # from a local directory
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
-    force_reload = kwargs.get('force_reload', False)
-    kwargs.pop('force_reload', None)
-    verbose = kwargs.get('verbose', True)
-    kwargs.pop('verbose', None)
+    source = kwargs.get('source', 'github').lower()
+    kwargs.pop('source', None)
+    if source not in ('github', 'local'):
+        raise ValueError(
+            f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
-    repo_dir = _get_cache_or_reload(github, force_reload, verbose)
+    if source == 'github':
+        force_reload = kwargs.get('force_reload', False)
+        kwargs.pop('force_reload', None)
+        verbose = kwargs.get('verbose', True)
+        kwargs.pop('verbose', None)
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
 
-    model = load_local(repo_dir, model, *args, **kwargs)
-
+    model = _load_local(repo_or_dir, model, *args, **kwargs)
     return model
 
 
-def load_local(hubconf_dir, model, *args, **kwargs):
+def _load_local(hubconf_dir, model, *args, **kwargs):
     r"""
-    Load a model from a local directory with a `hubconf.py`.
+    Load a model from a local directory with a ``hubconf.py``.
 
     Args:
         hubconf_dir (string): path to a local directory that contains a
-            `hubconf.py`.
+            ``hubconf.py``.
         model (string): name of an entrypoint defined in the directory's
             `hubconf.py`.
-        *args (optional): the corresponding args for callable `model`.
-        **kwargs (optional): the corresponding kwargs for callable `model`.
+        *args (optional): the corresponding args for callable ``model``.
+        **kwargs (optional): the corresponding kwargs for callable ``model``.
 
     Returns:
         a single model with corresponding pretrained weights.
 
     Example:
         >>> path = '/some/local/path/pytorch/vision'
-        >>> model = torch.hub.load_local(path, 'resnet50', pretrained=True)
+        >>> model = _load_local(path, 'resnet50', pretrained=True)
     """
     sys.path.insert(0, hubconf_dir)
 
@@ -371,7 +395,6 @@ def load_local(hubconf_dir, model, *args, **kwargs):
     hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     entry = _load_entry_from_hubconf(hub_module, model)
-
     model = entry(*args, **kwargs)
 
     sys.path.remove(hubconf_dir)
