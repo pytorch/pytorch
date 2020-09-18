@@ -7750,7 +7750,7 @@ class TestTorchDeviceType(TestCase):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         def cholesky_test_helper(n, batch_dims, upper):
-            # TODO: This is a workaround while there is no support for complex svd
+            # This is a workaround while there is no support for complex random_symmetric_pd_matrix
             if dtype.is_complex:
                 real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
                 A_real = random_symmetric_pd_matrix(n, *batch_dims, dtype=real_dtype, device=device)
@@ -7772,7 +7772,7 @@ class TestTorchDeviceType(TestCase):
     def test_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
-        # TODO: This is a workaround while there is no support for complex svd
+        # This is a workaround while there is no support for complex random_symmetric_pd_matrix
         if dtype.is_complex:
             real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
             A_real = random_symmetric_pd_matrix(10, dtype=real_dtype, device=device)
