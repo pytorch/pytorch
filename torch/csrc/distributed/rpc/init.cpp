@@ -45,6 +45,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto _C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = _C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
 
+  auto module = py::handle(rpc_module).cast<py::module>();
+
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(
           module,

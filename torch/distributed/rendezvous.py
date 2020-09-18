@@ -1,15 +1,14 @@
 try:
     from urllib.parse import urlparse, urlunparse
-    from urllib.parse import SplitResult, SplitResultBytes
 except ImportError:
     # Temporarily disable Python2 typechecking
-    from urlparse import urlparse, urlunparse # type: ignore[import, no-redef]
+    from urlparse import urlparse, urlunparse  # type: ignore[import, no-redef]
 
 import torch._six as six
 import numbers
 import os
 from datetime import timedelta
-from typing import Optional, Tuple, Dict, Union
+from typing import Optional, Dict, Union
 
 from . import FileStore, TCPStore
 from .constants import default_pg_timeout
@@ -48,7 +47,7 @@ def register_rendezvous_handler(scheme, handler):
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url: str, rank: int=-1, world_size: int=-1, **kwargs):
+def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, six.string_classes):
         raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
@@ -115,7 +114,7 @@ def _file_rendezvous_handler(url: str, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url: str, timeout: timedelta=default_pg_timeout, **kwargs):
+def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
@@ -141,7 +140,7 @@ def _tcp_rendezvous_handler(url: str, timeout: timedelta=default_pg_timeout, **k
     raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url: str, timeout: timedelta=default_pg_timeout, **kwargs):
+def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
