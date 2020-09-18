@@ -1535,16 +1535,11 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
         return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
-    symmetric = kwargs.get("symmetric", False)
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
     s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    if symmetric:
-        vh = u.conj().transpose(-2, -1)
-    else:
-        vh = v.transpose(-2, -1)
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(vh))
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):

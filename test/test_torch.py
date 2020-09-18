@@ -7747,21 +7747,18 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         def cholesky_test_helper(n, batch_dims, upper):
             # TODO: This is a workaround while there is no support for complex svd
             if dtype.is_complex:
                 real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True,
-                                                                        dtype=real_dtype, device=device)
-                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True,
-                                                                        dtype=real_dtype, device=device)
+                A_real = random_symmetric_pd_matrix(n, *batch_dims, dtype=real_dtype, device=device)
+                A_imag = random_symmetric_pd_matrix(n, *batch_dims, dtype=real_dtype, device=device)
                 A = A_real + 1j * A_imag
                 A = 0.5 * (A + A.transpose(-2, -1).conj())
             else:
-                A = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, symmetric=True,
-                                                                   dtype=dtype, device=device)
+                A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
             self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
@@ -7773,17 +7770,17 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         # TODO: This is a workaround while there is no support for complex svd
         if dtype.is_complex:
             real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-            A_real = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
-            A_imag = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=real_dtype, device=device)
+            A_real = random_symmetric_pd_matrix(10, dtype=real_dtype, device=device)
+            A_imag = random_symmetric_pd_matrix(10, dtype=real_dtype, device=device)
             A = A_real + 1j * A_imag
             A = 0.5 * (A + A.t().conj())
         else:
-            A = random_fullrank_matrix_distinct_singular_value(10, symmetric=True, dtype=dtype, device=device)
+            A = random_symmetric_pd_matrix(10, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
