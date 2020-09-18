@@ -16594,14 +16594,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):
-        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4]
+        if dtype != torch.bfloat16:
+            inputValues.append(1000)
         expectedOutput = np.multiply(
             inputValues,
             np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
-        precision_4dps = 0.0002
 
         inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expectedOutputTensor = \
@@ -16609,14 +16612,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # normal
         self.assertEqual(torch.nn.functional.hardswish(inputTensor),
-                         expectedOutputTensor,
-                         atol=precision_4dps, rtol=0)
+                         expectedOutputTensor)
 
         # inplace
         inputTensorCpy = inputTensor.clone().detach()
         torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
-        self.assertEqual(inputTensorCpy, expectedOutputTensor,
-                         atol=precision_4dps, rtol=0)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -16630,6 +16631,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
                          atol=precision_4dps, rtol=0)
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardsigmoid(self, device, dtype):
@@ -16637,18 +16640,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
 
         inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
-        precision_4dps = 0.0002
 
         # normal
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensor),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
+                         torch.tensor(expectedOutput, dtype=dtype, device=device))
 
         # inplace
         inputTensorCpy = inputTensor.clone().detach()
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
+                         torch.tensor(expectedOutput, dtype=dtype, device=device))
 
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
