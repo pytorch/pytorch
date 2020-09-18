@@ -26,9 +26,9 @@ class TestCppApiParity(common.TestCase):
 expected_test_params_dicts = []
 
 for test_params_dicts, test_instance_class in [
-    (sample_module.module_tests, common_nn.ModuleTest),
+    (sample_module.module_tests, common_nn.NewModuleTest),
     (sample_functional.functional_tests, common_nn.NewModuleTest),
-    (common_nn.module_tests, common_nn.ModuleTest),
+    (common_nn.module_tests, common_nn.NewModuleTest),
     (common_nn.new_module_tests, common_nn.NewModuleTest),
     (common_nn.criterion_tests, common_nn.CriterionTest),
 ]:
