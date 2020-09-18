@@ -739,8 +739,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+        self.register_buffer('min_val', torch.tensor(float('inf')))
+        self.register_buffer('max_val', torch.tensor(float('-inf')))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -917,10 +917,9 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        same_values = False
-        if min_val.numel() > 0 and max_val.numel() > 0:
-            same_values = min_val.item() == max_val.item()
-        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
+        same_values = min_val.item() == max_val.item()
+        is_uninitialized = min_val == float('inf') and max_val == float('-inf')
+        if is_uninitialized or same_values:
             min_val, max_val = torch._aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
