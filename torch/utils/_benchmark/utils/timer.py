@@ -6,7 +6,8 @@ from typing import List, Optional
 
 import numpy as np
 import torch
-from torch.utils._benchmark.utils import common, valgrind_wrapper
+from torch.utils._benchmark.utils import common
+from torch.utils._benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
 __all__ = ["Timer"]
@@ -138,7 +139,7 @@ class Timer(object):
                                                 callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
 
-    def collect_callgrind(self, number=100, standardize=True):
+    def collect_callgrind(self, number=100):
         if not isinstance(self._stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
@@ -156,17 +157,5 @@ class Timer(object):
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
-        fn_counts = valgrind_wrapper.wrapper_singleton().collect_callgrind(
+        return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             stmt=self._stmt, setup=self._setup, number=number, num_threads=self._num_threads)
-
-        if standardize:
-            standardized_fn_counts = []
-            prefix_truncations = ["build/aten/", "work/Python/", "work/Objects/"]
-            for count, fn in fn_counts:
-                fn = re.sub(r"^.+build/\.\./", "build/../", fn)
-                for new_prefix in prefix_truncations:
-                    fn = re.sub(r"^.+" + new_prefix, new_prefix, fn)
-                fn = re.sub(r"\s\[.+\]$", "", fn)
-                standardized_fn_counts.append((count, fn))
-            fn_counts = standardized_fn_counts
-        return fn_counts
