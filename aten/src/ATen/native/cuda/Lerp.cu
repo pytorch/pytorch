@@ -52,7 +52,6 @@ Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
   TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
-  result.resize_as_(b_self, b_self.suggest_memory_format());
   lerp_cuda(result, b_self, b_end, b_weight);
   return result;
 }
@@ -61,7 +60,6 @@ Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
                             const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
-  result.resize_as_(b_self, b_self.suggest_memory_format());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "lerp_out_cuda", [&]{
     lerp_scalar_cuda<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
   });

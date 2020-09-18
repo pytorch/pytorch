@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import division
 import torch
 
 # This is how we include tests located in test/jit/...
@@ -30,8 +29,9 @@ from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
-from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
+from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
+from jit.test_slice import TestSlice  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -2526,7 +2526,7 @@ graph(%Ra, %Rb):
         try:
             subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0")
+            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0") from e
 
     def test_print_op_module(self):
         # Issue #19351: python2 and python3 go through different paths.
@@ -4436,8 +4436,7 @@ a")
 
         self.checkScript(foo, ())
 
-    def test_string_sort(self):
-        @torch.jit.script
+    def test_string_sorted(self):
         def foo(strs: List[str]):
             return sorted(strs)
 
@@ -4445,10 +4444,79 @@ a")
             .check("graph") \
             .check_next("str[] = aten::sorted") \
             .check_next("return") \
-            .run(str(foo.graph))
+            .run(str(torch.jit.script(foo).graph))
 
         inputs = ["str3", "str2", "str1"]
-        self.assertEqual(foo(inputs), sorted(inputs))
+        self.checkScript(foo, (inputs,))
+
+    def test_string_sort(self):
+        def foo(strs: List[str]):
+            strs.sort()
+            return strs
+
+        inputs = ["str3", "str2", "str1"]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_sorted(self):
+        def foo(tups: List[Tuple[int, int]]):
+            return sorted(tups)
+
+        inputs = [(1, 2), (0, 2), (1, 3)]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_sort(self):
+        def foo(tups: List[Tuple[int, int]]):
+            tups.sort()
+            return tups
+
+        inputs = [(1, 2), (0, 2), (1, 3)]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_sort_reverse(self):
+        def foo(tups: List[Tuple[int, int]]):
+            tups.sort(reverse=True)
+            return tups
+
+        inputs = [(1, 2), (0, 2), (1, 3)]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_unsortable_element_type(self):
+        @torch.jit.script
+        def foo():
+            tups = [({1: 2}, {2: 3})]
+            tups.sort()
+            return tups
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "are not sortable", "tups.sort"):
+            foo()
+
+    def test_tuple_unsortable_diff_type(self):
+        @torch.jit.script
+        def foo(inputs: List[Any]):
+            inputs.sort()
+            return inputs
+
+        inputs = [(1, 2), ("foo", "bar")]
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Only values of same type can be compared", "inputs.sort"):
+            foo(inputs)
+
+    def test_tuple_nested_sort(self):
+        def foo(inputs: List[Tuple[int, Tuple[int, str]]]):
+            inputs.sort()
+            return inputs
+
+        inputs = [(1, (2, "foo")), (1, (2, "bar")), (1, (0, "bar"))]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_unsortable_nested_diff_type(self):
+        @torch.jit.script
+        def foo(inputs: List[Any]):
+            inputs.sort()
+            return inputs
+
+        inputs = [(1, (2, 3)), (2, ("foo", "bar"))]
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Only values of same type can be compared", "inputs.sort"):
+            foo(inputs)
 
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
@@ -6999,7 +7067,7 @@ a")
             return torch.{tensor_op}({input})
         ''')
         ops = ['tensor', 'as_tensor']
-        inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
+        inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]', 'torch.jit.annotate(List[List[int]], [])']
         expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
                           "Double(*, device=cpu)", "Double(device=cpu)",
                           "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
@@ -7081,6 +7149,7 @@ a")
         ''')
 
         lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
+                 "torch.jit.annotate(List[List[int]], [])",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -15355,6 +15424,11 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool1d_with_indices',
 }
 
+EXCLUDE_ALIAS = {
+    # aliases, which may appear in method_tests but are tested elsewhere
+    'true_divide',
+}
+
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
     call = get_call(method_name, 'method', actuals, kwargs)
@@ -15523,6 +15597,10 @@ def add_autograd_test(
     # Disable complex tests
     # TODO: Add complex support for jit
     if 'complex' in variant_name:
+        return
+
+    # Skips aliases, which are tested in test_op_aliases.py
+    if name in EXCLUDE_ALIAS:
         return
 
     basic_test_name = 'test_' + name
