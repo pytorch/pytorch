@@ -174,7 +174,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 
   Tensor result_;
   // addr is implemented as a composite op through outer
-  if (beta == 0.0) {
+  if (beta == 0) {
     // If beta is 0, self would be ignored and `nan` and `inf` in it would not be propagated
     result_ = alpha * at::outer(vec1, vec2);
   } else {
