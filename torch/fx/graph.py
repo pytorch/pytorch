@@ -74,16 +74,14 @@ class Graph:
     def nodes(self):
         return tuple(self._nodes)
 
-    def copy_graph(self):
+    def graph_copy(self, g : 'Graph'):
         """
         Create a new graph containing the same nodes as `self` but without
         `output` set. Thus, you can add new nodes to this graph copy.
         """
-        g = Graph()
         val_map : Dict[Node, Node] = {}
-        for node in self._nodes:
-            val_map[node] = g.node_copy(node, lambda n : val_map[n])
-        return g
+        for node in g._nodes:
+            val_map[node] = self.node_copy(node, lambda n : val_map[n])
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):

@@ -172,7 +172,8 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        new_g = g.copy_graph()
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
@@ -453,7 +454,8 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
 
         def transform(traced):
-            new_graph = traced.graph.copy_graph()
+            new_graph = torch.fx.Graph()
+            new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
                 op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
             new_graph.output(relu_out)
