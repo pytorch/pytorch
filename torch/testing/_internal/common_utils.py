@@ -1539,11 +1539,7 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    if dtype.is_complex:
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-    else:
-        real_dtype = dtype
-    s = ((1. - matrix_size) * torch.rand(matrix_size, dtype=real_dtype, device=device) + matrix_size).diag()
+    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     if symmetric:
         vh = u.conj().transpose(-2, -1)
     else:
