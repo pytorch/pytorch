@@ -163,6 +163,8 @@ class _ValgrindWrapper(object):
         script_file = os.path.join(working_dir, "timer_callgrind.py")
         callgrind_out = os.path.join(working_dir, "callgrind.out")
         error_log = os.path.join(working_dir, "error.txt")
+        stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
+        f_stdout_stderr = open(stdout_stderr_log, "wt")
 
         try:
             with open(script_file, "wt") as f:
@@ -183,7 +185,9 @@ class _ValgrindWrapper(object):
                     "python",
                     script_file,
                 ],
-                capture_output=True,
+                stdout=f_stdout_stderr,
+                stderr=subprocess.STDOUT,
+                capture_output=False,
             )
             if valgrind_invocation.returncode:
                 error_report = ""
@@ -191,9 +195,9 @@ class _ValgrindWrapper(object):
                     with open(error_log, "rt") as f:
                         error_report = f.read()
                 if not error_report:
-                    error_report = "Unknown error."
-                    error_report += "\n" + valgrind_invocation.stdout.decode("utf-8")
-                    error_report += "\n" + valgrind_invocation.stderr.decode("utf-8")
+                    with open(stdout_stderr_log, "rt") as f:
+                        error_report = "Unknown error.\n" + f.read()
+
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(inclusive: bool):
@@ -229,6 +233,7 @@ class _ValgrindWrapper(object):
                 return fn_counts
             return parse_output(inclusive=True), parse_output(inclusive=False)
         finally:
+            f_stdout_stderr.close()
             shutil.rmtree(working_dir)
 
     @staticmethod
