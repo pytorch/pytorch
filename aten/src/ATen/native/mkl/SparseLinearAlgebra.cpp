@@ -48,7 +48,7 @@ namespace at { namespace native {
                                           double * dense, double * t, double alpha, double beta, int64_t nrows,
                                           int64_t ncols) {
       sparse_matrix_t A;
-      // mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, );
+      // mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, poi, values);
     }
 
     template <typename scalar_t>

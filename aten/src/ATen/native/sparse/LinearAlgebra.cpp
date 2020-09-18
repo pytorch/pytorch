@@ -25,15 +25,12 @@ namespace at { namespace native {
   Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& t, const Tensor& dense,
                          Scalar alpha, Scalar beta) {
 
-    LongTensor indices = sparse_._indices();
+    LongTensor indices = sparse_.indices();
     LongTensor pointers = sparse_.pointers();
-    Tensor values      = sparse_._values();
+    Tensor values      = sparse_.values();
     int64_t nnz = sparse_._nnz();
-    
-    auto values_accessor = values.accessor<int64_t, 1>();
-    auto pointers_accessor = pointers.accessor<int64_t, 1>();
-    auto indices_accessor = indices.accessor<int64_t, 1>();
 
+    std::cout << "pre dispatch: " << values.scalar_type() << std::endl;;
     AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
         scalar_t cast_alpha = alpha.to<scalar_t>();
