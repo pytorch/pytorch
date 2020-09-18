@@ -34,6 +34,14 @@ inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
 }
 #endif
 
+// CUDA intrinsics
+
+// #if defined(__CUDA_ARCH__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+// inline __device__ BFloat16 __ldg(const BFloat16* ptr) {
+//     return __ldg(reinterpret_cast<const __nv_bfloat16*>(ptr));
+// }
+// #endif
+
 /// Arithmetic
 
 inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {
