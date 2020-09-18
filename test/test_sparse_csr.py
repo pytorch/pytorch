@@ -90,7 +90,8 @@ class TestSparseGCS(TestCase):
                 values.extend(v)
 
         # print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
-        return torch.sparse_gcs_tensor(torch.tensor(ro), torch.tensor(co), torch.tensor(values),
+        return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
+                                       torch.tensor(co, dtype=torch.int32), torch.tensor(values),
                                        torch.tensor(reduction), shape, fill_value)
 
     def gen_sparse_gcs(self, shape, nnz, fill_value=float('NaN')):
