@@ -4,7 +4,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
-#include <ATen/native/cpu/CompositeRandomAccessor.h>
+#include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 
