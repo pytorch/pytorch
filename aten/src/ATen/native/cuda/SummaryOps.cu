@@ -24,7 +24,6 @@ namespace {
   template<typename input_t, typename IndexType>
   __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
     IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-    // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
     // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
     // therefore when bin == nbins, adjust bin to the last bin
@@ -509,7 +508,13 @@ std::tuple<Tensor,Tensor> _histogram_cuda(
     hist *= nbins / (maxval - minval) / hist.sum();
   }
 
-  Tensor edges = at::native::linspace(min, max, nbins + 1, self.options());
+  Tensor edges;
+  if (self.scalar_type() == kFloat) {
+    edges = at::linspace(min, max, nbins + 1, self.options());
+  } else {
+    edges = at::linspace(min, max, nbins + 1, self.options().dtype(kDouble));
+  }
+
   return std::make_tuple(hist, edges);
 }
 
