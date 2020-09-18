@@ -10,7 +10,7 @@ import os
 from datetime import timedelta
 from typing import Optional, Dict, Union
 
-from . import FileStore, TCPStore
+from torch._C._distributed_c10d import FileStore, TCPStore
 from .constants import default_pg_timeout
 
 _rendezvous_handlers = {}

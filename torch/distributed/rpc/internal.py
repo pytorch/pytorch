@@ -36,7 +36,7 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        self._dispatch_table = copyreg.dispatch_table.copy() # type: ignore
+        self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore
         self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
