@@ -21,8 +21,6 @@ namespace {
 const std::string kSocketIfnameEnvVar = "TP_SOCKET_IFNAME";
 const std::string kDefaultUvAddress = "127.0.0.1";
 
-constexpr long kToMilliseconds = 1000;
-
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";
@@ -430,7 +428,7 @@ void TensorPipeAgent::pipeRead(
          ctx{std::move(ctx)}](
             const tensorpipe::Error& error,
             tensorpipe::Message tpMessage) mutable {
-          DevicesStateGuard guard(ctx);
+          //DevicesStateGuard guard(ctx);
           if (error) {
             fn(error, Message(), std::move(ctx));
             return;
@@ -547,18 +545,6 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " done sending response to request #" << messageId
                   << " to " << pipe->getRemoteName();
-
-#ifdef USE_CUDA
-          // use a dedicated thread to synchronize CUDA streams before
-          // destructing them.
-          // NB: when we add a dedicated stream pool later, this prevents
-          // returning the stream to the pool too early.
-          threadPool_.run([ctx = std::move(ctx)]() mutable {
-            for (auto& stream : ctx.getCUDAStreams()) {
-              stream.synchronize();
-            }
-          });
-#endif
         });
   } else {
     pipeWrite(
