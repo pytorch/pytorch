@@ -29,9 +29,9 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }
-inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
-  return *reinterpret_cast<const __nv_bfloat16*>(&x);
-}
+// inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
+//   return *reinterpret_cast<const __nv_bfloat16*>(&x);
+// }
 #endif
 
 // CUDA intrinsics
