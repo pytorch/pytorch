@@ -163,8 +163,6 @@ def _all_gather(obj):
         _all_gather_sequence_id += 1
 
     is_leader = leader_name == self_name
-    # Set a long enough timeout for all shutdown messages to be processed.
-    timeout = 5  # second
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -173,8 +171,7 @@ def _all_gather(obj):
         rpc_sync(
             leader_name,
             _gather_to_leader,
-            args=(sequence_id, self_name, obj),
-            timeout=timeout,
+            args=(sequence_id, self_name, obj)
         )
 
     with _all_gather_dict_lock:
@@ -192,19 +189,23 @@ def _all_gather(obj):
             fut = rpc_async(
                 follower_name,
                 _broadcast_to_followers,
-                args=(sequence_id, states.gathered_objects),
-                timeout=timeout
+                args=(sequence_id, states.gathered_objects)
             )
             worker_name_to_response_future_dict[follower_name] = fut
+
+        failed_followers = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                logger.error(
-                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_name, timeout=timeout
-                    )
-                )
+                failed_followers.append(follower_name)
+
+        if failed_followers:
+            timeout = _get_current_rpc_agent()._get_timeout()
+            raise RuntimeError(
+                f"Followers {failed_followers} timed out after {timeout:.2f} seconds"
+            )
+
     return states.gathered_objects
 
 
@@ -217,7 +218,10 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    _all_gather(None)
+    try:
+        _all_gather(None)
+    except RuntimeError as ex:
+        logger.error(str(ex))
 
 
 @_require_initialized
@@ -322,6 +326,18 @@ def _to_worker_info(name_or_info):
         return get_worker_info(name_or_info)
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
+
+
+def _rref_typeof_on_owner(rref):
+    return type(rref.local_value())
+
+
+def _rref_typeof_on_user(rref):
+    return rpc_sync(
+        rref.owner(),
+        _rref_typeof_on_owner,
+        args=(rref,)
+    )
 
 
 T = TypeVar("T")
