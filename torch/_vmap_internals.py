@@ -202,20 +202,23 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     doesn't provide a batched `torch.dot` API; instead of unsuccessfully
     rummaging through docs, use `vmap` to construct a new function.
 
-        >>> torch.dot                      # [D], [D] -> []
-        >>> batched_dot = vmap(torch.dot)  # [N, D], [N, D] -> [N]
+        >>> torch.dot                            # [D], [D] -> []
+        >>> batched_dot = torch.vmap(torch.dot)  # [N, D], [N, D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
         >>> batched_dot(x, y)
 
     `vmap` can be helpful in hiding batch dimensions, leading to a simpler
     model authoring experience.
 
+        >>> batch_size, feature_size = 3, 5
+        >>> weights = torch.randn(feature_size, requires_grad=True)
+        >>>
         >>> def model(feature_vec):
         >>>     # Very simple linear model with activation
         >>>     return feature_vec.dot(weights).relu()
         >>>
         >>> examples = torch.randn(batch_size, feature_size)
-        >>> result = vmap(model)(examples)
+        >>> result = torch.vmap(model)(examples)
 
     `vmap` can also help vectorize computations that were previously difficult
     or impossible to batch. One example is higher-order gradient computation.
@@ -226,19 +229,21 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     call to `autograd.grad`.
 
         >>> # Setup
+        >>> N = 5
+        >>> f = lambda x: x ** 2
         >>> x = torch.randn(N, requires_grad=True)
         >>> y = f(x)
         >>> I_N = torch.eye(N)
-
+        >>>
         >>> # Sequential approach
-        >>> jacobian_rows = [torch.autograd.grad(y, x, v, retain_graph=True)
-        >>>                  for v in I_n.unbind()]
+        >>> jacobian_rows = [torch.autograd.grad(y, x, v, retain_graph=True)[0]
+        >>>                  for v in I_N.unbind()]
         >>> jacobian = torch.stack(jacobian_rows)
-
+        >>>
         >>> # vectorized gradient computation
         >>> def get_vjp(v):
         >>>     return torch.autograd.grad(y, x, v)
-        >>> jacobian = vmap(get_vjp)(I_N)
+        >>> jacobian = torch.vmap(get_vjp)(I_N)
 
     .. note::
         vmap does not provide general autobatching or handle variable-length
