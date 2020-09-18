@@ -21,11 +21,6 @@ from ..overrides import has_torch_function, handle_torch_function
 from . import profiler
 from . import functional
 
-# mypy annotations
-def _profiler_enabled() -> bool: ...
-def _RecordFunction() -> Callable[..., Any]: ...
-def _run_before_callbacks(Callable, str): ...
-
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
@@ -189,7 +184,7 @@ def grad(
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
-            only_inputs=only_inputs, 
+            only_inputs=only_inputs,
             allow_unused=allow_unused,
         )
 
