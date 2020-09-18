@@ -214,6 +214,7 @@ namespace jit {
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
   _(SimplifyReorderForCond)                 \
+  _(SimplifyFuseConditions)                 \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -392,14 +393,20 @@ namespace jit {
   _(LLVMElemwiseAdd)                       \
   _(LLVMElemwiseAddFloat)                  \
   _(LLVMElemwiseLog10Float)                \
+  _(LLVMElemwiseLog1pFloat)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
   _(LLVMElemwiseMaxFloat)                  \
   _(LLVMElemwiseMaxNaNFloat)               \
   _(LLVMElemwiseMinFloat)                  \
   _(LLVMElemwiseMinNaNFloat)               \
+  _(LLVMElemwiseMod)                       \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
+  _(LLVMCompareSelectByteGT)               \
+  _(LLVMCompareSelectByteGE)               \
+  _(LLVMCompareSelectByteLT)               \
+  _(LLVMCompareSelectByteLE)               \
   _(LLVMStoreFloat)                        \
   _(LLVMSimpleMath01)                      \
   _(LLVMComputeMul)                        \

@@ -4,13 +4,15 @@ import operator
 import numbers
 import pickle
 import copy
+from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -219,8 +221,12 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, (a, b))
 
-    @skipIfRocm
     def test_native_callable(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        torch_root = Path(__file__).resolve().parent.parent
+        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch.ops.load_library(str(p))
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
@@ -459,8 +465,31 @@ class TestFX(JitTestCase):
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
+        self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
         self.assertEqual(copied(x), transformed(x))
+
+    def test_deepcopy_with_submods_params(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.relu(x) + self.param
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(x) - self.param
+
+        baz = Baz()
+        traced = symbolic_trace(baz)
+        copied = copy.deepcopy(traced)
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
