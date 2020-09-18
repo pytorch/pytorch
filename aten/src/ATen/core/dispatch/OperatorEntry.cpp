@@ -45,7 +45,7 @@ namespace {
 } // anonymous namespace
 
 const AnnotatedKernel OperatorEntry::ambiguousAutogradOtherKernel_ = AnnotatedKernel(
-    c10::KernelFunction::makeAmbiguousAutogradOther(), nullptr, "");
+    c10::KernelFunction::makeAmbiguousAutogradOther(), nullptr, "ambiguous_autogradother");
 
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
