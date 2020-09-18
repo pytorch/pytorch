@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from . import (
+from torch._C._distributed_c10d import (
     AllreduceOptions,
     AllreduceCoalescedOptions,
     AllToAllOptions,
@@ -19,8 +19,8 @@ from . import (
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    ReduceOp,
 )
-from . import ReduceOp
 from . import PrefixStore
 from . import ProcessGroup
 from . import Store
