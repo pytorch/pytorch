@@ -453,7 +453,7 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
             else:
                 compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
-           return f"""\
+            return f"""\
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   static auto op = c10::Dispatcher::singleton()
