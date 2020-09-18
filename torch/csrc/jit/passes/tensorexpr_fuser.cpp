@@ -398,10 +398,8 @@ class TensorExprFuser {
   // until there is nothing we can pull in.
   std::pair<graph_node_list::iterator, bool> createFusionGroup(Node* n) {
     Node* fusion_group = n;
-    bool changed = false;
     if (min_group_size_ == 1) {
       fusion_group = getOrCreateTensorExprSubgraph(n);
-      changed = true;
     }
 
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
@@ -416,7 +414,8 @@ class TensorExprFuser {
             maybe_fusion_group.value()->reverseIterator(), true);
       }
     }
-    return std::make_pair(++n->reverseIterator(), changed);
+
+    return std::make_pair(++n->reverseIterator(), false);
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
