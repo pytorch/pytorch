@@ -370,7 +370,7 @@ def expand(g, self, size, implicit):
         # Expand with -1 dim value means dim is unchanged.
         # Since onnx::expand supports two-way broadcasting,
         # -1 dim value can be exported to onnx as 1
-        size = view(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
+        size = view(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1])))
     dtype = 4  # dim type is int64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
@@ -1776,7 +1776,7 @@ def pixel_shuffle(g, self, upscale_factor):
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
                 g.op("Constant", value_t=torch.tensor([-1, output_channel, dims[2] * upscale_factor,
-                                                       dims[3] * upscale_factor]))
+                                                       dims[3] * upscale_factor])))
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
