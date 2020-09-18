@@ -323,10 +323,8 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
   out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
-    if (fg->kind() != prim::FallbackGraph) {
-      out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
-          << *fg->g(attr::Subgraph);
-    }
+    out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
+        << *fg->g(attr::Subgraph);
   }
   /*
   // Uncomment this to debug all_nodes issues
