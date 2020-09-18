@@ -83,7 +83,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, r.scalar_type(), "logspace_cpu", [&]() {
       double scalar_base = static_cast<double>(base); // will be autopromoted anyway
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();

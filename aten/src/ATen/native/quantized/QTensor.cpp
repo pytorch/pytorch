@@ -136,11 +136,6 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 Tensor quantized_clone(
     const Tensor& self,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // TODO: add per channel support
-  TORCH_INTERNAL_ASSERT(
-      self.qscheme() == at::kPerTensorAffine,
-      "clone for quantized Tensor only works for PerTensorAffine scheme right now");
-
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
@@ -153,12 +148,26 @@ Tensor quantized_clone(
     memory_format = self.suggest_memory_format();
   }
 
-  Tensor dst = at::_empty_affine_quantized(
-      self.sizes(),
-      self.options().memory_format(memory_format),
-      self.q_scale(),
-      self.q_zero_point(),
-      c10::nullopt);
+  Tensor dst;
+  if (self.qscheme() == at::kPerTensorAffine) {
+    dst = at::_empty_affine_quantized(
+        self.sizes(),
+        self.options().memory_format(memory_format),
+        self.q_scale(),
+        self.q_zero_point(),
+        c10::nullopt);
+  } else if (self.qscheme() == at::kPerChannelAffine) {
+    dst = at::_empty_per_channel_affine_quantized(
+        self.sizes(),
+        self.q_per_channel_scales(),
+        self.q_per_channel_zero_points(),
+        self.q_per_channel_axis(),
+        self.options().memory_format(memory_format),
+        c10::nullopt);
+  } else {
+    TORCH_CHECK(false, "clone for quantized Tensor only works for \
+      PerTensorAffine and PerChannelAffine qscheme right now");
+  }
 
   at::native::copy_(dst, self, false);
 
