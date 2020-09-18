@@ -56,10 +56,8 @@ void expm1_kernel_cuda(TensorIterator& iter) {
 
 void i0_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "i0_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "i0_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_i0(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_i0(a);
     });
   });
 }
