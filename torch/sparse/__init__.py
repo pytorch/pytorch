@@ -90,7 +90,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
     """
     if mat1.is_sparse and mat2.is_sparse:
-        return torch._sparse_matmul(mat1, mat2)
+        return torch._sparse_sparse_matmul(mat1, mat2)
     return torch._sparse_mm(mat1, mat2)
 
 

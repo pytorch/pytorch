@@ -6,187 +6,282 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 
-// helper
+using namespace at::sparse;
+
 namespace {
 
-std::vector<int64_t> indices2csr(
-    const TensorAccessor<int64_t, 1>& indices,
-    int64_t dim) {
-  /* Return the new indices using csr sparse format.
+LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
+  /* Return the CSR indices from COO indices 
 
-    `indices` original indices tensor using coo sparse format.
-    `dim` is the dimension of the sparse part of a sparse tensor.
+    `indices` is the COO indices array
+    `dim` is the number of rows
+    `nnz` is the number of non zeros in the original sparse tensor
   */
-  auto nnz = indices.size(0);
-  std::vector<int64_t> csr(dim + 1, int64_t(0));
-  int64_t last_i = 0;
-  for (int64_t index = 0; index < nnz; index++) {
-    int64_t i = indices[index];
-    if (i != last_i) {
-      for (int64_t j = last_i; j < i + 1; j++) {
-        csr[j + 1] = csr[last_i + 1];
+  LongTensor csr = native::zeros({dim + 1}, kLong);
+
+  // TODO: eliminate this conditional when zero-size dims supported correctly
+  if (nnz > 0) {
+    auto csr_accessor = csr.accessor<int64_t, 1>();
+    // Convert the sparse matrix to CSR format
+    at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
+      int64_t h, hp0, hp1;
+      for (auto i = start; i < end; i++) {
+        hp0 = indices[i];
+        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+        if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
+          csr_accessor[h+1] = i+1;
+        }
       }
-      last_i = i;
-    }
-    csr[last_i + 1] += 1;
-  }
-  for (int64_t j = last_i; j < dim; j++) {
-    csr[j + 1] = csr[last_i + 1];
+    });
   }
   return csr;
 }
 
-template <typename scalar_t, bool is_coalesced>
-void sparse_matmul_kernel(
-    Tensor& result,
-    const Tensor& mat1,
-    const Tensor& mat2) {
-  /*
-    See test/test_sparse.py:test_sparse_matmul:sparse_mm for the Python
-    prototype of the sparse matmult algorithm that this implementation
-    is based on.
 
-    This kernel implements a matrix multiplication of the sparse matrix :attr:`mat1`
-    and sparse matrix :attr:`mat2`. This implementation uses the right operand in CSR format 
-    and collects the elements of the result into a dictionary.
-
+void expandptr(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
+  /* 
+    Expands a compressed row pointer into a row indices array
+    Inputs:
+      `n_row` is the number of rows in `Ap`
+      `Ap` is the row pointer
     
+    Output: 
+      `Bi` is the row indices 
   */
+  for (int64_t i = 0; i < n_row; i++) {
+    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+      Bi[jj] = i;
+    }
+  }
+}
 
-  auto indices_a = mat1._indices().contiguous();
-  auto values_a = mat1._values().contiguous();
+int64_t __csr_matmult_maxnnz(
+    const int64_t n_row,
+    const int64_t n_col,
+    const int64_t Ap[],
+    const int64_t Aj[],
+    const int64_t Bp[],
+    const int64_t Bj[]) {
+  /*
+    Compute needed buffer size for matrix `C` in `C = A*B` operation.
 
-  auto indices_b = mat2._indices().contiguous();
-  auto values_b = mat2._values().contiguous();
+    The matrices should be in proper CSR structure, and their dimensions
+    should be compatible.
 
-  auto nnz_a = values_a.size(0);
-  auto nnz_b = values_b.size(0);
-  auto indices_accessor_a = indices_a.accessor<int64_t, 2>();
-  auto indices_accessor_b = indices_b.accessor<int64_t, 2>();
+    This is an implementation of the SMMP algorithm:
+     "Sparse Matrix Multiplication Package (SMMP)"
 
-  auto values_accessor_a = values_a.accessor<scalar_t, 1>();
-  auto values_accessor_b = values_b.accessor<scalar_t, 1>();
+       Randolph E. Bank and Craig C. Douglas
 
-  auto result_indices = result._indices();
-  auto result_values = result._values();
+     http://citeseer.ist.psu.edu/445062.html
+     http://www.mgnet.org/~douglas/ccd-codes.html
+  */
+  std::vector<int64_t> mask(n_col, -1);
+  const auto long_max = std::numeric_limits<int64_t>::max();
 
-  std::map<std::pair<int64_t, int64_t>, scalar_t> d;
-  for (int64_t n1 = 0; n1 < nnz_a; n1++) {
-    if constexpr (is_coalesced) {
-      auto r2 = indices2csr(indices_accessor_b[0], mat2.size(0));
-      for (int64_t n2 = r2[indices_accessor_a[1][n1]]; 
-          n2 < r2[indices_accessor_a[1][n1] + 1];
-          n2++) {
-        auto current_index = std::make_pair(
-            indices_accessor_a[0][n1], indices_accessor_b[1][n2]);
-        d[current_index] += values_accessor_a[n1] * values_accessor_b[n2];
-      }
-    } else {
-      for (int64_t n2 = 0; n2 < nnz_b; n2++) {
-        if (indices_accessor_b[0][n2] == indices_accessor_a[1][n1]) {
-          auto current_index = std::make_pair(
-              indices_accessor_a[0][n1], indices_accessor_b[1][n2]);
-          d[current_index] += values_accessor_a[n1] * values_accessor_b[n2];
+  int64_t nnz = 0;
+  for (int64_t i = 0; i < n_row; i++) {
+    int64_t row_nnz = 0;
+
+    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+      int64_t j = Aj[jj];
+      for (int64_t kk = Bp[j]; kk < Bp[j + 1]; kk++) {
+        int64_t k = Bj[kk];
+        if (mask[k] != i) {
+          mask[k] = i;
+          row_nnz++;
         }
       }
     }
+    int64_t next_nnz = nnz + row_nnz;
+    TORCH_CHECK(row_nnz <= long_max - nnz, "nnz of the output is too large");
+    nnz = next_nnz;
   }
-  int64_t nnz_result = d.size();
-  std::vector<int64_t> values_size = {nnz_result};
-  result_indices.resize_({2, nnz_result});
-  result_values.resize_(values_size);
+  return nnz;
+}
 
-  auto result_indices_accessor = result_indices.accessor<int64_t, 2>();
-  auto result_values_accessor = result_values.accessor<scalar_t, 1>();
+template<class scalar_t>
+void _csr_matmult(
+    const int64_t n_row,
+    const int64_t n_col,
+    const int64_t Ap[],
+    const int64_t Aj[],
+    const scalar_t Ax[],
+    const int64_t Bp[],
+    const int64_t Bj[],
+    const scalar_t Bx[],
+    int64_t Cp[],
+    int64_t Cj[],
+    scalar_t Cx[]) {
+  /* 
+    Compute CSR entries for matrix C = A*B.
 
-  int64_t index = 0;
-  for (auto kv : d) {
-    auto idx = kv.first;
-    result_indices_accessor[0][index] = idx.first;
-    result_indices_accessor[1][index] = idx.second;
-    result_values[index] = kv.second;
-    index++;
-  } 
+    The matrices `A` and 'B' should be in proper CSR structure, and their dimensions
+    should be compatible.
+
+    Inputs:
+      `n_row`         - number of row in A
+      `n_col`         - number of columns in B
+      `Ap[n_row+1]`   - row pointer
+      `Aj[nnz(A)]`    - column indices
+      `Ax[nnz(A)]     - nonzeros
+      `Bp[?]`         - row pointer
+      `Bj[nnz(B)]`    - column indices
+      `Bx[nnz(B)]`    - nonzeros
+    Outputs:
+      `Cp[n_row+1]` - row pointer
+      `Cj[nnz(C)]`  - column indices
+      `Cx[nnz(C)]`  - nonzeros
+
+    Note:
+      Output arrays Cp, Cj, and Cx must be preallocated
+
+    This is an implementation of the SMMP algorithm:
+     "Sparse Matrix Multiplication Package (SMMP)"
+
+       Randolph E. Bank and Craig C. Douglas
+
+     http://citeseer.ist.psu.edu/445062.html
+     http://www.mgnet.org/~douglas/ccd-codes.html
+
+  */
+  std::vector<int64_t> next(n_col, -1);
+  std::vector<scalar_t> sums(n_col, 0);
+
+  int64_t nnz = 0;
+
+  Cp[0] = 0;
+
+  for (int64_t i = 0; i < n_row; i++) {
+    int64_t head = -2;
+    int64_t length = 0;
+
+    int64_t jj_start = Ap[i];
+    int64_t jj_end = Ap[i + 1];
+    for (int64_t jj = jj_start; jj < jj_end; jj++) {
+      int64_t j = Aj[jj];
+      scalar_t v = Ax[jj];
+
+      int64_t kk_start = Bp[j];
+      int64_t kk_end = Bp[j + 1];
+      for (int64_t kk = kk_start; kk < kk_end; kk++) {
+        int64_t k = Bj[kk];
+
+        sums[k] += v * Bx[kk];
+
+        if (next[k] == -1) {
+          next[k] = head;
+          head = k;
+          length++;
+        }
+      }
+    }
+
+    for (int64_t jj = 0; jj < length; jj++) {
+      if (sums[head] != 0) {
+        Cj[nnz] = head;
+        Cx[nnz] = sums[head];
+        nnz++;
+      }
+
+      int64_t temp = head;
+      head = next[head];
+
+      next[temp] = -1; // clear arrays
+      sums[temp] = 0;
+    }
+
+    Cp[i + 1] = nnz;
+  }
+}
+
+
+template <typename scalar_t>
+void sparse_matmul_kernel(
+    Tensor& output,
+    const Tensor& mat1,
+    const Tensor& mat2) {
+  /* 
+    Computes  the sparse-sparse matrix multiplication between `mat1` and `mat2`, which are sparse tensors in COO format. 
+
+    The implementation is based on the paper  
+    Bank and Douglas, 2001, Sparse Matrix Multiplication Package (SMPP)
+  */
+
+  auto mat1_indices_ = mat1._indices().contiguous();
+  auto mat1_values = mat1._values().contiguous();
+  Tensor mat1_indptr = _to_csr(mat1_indices_.data_ptr<int64_t>(), mat1.size(0), mat1._nnz());
+  auto mat1_indices = mat1_indices_[1];
+
+  auto mat2_indices_ = mat2._indices().contiguous();
+  auto mat2_values = mat2._values().contiguous();
+  Tensor mat2_indptr = _to_csr(mat2_indices_.data_ptr<int64_t>(), mat2.size(0), mat2._nnz());
+  auto mat2_indices = mat2_indices_[1];
+  
+  auto M = mat1.size(0);
+  auto K1 = mat1.size(1);
+
+  auto K2 = mat2.size(0);
+  auto N = mat2.size(1);
+
+  auto major_axis = M;
+
+  auto nnz = __csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_indices.data_ptr<int64_t>(), 
+      mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>());
+
+  auto output_indices = output._indices();
+  auto output_values = output._values();
+
+  Tensor output_indptr = at::empty({major_axis + 1}, kLong);
+
+  output_indices.resize_({2 * nnz});
+  output_values.resize_(nnz);
+
+  _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(), 
+  mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(), 
+  output_indptr.data_ptr<int64_t>(), output_indices.data_ptr<int64_t>() + nnz, output_values.data_ptr<scalar_t>());
+  
+  auto major_dim = output.size(0);
+
+  Tensor major_indices = at::empty( {nnz}, kLong );
+  expandptr(major_dim, output_indptr.data_ptr<int64_t>(), major_indices.data_ptr<int64_t>());
+
+  std::memcpy(output_indices.data_ptr<int64_t>(), major_indices.data_ptr<int64_t>(), sizeof(int64_t) * nnz);
+  output._indices().set_(output_indices.view({2, nnz}));
 }
 
 template <typename scalar_t, bool grad_by_row>
-void sparse_matmul_kernel_grad(Tensor& result, const Tensor& x) {
-  auto x_indices = x._indices().contiguous();
-  auto x_values = x._values().contiguous();
+void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
+  /* 
+    Computes  the backward output  for matrix C = A*B.
 
-  auto nnz_a = x_values.size(0);
+    C = A@B 
+      then 
+    A_grad = C_grad @ B^T
+    B_grad = A^T @ C_grad
 
-  auto indices_accessor = x_indices.accessor<int64_t, 2>();
-  auto rows = indices_accessor[1];
-  auto cols = indices_accessor[0];
-  auto values_accessor = x_values.accessor<scalar_t, 1>();
-
-  auto result_indices = result._indices();
-  auto result_values = result._values();
-
-  auto n = result.size(0);
-  auto m = result.size(1);
-  auto size = grad_by_row ? n : m;
-  auto inner_size = grad_by_row ? m : n;
-
-  auto indices = (grad_by_row ? rows : cols);
-
-  std::vector<scalar_t> scalar_values(size, static_cast<scalar_t>(0));
-  for (int64_t i = 0; i < nnz_a; i++) {
-    for (int64_t index = 0; index < size; index++) {
-      if (indices[i] == index) {
-        scalar_values[index] += values_accessor[i];
-      }
-    }
+    if grad_by_row == true:
+      output = x^T @ C_grad 
+    else:
+      output = C_grad @ x^T 
+  */
+  Tensor grad_filled = at::ones(grad.sizes(), grad.options().layout(kStrided));
+  if (grad_by_row) {
+    sparse_matmul_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_filled.to_sparse());
+  } else {
+    sparse_matmul_kernel<scalar_t>(output, grad_filled.to_sparse(), x.transpose(0, 1).coalesce());
   }
-
-  int64_t index = 0;
-  std::map<std::pair<int64_t, int64_t>, scalar_t> d;
-
-  for (int64_t curr_index = 0; curr_index < scalar_values.size();
-       curr_index++) {
-    if (scalar_values[curr_index] != static_cast<scalar_t>(0)) {
-      for (int64_t mat2_index = 0; mat2_index < inner_size; mat2_index++) {
-        std::pair<int64_t, int64_t> current_index;
-        if (grad_by_row) {
-          current_index = std::make_pair(curr_index, mat2_index);
-        } else {
-          current_index = std::make_pair(mat2_index, curr_index);
-        }
-        d[current_index] += scalar_values[curr_index];
-        index++;
-      }
-    }
-  }
-  int64_t nnz_result = d.size();
-
-  std::vector<int64_t> values_size = {nnz_result};
-  result_indices.resize_({2, nnz_result});
-  result_values.resize_(values_size);
-
-  auto result_indices_accessor = result_indices.accessor<int64_t, 2>();
-  auto result_values_accessor = result_values.accessor<scalar_t, 1>();
-
-  index = 0;
-  for (auto kv : d) {
-    auto idx = kv.first;
-    result_indices_accessor[0][index] = idx.first;
-    result_indices_accessor[1][index] = idx.second;
-    result_values[index] = kv.second;
-    index++;
-  } 
 }
 
 } // end anonymous namespace
 
-Tensor sparse_matmul(const Tensor& mat1_, const Tensor& mat2_) {
+Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
-  TORCH_CHECK(mat1_.size(1) == mat2_.size(0), "Incompatible matrices");
+
   TORCH_CHECK(
       mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
@@ -194,21 +289,15 @@ Tensor sparse_matmul(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
            "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());
 
-  auto mat1 = mat1_.coalesce();
-  auto mat2 = mat2_.coalesce();
-  Tensor output = at::native::empty_sparse(
-      {mat1_.size(0), mat2_.size(1)}, mat1_.options());
+  Tensor output = at::native::empty_sparse({mat1_.size(0), mat2_.size(1)}, mat1_.options());
 
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
-    if (mat1.is_coalesced() && mat2.is_coalesced())
-      sparse_matmul_kernel<scalar_t, true>(output, mat1, mat2);
-    else
-      sparse_matmul_kernel<scalar_t, false>(output, mat1, mat2);
+    sparse_matmul_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
   return output;
 }
 
-Tensor sparse_matmul_backward_cpu(
+Tensor sparse_sparse_matmul_backward_cpu(
     const Tensor& grad,
     const Tensor& var,
     int64_t mult_order) {
@@ -218,20 +307,19 @@ Tensor sparse_matmul_backward_cpu(
   Tensor output = at::native::empty_like(grad);
   if (mult_order == 0) {
     std::vector<int64_t> size = {var.size(1), grad.size(1)};
-    at::sparse::get_sparse_impl(output)->resize_and_clear_(
-        size.size(), 0, size);
+    at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
+    
     AT_DISPATCH_FLOATING_TYPES(
         output.scalar_type(), "sparse_matmul_kernel_grad_by_row", [&] {
-          sparse_matmul_kernel_grad<scalar_t, true>(output, var);
+          sparse_matmul_kernel_grad<scalar_t, true>(output,  grad, var);
         });
   } else if (mult_order == 1) {
     std::vector<int64_t> size = {grad.size(0), var.size(0)};
-    at::sparse::get_sparse_impl(output)->resize_and_clear_(
-        size.size(), 0, size);
+    at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
 
     AT_DISPATCH_FLOATING_TYPES(
         output.scalar_type(), "sparse_matmul_kernel_grad_by_col", [&] {
-          sparse_matmul_kernel_grad<scalar_t, false>(output, var);
+          sparse_matmul_kernel_grad<scalar_t, false>(output, grad, var);
         });
   }
   return output;
