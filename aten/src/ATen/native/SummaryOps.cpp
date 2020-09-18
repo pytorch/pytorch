@@ -87,14 +87,14 @@ Tensor _histogram_cpu_template_uniformbins(
       minval,
       ", ",
       maxval,
-      "] is not finite"); 
+      "] is not finite");
   TORCH_CHECK(minval < maxval, "max must be larger than min");
 
   bool has_weights = weights.defined();
   TORCH_CHECK(
       !has_weights || weights.size(0) == self.size(0),
       "input and weights should have the same length");
-  
+
   Tensor output;
   int64_t self_size = self.size(0);
 
@@ -160,7 +160,7 @@ Tensor _histogram_cpu(
             density);
   });
 
-  
+
   if (density) { // Compute the density
     double minval = min.to<double>();
     double maxval = max.to<double>();
