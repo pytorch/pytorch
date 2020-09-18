@@ -810,8 +810,6 @@ class SmoothL1Loss(_Loss):
     """
     __constants__ = ['reduction']
 
-    beta: float
-
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', beta: float = 1.0) -> None:
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
         self.beta = beta
