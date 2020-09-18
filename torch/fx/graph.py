@@ -80,7 +80,7 @@ class Graph:
         `output` set. Thus, you can add new nodes to this graph copy.
         """
         g = Graph()
-        val_map = {}
+        val_map : Dict[Node, Node] = {}
         for node in self._nodes:
             val_map[node] = g.node_copy(node, lambda n : val_map[n])
         return g
