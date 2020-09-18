@@ -3730,7 +3730,6 @@ def triplet_margin_with_distance_loss(anchor, positive, negative, *, distance_fu
     # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], float, bool, str) -> Tensor
     r"""
     See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
-    Note: does not support JIT scripting.
     """
     if torch.jit.is_scripting():
         raise NotImplementedError("F.triplet_margin_with_distance_loss does not support JIT scripting: "

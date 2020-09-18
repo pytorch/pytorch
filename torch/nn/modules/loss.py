@@ -1254,10 +1254,10 @@ class TripletMarginLoss(_Loss):
 class TripletMarginWithDistanceLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given input
     tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
-    positive, and negative examples, respectively); and a nonnegative,
+    positive, and negative examples, respectively) and a nonnegative,
     real-valued function ("distance function") used to compute the relationship
-    between the anchor and positive examples ("positive distance") and the
-    anchor and negative examples ("negative distance").
+    between the anchor and positive example ("positive distance") and the
+    anchor and negative example ("negative distance").
 
     The unreduced loss (i.e., with :attr:`reduction` set to ``'none'``)
     can be described as:
@@ -1267,10 +1267,11 @@ class TripletMarginWithDistanceLoss(_Loss):
         l_i = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
-    quantifying the closeness of two tensors, referred to as :attr:`distance_function`;
-    and :math:`margin` is a non-negative margin between the positive and negative
-    distances that is required for the loss to be 0.  The input tensors have :math:`N`
-    elements each and can be of any shape that the distance function can handle.
+    quantifying the closeness of two tensors, referred to as the :attr:`distance_function`;
+    and :math:`margin` is a non-negative margin representing the minimum difference
+    between the positive and negative distances that is required for the loss to
+    be 0.  The input tensors have :math:`N` elements each and can be of any shape
+    that the distance function can handle.
 
     If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then:
@@ -1284,8 +1285,6 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     See also :class:`~torch.nn.TripletMarginLoss`, which computes the triplet
     loss for input tensors using the :math:`l_p` distance as the distance function.
-
-    Note: does not support JIT scripting.
 
     Args:
         distance_function (callable, optional): A nonnegative, real-valued function that

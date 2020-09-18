@@ -9812,6 +9812,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
 
             v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
+            v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))
             v(lambda: F.margin_ranking_loss(input, input, input.sign(), reduction=reduction))
             v(lambda: F.cosine_embedding_loss(input, input, input[:, 0].sign(), reduction=reduction))
 
@@ -12134,6 +12135,7 @@ class TestNNDeviceType(NNTestCase):
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
 
+    @onlyOnCPUAndCUDA
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.  Checks
@@ -12167,6 +12169,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
                             (anchor, positive, negative)))
 
+    @onlyOnCPUAndCUDA
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and
         # `F.triplet_margin_with_distance_loss`.
