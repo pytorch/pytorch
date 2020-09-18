@@ -9853,8 +9853,9 @@ class TestNNDeviceType(NNTestCase):
             target_lengths = torch.randint(10, 30, (16,), dtype=torch.long, device=device)
             v(lambda: F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction=reduction))
 
-            # FIXME: should we allow derivatives on these?
-            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input, reduction=reduction))
+
+            # FIXME: sign should not produce  tensor with requires_grad
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
     # We don't want to make propagating NaN a hard requirement on ops, but for

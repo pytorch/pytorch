@@ -199,6 +199,39 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     return grad_input;
 }
 
+Tensor binary_cross_entropy_target_backward(const Tensor &grad, const Tensor& input, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input = at::empty_like(input);
+
+    // These squeezes are copied from binary_cross_entropy_backward_out_cpu backward
+    auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(at::squeeze(grad))
+      .add_input(at::squeeze(input))
+      .build();
+
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "binary_cross_entropy_target_backward", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t grad_val, scalar_t input_val) {
+                // The gradient is the partial derivative of BCELoss
+                // with respect to y
+                // d(L)/d(y) = -w (ln(x) - ln(1-x))
+                return grad_val * (std::max(scalar_t(std::log(scalar_t(1)-input_val)), scalar_t(-100)) -
+                       std::max(scalar_t(std::log(input_val)), scalar_t(-100)));
+            }
+        );
+    });
+
+    if (weight.defined()) {
+        grad_input.mul_(weight);
+    }
+    if (reduction == at::Reduction::Mean) {
+        grad_input.div_(input.numel());
+    }
+
+    return grad_input;
+}
+
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);

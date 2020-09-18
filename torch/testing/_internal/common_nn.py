@@ -3970,6 +3970,16 @@ criterion_tests = [
     ),
     dict(
         module_name='BCELoss',
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double().requires_grad_(),
+        reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
+            (i.numel() if get_reduction(m) else 1),
+        desc='target_requires_grad',
+        check_bfloat16=TEST_WITH_ROCM,
+        check_gradgrad=False,  # double backwards not supported for target
+    ),
+    dict(
+        module_name='BCELoss',
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
@@ -3978,6 +3988,18 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_bfloat16=TEST_WITH_ROCM,
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double().requires_grad_(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_reduction(m) else 1),
+        desc='weights_target_requires_grad',
+        check_bfloat16=TEST_WITH_ROCM,
+        check_gradgrad=False,  # double backwards not supported for target
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -4327,6 +4349,18 @@ criterion_tests = [
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
         check_bfloat16=TEST_WITH_ROCM,
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch.rand(()),),
+        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand({}))',
+        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(()).gt(0).double().requires_grad_(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_reduction(m) == 'mean' else 1),
+        desc='scalar_weights_target_requires_grad',
+        check_bfloat16=TEST_WITH_ROCM,
+        check_gradgrad=False,  # double backwards not supported for target
     ),
     dict(
         module_name='HingeEmbeddingLoss',

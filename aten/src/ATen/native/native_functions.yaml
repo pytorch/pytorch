@@ -704,6 +704,11 @@
     CPU: binary_cross_entropy_backward_out_cpu
     CUDA: binary_cross_entropy_backward_out_cuda
 
+- func: binary_cross_entropy_target_backward(Tensor grad_output, Tensor self, Tensor? weight=None, int reduction=Mean) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  variants: function
+
 - func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   variants: function
