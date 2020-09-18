@@ -407,11 +407,6 @@ class TensorExprFuser {
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
     auto inputs = sortReverseTopological(n->inputs(), n->owningBlock());
     for (auto input : inputs) {
-      if (input->node()->kind() == prim::TensorExprGroup &&
-          n->kind() == prim::TensorExprGroup) {
-        std::cout << " HI ELIAS\n";
-      }
-
       debugDumpFusionGroup("Current fusion group: ", fusion_group);
       GRAPH_DEBUG("Trying to merge: ", *input->node());
       if (auto maybe_fusion_group = tryMerge(fusion_group, input->node())) {
