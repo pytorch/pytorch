@@ -14,7 +14,7 @@ from torch.testing import \
     (get_all_dtypes)
 
 try:
-    import psutil  #type: ignore[import]
+    import psutil  # type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
