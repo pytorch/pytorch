@@ -186,13 +186,20 @@ public:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
+  DispatchKey::AutogradXLA,
+  DispatchKey::AutogradPrivateUse1,
+  DispatchKey::AutogradPrivateUse2,
+  DispatchKey::AutogradPrivateUse3,
+  DispatchKey::AutogradOther,
+});
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
-
-// TODO(#43441): Once we have iterator-like funtionality on DispatchKeySet
-//      we can remove this API and use c10::getRuntimeDispatchKeySet instead.
-//      This API is only used in aten/src/ATen/core/dispatch/OperatorEntry.cpp.
-C10_API ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k);
 
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
@@ -212,6 +219,6 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // is the most likely key that will need this treatment;
   // After Autograd keys are moved from globally enabled set to TensorImpl,
   // we should remove all Autograd keys before taking highestPriority.
-  return (s - getRuntimeDispatchKeySet(DispatchKey::Autograd)).highestPriorityTypeId();
+  return (s - autograd_dispatch_keyset).highestPriorityTypeId();
 }
 }
