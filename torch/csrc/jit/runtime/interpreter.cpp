@@ -1075,7 +1075,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     std::function<void(std::vector<IValue>&)>* profile_functions;
     TypePtr* types;
 
-    ActiveFrame(Frame& frame)
+    ActiveFrame(const Frame& frame)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),
           constants(frame.function->constant_table_.data()),
@@ -1084,23 +1084,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           profile_functions(frame.function->profile_function_table_.data()),
           types(frame.function->type_table_.data()) {}
   };
-
-  static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    if (!frame.record_function &&
-        at::hasCallbacks() &&
-        at::isRecordFunctionEnabled()) {
-      auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (rec_fn->active) {
-        if (rec_fn->needs_inputs) {
-          rec_fn->before(frame.function->function_name_, last(stack, frame.function->n_inputs));
-        } else {
-          rec_fn->before(frame.function->function_name_);
-        }
-        frame.record_function = std::move(rec_fn);
-      }
-    }
-  }
 
   std::vector<Frame> frames;
 
@@ -1326,6 +1309,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     jit::last(stack, num_outputs).vec()));
               }
             }
+            // destroy the last frame and call RecordFunction's end callbacks
+            leaveFrame();
             return false;
           case WAIT: {
             auto future = stack.back().toFuture();
@@ -1588,6 +1573,23 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
+  static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+    if (!frame.record_function &&
+        at::hasCallbacks() &&
+        at::isRecordFunctionEnabled()) {
+      auto rec_fn = std::make_unique<at::RecordFunction>(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (rec_fn->active) {
+        if (rec_fn->needs_inputs) {
+          rec_fn->before(frame.function->function_name_, last(stack, frame.function->n_inputs));
+        } else {
+          rec_fn->before(frame.function->function_name_);
+        }
+        frame.record_function = std::move(rec_fn);
+      }
+    }
+  }
+
  public:
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
@@ -1758,5 +1760,6 @@ void InterpreterContinuation::operator()() {
   DistAutogradContainer::forceCurrentContextId(prev_dist_id);
 #endif
 }
+
 } // namespace jit
 } // namespace torch
