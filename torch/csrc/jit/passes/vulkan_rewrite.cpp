@@ -195,7 +195,9 @@ void vulkanFoldPrePackingOps(script::Module& m) {
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
-script::Module vulkanOptimizeForMobile(const script::Module& module) {
+script::Module vulkanOptimizeForMobile(
+    const script::Module& module,
+    const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with Vulkan at the moment. "
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
