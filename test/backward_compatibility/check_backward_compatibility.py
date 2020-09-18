@@ -93,6 +93,8 @@ allow_list = [
     ("aten::_var", datetime.date(2020, 10, 1)),
     ("aten::_std", datetime.date(2020, 10, 1)),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
+    ("aten::stft", datetime.date(2020, 10, 1)),
+    ("aten::istft", datetime.date(2020, 10, 1)),
     ("prim::MakeTestTensor", datetime.date(2020, 10, 1)),
     ("preprocess", datetime.date(2020, 10, 1)),
     ("compile", datetime.date(2020, 10, 1)),
