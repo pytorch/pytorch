@@ -782,9 +782,9 @@ def embedding_bag(g,
     embeddings = loop_block.op("Gather", embedding_matrix, indices_row, axis_i=0)
     if not sym_help._is_none(per_sample_weights):
         per_sample_weights_row = loop_block.op("Slice", per_sample_weights,
-                                                    indices_start,
-                                                    indices_end,
-                                                    zero)
+                                               indices_start,
+                                               indices_end,
+                                               zero)
         per_sample_weights_row = loop_block.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
         embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
