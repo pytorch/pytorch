@@ -283,10 +283,11 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
                 ):
         # type: (...) -> Tuple[Tensor, Tensor]
 
-        # makes sure that input is contiguous for efficiency
-        A = A.contiguous()
+        # makes sure that input is contiguous for efficiency.
+        # Note: autograd does not support dense gradients for sparse input yet.
+        A = A.contiguous() if (not A.is_sparse) else A
         if B is not None:
-            B = B.contiguous()
+            B = B.contiguous() if (not B.is_sparse) else B
 
         D, U = lobpcg(
             A, k, B, X,
