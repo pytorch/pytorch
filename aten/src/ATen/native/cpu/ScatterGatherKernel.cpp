@@ -7,7 +7,7 @@
 namespace at { namespace native {
 
 namespace {
-
+  
 // Implement as functors since lambdas don't get optimized.
 class ReduceMultiply {
 public:
@@ -30,24 +30,6 @@ public:
   }
 };
 static ReduceAdd reduce_add;
-
-class ReduceSubtract {
-public:
-  template <typename scalar_t>
-  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
-    *self_data -= *src_data;
-  }
-};
-static ReduceSubtract reduce_subtract;
-
-class ReduceDivide {
-public:
-  template <typename scalar_t>
-  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
-    *self_data /= *src_data;
-  }
-};
-static ReduceDivide reduce_divide;
 
 class TensorAssign {
 public:
@@ -348,17 +330,10 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_subtract_", reduce_subtract);
-    break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_divide_", reduce_divide);
   }
 }
 
@@ -369,17 +344,10 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_subtract_", reduce_subtract);
-    break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_DIVIDE :
-    cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_divide_", reduce_divide);
   }
 }
 

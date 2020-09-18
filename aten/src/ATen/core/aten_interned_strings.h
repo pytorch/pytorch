@@ -292,8 +292,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \
@@ -401,6 +399,7 @@ _(aten, isreal) \
 _(aten, istft) \
 _(aten, isposinf) \
 _(aten, isneginf) \
+_(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -556,6 +555,7 @@ _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
+_(aten, nanquantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \

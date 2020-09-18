@@ -2544,6 +2544,13 @@ quantile(q, dim=None, keepdim=False) -> Tensor
 See :func:`torch.quantile`
 """)
 
+add_docstr_all('nanquantile',
+               r"""
+nanquantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.nanquantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2934,7 +2941,7 @@ Args:
     value (float): the source element(s) to scatter,
       incase `src` is not specified
     reduce (string): reduction operation to apply,
-      can be either 'add', 'subtract', 'multiply' or 'divide'.
+      can be either 'add' or 'multiply'.
 
 Example::
 
