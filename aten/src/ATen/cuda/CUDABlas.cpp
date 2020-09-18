@@ -479,7 +479,7 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
 }
 
-#ifdef __HIP_PLATFORM_HCC__ || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   bool trans_bool = (_cublasOpFromChar(trans) != CUBLAS_OP_N);
