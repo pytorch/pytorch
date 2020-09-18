@@ -448,12 +448,12 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
             if legacy_dispatcher_tensor_args:
                 tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
                 compute_dk = f"""\
- DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
-   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
-   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
-             else:
-                 compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
-            return f"""\
+DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
+  DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
+  DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
+            else:
+                compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
+           return f"""\
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   static auto op = c10::Dispatcher::singleton()
