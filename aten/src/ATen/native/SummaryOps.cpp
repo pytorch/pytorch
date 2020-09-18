@@ -52,14 +52,18 @@ Tensor _bincount_cpu_template(
   return output;
 }
 
-///////////////// histogram /////////////////
+// A helper function to get the bin for histogram
+// while each bin is inclusive at the lower end and exclusive at the higher,
+// i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
+// order to include maxvalue if exists
 template <typename input_t>
 inline int64_t getbin(input_t x, input_t min, input_t max, int64_t bins) {
   if (x == max)
     return bins - 1;
-  return (int64_t)((x - min) / (max - min) * bins);
+  return (int64_t)((x - min) * bins / (max - min));
 }
 
+///////////////// histogram /////////////////
 template <typename input_t, typename weights_t>
 Tensor _histogram_cpu_template_uniformbins(
     const Tensor& self,
@@ -135,7 +139,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
     const Tensor& weights,
     bool density) {
 
-  // If range is not defined, compute min and max
+  // If range is not defined, compute min and max from the values in the Tensor
   Scalar min;
   Scalar max;
   if (range.has_value()) {
@@ -146,8 +150,9 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
     max = self.max().item();
   }
 
-  auto hist = AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histogram_cpu_uniformbins", [&] {
-    const auto scalar = weights.scalar_type();
+  Tensor hist = AT_DISPATCH_ALL_TYPES(
+      self.scalar_type(), "histogram_cpu_uniformbins", [&] {
+        const auto scalar = weights.scalar_type();
         if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
           return _histogram_cpu_template_uniformbins<scalar_t, float>(
               self.flatten(0).contiguous(),
@@ -163,7 +168,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
             min.to<scalar_t>(),
             max.to<scalar_t>(),
             density);
-  });
+      });
 
   if (density) { // Compute the density
     double minval = min.to<double>();
@@ -176,7 +181,12 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
     hist *= bins / (maxval - minval) / hist.sum();
   }
 
-  Tensor edges = at::linspace(min, max, bins + 1, self.options());
+  Tensor edges;
+  if (self.scalar_type() == kFloat) {
+    edges = at::linspace(min, max, bins + 1, self.options());
+  } else {
+    edges = at::linspace(min, max, bins + 1, self.options().dtype(kDouble));
+  }
 
   return std::make_tuple(hist, edges);
 }
