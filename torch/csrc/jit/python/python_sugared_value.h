@@ -63,6 +63,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       Function& m,
       const std::string& field) override;
 
+  Value* asValue(const SourceRange& loc, Function& m) override {
+    throw ErrorReport(loc)
+        << kind() << " cannot be used as a value. "
+        << "Perhaps it is a closed over global variable? If so, please "
+        << "consider passing it in as an argument or use a local varible "
+        << "instead.";
+  }
+
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name);
 
