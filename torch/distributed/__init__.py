@@ -1,7 +1,6 @@
 
 import torch
 import datetime
-from typing import Optional
 
 def is_available():
     """
@@ -26,9 +25,4 @@ if is_available():
     # this.
 
     from .distributed_c10d import _backend
-
-# mypy type annotations
-class FileStore:
-    def __init__(self, path: str, numWorkers: int): ...
-class TCPStore:
-    def __init__(self, masterAddr: Optional[str], masterPort: int, numWorkers: int, isServer: bool, timeout: datetime.timedelta): ...
+    from torch._C._distributed_c10d import FileStore, TCPStore

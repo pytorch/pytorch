@@ -4,7 +4,7 @@ from typing import Protocol, TypeVar, Callable, Optional, Any, cast
 F = TypeVar("F", bound=Callable[..., object])
 
 class WrapWithAttributes(Protocol[F]):
-    _wrapped_async_rpc_function: Optional[Callable [..., Any]]
+    _wrapped_async_rpc_function: Optional[Callable[..., Any]]
     __call__: F
 
 def wrap_with_attributes(fn: F) -> WrapWithAttributes[F]:

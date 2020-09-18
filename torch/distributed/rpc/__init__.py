@@ -4,6 +4,7 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 import threading
+from typing import Iterator, Tuple
 
 
 _init_counter = 0
@@ -29,7 +30,6 @@ if is_available():
         _set_profiler_node_id,
         _is_current_rpc_agent_set,
         RpcBackendOptions,
-        rendezvous_iterator,
     )  # noqa: F401
     from .api import *  # noqa: F401
     from torch._C._distributed_rpc import TensorPipeRpcBackendOptions  # noqa: F401
@@ -91,10 +91,10 @@ if is_available():
         # finishing handshaking. To avoid that issue, we make it global to
         # keep it alive.
         global rendezvous_iterator
-        rendezvous_iterator = torch.distributed.rendezvous(
+        rendezvous_iterator = torch.distributed.rendezvous(  # type: ignore
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
-        store, _, _ = next(rendezvous_iterator)
+        store, _, _ = next(rendezvous_iterator)  # type: ignore
 
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
@@ -135,7 +135,7 @@ if is_available():
 
     def _init_rpc_backend(
         # Not sure how to annotate dynamic attribute of a type
-        backend=backend_registry.BackendType.TENSORPIPE, # type: ignore
+        backend=backend_registry.BackendType.TENSORPIPE,  # type: ignore
         store=None,
         name=None,
         rank=-1,

@@ -28,9 +28,9 @@ _backend_type_doc = """
 
 # Create an enum type, `BackendType`, with empty members.
 # Ignore the type error due to mypy bug #9079
-BackendType = enum.Enum(value="BackendType", names=dict()) # type: ignore
+BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore
 # Ignore the type error due to mypy bug #2427
-BackendType.__repr__ = _backend_type_repr # type: ignore
+BackendType.__repr__ = _backend_type_repr  # type: ignore
 BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
@@ -75,9 +75,9 @@ def register_backend(
         **existing_enum_dict
     )
     # Ignore the type error due to mypy bug #9079
-    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict) # type: ignore
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore
     # Ignore the type error due to mypy bug #2427
-    BackendType.__repr__ = _backend_type_repr # type: ignore
+    BackendType.__repr__ = _backend_type_repr  # type: ignore
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 

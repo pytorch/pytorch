@@ -128,7 +128,13 @@ PyObject* c10d_init(PyObject* _unused) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module)
+    return nullptr;
+  auto _C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = _C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   module.def(
       "_register_comm_hook",

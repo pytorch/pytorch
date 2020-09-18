@@ -79,9 +79,9 @@ class _InternalRPCPickler:
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
-        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer # type: ignore
+        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer  # type: ignore
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
-        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer # type: ignore
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
@@ -222,8 +222,8 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     profile_key = "rpc_{}#{}({} -> {})".format(
         exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
-    rf = torch.autograd._RecordFunction() # type: ignore
-    torch.autograd._run_before_callbacks(rf, profile_key) # type: ignore
+    rf = torch.autograd._RecordFunction()  # type: ignore
+    torch.autograd._run_before_callbacks(rf, profile_key)  # type: ignore
     return rf
 
 
