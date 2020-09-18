@@ -17,7 +17,7 @@ def optimize_for_mobile(
         script_module,
         optimization_blocklist: Set[MobileOptimizerType] = None,
         preserved_methods: List[AnyStr] = None,
-        backend: AnyStr = 'CPU'):
+        backend: str = 'CPU'):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
