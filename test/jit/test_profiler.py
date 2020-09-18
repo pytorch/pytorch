@@ -210,8 +210,6 @@ class TestProfiler(JitTestCase):
         # by fusing a = a + b with a = a + 1
         # if we were to continue iteration from that fusion point,
         # would miss the fusion opportunity of c = c + d + b
-        # b = b.add_(3) could be replaced by any other non-fusable node
-        # that splits the two fusion groups apart
 
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TensorExprGroup"))), 2)
