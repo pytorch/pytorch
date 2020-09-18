@@ -78,7 +78,7 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm, dou
         const auto x_abs = x.abs();
         const auto output = Vec256<scalar_t>::blendv(
             x / beta_val_vec, pos_or_neg_1_vec, x_abs >= beta_val_vec);
-        return norm_val_vec * x * grad_output;
+        return norm_val_vec * output * grad_output;
       }
     );
   });

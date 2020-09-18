@@ -886,7 +886,7 @@ def smoothl1loss_beta_test():
         pickle=False)
 
 
-def smoothl1loss_beta_test():
+def smoothl1loss_zero_beta_test():
     t = torch.randn(2, 3, 4)
     return dict(
         fullname='SmoothL1Loss_beta',
