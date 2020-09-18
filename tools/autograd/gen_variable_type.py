@@ -508,9 +508,9 @@ def format_trace_inputs(declaration):
             if value == "options":
                 result = ""
                 result += ADD_TRACE_INPUT.substitute(name=name, input="optTypeMetaToScalarType(options.dtype_opt())") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name=name, input="options.layout_opt()") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name=name, input="options.device_opt()") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name=name, input="options.pinned_memory_opt()")
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.layout()") + "\n"
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.device()") + "\n"
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.pinned_memory()")
                 return result
             else:
                 return ADD_TRACE_INPUT.substitute(name=name, input=value)
@@ -545,9 +545,9 @@ def format_trace_inputs(declaration):
         if has_factory_name:
             outplace = ""
             outplace += ADD_TRACE_INPUT.substitute(name='out', input='optTypeMetaToScalarType(out.options().dtype_opt())') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().layout_opt()') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().device_opt()') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().pinned_memory_opt()')
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().layout()') + "\n"
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().device()') + "\n"
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().pinned_memory()')
         else:
             outplace = ''
 
