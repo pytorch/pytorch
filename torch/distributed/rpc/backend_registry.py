@@ -222,6 +222,10 @@ def _tensorpipe_check_device_maps(agent, device_maps):
 
     agent._set_reverse_device_maps(reverse_device_maps)
 
+    # Synchronize again to make sure that all device maps are properly
+    # configured before launching user RPCs.
+    api._all_gather(None)
+
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
