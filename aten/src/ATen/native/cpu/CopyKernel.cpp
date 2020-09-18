@@ -36,7 +36,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
-      if (iter.tensor(0).is_conjugate() == iter.tensor(1).is_conjugate()) {
+      if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
         AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
             cpu_kernel_vec(
               iter,

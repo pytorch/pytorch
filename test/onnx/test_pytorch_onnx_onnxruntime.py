@@ -31,7 +31,7 @@ def to_numpy(tensor):
         return tensor.cpu().numpy()
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
-                    do_constant_folding=True, keep_initializers_as_inputs=True, 
+                    do_constant_folding=True, keep_initializers_as_inputs=True,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
                     onnx_shape_inference=False,
@@ -870,25 +870,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloordivModule(), (x,))
 
-    def test_true_div(self):
-        class TrueDivModule(torch.nn.Module):
+    def test_div(self):
+        class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return torch.true_divide(x, y)
+                return x / y
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
-        self.run_test(TrueDivModule(), (x, y))
-        self.run_test(TrueDivModule(), (x.float(), y))
-        self.run_test(TrueDivModule(), (x.to(torch.short), y.to(torch.short)))
+        self.run_test(DivModule(), (x, y))
+        self.run_test(DivModule(), (x.float(), y.float()))
 
-    # Note: true_divide cannot (generally) be exported via scripting
+    # Note: div cannot (generally) be exported via scripting
     # since its type promotion logic is dependent on knowing the scalar types
     # of the input tensors. That is, the ONNX graph is dependent on the
     # data type of the inputs. This makes it appropriate for tracing only.
-    def test_true_div_trace(self):
-        class TrueDivModule(torch.nn.Module):
+    def test_div_promotion_trace(self):
+        class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return torch.true_divide(x, y)
+                return x / y
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -896,10 +895,10 @@ class TestONNXRuntime(unittest.TestCase):
         prev_default = torch.get_default_dtype()
 
         torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.trace(TrueDivModule(), (x, y)), (x, y))
+        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
         torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.trace(TrueDivModule(), (x, y)), (x, y))
+        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
         torch.set_default_dtype(prev_default)
 
@@ -2874,6 +2873,20 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.randn(16)
         self.run_test(model, inputs)
 
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_transpose(self):
+        class LoopModel(torch.nn.Module):
+            def forward(self, x):
+                res = torch.zeros_like(x[0])
+                for i in range(x.size(0)):
+                    res += x[0].transpose(0, 1)
+                return res
+
+        model = torch.jit.script(LoopModel())
+        x = torch.randn(5, 3, 3)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list(self):
         class ListModel(torch.jit.ScriptModule):
@@ -4137,6 +4150,22 @@ class TestONNXRuntime(unittest.TestCase):
                 return out
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_if_transpose(self):
+        class IfModel(torch.nn.Module):
+            def forward(self, x):
+                x = x.transpose(0, 1)
+                if x.size(0) == 2:
+                    return x.transpose(0, 1)
+                else:
+                    return x
+
+        x = torch.randn(2, 3)
+        self.run_test(torch.jit.script(IfModel()), x,
+                      output_names=['output_1'],
+                      dynamic_axes={'output_1': [0, 1]})
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):

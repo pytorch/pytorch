@@ -184,7 +184,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    // real is never affected by conjugate bit, safe to use physical version
+    auto real_tensor = at::view_as_real_physical(self);
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -200,8 +201,8 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor materialize_conj(const Tensor& self) {
-  if (!self.is_conjugate()) { return self; }
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
   auto result = at::empty_like(self, self.options());
   return result.copy_(self);
 }
@@ -212,7 +213,7 @@ Tensor conj(const Tensor& self) {
       Storage(self.storage()), self.key_set(), self.dtype());
   impl->set_storage_offset(self.storage_offset());
   impl->set_sizes_and_strides(self.sizes(), self.strides());
-  impl->set_conjugate(!self.is_conjugate());
+  impl->set_conj(!self.is_conj());
   self_ = Tensor(std::move(impl));
   namedinference::propagate_names(self_, self);
   return self_;

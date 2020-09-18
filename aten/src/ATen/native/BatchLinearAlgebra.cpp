@@ -302,17 +302,6 @@ template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int 
 }
 #endif
 
-// Note [Handling conjugate views in BatchLinearAlgebra]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// These operations support complex tensors, but there is no explicit
-// handling for is_conjugate() input tensors.  This is implicitly handled
-// by the cloneBatched***** functions, which clone the tensor (and
-// will thus materialize conjugate tensors).  You can assume that some
-// sort of cloning will happen for inputs that backend to LAPACK,
-// because conventionally, LAPACK operates *inplace* on its given
-// tensors.  If you add anything to this file that isn't LAPACK, make
-// sure you handle is_conjugate()!
-
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 

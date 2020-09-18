@@ -76,9 +76,6 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
   return std::conj(v);
 }
 
-// NB: ignores the conjugate bit on kernels
-// TODO: stop generating kernels for non-complex case; a normal copy_ kernel
-// can be used in this case
 void conj_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "conj_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {

@@ -315,6 +315,11 @@ def saved_variables(formula, args):
             'suffix': '_dim',
             'type': 'int64_t',
         }),
+        # replace self.is_conj() with self_conjugate
+        (r'{}.is_conj\(\)', {
+            'suffix': '_conjugate',
+            'type': 'bool',
+        })
     ]
 
     for arg in args:

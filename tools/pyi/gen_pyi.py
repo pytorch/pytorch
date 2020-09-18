@@ -438,6 +438,7 @@ def gen_pyi(declarations_path, out):
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
+        'is_conj': ['def is_conj(self: Tensor) -> _bool: ...'],
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
@@ -560,7 +561,7 @@ def gen_pyi(declarations_path, out):
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
-        'contiguous': ['def contiguous(self) -> Tensor: ...'],
+        'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],

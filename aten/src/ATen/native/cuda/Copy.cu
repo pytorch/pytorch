@@ -25,7 +25,8 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   // We can memcpy the memory if both tensors have the same type AND both
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
-  bool memcpy_eligible = same_type && iter.is_contiguous();
+  bool same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj();
+  bool memcpy_eligible = same_type && same_conj && iter.is_contiguous();
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -71,10 +72,18 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-          kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-            gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-          });
+      if (!same_conj) {
+        AT_DISPATCH_COMPLEX_TYPES(
+            dtype, "copy_conj_", [&] {
+              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
+            });
+      }
+      } else {
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+            kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+              gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+            });
+      }
     }
   }
 

@@ -96,6 +96,9 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
+        a = a.resolve_conj()
+        b = b.resolve_conj()
+
         a_real = a.real
         b_real = b.real
         real_result, debug_msg = _compare_tensors_internal(a_real, b_real,

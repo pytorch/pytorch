@@ -285,11 +285,6 @@ static void addmm_impl_cpu_(
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
-  // TODO: use cpublas::ConjTranspose
-  a = native::materialize_conj(a);
-  b = native::materialize_conj(a);
-  // TODO: handle output c
-
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",

@@ -151,9 +151,11 @@ class _Formatter(object):
 
 def _scalar_str(self, formatter1, formatter2=None):
     if formatter2 is not None:
-        real_str = _scalar_str(self.real, formatter1)
-        imag_str = _scalar_str(self.imag, formatter2) + "j"
-        if self.imag < 0:
+        real_self, conj = torch.view_as_real_physical(self), self.is_conj()
+        real_str = _scalar_str(real_self[0], formatter1)
+        imag = -real_self[1] if conj else real_self[1]
+        imag_str = _scalar_str(imag, formatter2) + "j"
+        if imag < 0:
             return real_str + imag_str.lstrip()
         else:
             return real_str + "+" + imag_str.lstrip()
@@ -234,8 +236,12 @@ def _tensor_str(self, indent):
         self = self.float()
 
     if self.dtype.is_complex:
-        real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
-        imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
+        real_self, conj = torch.view_as_real_physical(self), self.is_conj()
+        real = real_self[..., 0]
+        imag = -real_self[..., 1] if conj else real_self[..., 1]
+        real_formatter = _Formatter(get_summarized_data(real) if summarize else real)
+        imag_formatter = _Formatter(
+            get_summarized_data(imag) if summarize else imag)
         return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
     else:
         formatter = _Formatter(get_summarized_data(self) if summarize else self)

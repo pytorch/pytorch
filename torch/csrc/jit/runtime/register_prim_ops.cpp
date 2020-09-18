@@ -422,6 +422,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::is_conj(Tensor self) -> bool"),
+         [](Stack* stack) {
+           at::Tensor arg = pop(stack).toTensor();
+           push(stack, arg.is_conj());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::dim(Tensor self) -> int"),
          [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();

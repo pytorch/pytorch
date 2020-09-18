@@ -598,14 +598,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Whether or not the imaginary part of the tensor should be negated
    */
-  inline bool is_conjugate() const {
+  inline bool is_conj() const {
     return key_set_.has(DispatchKey::Conjugate);
   }
 
   /**
    * Set whether or not to take the conjugate of the tensor (flip the imaginary bit).
    */
-  void set_conjugate(bool value) {
+  void set_conj(bool value) {
     if (value)
       key_set_ = key_set_.add(DispatchKey::Conjugate);
     else
