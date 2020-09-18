@@ -3,13 +3,13 @@
 #include <c10/macros/Macros.h>
 #include <limits>
 
-
 namespace c10 {
 
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
-#if defined(__CUDA_ARCH__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  x = __bfloat16_as_ushort(__float2bfloat16(value));
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  auto bf = __float2bfloat16(value);
+  x = *reinterpret_cast<const unsigned short*>(&bf);
 #else
   // RNE by default
   x = detail::round_to_nearest_even(value);
