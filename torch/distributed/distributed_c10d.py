@@ -1,6 +1,7 @@
 import pickle
 import torch
 import warnings
+import contextlib
 from torch._six import string_classes
 from datetime import timedelta
 
@@ -243,6 +244,36 @@ def _check_tensor_list(param, param_name):
        not all(isinstance(p, torch.Tensor) for p in param):
         raise RuntimeError("Invalid function argument. Expected parameter `{}` "
                            "to be of type List[torch.Tensor].".format(param_name))
+
+
+def _check_op_list(op_list, list_name):
+    """
+    Helper to check that the ``op_list`` is a list of functions.
+
+    """
+    if not isinstance(op_list, list) or \
+       not all(op in [isend, irecv] for op in op_list):
+        raise RuntimeError(f"Invalid function. Expected fucntion in `{op_list}` "
+                           f"to be of type torch.distributed.isend or"
+                           f"torch.distributed.irecv.")
+
+
+def _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list):
+    """
+    Helper to check that all the inputs have the same length.
+
+    """
+    expected_length = len(op_list)
+    check_list = [tensor_list, peer_list]
+    if group_list is not None:
+        check_list.append(group_list)
+    if tag_list is not None:
+        check_list.append(tag_list)
+
+    for curr_list in check_list:
+        if not isinstance(curr_list, list) or expected_length != len(curr_list):
+            raise RuntimeError(f"Expected parameters to be the same length, "
+                               f"{expected_length} vs {len(curr_list)}, value: {curr_list}")
 
 
 def is_mpi_available():
@@ -751,6 +782,61 @@ def recv(tensor,
             group_src_rank = _get_group_rank(pg, src)
             pg.recv([tensor], group_src_rank, tag).wait()
         return src
+
+
+@contextlib.contextmanager
+def _group_manager(backend):
+    if backend == Backend.NCCL:
+        ProcessGroupNCCL.group_start()
+    try:
+        yield
+    finally:
+        if backend == Backend.NCCL:
+            ProcessGroupNCCL.group_end()
+
+
+def batch_isend_irecv(op_list,
+                      tensor_list,
+                      peer_list,
+                      group_list=None,
+                      tag_list=None):
+    """
+    Send or Receive tensors asynchronously and return a list of requests.
+
+    Process the first item in each passed parameters, and then the second item
+    in each passed parameters, etc.
+
+    Arguments:
+        op_list: list of point-to-point operations(type of each operations is either
+        ``torch.distributed.isend`` or ``torch.distributed.irecv``.
+        tensor_list (list[Tensor]): list of send or recv tensors.
+        peer_list (list[int]): list of peer ranks to send to or receive from.
+        group_list (list[ProcessGroup], Optional): list of groups to operator on.
+        tag_list (list[int], Optional): list of tags to match send with recv.
+
+    Return:
+        a list of distributed request objects returned by calling the corresponding
+        op in the op_list.
+    """
+    _check_op_list(op_list, "op_list")
+    _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list)
+
+    backend = get_backend(group.WORLD if group_list is None else group_list[0])
+
+    reqs = []
+    with _group_manager(backend):
+        for i in range(len(op_list)):
+            op = op_list[i]
+            tensor = tensor_list[i]
+            peer = peer_list[i]
+            curr_group = group.WORLD if group_list is None else group_list[i]
+            tag = 0 if tag_list is None else tag_list[i]
+
+            ret = op(tensor, peer, curr_group, tag)
+
+            if ret is not None:
+                reqs.append(ret)
+    return reqs
 
 
 def broadcast_multigpu(tensor_list,

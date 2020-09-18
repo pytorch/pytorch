@@ -198,10 +198,13 @@ def _lock():
             lf.close()
 
 
-def _build_tensor(size, value=None, dtype=torch.float):
+def _build_tensor(size, value=None, dtype=torch.float, rank=None, cuda=False, rank_to_GPU=None):
     if value is None:
         value = size
-    return torch.empty(size, size, size, dtype=dtype).fill_(value)
+    if cuda:
+        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(rank_to_GPU[rank][0])
+    else:
+        return torch.empty(size, size, size, dtype=dtype).fill_(value)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None):
@@ -571,6 +574,55 @@ class DistributedTest:
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
+        # NCCL Batch SEND RECV
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        def test_batch_send_recv_nccl(self):
+            self._barrier()
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+
+            send_recv_op_list = []
+            send_recv_tensor_list = []
+            peer_list = []
+            expected_tensor_list = []
+
+            for src in range(0, dist.get_world_size()):
+                if src == rank:
+                    continue
+                send_tensor = _build_tensor(1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                recv_tensor = _build_tensor(1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                send_recv_op_list.extend([dist.irecv, dist.isend])
+                send_recv_tensor_list.extend([recv_tensor, send_tensor])
+                peer_list.extend([src, src])
+
+            reqs = dist.batch_isend_irecv(send_recv_op_list, send_recv_tensor_list, peer_list)
+            for req in reqs:
+                req.wait()
+            self._barrier()
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        def test_send_recv_nccl(self):
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            tensor = _build_tensor(rank + 1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+
+            for src in range(0, dist.get_world_size()):
+                if src == rank:
+                    # Send mode
+                    for dst in range(0, dist.get_world_size()):
+                        if dst == rank:
+                            continue
+                        dist.send(tensor, dst)
+                else:
+                    # Recv mode
+                    expected_tensor = _build_tensor(src + 1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                    output_tensor = _build_tensor(src + 1, value=-1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                    dist.recv(output_tensor, src)
+                    self.assertEqual(output_tensor, expected_tensor)
+
+            self._barrier()
         # SEND RECV
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         def test_send_recv(self):

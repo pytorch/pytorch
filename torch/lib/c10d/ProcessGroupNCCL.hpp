@@ -440,6 +440,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
+  static void groupStart();
+
+  static void groupEnd();
+
   static const int64_t kProcessGroupNCCLOpTimeoutMillis;
 
  protected:
@@ -476,6 +480,22 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
+      PreProcess pre,
+      PostProcess post);
+
+  // Helper that encapsulates work shared across point-to-point communication
+  // primitives.It is the same structure as the helper used for collective
+  // communicaiton primitives.
+  template <typename Fn>
+  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      bool isRecv);
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      bool isRecv,
       PreProcess pre,
       PostProcess post);
 
@@ -634,6 +654,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Schedule NCCL operations on high priority CUDA streams.
   bool isHighPriorityStream_ = false;
+
+  // The number of active ncclGroupStart() calls. This counter will be increased
+  // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
+  // is called.
+  static thread_local uint64_t ncclActiveGroupCounter_;
 };
 
 } // namespace c10d
