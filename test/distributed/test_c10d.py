@@ -1936,7 +1936,7 @@ class Task(nn.Module):
         return self.p + x
 
 
-class DdpComHook(nn.Module):
+class ModuleForDdpCommHook(nn.Module):
     def __init__(self):
         super().__init__()
         self.t0 = Task()
@@ -2902,7 +2902,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -2918,6 +2917,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 x = self.relu(self.fc1(x))
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
+
+        def train_loop(model, optimizer, iterations):
+            for _ in range(iterations):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = criterion(output, target)
+                loss.backward()
+                optimizer.step()
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
 
@@ -2945,41 +2952,23 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
 
         # run the model for 6 iterations, with a checkpoint in the middle
-        for _ in range(3):
-            optimizer_withload.zero_grad()
-            output = ddp_withload(input)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer_withload.step()
+        train_loop(ddp_withload, optimizer_withload, 3)
 
+        # zero out parameters and reload them from the state dict
         checkpoint_path = self.filename + "_model_checkpoint"
         if rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
-
         dist.barrier()
-
-        # zero out parameters and reload them from the state dict
         for p in ddp_withload.parameters():
             p = 0
         map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
         ddp_withload.load_state_dict(
             torch.load(checkpoint_path, map_location=map_location))
 
-        for _ in range(3):
-            optimizer_withload.zero_grad()
-            output = ddp_withload(input)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer_withload.step()
-
+        train_loop(ddp_withload, optimizer_withload, 3)
 
         # re-run the model with the same inputs for 6 iterations with no checkpoint
-        for _ in range(6):
-            optimizer_withoutload.zero_grad()
-            output = ddp_withoutload(input)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer_withoutload.step()
+        train_loop(ddp_withoutload, optimizer_withoutload, 6)
 
         for p_withload, p_withoutload in zip(ddp_withload.parameters(), ddp_withoutload.parameters()):
             self.assertEqual(p_withload, p_withoutload)
@@ -3179,7 +3168,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
-            DdpComHook().cpu(), process_group=process_group
+            ModuleForDdpCommHook().cpu(), process_group=process_group
         )
 
         # Register DDP Communication Hook
@@ -3192,7 +3181,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
-            DdpComHook().to(device_id),
+            ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
         )
@@ -3325,7 +3314,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
+        model = DistributedDataParallel(ModuleForDdpCommHook(), process_group=process_group)
 
         with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
             model._register_comm_hook(state=None, hook=1)
@@ -3349,7 +3338,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
+        model = DistributedDataParallel(ModuleForDdpCommHook(), process_group=process_group)
 
         with self.assertRaisesRegex(
             ValueError,
@@ -3386,7 +3375,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(DdpComHook(), process_group=process_group)
+        model = DistributedDataParallel(ModuleForDdpCommHook(), process_group=process_group)
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
