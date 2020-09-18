@@ -190,7 +190,7 @@ def _all_gather(obj):
                 follower_name,
                 _broadcast_to_followers,
                 args=(sequence_id, states.gathered_objects)
-                )
+            )
             worker_name_to_response_future_dict[follower_name] = fut
 
         failed_followers = []
