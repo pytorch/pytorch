@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
 import datetime
@@ -97,6 +96,8 @@ allow_list = [
     ("aten::_var", datetime.date(2020, 10, 1)),
     ("aten::_std", datetime.date(2020, 10, 1)),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
+    ("aten::stft", datetime.date(2020, 10, 1)),
+    ("aten::istft", datetime.date(2020, 10, 1)),
 ]
 
 

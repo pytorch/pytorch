@@ -21,6 +21,75 @@ if TEST_LIBROSA:
 fft_fn = torch.fft
 import torch.fft
 
+
+def _complex_stft(x, *args, **kwargs):
+    # Transform real and imaginary components separably
+    stft_real = torch.stft(x.real, *args, **kwargs, return_complex=True, onesided=False)
+    stft_imag = torch.stft(x.imag, *args, **kwargs, return_complex=True, onesided=False)
+    return stft_real + 1j * stft_imag
+
+
+def _hermitian_conj(x, dim):
+    """Returns the hermitian conjugate along a single dimension
+
+    H(x)[i] = conj(x[-i])
+    """
+    out = torch.empty_like(x)
+    mid = (x.size(dim) - 1) // 2
+    idx = [slice(None)] * out.dim()
+    idx_center = list(idx)
+    idx_center[dim] = 0
+    out[idx] = x[idx]
+
+    idx_neg = list(idx)
+    idx_neg[dim] = slice(-mid, None)
+    idx_pos = idx
+    idx_pos[dim] = slice(1, mid + 1)
+
+    out[idx_pos] = x[idx_neg].flip(dim)
+    out[idx_neg] = x[idx_pos].flip(dim)
+    if (2 * mid + 1 < x.size(dim)):
+        idx[dim] = mid + 1
+        out[idx] = x[idx]
+    return out.conj()
+
+
+def _complex_istft(x, *args, **kwargs):
+    # Decompose into Hermitian (FFT of real) and anti-Hermitian (FFT of imaginary)
+    n_fft = x.size(-2)
+    slc = (Ellipsis, slice(None, n_fft // 2 + 1), slice(None))
+
+    hconj = _hermitian_conj(x, dim=-2)
+    x_hermitian = (x + hconj) / 2
+    x_antihermitian = (x - hconj) / 2
+    istft_real = torch.istft(x_hermitian[slc], *args, **kwargs, onesided=True)
+    istft_imag = torch.istft(-1j * x_antihermitian[slc], *args, **kwargs, onesided=True)
+    return torch.complex(istft_real, istft_imag)
+
+
+def _stft_reference(x, hop_length, window):
+    r"""Reference stft implementation
+
+    This doesn't implement all of torch.stft, only the STFT definition:
+
+    .. math:: X(m, \omega) = \sum_n x[n]w[n - m] e^{-jn\omega}
+
+    """
+    n_fft = window.numel()
+    X = torch.empty((n_fft, (x.numel() - n_fft + hop_length) // hop_length),
+                    device=x.device, dtype=torch.cdouble)
+    for m in range(X.size(1)):
+        start = m * hop_length
+        if start + n_fft > x.numel():
+            slc = torch.empty(n_fft, device=x.device, dtype=x.dtype)
+            tmp = x[start:]
+            slc[:tmp.numel()] = tmp
+        else:
+            slc = x[start: start + n_fft]
+        X[:, m] = torch.fft.fft(slc * window)
+    return X
+
+
 # Tests of functions related to Fourier analysis in the torch.fft namespace
 class TestFFT(TestCase):
     exact_dtype = True
@@ -301,6 +370,9 @@ class TestFFT(TestCase):
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
                 self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=False)
+                # With return_complex=True, the result is the same but viewed as complex instead of real
+                result_complex = x.stft(n_fft, hop_length, win_length, window, center=center, return_complex=True)
+                self.assertEqual(result_complex, torch.view_as_complex(result))
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
@@ -325,6 +397,194 @@ class TestFFT(TestCase):
         _test((10,), 3, win_length=5, expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
+
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @dtypes(torch.double, torch.cdouble)
+    def test_complex_stft_roundtrip(self, device, dtype):
+        test_args = list(product(
+            # input
+            (torch.randn(600, device=device, dtype=dtype),
+             torch.randn(807, device=device, dtype=dtype),
+             torch.randn(12, 14, device=device, dtype=dtype),
+             torch.randn(9, 6, device=device, dtype=dtype)),
+            # n_fft
+            (50, 27),
+            # hop_length
+            (None, 10),
+            # center
+            (True,),
+            # pad_mode
+            ("constant",),
+            # normalized
+            (True, False),
+            # onesided
+            (True, False) if not dtype.is_complex else (False,),
+        ))
+
+        for args in test_args:
+            x, n_fft, hop_length, center, pad_mode, normalized, onesided = args
+            common_kwargs = {
+                'n_fft': n_fft, 'hop_length': hop_length, 'center': center,
+                'normalized': normalized, 'onesided': onesided,
+            }
+
+            # Functional interface
+            x_stft = torch.stft(x, pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
+                                      length=x.size(-1), **common_kwargs)
+            self.assertEqual(x_roundtrip, x)
+
+            # Tensor method interface
+            x_stft = x.stft(pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
+                                      length=x.size(-1), **common_kwargs)
+            self.assertEqual(x_roundtrip, x)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @dtypes(torch.double, torch.cdouble)
+    def test_stft_roundtrip_complex_window(self, device, dtype):
+        test_args = list(product(
+            # input
+            (torch.randn(600, device=device, dtype=dtype),
+             torch.randn(807, device=device, dtype=dtype),
+             torch.randn(12, 14, device=device, dtype=dtype),
+             torch.randn(9, 6, device=device, dtype=dtype)),
+            # n_fft
+            (50, 27),
+            # hop_length
+            (None, 10),
+            # pad_mode
+            ("constant",),
+            # normalized
+            (True, False),
+        ))
+        for args in test_args:
+            x, n_fft, hop_length, pad_mode, normalized = args
+            window = torch.rand(n_fft, device=device, dtype=torch.cdouble)
+            x_stft = torch.stft(
+                x, n_fft=n_fft, hop_length=hop_length, window=window,
+                center=True, pad_mode=pad_mode, normalized=normalized)
+            self.assertEqual(x_stft.dtype, torch.cdouble)
+            self.assertEqual(x_stft.size(-2), n_fft)  # Not onesided
+
+            x_roundtrip = torch.istft(
+                x_stft, n_fft=n_fft, hop_length=hop_length, window=window,
+                center=True, normalized=normalized, length=x.size(-1),
+                return_complex=True)
+            self.assertEqual(x_stft.dtype, torch.cdouble)
+
+            if not dtype.is_complex:
+                self.assertEqual(x_roundtrip.imag, torch.zeros_like(x_roundtrip.imag),
+                                 atol=1e-6, rtol=0)
+                self.assertEqual(x_roundtrip.real, x)
+            else:
+                self.assertEqual(x_roundtrip, x)
+
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @dtypes(torch.cdouble)
+    def test_complex_stft_definition(self, device, dtype):
+        test_args = list(product(
+            # input
+            (torch.randn(600, device=device, dtype=dtype),
+             torch.randn(807, device=device, dtype=dtype)),
+            # n_fft
+            (50, 27),
+            # hop_length
+            (10, 15)
+        ))
+
+        for args in test_args:
+            window = torch.randn(args[1], device=device, dtype=dtype)
+            expected = _stft_reference(args[0], args[2], window)
+            actual = torch.stft(*args, window=window, center=False)
+            self.assertEqual(actual, expected)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @dtypes(torch.cdouble)
+    def test_complex_stft_real_equiv(self, device, dtype):
+        test_args = list(product(
+            # input
+            (torch.rand(600, device=device, dtype=dtype),
+             torch.rand(807, device=device, dtype=dtype),
+             torch.rand(14, 50, device=device, dtype=dtype),
+             torch.rand(6, 51, device=device, dtype=dtype)),
+            # n_fft
+            (50, 27),
+            # hop_length
+            (None, 10),
+            # win_length
+            (None, 20),
+            # center
+            (False, True),
+            # pad_mode
+            ("constant",),
+            # normalized
+            (True, False),
+        ))
+
+        for args in test_args:
+            x, n_fft, hop_length, win_length, center, pad_mode, normalized = args
+            expected = _complex_stft(x, n_fft, hop_length=hop_length,
+                                     win_length=win_length, pad_mode=pad_mode,
+                                     center=center, normalized=normalized)
+            actual = torch.stft(x, n_fft, hop_length=hop_length,
+                                win_length=win_length, pad_mode=pad_mode,
+                                center=center, normalized=normalized)
+            self.assertEqual(expected, actual)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @dtypes(torch.cdouble)
+    def test_complex_istft_real_equiv(self, device, dtype):
+        test_args = list(product(
+            # input
+            (torch.rand(40, 20, device=device, dtype=dtype),
+             torch.rand(25, 1, device=device, dtype=dtype),
+             torch.rand(4, 20, 10, device=device, dtype=dtype)),
+            # hop_length
+            (None, 10),
+            # center
+            (False, True),
+            # normalized
+            (True, False),
+        ))
+
+        for args in test_args:
+            x, hop_length, center, normalized = args
+            n_fft = x.size(-2)
+            expected = _complex_istft(x, n_fft, hop_length=hop_length,
+                                      center=center, normalized=normalized)
+            actual = torch.istft(x, n_fft, hop_length=hop_length,
+                                 center=center, normalized=normalized,
+                                 return_complex=True)
+            self.assertEqual(expected, actual)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    def test_complex_stft_onesided(self, device):
+        # stft of complex input cannot be onesided
+        for x_dtype, window_dtype in product((torch.double, torch.cdouble), repeat=2):
+            x = torch.rand(100, device=device, dtype=x_dtype)
+            window = torch.rand(10, device=device, dtype=window_dtype)
+
+            if x_dtype.is_complex or window_dtype.is_complex:
+                with self.assertRaisesRegex(RuntimeError, 'complex'):
+                    x.stft(10, window=window, pad_mode='constant', onesided=True)
+            else:
+                y = x.stft(10, window=window, pad_mode='constant', onesided=True)
+                self.assertEqual(y.dtype, torch.double)
+                self.assertEqual(y.size(), (6, 51, 2))
+
+        y = torch.rand(100, device=device, dtype=torch.double)
+        window = torch.randn(10, device=device, dtype=torch.cdouble)
+        with self.assertRaisesRegex(RuntimeError, 'complex'):
+            x.stft(10, pad_mode='constant', onesided=True)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -509,8 +769,9 @@ class TestFFT(TestCase):
                 tensor1 = torch.randn(data_size, device=device, dtype=dtype)
                 tensor2 = torch.randn(data_size, device=device, dtype=dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)
-                istft1 = torch.istft(tensor1, **kwargs)
-                istft2 = torch.istft(tensor2, **kwargs)
+                # Also compare method vs. functional call signature
+                istft1 = tensor1.istft(**kwargs)
+                istft2 = tensor2.istft(**kwargs)
                 istft = a * istft1 + b * istft2
                 estimate = torch.istft(a * tensor1 + b * tensor2, **kwargs)
                 self.assertEqual(istft, estimate, atol=1e-5, rtol=0)
