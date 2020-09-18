@@ -115,6 +115,12 @@ def async_execution(fn):
         >>>         )
         >>>         return ret_fut
         >>>
+        >>>     @rpc.functions.async_execution
+        >>>     def bound_async_add(self, to, x, y, z):
+        >>>         return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        >>>             lambda fut: fut.wait() + z
+        >>>         )
+        >>>
         >>> # On worker0
         >>> ret = rpc.rpc_sync(
         >>>     "worker1",
@@ -128,6 +134,26 @@ def async_execution(fn):
         >>>     AsyncExecutionClass.class_async_add,
         >>>     args=("worker2", torch.ones(2), 1, 2)
         >>> )
+        >>> print(ret)  # prints tensor([4., 4.])
+
+        This decorator also works with RRef helpers, i.e., .
+        :meth:`torch.distributed.rpc.RRef.rpc_sync`,
+        :meth:`torch.distributed.rpc.RRef.rpc_async`, and
+        :meth:`torch.distributed.rpc.RRef.remote`.
+
+        >>> from torch.distributed import rpc
+        >>>
+        >>> # reuse the AsyncExecutionClass class above
+        >>> rref = rpc.remote("worker1", AsyncExecutionClass)
+        >>> ret = rref.rpc_sync().static_async_add("worker2", torch.ones(2), 1, 2)
+        >>> print(ret)  # prints tensor([4., 4.])
+        >>>
+        >>> rref = rpc.remote("worker1", AsyncExecutionClass)
+        >>> ret = rref.rpc_async().static_async_add("worker2", torch.ones(2), 1, 2).wait()
+        >>> print(ret)  # prints tensor([4., 4.])
+        >>>
+        >>> rref = rpc.remote("worker1", AsyncExecutionClass)
+        >>> ret = rref.remote().static_async_add("worker2", torch.ones(2), 1, 2).to_here()
         >>> print(ret)  # prints tensor([4., 4.])
     """
     @functools.wraps(fn)
