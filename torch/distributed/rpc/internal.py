@@ -222,8 +222,8 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     profile_key = "rpc_{}#{}({} -> {})".format(
         exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
-    rf = torch.autograd._RecordFunction()
-    torch.autograd._run_before_callbacks(rf, profile_key)
+    rf = torch.autograd._RecordFunction() # type: ignore
+    torch.autograd._run_before_callbacks(rf, profile_key) # type: ignore
     return rf
 
 
