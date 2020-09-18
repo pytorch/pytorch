@@ -651,10 +651,9 @@ def configure_extension_build():
         extensions.append(
             Extension(
                 "torch.utils._benchmark.utils.valgrind_wrapper.bindings",
-                ["torch/utils/_benchmark/utils/valgrind_wrapper/control_bindings.cpp"],
+                ["torch/utils/_benchmark/utils/valgrind_wrapper/callgrind_trampoline.cpp"],
                 include_dirs=[
                     "third_party/pybind11/include",
-                    "torch/utils/_benchmark/utils/valgrind_wrapper/",
                 ],
                 language='c++'
             ),
