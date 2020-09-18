@@ -1046,14 +1046,14 @@ void testRecordFunction() {
     const int test_val = 123;
     const std::string test_str = "test str";
     addGlobalCallback(RecordFunctionCallback(
-        [test_str, &ids](const RecordFunction& /* unused */) {
+        [test_val, test_str, &ids](const RecordFunction& /* unused */) {
           auto ctx = std::make_unique<TestContext>();
           ctx->a = test_val;
           ctx->b = test_str;
           ids.push_back(1);
           return ctx;
         },
-        [test_str](
+        [test_val, test_str](
             const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
           TORCH_CHECK(ctx_ptr != nullptr);
@@ -1072,14 +1072,14 @@ void testRecordFunction() {
       const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [test_str, &ids](const RecordFunction& /* unused */) {
+          [test_val, test_str, &ids](const RecordFunction& /* unused */) {
             auto ctx = std::make_unique<TestContext>();
             ctx->a = test_val;
             ctx->b = test_str;
             ids.push_back(2);
             return ctx;
           },
-          [test_str](
+          [test_val, test_str](
               const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
             auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
             TORCH_CHECK(ctx_ptr != nullptr);
