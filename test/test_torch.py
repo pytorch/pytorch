@@ -14428,9 +14428,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-
-
-
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
@@ -17137,7 +17134,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             t = torch.rand(1000, device=device).to(dtype) * r
             self._i0_helper(t)
 
-    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
@@ -17145,7 +17142,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # The domain is (-13.25, 13.25)
         self._i0_range_helper(13.25, device, dtype)
 
-    @dtypesIfCUDA(*([torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
@@ -17160,7 +17157,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # The domain is (-709.75, 709.75)
         self._i0_range_helper(709.75, device, dtype)
 
-    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
@@ -20117,18 +20114,18 @@ tensor_op_tests = [
     ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('erfinv', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
+    ('exp', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('exp', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
-        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+        lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, _float_types2, [torch.bfloat16]),
-    ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
-    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
+    ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
