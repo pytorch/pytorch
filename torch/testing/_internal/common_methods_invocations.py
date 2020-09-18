@@ -229,6 +229,7 @@ op_db = [
                    domain=(1, float('inf')),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
@@ -246,6 +247,7 @@ op_db = [
                    ref=np.arcsinh,
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
@@ -262,6 +264,7 @@ op_db = [
                    domain=(-1, 1),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -289,6 +292,7 @@ op_db = [
                    ref=np.log,
                    domain=(0, float('inf')),
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
@@ -301,7 +305,7 @@ op_db = [
     UnaryUfuncInfo('log10',
                    ref=np.log10,
                    domain=(0, float('inf')),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -320,6 +324,7 @@ op_db = [
                    ref=np.log2,
                    domain=(0, float('inf')),
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
