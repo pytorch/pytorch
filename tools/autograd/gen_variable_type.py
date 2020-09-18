@@ -71,7 +71,7 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
-    jit::tracer::addInputs(node, "options", dtype_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
     jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
     jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
     jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
@@ -79,7 +79,7 @@ RENAME_TRACE_ADD_ARGS = {
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
-    jit::tracer::addInputs(node, "options", dtype_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
     jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
     jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
     jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
