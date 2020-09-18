@@ -16,40 +16,49 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   // for a library
   AT_ERROR(msg);
 }
-
-
 } // namespace detail
 
-template <>
-EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
-    detail::_Uninitialized>() noexcept {
-  static constexpr detail::TypeMetaData singleton = detail::TypeMetaData(
-      0,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      TypeIdentifier::uninitialized(),
-      "nullptr (uninitialized)");
-  return &singleton;
+std::mutex TypeMeta::instanceMutex_;
+
+// prepopulate instance vector with ScalarType types
+std::vector<detail::TypeMetaData>& TypeMeta::typeMetaDataInstances() {
+  static std::vector<detail::TypeMetaData> instances = []{
+    std::lock_guard<std::mutex> lock(instanceMutex_);
+    std::vector<detail::TypeMetaData> vec;
+#define ADD_SCALAR_TYPE_META(T, name) \
+    { /* ScalarType::name */ \
+      auto typeId = TypeIdentifier::Get<T>(); \
+      auto typeName = c10::util::get_fully_qualified_type_name<T>(); \
+      vec.emplace_back( \
+        sizeof(T), \
+        detail::_PickNew<T>(), \
+        detail::_PickPlacementNew<T>(), \
+        detail::_PickCopy<T>(), \
+        detail::_PickPlacementDelete<T>(), \
+        detail::_PickDelete<T>(), \
+        typeId, \
+        typeName); \
+    }
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(ADD_SCALAR_TYPE_META)
+#undef ADD_SCALAR_TYPE_META
+    // Undefined
+    vec.emplace_back(
+        0,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        TypeIdentifier::uninitialized(),
+        "nullptr (uninitialized)");
+    return vec;
+  }();
+  return instances;
 }
 
-CAFFE_KNOWN_TYPE(uint8_t)
-CAFFE_KNOWN_TYPE(int8_t)
-CAFFE_KNOWN_TYPE(int16_t)
-CAFFE_KNOWN_TYPE(int)
-CAFFE_KNOWN_TYPE(int64_t)
-CAFFE_KNOWN_TYPE(at::Half)
-CAFFE_KNOWN_TYPE(float)
-CAFFE_KNOWN_TYPE(double)
-CAFFE_KNOWN_TYPE(c10::complex<c10::Half>)
-CAFFE_KNOWN_TYPE(c10::complex<float>)
-CAFFE_KNOWN_TYPE(c10::complex<double>)
-// 11 = undefined type id
-// 12 = Tensor (defined in tensor.cc)
+// other known types
+
 CAFFE_KNOWN_TYPE(std::string)
-CAFFE_KNOWN_TYPE(bool)
 CAFFE_KNOWN_TYPE(uint16_t)
 CAFFE_KNOWN_TYPE(char)
 CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
@@ -79,14 +88,11 @@ using _guard_long_unique = std::conditional_t<
     _guard_long_unique_dummy<T>,
     T>;
 } // namespace detail
+
 CAFFE_KNOWN_TYPE(detail::_guard_long_unique<long>);
 CAFFE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
 
 CAFFE_KNOWN_TYPE(float*)
 CAFFE_KNOWN_TYPE(at::Half*)
-CAFFE_KNOWN_TYPE(c10::qint8)
-CAFFE_KNOWN_TYPE(c10::quint8)
-CAFFE_KNOWN_TYPE(c10::qint32)
-CAFFE_KNOWN_TYPE(at::BFloat16)
 
 } // namespace caffe2

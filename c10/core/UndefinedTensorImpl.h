@@ -29,7 +29,7 @@ private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;
 public:
-  friend struct UndefinedType;
+  // friend struct UndefinedType;
 };
 
 } // namespace c10
