@@ -35,11 +35,7 @@ import re
 from .gen_variable_type import should_trace
 from .utils import write, is_tensor_method
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 #
 # declarations blocklist
@@ -57,8 +53,7 @@ SKIP_PYTHON_BINDINGS = [
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
-    '_indexCopy_', 'max_values', 'min_values',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
+    '_indexCopy_', '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
     'full(_out)?',

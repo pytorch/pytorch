@@ -273,7 +273,12 @@ __global__ void linear_index_weight_offsets_dedup_kernel(
   }
 }
 
-template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
+template <
+    typename SIndex,
+    typename TParam,
+    typename T,
+    bool ExactBlock = false,
+    roundOption roundOpt = NEAREST>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
@@ -293,7 +298,14 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
     const SIndex* sorted_linear_ind_data, // sorted linear indices
     const int* __restrict__ sorted_seg_id_data, // sorted segment id
     const float* lr,
+    ulong2 seed,
     float weight_decay = 0.f) {
+
+  class randFactor<TParam, T, roundOpt> rand_factor(
+      seed,
+      blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x +
+          threadIdx.x);
+
   const float LR = lr[0];
   // num_indices blocks, each block process one index
   int sorted_linear_indice_id = blockIdx.x; // the index of sorted_linear_ind
@@ -329,16 +341,20 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 
   float sum_squares = 0.0;
   __shared__ float row_sum_squares_avg;
+  extern __shared__ float x_ij[];
 
   for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
     // i: index in the embedding dimension
-    float x_ij = 0.0;
+    float t_x_ij = 0.0;
+
     for (int dup_id = 0; dup_id < num_dup; dup_id++) {
       int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
-      x_ij += grad[group * block_size + i];
+      t_x_ij += grad[group * block_size + i];
     }
-    x_ij += weight_decay * param[index * block_size + i];
-    sum_squares += x_ij * x_ij;
+    t_x_ij += weight_decay *
+      rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);;
+    sum_squares += t_x_ij * t_x_ij;
+    x_ij[i] = t_x_ij;
   }
   float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
 
@@ -352,15 +368,9 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
   // update param
   float step = LR / (sqrtf(param_mom[index]) + epsilon);
   for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-    float x_ij = 0.0;
-    for (int dup_id = 0; dup_id < num_dup; dup_id++) {
-      int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
-      x_ij += grad[group * block_size + i];
-    }
     const size_t paramIdx = index * block_size + i; // index for param
-    x_ij += weight_decay * param[paramIdx];
-    float param_new = param[paramIdx] + x_ij * step;
-    param[paramIdx] = param_new;
+    param[paramIdx] =
+        rand_factor.convertTypeFromTargetToParam(param[paramIdx] + x_ij[i] * step);
   }
 }
 
@@ -930,7 +940,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
     // 0: nearest rounding
     // 1: stochastic rounding
-    if (round_option_) {
+    if (round_option_ == STOCHASTIC) {
       seed.x = default_rng_seed_val;
       seed.y = maxThreads * block_size;
     }
@@ -939,7 +949,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       // WarpReduce.
       int multiple = std::min(maxThreads / block_size, SEGREDUCE_MINBLOCKS);
       dim3 block(block_size, multiple);
-      if (round_option_) {
+      if (round_option_ == STOCHASTIC) {
         rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
             IndexType,
             TParam,
@@ -1054,11 +1064,18 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        round_option_((roundOption)this->template GetSingleArgument<int>(
+            "round_option",
+            NEAREST)),
         weight_decay_(
             this->template GetSingleArgument<float>("weight_decay", 0.f)) {
     VLOG(1) << "gradient optimization operator in use: "
             << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
             << " weight_decay_=" << weight_decay_;
+
+    CAFFE_ENFORCE(
+        round_option_ == STOCHASTIC || round_option_ == NEAREST,
+        "round_option_ should be either NEAREST or STOCHATIC");
 
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
@@ -1180,29 +1197,70 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
         &sorted_seg_id_buffer_,
         &context_);
 
-    rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
-        IndexType,
-        TParam,
-        T,
-        false>
-        <<<num_indices,
-           std::min(maxThreads, block_size),
-           0,
-           context_.cuda_stream()>>>(
-            prefix_sum_length_data,
-            N,
-            block_size,
-            num_lengths,
-            num_indices,
-            epsilon_,
-            paramOut,
-            momentOut,
-            indices,
-            is_mean ? grad_buffer_data : grad,
-            sorted_linear_ind_buffer_.template data<IndexType>(),
-            sorted_seg_id_buffer_.template data<int>(),
-            lr,
-            weight_decay_);
+    ulong2 seed;
+
+    // 0: nearest rounding
+    // 1: stochastic rounding
+    if (round_option_ == STOCHASTIC) {
+      seed.x = default_rng_seed_val;
+      seed.y = maxThreads * block_size;
+    }
+
+    CAFFE_ENFORCE_LE(block_size, 10240,
+      "Block size is too big and will exceed the max size of the shared memory");
+    if (round_option_ == STOCHASTIC) {
+      rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+          IndexType,
+          TParam,
+          T,
+          false,
+          STOCHASTIC>
+          <<<num_indices,
+             std::min(maxThreads, block_size),
+             block_size * sizeof(float),
+             context_.cuda_stream()>>>(
+              prefix_sum_length_data,
+              N,
+              block_size,
+              num_lengths,
+              num_indices,
+              epsilon_,
+              paramOut,
+              momentOut,
+              indices,
+              is_mean ? grad_buffer_data : grad,
+              sorted_linear_ind_buffer_.template data<IndexType>(),
+              sorted_seg_id_buffer_.template data<int>(),
+              lr,
+              seed,
+              weight_decay_);
+    } else {
+      rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+          IndexType,
+          TParam,
+          T,
+          false,
+          NEAREST>
+          <<<num_indices,
+             std::min(maxThreads, block_size),
+             block_size * sizeof(float),
+             context_.cuda_stream()>>>(
+              prefix_sum_length_data,
+              N,
+              block_size,
+              num_lengths,
+              num_indices,
+              epsilon_,
+              paramOut,
+              momentOut,
+              indices,
+              is_mean ? grad_buffer_data : grad,
+              sorted_linear_ind_buffer_.template data<IndexType>(),
+              sorted_seg_id_buffer_.template data<int>(),
+              lr,
+              seed,
+              weight_decay_);
+    }
 
     return true;
   }
@@ -1220,6 +1278,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
  protected:
   T epsilon_;
+  roundOption round_option_;
   T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);

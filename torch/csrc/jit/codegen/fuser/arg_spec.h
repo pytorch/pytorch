@@ -1,9 +1,9 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/core/functional.h> // fmap
+#include <c10/util/hash.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
-#include <torch/csrc/utils/hash.h>
 
 #include <cstdint>
 #include <vector>
@@ -20,7 +20,7 @@ namespace fuser {
 struct TORCH_API ArgSpec {
   ArgSpec(at::TensorList inputs, const int _device)
       : descs_{c10::fmap<TensorDesc>(inputs)},
-        hash_code_{torch::get_hash(_device, inputs.size(), descs_)},
+        hash_code_{c10::get_hash(_device, inputs.size(), descs_)},
         device_{_device} {}
 
   // (Common) hash function

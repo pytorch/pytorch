@@ -31,6 +31,20 @@ class SparseAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+
+        sparse_params = []
+        for index, param in enumerate(params):
+            if isinstance(param, dict):
+                for d_index, d_param in enumerate(param.get("params", [])):
+                    if d_param.is_sparse:
+                        sparse_params.append([index, d_index])
+            elif param.is_sparse:
+                sparse_params.append(index)
+        if sparse_params:
+            raise ValueError(
+                f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
+            )
+
         defaults = dict(lr=lr, betas=betas, eps=eps)
         super(SparseAdam, self).__init__(params, defaults)
 

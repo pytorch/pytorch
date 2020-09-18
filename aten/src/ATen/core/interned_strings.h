@@ -36,6 +36,7 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
+  _(prim, TensorExprGroup)           \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -95,6 +96,7 @@ namespace c10 {
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, TypeCheck)                 \
+  _(prim, FallbackGraph)             \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -141,6 +143,8 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, rpc_sync)                  \
+  _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
@@ -157,16 +161,25 @@ namespace c10 {
   _(aten, asin_)                     \
   _(aten, arcsin)                    \
   _(aten, arcsin_)                   \
+  _(aten, asinh)                     \
+  _(aten, asinh_)                    \
+  _(aten, arcsinh)                   \
+  _(aten, arcsinh_)                  \
   _(aten, atan)                      \
   _(aten, atan_)                     \
   _(aten, arctan)                    \
   _(aten, arctan_)                   \
+  _(aten, atanh)                     \
+  _(aten, atanh_)                    \
+  _(aten, arctanh)                   \
+  _(aten, arctanh_)                  \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, linalg_norm)               \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -175,6 +188,10 @@ namespace c10 {
   _(aten, __isnot__)                 \
   _(aten, copy)                      \
   _(aten, copy_)                     \
+  _(aten, div)                       \
+  _(aten, div_)                      \
+  _(aten, true_divide)               \
+  _(aten, true_divide_)              \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
   _(aten, addcdiv_)                  \
@@ -182,12 +199,27 @@ namespace c10 {
   _(aten, addmv_)                    \
   _(aten, addr_)                     \
   _(aten, baddbmm_)                  \
+  _(aten, ge)                        \
   _(aten, ge_)                       \
+  _(aten, greater_equal)             \
+  _(aten, greater_equal_)            \
+  _(aten, gt)                        \
   _(aten, gt_)                       \
+  _(aten, greater)                   \
+  _(aten, greater_)                  \
+  _(aten, le)                        \
   _(aten, le_)                       \
+  _(aten, less_equal)                \
+  _(aten, less_equal_)               \
   _(aten, lerp_)                     \
+  _(aten, lt)                        \
   _(aten, lt_)                       \
+  _(aten, less)                      \
+  _(aten, less_)                     \
+  _(aten, ne)                        \
   _(aten, ne_)                       \
+  _(aten, not_equal)                 \
+  _(aten, not_equal_)                \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
@@ -204,6 +236,10 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
+  _(aten, sub)                       \
+  _(aten, sub_)                      \
+  _(aten, subtract)                  \
+  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \
@@ -269,6 +305,7 @@ namespace c10 {
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
+  _(onnx, SequenceErase)             \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
   _(onnx, SoftmaxCrossEntropyLoss)   \

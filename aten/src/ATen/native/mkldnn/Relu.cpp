@@ -8,11 +8,11 @@
 namespace at { namespace native {
 
 Tensor mkldnn_relu(const Tensor& input) {
-  AT_ERROR("mkldnn_relu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_relu_(Tensor& input) {
-  AT_ERROR("mkldnn_relu_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with MKLDNN support");
 }
 
 }}

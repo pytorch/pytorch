@@ -241,6 +241,32 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
+const Expr* IRMutator::mutate(const MaxTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MaxTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
+const Expr* IRMutator::mutate(const MinTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MinTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
 const Expr* IRMutator::mutate(const ReduceOp* v) {
   const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
   const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
@@ -370,17 +396,21 @@ Stmt* IRMutator::mutate(const AtomicAdd* v) {
   return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
+Stmt* IRMutator::mutate(const SyncThreads* v) {
+  return new SyncThreads();
+}
+
 Stmt* IRMutator::mutate(const Allocate* v) {
   const Var* buffer_var_old = v->buffer_var();
   const Var* buffer_var_new =
       dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
+  bool any_change = buffer_var_new != buffer_var_old;
 
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
   for (size_t i = 0; i < dims_old.size(); i++) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] == dims_old[i]);
+    any_change |= (dims_new[i] != dims_old[i]);
   }
 
   if (!any_change) {
