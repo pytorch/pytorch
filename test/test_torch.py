@@ -16309,8 +16309,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         vec1 = torch.from_numpy(v1_np).to(device=device, dtype=dtype)
         vec2 = torch.from_numpy(v2_np).to(device=device, dtype=dtype)
+        out = torch.empty(vec1.size(0), vec2.size(0), dtype=dtype, device=device)
 
-        out = torch.empty(vec1.size(0), vec2.size(0))
         torch_res = torch.outer(vec1, vec2)
         self.assertEqual(np_res, torch_res)
         torch.outer(vec1, vec2, out=out)

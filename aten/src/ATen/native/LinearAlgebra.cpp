@@ -160,6 +160,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
     result.resize_as_(self_);
+    result.copy_(self_);
   } else {
     self_ = self;
   }
@@ -172,15 +173,19 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
               ", v1: ", vec1.sizes(),
               ", v2: ", vec2.sizes());
 
-  Tensor result_;
-  // addr is implemented as a composite op through torch.outer
-  // If beta is 0, self would be ignored and `nan` and `inf` in it would not be propagated
+  // If beta is 0, self would be ignored
+  // and `nan` and `inf` in it would not be propagated
   if (beta.to<double>() == 0.0) {
-    result_ = alpha * at::outer(vec1, vec2);
-  } else {
-    result_ = beta * self_ + alpha * at::outer(vec1, vec2);
+    result.zero_();
+  } else if (beta.to<double>() != 1.0) {
+    result.mul_(beta);
   }
-  result.copy_(result_);
+
+  // addr is implemented as a composite op through torch.outer
+  at::add_out(result,
+              result,
+              at::outer(vec1, vec2),
+              alpha);
   return result;
 }
 
@@ -206,7 +211,7 @@ Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   }
 
   // torch.outer is implemented as a composite op using reshape and mul
-  result.copy_(self.reshape({self.size(0), 1}) * vec2);
+  at::mul_out(result, self.reshape({self.size(0), 1}), vec2);
   return result;
 }
 
