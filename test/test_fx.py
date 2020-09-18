@@ -150,7 +150,7 @@ class TestFX(JitTestCase):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
         class NoLeafModulesTracer(Tracer):
-            def is_leaf_module(self, m):
+            def is_leaf_module(self, m, qualname):
                 return False
 
         class MyReluMod(torch.nn.Module):
