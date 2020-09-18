@@ -30,7 +30,7 @@ namespace at { namespace native {
     Tensor values      = sparse_.values();
     int64_t nnz = sparse_._nnz();
 
-    std::cout << "pre dispatch: " << values.scalar_type() << std::endl;;
+    std::cout << "pre dispatch: " << values.scalar_type() <<  "MKL: " << at::hasMKL() << std::endl;;
     AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
         scalar_t cast_alpha = alpha.to<scalar_t>();
