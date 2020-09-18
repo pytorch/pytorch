@@ -5,16 +5,6 @@ import torch
 from typing import Dict
 from enum import Enum
 
-# mypy type annotations
-class DistAutogradContext:
-    def _context_id(self) -> int: ...
-def _init(default_node_id: int) -> None: ...
-def _get_debug_info() -> Dict[str, str]: ...
-def _new_context() -> DistAutogradContext: ...
-def _release_context(context_id: int) -> None: ...
-def get_gradients(context_id: int) -> Dict[torch.Tensor, torch.Tensor]: ...
-def _is_valid_context(worker_id: int) -> bool: ...
-
 def is_available():
     return hasattr(torch._C, "_dist_autograd_init")
 
@@ -22,6 +12,16 @@ def is_available():
 if is_available() and not torch._C._dist_autograd_init():
     raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
+if is_available():
+    from torch._C._distributed_autograd import (
+        DistAutogradContext,
+        _init,
+        _get_debug_info,
+        _new_context,
+        _release_context,
+        get_gradients,
+        _is_valid_context,
+    )
 
 class context(object):
     '''

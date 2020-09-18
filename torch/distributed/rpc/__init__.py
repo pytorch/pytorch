@@ -45,7 +45,7 @@ if is_available():
     def init_rpc(
         name,
         # Not sure how to annotate dynamic attribute of a type
-        backend=BackendType.TENSORPIPE, # type: ignore
+        backend=BackendType.TENSORPIPE,  # type: ignore
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
