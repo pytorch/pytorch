@@ -1104,7 +1104,7 @@ def _is_per_tensor_obs_instance(module):
 
 def _is_hist_obs_instance(module):
     if isinstance(module, torch.jit.RecursiveScriptModule):
-        return _is_observer_script_module(module, "torch.quantization.observer.MinMaxObserver")
+        return _is_observer_script_module(module, "torch.quantization.observer.HistogramObserver")
     else:
         return isinstance(module, torch.quantization.HistogramObserver)
 
