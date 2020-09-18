@@ -148,6 +148,12 @@ if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       )
+    if(USE_STATIC_CUDNN)
+        set_source_files_properties(
+          ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+          PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
+        )
+    endif()
 endif()
 
 if(USE_NUMPY)
@@ -278,3 +284,25 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Generate torch/version.py from the appropriate CMake cache variables.
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+  set(TORCH_VERSION_DEBUG 1)
+else()
+  set(TORCH_VERSION_DEBUG 0)
+endif()
+
+add_custom_command(
+  OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND
+    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
+      --is_debug=${TORCH_VERSION_DEBUG}
+      --cuda_version=${CUDA_VERSION}
+      --hip_version=${HIP_VERSION}
+  WORKING_DIRECTORY ${TORCH_ROOT}
+)
+add_custom_target(
+  gen_torch_version ALL
+  DEPENDS ${TORCH_SRC_DIR}/version.py
+)
+add_dependencies(torch_python gen_torch_version)

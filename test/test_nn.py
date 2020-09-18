@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
-    module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
+    module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
@@ -633,6 +633,11 @@ class TestNN(NNTestCase):
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
+
+        # Force set to None.
+        module.zero_grad(set_to_none=True)
+        self.assertIsNone(module.weight.grad)
+
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -3092,9 +3097,18 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
 
         inputs = torch.randn(1, 2, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # Assert assertion errors are raised for invalid circular padding values
+        inputs = torch.randn(1, 1, 4, requires_grad=True)
+        # Should raise error when trying to wrap around more than once
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
+        # Should raise error when negative padding results in negative output shape
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
 
         # assert that relfection padding errors when pad >= input size
         expected_err_msg = r"Padding size should be less than the corresponding input dimension"
@@ -4028,6 +4042,38 @@ class TestNN(NNTestCase):
                     self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
+    def test_ConvTranspose2d_output_size_downsample_upsample(self):
+        b, c, hid_c = 2, 3, 2
+        for h in range(13, 24):
+            for w in range(13, 17):
+                for k in range(2, 5):
+                    for d in range(1, 5):
+                        for s in range(1, 4):
+                            for p in range(3):
+                                conv = nn.Conv2d(
+                                    in_channels=c,
+                                    out_channels=hid_c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                t_conv = nn.ConvTranspose2d(
+                                    in_channels=hid_c,
+                                    out_channels=c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                i = torch.randn(b, c, h, w)
+
+                                out = t_conv(conv(i), output_size=i.shape)
+
+                                self.assertEqual(out.size()[2:], i.size()[2:])
 
     def test_ConvTranspose3d_correct_output_size(self):
         # Check that ConvTranspose3d can take a 5d output_size.
@@ -8739,7 +8785,7 @@ for test_params in module_tests + new_module_tests:
 
         add_test(test, decorator)
 
-for test_params in criterion_tests + new_criterion_tests:
+for test_params in criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = CriterionTest(**test_params)
@@ -9153,8 +9199,10 @@ class TestNNDeviceType(NNTestCase):
             (2, 6, 4, 2, 2): 3,
             (1, 256, 1, 1): 32,
         }
-        for shape, g in good_shape_g.items():
+        for shape_g, grad in product(good_shape_g.items(), [True, False]):
+            shape, g = shape_g
             x = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
+            x.requires_grad_(grad)
             b = shape[0]
             c = shape[1]
 
@@ -9166,8 +9214,13 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
+            # TODO: fix numerical issue. See #44863
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+
+            output.backward(torch.randn_like(output))
+            if output.is_cuda:
+                torch.cuda.synchronize()
 
             # test that GN applies weight and bias correctly
             scale = torch.empty(c, device=device, dtype=dtype).uniform_(0.2, 2)
@@ -9180,8 +9233,9 @@ class TestNNDeviceType(NNTestCase):
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
             var = out_normed_reshaped.var(-1, unbiased=False)
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
+            # TODO: fix numerical issue. See #44863
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
 
         bad_shape_g = {
             (1, 2, 3, 4): 3,
@@ -9522,6 +9576,7 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
+    @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
@@ -11185,6 +11240,31 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, dtype, test_backward=test_backward)
         self._test_EmbeddingBag(device, 'mean', True, dtype, test_backward=test_backward)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_embedding_bag_non_contiguous_weight(self, device, dtype):
+        weight_tensor = torch.randn(3, 4, dtype=dtype, device=device)
+
+        weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
+        weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
+
+        index = torch.tensor([0, 1, 2], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        for mode in ['sum', 'mean', 'max']:
+            output_non_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_non_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+            output_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+        self.assertEqual(output_non_contig, output_contig)
+
 
     @onlyCUDA
     @skipCUDAIfNotRocm
@@ -11773,7 +11853,6 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_softmax_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 

@@ -67,6 +67,21 @@ bool& getTEGenerateBlockCode() {
   return te_generate_block_code;
 }
 
+c10::optional<at::Device> pickDeviceType(
+    const at::ArrayRef<torch::jit::Value*>& inputs) {
+  c10::optional<at::Device> device = c10::nullopt;
+  for (auto const& input : inputs) {
+    auto tt = input->type()->cast<TensorType>();
+    if (tt && tt->device()) {
+      if (device && *device != *tt->device()) {
+        return c10::nullopt;
+      }
+      device = *tt->device();
+    }
+  }
+  return device;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -238,9 +253,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
-    case aten::atan2:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward: {
+    case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
       for (size_t idx = 0; idx < 2; idx++) {
         torch::jit::Value* inp = v->node()->input(idx);
@@ -1205,24 +1218,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     }
 
-    case aten::_sigmoid_backward: {
-      return computeTwoOperand(
-          "aten_sigmoid_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs * (ExprHandle(1.0f) - rhs);
-          });
-    }
-
-    case aten::_tanh_backward: {
-      return computeTwoOperand(
-          "aten_tanh_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * (ExprHandle(1.0f) - rhs * rhs);
-          });
-    }
-
     case aten::sum: {
       return computeSum(v);
     }
@@ -1481,17 +1476,6 @@ static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
 }
 
-at::Device TensorExprKernel::pickDeviceType(
-    const at::ArrayRef<torch::jit::Value*>& inputs) {
-  for (auto const& input : inputs) {
-    auto tt = input->type()->cast<TensorType>();
-    if (tt && tt->device()) {
-      return *tt->device();
-    }
-  }
-  throw std::runtime_error("No tensor inputs");
-}
-
 TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     at::Device device) {
   BackendType backendType = BackendType::kUninitialized;
@@ -1726,7 +1710,7 @@ void TensorExprKernel::compile() {
     tensors_.erase(output->unique());
   }
 
-  device_ = pickDeviceType(graph_->inputs());
+  device_ = *pickDeviceType(graph_->inputs());
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = generateStmt(backendType);
   // Set up formal params (inputs, then outputs) for kernel.

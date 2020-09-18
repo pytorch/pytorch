@@ -164,7 +164,8 @@ void fuseConsecutiveTransposes(Block* b) {
       fuseConsecutiveTransposes(child_block);
     }
     if (n->kind() == onnx::Transpose &&
-        n->input()->node()->kind() == onnx::Transpose) {
+        n->input()->node()->kind() == onnx::Transpose &&
+        n->owningBlock() == n->input()->node()->owningBlock()) {
       auto origInput = n->input();
       n->is_(
           attr::perm,
@@ -513,6 +514,22 @@ static void speculateOps(Block* block) {
     auto node_input = n->input()->node();
     if (node_input->owningBlock() == n->owningBlock())
       continue;
+    // Skip if output of this node is part of block output.
+    bool is_block_output = false;
+    for (auto node_output : n->outputs()) {
+      for (auto node_output_use : node_output->uses()) {
+        if (node_output_use.user == n->owningBlock()->return_node()) {
+          is_block_output = true;
+          break;
+        }
+      }
+      if (is_block_output) {
+        break;
+      }
+    }
+    if (is_block_output) {
+      continue;
+    }
     // find the control flow node in the same block as node_input that contains
     // Node n
     auto control_flow_node = n->owningBlock()->owningNode();
