@@ -77,11 +77,11 @@ graph():
     ConstantPooling(graph);
     testing::FileCheck()
         .check_count(
-            "Float(2:1, requires_grad=0, device=cpu) = prim::Constant",
+            "Float(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant",
             1,
             /*exactly*/ true)
         ->check_count(
-            "Long(2:1, requires_grad=0, device=cpu) = prim::Constant",
+            "Long(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant",
             1,
             /*exactly*/ true)
         ->run(*graph);

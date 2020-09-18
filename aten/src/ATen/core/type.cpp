@@ -41,10 +41,20 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (*ndim > 0 && has_valid_strides_info) {
+        out << ",";
+      }
+      if (*ndim > 0 && has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << " strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {

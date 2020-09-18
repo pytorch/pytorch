@@ -269,7 +269,7 @@ graph(%0 : Tensor,
     parseIR(
         R"IR(
 graph(%a : Float(4, 5),
-      %b : Float(4:5, 5:1),
+      %b : Float(4, 5, strides=[5, 1]),
       %c : Double(*, *)):
   return (%a)
 )IR",
@@ -303,7 +303,7 @@ graph(%a : Float(4, 5),
     try {
       parseIR(
           R"IR(
-graph(%a : Float(4:5, 5)):
+graph(%a : Float(4, strides=[5], 5)):
   return (%a)
 )IR",
           &*graph,
@@ -317,7 +317,7 @@ graph(%a : Float(4:5, 5)):
     checkRoundtrip(
         R"IR(
 graph(%a : Float(4, 5),
-      %b : Float(4:5, 5:1),
+      %b : Float(4, 5, strides=[5, 1]),
       %c : Double(*, *)):
   return (%a)
 )IR");
@@ -329,7 +329,7 @@ graph(%a : Float(*, *, device=cpu),
       %b : Float(*, *, requires_grad=1),
       %c : Long(5, 10, requires_grad=1, device=cpu),
       %d : Float(5, requires_grad=0, device=cuda:2),
-      %e : Long(4:6, 3:2, 2:1, requires_grad=0, device=cuda:1),
+      %e : Long(4, 3, 1, strides=[6, 2, 1], requires_grad=0, device=cuda:1),
       %f : Float(),
       %g : Float(device=cpu),
       %h : Float(requires_grad=1),
