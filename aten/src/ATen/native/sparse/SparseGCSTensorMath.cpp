@@ -33,14 +33,9 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
   TORCH_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
   // ixj * jxk = ixk
-  std::cout << "size: " << sparse_.sizes() << " dim: -> " <<  sparse_.dim() << std::endl;
   int64_t dim_i = sparse_.size(0);
   int64_t dim_j = sparse_.size(1);
   int64_t dim_k = dense.size(1);
-
-  std::cout << "dense size: " << dense.sizes() << " dim: -> " <<  dense.dim() << std::endl;
-
-  std::cout << "t size: " << t.sizes() << " dim: -> " <<  t.dim() << std::endl;
 
   TORCH_CHECK(dense.size(0) == dim_j,
               "addmm: Argument #3 (dense): Expected dim 0 size ", dim_j, ", got ", dense.size(0));
@@ -48,7 +43,6 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
               "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", t.size(0));
   TORCH_CHECK(t.size(1) == dim_k,
               "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
-  std::cout << "t size: " << t.sizes() << " dim: -> " <<  t.dim() << std::endl;
   r.resize_({dim_i, dim_k});
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
@@ -67,7 +61,6 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar alpha) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  std::cout << "bself: " << b_self.sizes() << " dim: " << b_self.dim() << std::endl;
   return s_addmm_out_sparse_gcs_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
 }
 
@@ -87,7 +80,6 @@ SparseTensor& _sparse_gcs_mm_out(
   const SparseTensor& sparse,
   const Tensor& dense
 ) {
-  std::cout << "sparse gcs mm out \n" ;
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
@@ -157,10 +149,10 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
     resultBuffer.copy_(dense);
   }
 
-  AT_DISPATCH_ALL_TYPES(commonDtype, "add_dense_sparse_gcs", [&] {
+  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_dense_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
-    auto pointers_accessor = src_pointers.accessor<int64_t, 1>();
-    auto indices_accessor = src_indices.accessor<int64_t, 1>();
+    auto pointers_accessor = src_pointers.accessor<int32_t, 1>();
+    auto indices_accessor = src_indices.accessor<int32_t, 1>();
 
     scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();

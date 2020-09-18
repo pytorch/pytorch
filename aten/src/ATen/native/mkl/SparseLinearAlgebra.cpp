@@ -51,7 +51,6 @@ namespace at { namespace native {
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1, indices, values);
-      std::cout << "MKL\n";
       mkl_sparse_s_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols, beta, res, dense_ncols);
     }
@@ -65,7 +64,6 @@ namespace at { namespace native {
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1, indices, values);
-      std::cout << "MKL\n";
       mkl_sparse_d_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols, beta, res, dense_ncols);
     }
@@ -87,10 +85,8 @@ namespace at { namespace native {
 
   Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense, const Tensor& t,
                                         Scalar alpha, Scalar beta) {
-
-    std::cout << ">>> NO HELLLOOO\n";
     AT_DISPATCH_FLOATING_TYPES(
-      t.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+      dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
         sparse_mm_mkl_template<scalar_t>(res, sparse_.indices(),
                                          sparse_.pointers(), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());

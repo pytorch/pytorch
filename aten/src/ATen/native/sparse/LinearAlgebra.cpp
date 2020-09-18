@@ -29,8 +29,6 @@ namespace at { namespace native {
     LongTensor pointers = sparse_.pointers();
     Tensor values      = sparse_.values();
     int64_t nnz = sparse_._nnz();
-
-    std::cout << "pre dispatch: " << values.scalar_type() <<  " MKL: " << at::hasMKL() << std::endl;;
     
     AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
@@ -48,20 +46,7 @@ namespace at { namespace native {
         }
     });
 
-    std::cout << "post dispatch: " << values.scalar_type() <<  "MKL: " << at::hasMKL() << std::endl;;
-
-
     at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);
-    // if (at::hasMKL() && (at::native::is_floating_point(res) ||
-    //                      at::native::is_complex(res)) &&
-    //     res.is_contiguous()) {
-
-
-    // }
-    // else {
-          
-    // }
-
 
     return res;
   }

@@ -83,14 +83,8 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
   for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
 
-  std::cout << "<<<<< sizes: " << sizes_ << " dims0: " << dims0_ << " strides0: " << strides0_
-            << " dims1: " << dims1_ << " strides1: " << strides1_ <<  std::endl;
-
   make_strides(0, strides0_, dims0_);
   make_strides(rsplit_dim_, strides1_, dims1_);
-
-  std::cout << ">>>>> sizes: " << sizes_ << " dims0: " << dims0_ << " strides0: " << strides0_
-            << " dims1: " << dims1_ << " strides1: " << strides1_ <<  std::endl;
 }
 
 void SparseGCSTensorImpl::make_strides(int shape_start, std::vector<int64_t>& strides, std::vector<int64_t>& dims) {

@@ -89,7 +89,6 @@ class TestSparseGCS(TestCase):
                 co.extend(c)
                 values.extend(v)
 
-        # print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
         return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
                                        torch.tensor(co, dtype=torch.int32), torch.tensor(values),
                                        torch.tensor(reduction), shape, fill_value)
@@ -151,6 +150,8 @@ class TestSparseGCS(TestCase):
 
     def test_bench_matmul(self):
         from IPython import get_ipython
+
+        ipython = get_ipython()
 
         for m in [1000, 5000, 10000, 25000]:
             for nnz_ratio in [0.1, 0.2, 0.3, 0.4, 0.5, 0.8]:

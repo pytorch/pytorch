@@ -20,7 +20,6 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
 
 Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
-  std::cout << "addmv cpu \n";
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
@@ -57,7 +56,6 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self_.size(0)),
     "size mismatch, get ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
 
-  std::cout << "addmv_out \n";
   if (mat.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
     // should not propagate
@@ -94,7 +92,6 @@ Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  std::cout << "mv\n";
   Tensor result = at::empty({self.size(0)}, self.options());
   return native::mv_out(result, self, vec);
 }

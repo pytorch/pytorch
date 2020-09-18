@@ -593,18 +593,14 @@ Tensor matmul(
   auto has_out = out_opt.has_value();
   Tensor out = out_opt.value_or(Tensor());
 
-  std::cout << "matmul " << dim_tensor1 << " " << dim_tensor2 << std::endl;;
-
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    std::cout << "matmul if cond >> has_out -> " << has_out << std::endl;
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    std::cout << "matmul --- " << dim_tensor1 << " " << dim_tensor2 << std::endl;;
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
