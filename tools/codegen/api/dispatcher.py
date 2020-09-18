@@ -107,3 +107,6 @@ def cpparguments_exprs(args: Sequence[CppArgument]) -> Sequence[DispatcherExpr]:
 # close
 def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
     return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])
+
+def dispatcherarguments_exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])

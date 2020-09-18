@@ -71,18 +71,18 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
-    jit::tracer::addInputs(node, "dtype", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "layout", c10::optional<Layout>());
-    jit::tracer::addInputs(node, "device", c10::optional<Device>());
-    jit::tracer::addInputs(node, "pin_memory", c10::optional<bool>());
+    jit::tracer::addInputs(node, "options", dtype_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
-    jit::tracer::addInputs(node, "dtype", c10::optional<ScalarType>());
-    jit::tracer::addInputs(node, "layout", c10::optional<Layout>());
-    jit::tracer::addInputs(node, "device", c10::optional<Device>());
-    jit::tracer::addInputs(node, "pin_memory", c10::optional<bool>());
+    jit::tracer::addInputs(node, "options", dtype_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", layout_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", device_or_default(c10::nullopt));
+    jit::tracer::addInputs(node, "options", pinned_memory_or_default(c10::nullopt));
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
@@ -507,10 +507,10 @@ def format_trace_inputs(declaration):
         else:
             if value == "options":
                 result = ""
-                result += ADD_TRACE_INPUT.substitute(name="dtype", input="optTypeMetaToScalarType(options.dtype_opt())") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name="layout", input="options.layout_opt()") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name="device", input="options.device_opt()") + "\n"
-                result += ADD_TRACE_INPUT.substitute(name="pin_memory", input="options.pinned_memory_opt()")
+                result += ADD_TRACE_INPUT.substitute(name=name, input="optTypeMetaToScalarType(options.dtype_opt())") + "\n"
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.layout_opt()") + "\n"
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.device_opt()") + "\n"
+                result += ADD_TRACE_INPUT.substitute(name=name, input="options.pinned_memory_opt()")
                 return result
             else:
                 return ADD_TRACE_INPUT.substitute(name=name, input=value)
@@ -544,10 +544,10 @@ def format_trace_inputs(declaration):
         has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
         if has_factory_name:
             outplace = ""
-            outplace += ADD_TRACE_INPUT.substitute(name='dtype', input='optTypeMetaToScalarType(out.options().dtype_opt())') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='layout', input='out.options().layout_opt()') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='device', input='out.options().device_opt()') + "\n"
-            outplace += ADD_TRACE_INPUT.substitute(name='pin_memory', input='out.options().pinned_memory_opt()')
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='optTypeMetaToScalarType(out.options().dtype_opt())') + "\n"
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().layout_opt()') + "\n"
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().device_opt()') + "\n"
+            outplace += ADD_TRACE_INPUT.substitute(name='out', input='out.options().pinned_memory_opt()')
         else:
             outplace = ''
 
