@@ -33,6 +33,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
 
 void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(scalars.size() > 0, "Scalars list must have at least one value.");
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
 
@@ -139,6 +140,7 @@ bool can_use_fast_route(TensorList tensors) {
 
 bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(scalars.size() > 0, "Scalars list must have at least one value.");
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 
   return can_use_fast_route(tensors);

@@ -366,14 +366,15 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
   return true;
 }
 
-bool is_float_list_and_append_overloaded(PyObject* obj) {
+bool is_float_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
+
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  for (size_t idx = 0; idx < size; idx++) {
-    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+  if (size > 0) { 
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
     if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
       return false;
     }
@@ -437,7 +438,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return size > 0 && THPUtils_checkLong(obj);
     }
     case ParameterType::FLOAT_LIST: {
-      return is_float_list_and_append_overloaded(obj);
+      return is_float_list(obj);
     }
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
