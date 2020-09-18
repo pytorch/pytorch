@@ -73,6 +73,10 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
     uint64_t rand_offset;
   };
 
+  Kernel* kernel() const {
+    return lowered_.kernel();
+  }
+
  private:
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;

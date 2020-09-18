@@ -321,13 +321,27 @@ IterDomain::IterDomain(
 
   TORCH_INTERNAL_ASSERT(
       _extent->isAnInt(),
-      "Cannot create an iter domain over an extent that is not an int but recieved ",
+      "Cannot create an iter domain over an extent that is not an int but received ",
       _extent,
       " .");
 
   TORCH_INTERNAL_ASSERT(
       _start->isAnInt(),
-      "Cannot create an iter domain with a start that is not an int but recieved ",
+      "Cannot create an iter domain with a start that is not an int but received ",
+      _extent,
+      " .");
+
+  // Check that all for-loops iterate from zero to some positive integer
+  // lower_insert_syncs uses this assumption for correctness.
+  TORCH_INTERNAL_ASSERT(
+      _start->isZeroInt(),
+      "Cannot create an iter domain with a start that is non-zero but received ",
+      _extent,
+      " .");
+
+  TORCH_INTERNAL_ASSERT(
+      !_extent->isZeroInt(),
+      "Cannot create an iter domain with a extent that is zero but received ",
       _extent,
       " .");
 

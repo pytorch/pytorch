@@ -15,10 +15,12 @@ namespace jit {
 namespace fuser {
 
 //! Summary of interesting facts about the kernel
-//
 // TODO(kir): const node ptrs
 //
 struct KernelSummary {
+  //! List of Write-After-Read (WAR) synchronization barriers
+  std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
+
   //! List of global buffers
   std::vector<kir::Allocate*> global_allocations;
 

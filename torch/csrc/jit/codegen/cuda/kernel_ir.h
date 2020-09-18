@@ -517,7 +517,15 @@ class TORCH_CUDA_API Allocate : public Expr {
 // Sync represents __syncthreads barrier for block level coordination.
 class TORCH_CUDA_API Sync : public Expr {
  public:
-  Sync();
+  explicit Sync(bool war_sync = false);
+
+  bool isWarHazardSync() const {
+    return war_sync_;
+  }
+
+ private:
+  // TODO: war_sync_ is only used for testing/validation purposes.
+  bool war_sync_ = false;
 };
 
 class TORCH_CUDA_API Scope {

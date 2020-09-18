@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
+#include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
@@ -107,8 +108,11 @@ void GpuLower::lower() {
   const auto unrolled_loops =
       UnrollPass::runPass(fusion_, lowered_exprs, preds);
 
+  // Insert SyncThreads at end of for-loop to avoid WAR race condition
+  const auto sync_exprs = insertThreadSynchronization(fusion_, unrolled_loops);
+
   const auto indexed_loops =
-      IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
+      IndexLowering::getIndexedExprs(fusion_, sync_exprs);
 
   // We now have the lowered expressions, store the final lowered Kernel IR
   kernel_ = std::make_unique<Kernel>(indexed_loops, preds);

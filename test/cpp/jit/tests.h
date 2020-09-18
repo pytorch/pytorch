@@ -209,7 +209,8 @@ namespace jit {
   _(GPU_FusionSmemBlockGemmCache)                   \
   _(GPU_FusionSmemDynamicReductionSymbolic)         \
   _(GPU_FusionSmemDynamicReductionSymbolicArg)      \
-  _(GPU_FusionSmemDynamicPwiseMulSymbolicArg)       \
+  _(GPU_FusionSmemDynamicPwiseMulSymbolicArgWAR)    \
+  _(GPU_FusionSmemDynamicTiledGemm)                 \
   _(GPU_FusionGlobalIntermediate)                   \
   _(GPU_FusionGlobalIntermediateDefaultSchedule)    \
   _(GPU_FusionConstCheck)                           \

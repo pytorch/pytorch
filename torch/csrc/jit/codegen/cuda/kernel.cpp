@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
 #include <unordered_set>
 
@@ -19,6 +20,12 @@ namespace {
 //!
 class KernelIrScanner : private OptOutDispatch {
  public:
+  // Use expression count to uniquely identify each expression
+  size_t all_expression_count = 0;
+
+  // Map expression id to war hazard sync
+  std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
+
   std::vector<kir::Allocate*> global_allocations;
   std::vector<kir::Allocate*> dynamic_allocations;
   std::vector<kir::Allocate*> static_allocations;
@@ -34,7 +41,16 @@ class KernelIrScanner : private OptOutDispatch {
  private:
   void handle(Expr* expr) final {
     TORCH_CHECK(primary_expressions.insert(expr).second);
+    ++all_expression_count;
     OptOutDispatch::handle(expr);
+  }
+
+  void handle(kir::Sync* sync) final {
+    // TODO: Move to a dedicated validation pass
+    // which is not on the common execution/compilation path
+    if (sync->isWarHazardSync()) {
+      war_hazard_syncs[all_expression_count] = sync;
+    }
   }
 
   void handle(kir::ForLoop* fl) final {
@@ -79,9 +95,11 @@ Kernel::Kernel(std::vector<Expr*> exprs, ThreadPredicateMap predicate_map)
 }
 
 void Kernel::analyze() {
+  FUSER_PERF_SCOPE("Kernel::analyze");
   const KernelIrScanner ir_scanner(exprs_);
 
   // Cache the list of buffers used within the kernel
+  summary_.war_hazard_syncs = ir_scanner.war_hazard_syncs;
   summary_.global_allocations = ir_scanner.global_allocations;
   summary_.dynamic_smem_allocations = ir_scanner.dynamic_allocations;
   summary_.static_smem_allocations = ir_scanner.static_allocations;

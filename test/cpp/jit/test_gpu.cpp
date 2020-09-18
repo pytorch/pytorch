@@ -5040,9 +5040,9 @@ void testGPU_FusionSymbolicReduction() {
   // How many threads to use for the block reduction
   int runtime_threadIdx_dim = 128;
 
-  torch::jit::fuser::cuda::FusionExecutor executor;
-  executor.compileFusion(&fusion);
-  auto outputs = executor.runFusion(
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
       {input},
       torch::jit::fuser::cuda::LaunchParams(
           -1, -1, -1, runtime_threadIdx_dim, -1, -1));
@@ -5549,6 +5549,7 @@ void testGPU_FusionSmem() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
 void testGPU_FusionSmemReduce() {
@@ -5598,6 +5599,8 @@ void testGPU_FusionSmemReduce() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
 }
 
 void testGPU_FusionSmemBlockGemm() {
@@ -5660,6 +5663,7 @@ void testGPU_FusionSmemBlockGemm() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
 void testGPU_FusionSmemBlockGemmCache() {
@@ -5745,6 +5749,7 @@ void testGPU_FusionSmemBlockGemmCache() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
 void testGPU_FusionSmemDynamicReductionSymbolic() {
@@ -5781,9 +5786,9 @@ void testGPU_FusionSmemDynamicReductionSymbolic() {
   // How many threads to use for the block reduction
   constexpr int runtime_threadIdx_dim = 128;
 
-  torch::jit::fuser::cuda::FusionExecutor executor;
-  executor.compileFusion(&fusion);
-  auto outputs = executor.runFusion(
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
       {input},
       torch::jit::fuser::cuda::LaunchParams(
           -1, -1, -1, runtime_threadIdx_dim, -1, -1));
@@ -5793,6 +5798,7 @@ void testGPU_FusionSmemDynamicReductionSymbolic() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
 void testGPU_FusionSmemDynamicReductionSymbolicArg() {
@@ -5839,9 +5845,9 @@ void testGPU_FusionSmemDynamicReductionSymbolicArg() {
   // How many threads to use for the block reduction
   constexpr int runtime_threadIdx_dim = 128;
 
-  torch::jit::fuser::cuda::FusionExecutor executor;
-  executor.compileFusion(&fusion);
-  auto outputs = executor.runFusion(
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
       {t0, runtime_threadIdx_dim},
       torch::jit::fuser::cuda::LaunchParams(
           -1, -1, -1, runtime_threadIdx_dim, -1, -1));
@@ -5851,9 +5857,70 @@ void testGPU_FusionSmemDynamicReductionSymbolicArg() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
 }
 
-void testGPU_FusionSmemDynamicPwiseMulSymbolicArg() {
+void testGPU_FusionSmemDynamicPwiseMulSymbolicArgWAR() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Int* sym_bsx = new Int();
+  TensorView* tv0 = makeDummyTensor(2); // (M, K)
+  TensorView* tv1 = makeDummyTensor(2); // (K, N)
+  TensorView* tv2 = broadcast(tv0, {false, false, true}); // (M, K, B)
+  TensorView* tv3 = broadcast(tv1, {true, false, false}); // (B, K, N)
+  TensorView* tv4 = mul(tv2, tv3); // M, K, N
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(sym_bsx);
+  fusion.addOutput(tv4);
+  // Algorithm
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  constexpr int BSX = 32;
+  tv4->split(2, BSX);
+  tv4->split(1, sym_bsx);
+  tv4->split(0, BSX);
+  // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
+  tv4->reorder({{0, 0}, {1, 3}, {2, 1}, {3, 4}, {4, 2}, {5, 5}});
+  // M/BSX, K/BSX, N/BSX, MSX, KSX, NSX
+
+  tv0->computeAt(tv4, 3);
+  tv1->computeAt(tv4, 3);
+  // Schedule
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(2)->parallelize(ParallelType::BIDy);
+  // Manual Binding
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  // Thread and Block binding
+
+  constexpr int M = 128, K = 457, N = 1024;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
+      {t0, t1, BSX},
+      torch::jit::fuser::cuda::LaunchParams(-1, -1, -1, BSX, -1, -1));
+
+  at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0));
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(22) == 1);
+}
+
+void testGPU_FusionSmemDynamicTiledGemm() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5971,13 +6038,12 @@ void testGPU_FusionSmemDynamicPwiseMulSymbolicArg() {
   auto C_fuser = fuser_outputs[0];
 
   at::Tensor aten_C = mul(A.unsqueeze(2), B.unsqueeze(0)).sum(1);
-  // TODO: re-enable after fixing #380
-#if 0
   TORCH_CHECK(
       aten_C.allclose(C_fuser, 1e-5, 1e-5),
       "Error of: ",
       aten_C.sub(C_fuser).abs().max());
-#endif
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(41) == 1);
 }
 
 void testGPU_FusionGlobalIntermediate() {
@@ -6014,9 +6080,9 @@ void testGPU_FusionGlobalIntermediate() {
   // How many threads to use for the block reduction
   constexpr int runtime_threadIdx_dim = 128;
 
-  torch::jit::fuser::cuda::FusionExecutor executor;
-  executor.compileFusion(&fusion);
-  auto outputs = executor.runFusion(
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
       {input},
       torch::jit::fuser::cuda::LaunchParams(
           -1, -1, -1, runtime_threadIdx_dim, -1, -1));

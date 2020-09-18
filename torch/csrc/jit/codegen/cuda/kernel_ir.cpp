@@ -269,7 +269,7 @@ TensorIndex::TensorIndex(
       "Cannot index with a value other than an int.");
 }
 
-Sync::Sync() : Expr(ExprType::Sync) {
+Sync::Sync(bool war_sync) : Expr(ExprType::Sync), war_sync_(war_sync) {
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
