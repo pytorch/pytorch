@@ -353,17 +353,14 @@ def load(repo_or_dir, model, *args, **kwargs):
         >>> path = '/some/local/path/pytorch/vision'
         >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
-    source = kwargs.get('source', 'github').lower()
-    kwargs.pop('source', None)
+    source = kwargs.pop('source', 'github').lower()
     if source not in ('github', 'local'):
         raise ValueError(
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        force_reload = kwargs.get('force_reload', False)
-        kwargs.pop('force_reload', None)
-        verbose = kwargs.get('verbose', True)
-        kwargs.pop('verbose', None)
+        force_reload = kwargs.pop('force_reload', False)
+        verbose = kwargs.pop('verbose', True)
         repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
