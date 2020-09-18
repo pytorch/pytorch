@@ -202,7 +202,6 @@ class LambdaLR(_LRScheduler):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
-        self.last_epoch = last_epoch
         super(LambdaLR, self).__init__(optimizer, last_epoch, verbose)
 
     def state_dict(self):
@@ -284,7 +283,6 @@ class MultiplicativeLR(_LRScheduler):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
                     len(optimizer.param_groups), len(lr_lambda)))
             self.lr_lambdas = list(lr_lambda)
-        self.last_epoch = last_epoch
         super(MultiplicativeLR, self).__init__(optimizer, last_epoch, verbose)
 
     def state_dict(self):

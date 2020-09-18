@@ -30,7 +30,7 @@ from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
-from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
+from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 
 # Torch
@@ -6999,7 +6999,7 @@ a")
             return torch.{tensor_op}({input})
         ''')
         ops = ['tensor', 'as_tensor']
-        inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
+        inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]', 'torch.jit.annotate(List[List[int]], [])']
         expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
                           "Double(*, device=cpu)", "Double(device=cpu)",
                           "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
@@ -7081,6 +7081,7 @@ a")
         ''')
 
         lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
+                 "torch.jit.annotate(List[List[int]], [])",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -15355,6 +15356,11 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool1d_with_indices',
 }
 
+EXCLUDE_ALIAS = {
+    # aliases, which may appear in method_tests but are tested elsewhere
+    'true_divide',
+}
+
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
     call = get_call(method_name, 'method', actuals, kwargs)
@@ -15523,6 +15529,10 @@ def add_autograd_test(
     # Disable complex tests
     # TODO: Add complex support for jit
     if 'complex' in variant_name:
+        return
+
+    # Skips aliases, which are tested in test_op_aliases.py
+    if name in EXCLUDE_ALIAS:
         return
 
     basic_test_name = 'test_' + name
