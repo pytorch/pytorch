@@ -20,6 +20,22 @@ namespace c10 {
 
 DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device);
 
+inline ScalarType dtype_or_default(c10::optional<ScalarType> dtype) {
+  return dtype.has_value() ? *dtype : get_default_dtype_as_scalartype();
+}
+
+inline caffe2::TypeMeta dtype_or_default(c10::optional<caffe2::TypeMeta> dtype) {
+  return dtype.has_value() ? *dtype : get_default_dtype();
+}
+
+inline Layout layout_or_default(c10::optional<Layout> layout) {
+  return layout.has_value() ? *layout : kStrided;
+}
+
+inline Device device_or_default(c10::optional<Device> device) {
+  return device.has_value() ? *device : Device(kCPU);
+}
+
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -231,7 +247,7 @@ struct C10_API TensorOptions {
 
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept {
-    return has_device_ ? device_ : Device(kCPU);
+    return device_or_default(device_opt());
   }
 
   /// Returns whether the device is specified.
@@ -252,7 +268,7 @@ struct C10_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`.
   caffe2::TypeMeta dtype() const noexcept {
-    return has_dtype_ ? dtype_ : get_default_dtype();
+    return dtype_or_default(dtype_opt());
   }
 
   /// Returns whether the dtype is specified.
@@ -268,7 +284,7 @@ struct C10_API TensorOptions {
 
   /// Returns the layout of the `TensorOptions`.
   Layout layout() const noexcept {
-    return has_layout_ ? layout_ : kStrided;
+    return layout_or_default(layout_opt());
   }
 
   /// Returns whether the layout is specified.
@@ -557,24 +573,24 @@ inline std::string toString(const TensorOptions options) {
 // This is intended to be a centralized location by which we can determine
 // what an appropriate DispatchKey for a tensor is.
 inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device) {
-  const auto dtype_ = dtype.has_value() ? *dtype : typeMetaToScalarType(get_default_dtype());
-  const auto layout_ = layout.has_value() ? *layout : kStrided;
-  const auto device_ = device.has_value() ? *device : Device(kCPU);
+  const auto layout_ = layout_or_default(layout);
+  const auto device_ = device_or_default(device);
   switch (layout_) {
-      case Layout::Strided:
+      case Layout::Strided: {
+        const auto dtype_ = dtype_or_default(dtype);
         switch (device_.type()) {
           case DeviceType::CPU: {
             if (isQIntType(dtype_)) {
               return DispatchKey::QuantizedCPU;
             }
             return DispatchKey::CPU;
+          }
+          case DeviceType::CUDA: {
+            if (isQIntType(dtype_)) {
+              return DispatchKey::QuantizedCUDA;
             }
-            case DeviceType::CUDA: {
-              if (isQIntType(dtype_)) {
-                return DispatchKey::QuantizedCUDA;
-              }
-              return DispatchKey::CUDA;
-            }
+            return DispatchKey::CUDA;
+          }
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
@@ -596,6 +612,7 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device_.type());
         }
+      }
       case Layout::Sparse:
         switch (device_.type()) {
           case DeviceType::CPU:
