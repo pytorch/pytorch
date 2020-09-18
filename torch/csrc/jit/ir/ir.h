@@ -1421,6 +1421,9 @@ TORCH_API std::vector<Value*> inlineCallTo(
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
+// Sort inputs topologically, filtering node's who's owning block != b
+value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b);
+
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
 

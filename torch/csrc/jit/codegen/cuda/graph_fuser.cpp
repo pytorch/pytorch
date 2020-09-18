@@ -337,20 +337,6 @@ struct CudaGraphFuser {
     chunk->destroy();
   }
 
-  value_list sortReverseTopological(ArrayRef<Value*> inputs) {
-    value_list result;
-    for (auto i : inputs) {
-      if (i->node()->owningBlock() == block_) {
-        result.push_back(i);
-      }
-    }
-    // Sort in reverse topological order
-    std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
-      return a->node()->isAfter(b->node());
-    });
-    return result;
-  }
-
   at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
     AT_ASSERT(inputs.size() > 0);
     auto* g = inputs[0]->owningGraph();
@@ -613,7 +599,7 @@ struct CudaGraphFuser {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      auto inputs = sortReverseTopological(consumer->inputs());
+      auto inputs = sortReverseTopological(consumer->inputs(), block_);
       for (auto producer : inputs) {
         if (tryToMoveChunk(consumer, producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,

@@ -561,23 +561,9 @@ struct GraphFuser {
     return consumer->reverseIterator();
   }
 
-  value_list sortReverseTopological(ArrayRef<Value*> inputs) {
-    value_list result;
-    for (auto i : inputs) {
-      if (i->node()->owningBlock() == block_) {
-        result.push_back(i);
-      }
-    }
-    // Sort in reverse topological order
-    std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
-      return a->node()->isAfter(b->node());
-    });
-    return result;
-  }
-
   graph_node_list::iterator scanNodeForChunks(Node* consumer) {
     if (consumer->kind() == prim::FusionGroup) {
-      auto inputs = sortReverseTopological(consumer->inputs());
+      auto inputs = sortReverseTopological(consumer->inputs(), block_);
       for (auto producer : inputs) {
         if (!canFuseChunk(consumer, producer)) {
           continue;
@@ -872,7 +858,7 @@ struct GraphFuser {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      auto inputs = sortReverseTopological(consumer->inputs());
+      auto inputs = sortReverseTopological(consumer->inputs(), block_);
       for (auto producer : inputs) {
         if (tryToMoveChunk(consumer, producer)) {
           // the chunk before this consumer was re-arranged to allow fusion,
@@ -1097,7 +1083,7 @@ struct GraphFuser {
       Node* fused_cat = createFusedConcat(cat);
       Value* fused_cat_out = fused_cat->output();
 
-      auto sorted_inputs = sortReverseTopological(fused_cat->inputs());
+      auto sorted_inputs = sortReverseTopological(fused_cat->inputs(), block_);
       size_t input_idx = 0;
       bool any_fused = false;
       while (input_idx < sorted_inputs.size()) {
@@ -1110,7 +1096,7 @@ struct GraphFuser {
         AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
-        sorted_inputs = sortReverseTopological(fused_cat->inputs());
+        sorted_inputs = sortReverseTopological(fused_cat->inputs(), block_);
         input_idx = 0;
       }
 

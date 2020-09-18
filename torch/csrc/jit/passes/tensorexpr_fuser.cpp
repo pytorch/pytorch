@@ -360,20 +360,6 @@ class TensorExprFuser {
     });
   }
 
-  value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
-    value_list result;
-    for (auto i : inputs) {
-      if (i->node()->owningBlock() == b) {
-        result.push_back(i);
-      }
-    }
-    // Sort in reverse topological order
-    std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
-      return a->node()->isAfter(b->node());
-    });
-    return result;
-  }
-
   // Create a fusion group starting from the node N.
   // We then try to pull inputs into the fusion group and repeat that process
   // until there is nothing we can pull in.

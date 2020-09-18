@@ -323,8 +323,10 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
   out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
-    out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
-        << *fg->g(attr::Subgraph);
+    if (fg->kind() != prim::FallbackGraph) {
+      out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
+          << *fg->g(attr::Subgraph);
+    }
   }
   /*
   // Uncomment this to debug all_nodes issues
@@ -1935,6 +1937,20 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
     tup->node()->destroy();
   }
   return new_outputs;
+}
+
+value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
+  value_list result;
+  for (auto i : inputs) {
+    if (i->node()->owningBlock() == b) {
+      result.push_back(i);
+    }
+  }
+  // Sort in reverse topological order
+  std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
+    return a->node()->isAfter(b->node());
+  });
+  return result;
 }
 
 std::vector<Value*> insertGraph(
