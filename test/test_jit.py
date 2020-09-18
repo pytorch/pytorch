@@ -11565,7 +11565,7 @@ a")
                 return shutil.abcd
 
     def test_wrong_module_attr_lookup(self):
-        with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value:'):
+        with self.assertRaisesRegex(RuntimeError, 'python value of type \'type\' cannot be used as a value'):
             import io
 
             @torch.jit.script
@@ -13738,9 +13738,18 @@ a")
             if torch.jit.is_scripting():
                 return 1
             else:
-                print("hello") + 2
+                print("hello") + 2  # will not be compiled
 
         self.assertEqual(foo(), 1)
+
+    def test_assert_is_scripting_metacompile(self):
+        def foo():
+            assert not torch.jit.is_scripting(), "TestErrorMsg"
+            print("hello") + 2  # will not be compiled
+
+        f = torch.jit.script(foo)
+        with self.assertRaisesRegex(torch.jit.Error, "TestErrorMsg"):
+            f()
 
     def test_isinstance_metacompile(self):
         @torch.jit.script
