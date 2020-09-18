@@ -5028,11 +5028,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         if self.check_forward_only:
             return
 
-<<<<<<< HEAD
-        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
-
-=======
->>>>>>> master
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
             inputs = (input,) + params + (target,)
