@@ -416,6 +416,20 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2(torch.rand(4, 4))
 
+    def test_symbolic_trace_sequential(self):
+        class Simple(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        seq = torch.nn.Sequential(
+            Simple(),
+            Simple(),
+            Simple()
+        )
+        traced = symbolic_trace(seq)
+        x = torch.rand(3, 4)
+        self.assertEqual(traced(x), seq(x))
+
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):
             def forward(self, x):
@@ -445,8 +459,31 @@ class TestFX(JitTestCase):
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
+        self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
         self.assertEqual(copied(x), transformed(x))
+
+    def test_deepcopy_with_submods_params(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.relu(x) + self.param
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(x) - self.param
+
+        baz = Baz()
+        traced = symbolic_trace(baz)
+        copied = copy.deepcopy(traced)
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
@@ -524,10 +561,31 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
-        input = torch.rand(3) 
+        input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
-        self.assertEqual(r, ref) 
+        self.assertEqual(r, ref)
+
+    def test_construct_root_dict(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+
+        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
+        add_param : torch.Tensor = torch.rand(3, 4)
+        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+            {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
+
+        assert 'self.foo.bar.baz' in gm.code
+
+        x : torch.Tensor = torch.rand(3, 3)
+        out : torch.Tensor = gm(x)
+        ref_out : torch.Tensor = linear_mod(x) + add_param
+        self.assertEqual(out, ref_out)
+
 
 if __name__ == '__main__':
     run_tests()

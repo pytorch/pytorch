@@ -60,7 +60,7 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   return deviceIndices;
 }
 
-std::vector<c10::DeviceIndex> getDevicesForTensors(
+std::vector<c10::DeviceIndex> getDevicesForRemote(
     const std::string& remoteName,
     const std::vector<torch::Tensor>& tensors,
     const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMaps) {
@@ -456,7 +456,7 @@ void TensorPipeAgent::pipeWrite(
   if (deviceMap.empty()) {
     const auto& deviceMaps =
         rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
-    devices = getDevicesForTensors(
+    devices = getDevicesForRemote(
         pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
   } else {
     // If the deviceMap is overridden, use that instead.

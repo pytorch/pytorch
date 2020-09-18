@@ -543,7 +543,7 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl_UNBOXED(name.operator const char*(), std::forward<Func>(raw_f));
+    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
   }
 
   /// Register a fallback implementation for all operators which will be used
