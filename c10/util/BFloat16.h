@@ -7,8 +7,8 @@
 #include <cmath>
 #include <cstring>
 
-#if defined(CUDA_VERSION) && CUDA_VERSION > 11000
-#include <cuda_bf16.hpp>
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#include <cuda_bf16.h>
 #endif
 
 namespace c10 {
@@ -89,7 +89,7 @@ struct alignas(2) BFloat16 {
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
-#if defined(CUDA_VERSION) && CUDA_VERSION > 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
