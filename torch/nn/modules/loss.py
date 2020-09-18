@@ -1254,7 +1254,7 @@ class TripletMarginLoss(_Loss):
 class TripletMarginWithDistanceLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given input
     tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
-    positive, and negative examples, respectively) and a nonnegative,
+    positive, and negative examples, respectively), and a nonnegative,
     real-valued function ("distance function") used to compute the relationship
     between the anchor and positive example ("positive distance") and the
     anchor and negative example ("negative distance").
