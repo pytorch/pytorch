@@ -126,7 +126,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "_get_timeout",
               // intentionally not releasing GIL to avoid context switch
               [](const RpcAgent& self) {
-                return self.getRpcTimeout().count() / 1000.0f;
+                return self.getRpcTimeout().count() / float(kToMilliseconds);
               }
           );
 
