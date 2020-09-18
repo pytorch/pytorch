@@ -9,7 +9,7 @@ import numpy
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.onnx.utils import _add_block, _add_node_to_block, _add_input_to_block, _add_output_to_block
+from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -764,38 +764,38 @@ def embedding_bag(g,
     # Offsets holds the starting index position of each bag. So we create a list of the indices slices (determined by
     # offsets) and gather those indices in indices_row. Then we use this subset of indices to gather from embeddings.
     # The embeddings output is a loop scan output, so we can avoid creating a sequence and inserting elements in.
-    offsets_starts = sym_help._slice_helper(g, offsets, axes=[0], starts=[0], ends=[-1], steps=[1])
+    offsets_starts = sym_help._slice_helper(g, offsets, axes=[0], starts=[0], ends=[maxsize], steps=[1])
     offsets_ends = sym_help._slice_helper(g, offsets, axes=[0], starts=[1], ends=[maxsize], steps=[1])
 
     loop_len = sym_help._size_helper(g, offsets_ends, g.op("Constant", value_t=torch.tensor(0)))
     loop = g.op("Loop", loop_len, loop_condition)
 
-    new_block = _add_block(loop.node())
-    block_input_iter = _add_input_to_block(new_block)
+    loop_block = _add_block(loop.node())
+    block_input_iter = _add_input_to_block(loop_block)
 
-    indices_start = _add_node_to_block(new_block, "onnx::Gather", offsets_starts, block_input_iter, axis_i=0)
-    indices_end = _add_node_to_block(new_block, "onnx::Gather", offsets_ends, block_input_iter, axis_i=0)
-    indices_start = _add_node_to_block(new_block, "onnx::Unsqueeze", indices_start, axes_i=[0])
-    indices_end = _add_node_to_block(new_block, "onnx::Unsqueeze", indices_end, axes_i=[0])
+    indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
+    indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
+    indices_start = loop_block.op("Unsqueeze", indices_start, axes_i=[0])
+    indices_end = loop_block.op("Unsqueeze", indices_end, axes_i=[0])
 
-    indices_row = _add_node_to_block(new_block, "onnx::Slice", indices, indices_start, indices_end, zero)
-    embeddings = _add_node_to_block(new_block, "onnx::Gather", embedding_matrix, indices_row, axis_i=0)
+    indices_row = loop_block.op("Slice", indices, indices_start, indices_end, zero)
+    embeddings = loop_block.op("Gather", embedding_matrix, indices_row, axis_i=0)
     if not sym_help._is_none(per_sample_weights):
-        per_sample_weights_row = _add_node_to_block(new_block, "onnx::Slice", per_sample_weights,
+        per_sample_weights_row = loop_block.op("Slice", per_sample_weights,
                                                     indices_start,
                                                     indices_end,
                                                     zero)
-        per_sample_weights_row = _add_node_to_block(new_block, "onnx::Unsqueeze", per_sample_weights_row, axes_i=[1])
-        embeddings = _add_node_to_block(new_block, "onnx::Mul", embeddings, per_sample_weights_row)
+        per_sample_weights_row = loop_block.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+        embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
-        embeddings = _add_node_to_block(new_block, "onnx::ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = loop_block.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
     elif mode == 1:
-        embeddings = _add_node_to_block(new_block, "onnx::ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = loop_block.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
     else:
-        embeddings = _add_node_to_block(new_block, "onnx::ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = loop_block.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-    _add_output_to_block(new_block, loop_condition)
-    _add_output_to_block(new_block, embeddings)
+    _add_output_to_block(loop_block, loop_condition)
+    _add_output_to_block(loop_block, embeddings)
     # This pass does all required type casting for loop inputs (condition and iter)
     torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
 
