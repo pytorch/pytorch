@@ -4572,36 +4572,6 @@ class NNTestCase(TestCase):
                 PRECISION
             )
 
-    def check_criterion_jacobian(self, criterion, input, target, extra_args):
-        eps = 1e-6
-        self._forward_criterion(criterion, input, target, extra_args=extra_args)
-        analytical_d_x = self._backward_criterion(criterion, input, target, extra_args=extra_args)
-        numerical_d_x = deepcopy(analytical_d_x)
-
-        input_t = iter_tensors(input)
-        numerical_t = iter_tensors(numerical_d_x)
-        for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1).data
-            d_x = d_x.view(-1).data
-            for i in range(x.nelement()):
-                original = x[i].item()
-                x[i] = original + eps
-                fx1 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                x[i] = original - eps
-                fx2 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                deriv = (fx1 - fx2) / (2. * eps)
-                d_x[i] = float(deriv)
-                x[i] = original
-
-        # TODO: check structure
-        analytical_t = list(iter_tensors(analytical_d_x))
-        numerical_t = list(iter_tensors(numerical_d_x))
-
-        self.assertLessEqual(
-            max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
-
 
 class TestBase(object):
 
@@ -5057,8 +5027,6 @@ class CriterionTest(InputVariableMixin, TestBase):
 
         if self.check_forward_only:
             return
-
-        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
 
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
