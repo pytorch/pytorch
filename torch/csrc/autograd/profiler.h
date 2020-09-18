@@ -100,16 +100,16 @@ struct TORCH_API ProfilerConfig {
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
-      bool with_source = false)
+      bool with_stack = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
-        with_source(with_source) {}
+        with_stack(with_stack) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
-  bool with_source;
+  bool with_stack;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.

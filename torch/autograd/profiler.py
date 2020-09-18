@@ -313,7 +313,7 @@ class profile(object):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
-        with_source (bool, optional): record source information for the ops
+        with_stack (bool, optional): record source information for the ops
 
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
@@ -354,7 +354,7 @@ class profile(object):
             use_cuda=False,
             record_shapes=False,
             profile_memory=False,
-            with_source=False):
+            with_stack=False):
         self.enabled = enabled
         self.use_cuda = use_cuda
         self.function_events = None
@@ -363,7 +363,7 @@ class profile(object):
         self.entered = False
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
-        self.with_source = with_source
+        self.with_stack = with_stack
 
     def __enter__(self):
         if not self.enabled:
@@ -378,7 +378,7 @@ class profile(object):
             profiler_kind,
             self.record_shapes,
             self.profile_memory,
-            self.with_source)
+            self.with_stack)
         torch.autograd._enable_profiler(config)
         return self
 
@@ -390,7 +390,7 @@ class profile(object):
             parse_event_records(records),
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
-        if self.with_source:
+        if self.with_stack:
             self.function_events.set_backward_stacktraces()
         return False
 

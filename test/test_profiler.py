@@ -73,7 +73,7 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
-        with profile(with_source=True) as p:
+        with profile(with_stack=True) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y

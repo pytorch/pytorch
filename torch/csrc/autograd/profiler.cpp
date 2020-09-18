@@ -225,7 +225,7 @@ struct ProfilerThreadLocalState
       evt.setScope((uint8_t)fn.scope());
 
       // backward nodes source range corresponds to the forward node
-      if (config_.with_source && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+      if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
         auto cs = jit::currentCallstack();
         if (cs.empty()) {
           cs = jit::tracer::pythonCallstack();

@@ -32,7 +32,7 @@ if __name__ == '__main__':
         description='Profiler benchmark')
 
     parser.add_argument('--with_cuda', action='store_true')
-    parser.add_argument('--with_source', action='store_true')
+    parser.add_argument('--with_stack', action='store_true')
     parser.add_argument('--use_script', action='store_true')
     parser.add_argument('--profiling_tensor_size', default=1, type=int)
     parser.add_argument('--workload', default='loop', type=str)
@@ -55,7 +55,7 @@ if __name__ == '__main__':
             args.profiling_tensor_size,
             args.profiling_tensor_size,
             args.with_cuda,
-            args.with_source,
+            args.with_stack,
             args.use_script))
 
         input_x = torch.rand(
@@ -81,7 +81,7 @@ if __name__ == '__main__':
                 x = None
                 with torch.autograd.profiler.profile(
                         use_cuda=args.with_cuda,
-                        with_source=args.with_source) as prof:
+                        with_stack=args.with_stack) as prof:
                     x = workload(input_x)
                 return x
         else:
