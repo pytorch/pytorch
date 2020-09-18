@@ -70,7 +70,7 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     sccache --stop-server || true
     rm ~/sccache_error.log || true
     if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 RUST_LOG=sccache=trace sccache --start-server
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
       # https://github.com/pytorch/pytorch/pull/16645

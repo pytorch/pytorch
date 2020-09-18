@@ -610,3 +610,38 @@ class TestWith(JitTestCase):
         w = s(x, y)
 
         self.assertFalse(w.requires_grad)
+
+    def test_with_record_function(self):
+        """
+        Check that torch.autograd.profiler.record_function context manager is
+        torchscriptable.
+        """
+        def with_rf(x, y):
+            # type: (Tensor, Tensor) -> Tensor
+            with torch.autograd.profiler.record_function("foo"):
+                # Nested record_function.
+                with torch.autograd.profiler.record_function("nested"):
+                    a = x + y
+            return a
+
+        scripted = torch.jit.script(with_rf)
+        x, y = torch.ones(2), torch.ones(2)
+        with torch.autograd.profiler.profile() as p:
+            scripted(x, y)
+
+        # Need to call below to populate CPU children.
+        p.key_averages()
+        function_events = p.function_events
+        # Event with name "foo" should be recorded.
+        rf_events = [evt for evt in function_events if evt.name == "foo"]
+        self.assertTrue(len(rf_events), 1)
+        rf_event = rf_events[0]
+        child_events = rf_event.cpu_children
+        # Ensure we find nested record_function event
+        self.assertTrue("nested" in (child.name for child in child_events))
+        nested_function_event = [
+            evt for evt in function_events if evt.name == "nested"
+        ][0]
+        # Nested record function should have child "aten::add"
+        nested_child_events = nested_function_event.cpu_children
+        self.assertTrue("aten::add" in (child.name for child in nested_child_events))
