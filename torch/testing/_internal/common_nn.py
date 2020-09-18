@@ -3879,7 +3879,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(2, 3, 4),
-        target_size=(2, 3, 4),
+        target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
     ),
@@ -3955,7 +3955,7 @@ criterion_tests = [
     dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
-        target_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn((2, 3, 4, 5), requires_grad=True),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
                                       if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
@@ -4101,7 +4101,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(5, 10),
-        target_size=(5, 10),
+        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
@@ -4277,7 +4277,7 @@ criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
         desc='scalar',
     ),
@@ -4302,7 +4302,7 @@ criterion_tests = [
     dict(
         module_name='MSELoss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
@@ -4343,7 +4343,7 @@ criterion_tests = [
     dict(
         module_name='SmoothL1Loss',
         input_size=(),
-        target_size=(),
+        target_fn=lambda: torch.randn((), requires_grad=True),
         check_sum_reduction=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, reduction=get_reduction(m)),
@@ -4572,36 +4572,6 @@ class NNTestCase(TestCase):
                 PRECISION
             )
 
-    def check_criterion_jacobian(self, criterion, input, target, extra_args):
-        eps = 1e-6
-        self._forward_criterion(criterion, input, target, extra_args=extra_args)
-        analytical_d_x = self._backward_criterion(criterion, input, target, extra_args=extra_args)
-        numerical_d_x = deepcopy(analytical_d_x)
-
-        input_t = iter_tensors(input)
-        numerical_t = iter_tensors(numerical_d_x)
-        for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1).data
-            d_x = d_x.view(-1).data
-            for i in range(x.nelement()):
-                original = x[i].item()
-                x[i] = original + eps
-                fx1 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                x[i] = original - eps
-                fx2 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                deriv = (fx1 - fx2) / (2. * eps)
-                d_x[i] = float(deriv)
-                x[i] = original
-
-        # TODO: check structure
-        analytical_t = list(iter_tensors(analytical_d_x))
-        numerical_t = list(iter_tensors(numerical_d_x))
-
-        self.assertLessEqual(
-            max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
-
 
 class TestBase(object):
 
@@ -4775,89 +4745,81 @@ class ModuleTest(TestBase):
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
-            gpu_input = to_gpu(cpu_input, type_map=type_map)
 
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
-            cpu_param = test_case._get_parameters(cpu_module)
-            gpu_param = test_case._get_parameters(gpu_module)
-            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
-                gpu_p.data.copy_(cpu_p)
+        cpu_input = self._get_input()
+        type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
+        gpu_input = to_gpu(cpu_input, type_map=type_map)
 
-            test_case._zero_grad_input(cpu_input)
-            test_case._zero_grad_input(gpu_input)
-            test_case._zero_grad_parameters(cpu_module)
-            test_case._zero_grad_parameters(gpu_module)
-            cpu_output = test_case._forward(cpu_module, cpu_input)
-            gpu_output = test_case._forward(gpu_module, gpu_input)
+        cpu_module = self.constructor(*self.constructor_args)
+        gpu_module = self.constructor(*self.constructor_args).float().cuda()
+        cpu_param = test_case._get_parameters(cpu_module)
+        gpu_param = test_case._get_parameters(gpu_module)
+        for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
+            gpu_p.data.copy_(cpu_p)
+
+        test_case._zero_grad_input(cpu_input)
+        test_case._zero_grad_input(gpu_input)
+        test_case._zero_grad_parameters(cpu_module)
+        test_case._zero_grad_parameters(gpu_module)
+        cpu_output = test_case._forward(cpu_module, cpu_input)
+        gpu_output = test_case._forward(gpu_module, gpu_input)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+
+        # Run backwards on CPU and GPU and compare results
+        for _ in range(5):
+            cpu_gradOutput = cpu_output.clone().normal_()
+            gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+            cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
+            gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
-            # Run backwards on CPU and GPU and compare results
-            for _ in range(5):
-                cpu_gradOutput = cpu_output.clone().normal_()
-                gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
-                cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
-                gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
+        # Run double-backwards on CPU and GPU and compare results
+        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
+            cpu_output = cpu_module(cpu_input)
+            gpu_output = gpu_module(gpu_input)
+
+            cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
+            gpu_gradOutput.requires_grad = True
+
+            cpu_gradInputs = torch.autograd.grad(
+                cpu_output,
+                (cpu_input,) + tuple(cpu_module.parameters()),
+                cpu_gradOutput,
+                create_graph=True)
+            gpu_gradInputs = torch.autograd.grad(
+                gpu_output,
+                (gpu_input,) + tuple(gpu_module.parameters()),
+                gpu_gradOutput,
+                create_graph=True)
+
+            for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                    test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
 
-            # Run double-backwards on CPU and GPU and compare results
-            if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
-                cpu_output = cpu_module(cpu_input)
-                gpu_output = gpu_module(gpu_input)
-
-                cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
-                gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
-                gpu_gradOutput.requires_grad = True
-
-                cpu_gradInputs = torch.autograd.grad(
-                    cpu_output,
-                    (cpu_input,) + tuple(cpu_module.parameters()),
-                    cpu_gradOutput,
-                    create_graph=True)
-                gpu_gradInputs = torch.autograd.grad(
-                    gpu_output,
-                    (gpu_input,) + tuple(gpu_module.parameters()),
-                    gpu_gradOutput,
-                    create_graph=True)
-
-                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
-
-                # We mix output into the second backwards computation so that
-                # torch.autograd.grad doesn't complain that some inputs
-                # are unreachable (which can happen if you differentiate
-                # only on the gradient.
-                cpu_gg = torch.autograd.grad(
-                    cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
-                    (cpu_input, cpu_gradOutput) + tuple(cpu_module.parameters()),
-                    retain_graph=True)
-                gpu_gg = torch.autograd.grad(
-                    gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
-                    (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
-                    retain_graph=True)
+            # We mix output into the second backwards computation so that
+            # torch.autograd.grad doesn't complain that some inputs
+            # are unreachable (which can happen if you differentiate
+            # only on the gradient.
+            cpu_gg = torch.autograd.grad(
+                cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
+                (cpu_input, cpu_gradOutput) + tuple(cpu_module.parameters()),
+                retain_graph=True)
+            gpu_gg = torch.autograd.grad(
+                gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
+                (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
+                retain_graph=True)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
-            self.test_noncontig(test_case, gpu_module, gpu_input)
-        except NotImplementedError:
-            pass
-        # TODO: remove this after CUDA scatter_ is implemented
-        except AttributeError as e:
-            if len(e.args) == 1 and "'FloatTensor' object has no attribute 'scatter_'" in e.args[0]:
-                pass
-            else:
-                raise
+        self.test_noncontig(test_case, gpu_module, gpu_input)
 
 
 class InputVariableMixin(object):
@@ -5066,32 +5028,22 @@ class CriterionTest(InputVariableMixin, TestBase):
         if self.check_forward_only:
             return
 
-        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
-        self._do_extra_tests(test_case, module, input, target)
-
-    def _do_extra_tests(self, test_case, module, input, target):
-        test_case.assertFalse(target.requires_grad)
-
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):
-            inputs = (input,) + params
+            inputs = (input,) + params + (target,)
 
-            def apply_fn(input, *params):
+            def apply_fn(input, target, *params):
                 return module(input, target)
         else:
-            inputs = input + params
+            inputs = input + params + (target,)
 
-            def apply_fn(input1, input2, *params):
+            def apply_fn(input1, input2, target, *params):
                 return module(input1, input2, target)
 
-        # TODO: we don't pass `target` as part of inputs because we don't
-        # currently compute the gradient w.r.t. target for loss functions.
         gradcheck(apply_fn, inputs)
 
-        if not self.check_gradgrad:
-            return
-
-        gradgradcheck(apply_fn, inputs)
+        if self.check_gradgrad:
+            gradgradcheck(apply_fn, inputs)
 
     def test_cuda(self, test_case, dtype=None, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):

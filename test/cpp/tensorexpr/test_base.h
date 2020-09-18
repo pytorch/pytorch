@@ -58,6 +58,17 @@ void ExpectAllNear(
   }
 }
 
+template <typename U, typename V>
+void ExpectAllNear(
+    const std::vector<U>& vec,
+    const U& val,
+    V threshold,
+    const std::string& name = "") {
+  for (size_t i = 0; i < vec.size(); i++) {
+    ASSERT_NEAR(vec[i], val, threshold, "element index: ", i, ", name: ", name);
+  }
+}
+
 template <typename T>
 static void assertAllEqual(const std::vector<T>& vec, const T& val) {
   for (auto const& elt : vec) {
