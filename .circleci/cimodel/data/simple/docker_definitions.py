@@ -20,14 +20,13 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     "pytorch-linux-xenial-py3-clang5-asan",
+    "pytorch-linux-xenial-py3-clang7-onnx",
     "pytorch-linux-xenial-py3.8",
     "pytorch-linux-xenial-py3.6-clang7",
     "pytorch-linux-xenial-py3.6-gcc4.8",
     "pytorch-linux-xenial-py3.6-gcc5.4",
     "pytorch-linux-xenial-py3.6-gcc7.2",
     "pytorch-linux-xenial-py3.6-gcc7",
-    "pytorch-linux-xenial-rocm3.3-py3.6",
-    "pytorch-linux-xenial-rocm3.5.1-py3.6",
     "pytorch-linux-bionic-rocm3.7-py3.6",
 ]
 
