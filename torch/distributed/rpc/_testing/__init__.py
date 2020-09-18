@@ -3,29 +3,7 @@ from typing import List, Dict
 from datetime import timedelta
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
-
-# mypy declarations
-class FaultyProcessGroupRpcBackendOptions:
-    def __init__(
-        self,
-        num_send_recv_threads: int,
-        rpc_timeout: float,
-        init_method: str,
-        messages_to_fail: List[str],
-        messages_to_delay: Dict[str, float],
-        num_fail_sends: int
-    ): ...
-class FaultyProcessGroupAgent:
-    def __init__(
-        self,
-        name: str,
-        process_group: ProcessGroup,
-        num_send_recv_threads: int,
-        rpc_timeout: timedelta,
-        messages_to_fail: List[str],
-        messages_to_delay: Dict[str, float],
-        num_fail_sends: int
-    ): ...
+from torch._C._distributed_rpc import FaultyProcessGroupRpcBackendOptions, FaultyProcessGroupAgent
 
 def is_available():
     return hasattr(torch._C, "_faulty_agent_init")
