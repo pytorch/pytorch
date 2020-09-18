@@ -1453,6 +1453,22 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
   throw std::runtime_error(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports recv for NCCL lib version >= 2.7.0");
+}
 #endif
 
 void ProcessGroupNCCL::groupStart() {
