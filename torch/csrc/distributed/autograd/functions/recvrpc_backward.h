@@ -23,7 +23,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
       const AutogradMetadata& autogradMetadata,
       std::shared_ptr<DistAutogradContext> autogradContext,
       rpc::worker_id_t fromWorkerId,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap);
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap);
 
   torch::autograd::variable_list apply(
       torch::autograd::variable_list&& grads) override;

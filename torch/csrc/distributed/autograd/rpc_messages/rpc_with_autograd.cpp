@@ -19,12 +19,12 @@ RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     rpc::Message&& wrappedMessage,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap)
+    std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
       wrappedMessage_(std::move(wrappedMessage)),
-      deviceMap_(deviceMap) {
+      deviceMap_(std::move(deviceMap)) {
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
@@ -39,14 +39,14 @@ RpcWithAutograd::RpcWithAutograd(
     std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap)
+    std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
-      deviceMap_(deviceMap) {
+      deviceMap_(std::move(deviceMap)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||

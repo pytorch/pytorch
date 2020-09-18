@@ -19,8 +19,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::MessageType messageType,
       const AutogradMetadata& autogradMetadata,
       rpc::Message&& wrappedMessage,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {});
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
 
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
@@ -30,8 +29,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
-      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
-          {});
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
 
   rpc::Message toMessageImpl() && override;
 
