@@ -354,7 +354,7 @@ test_cpp_extensions() {
 
 test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
-  if [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
     pushd build/bin
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
