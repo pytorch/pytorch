@@ -1902,7 +1902,7 @@ TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther
   {
     expectThrows<c10::Error>([&] {
       callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
-    }, "You're registering kernel to a backend maps to AutogradOther trying to override Math kernel behavior.");
+    }, "test::fn has kernels registered to both Math and a backend mapped to AutogradOther.");
   }
 }
 

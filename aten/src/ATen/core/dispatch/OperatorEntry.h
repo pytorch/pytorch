@@ -229,6 +229,7 @@ private:
 
   std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
+  static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
   // signature_hash_ is set to the hash of the function signature if any of
   // the kernels was created in a way that allowed us to know the function
