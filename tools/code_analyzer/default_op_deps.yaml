@@ -502,6 +502,7 @@
   - name: aten::zeros
 - name: aten::_conj
   depends:
+  - name: aten::_conj
   - name: aten::conj
   - name: aten::empty
   - name: aten::eq
@@ -1614,8 +1615,10 @@
 - name: aten::_triangular_solve_helper
   depends:
   - name: aten::clone
+  - name: aten::empty
   - name: aten::eq
   - name: aten::is_nonzero
+  - name: aten::size
   - name: aten::transpose
   - name: aten::transpose_
 - name: aten::_trilinear
@@ -3159,6 +3162,7 @@
   depends:
   - name: aten::_copy_from
   - name: aten::_empty_affine_quantized
+  - name: aten::_empty_per_channel_affine_quantized
   - name: aten::as_strided_
   - name: aten::copy_
   - name: aten::copy_sparse_to_sparse_
@@ -3168,6 +3172,9 @@
   - name: aten::eq
   - name: aten::is_complex
   - name: aten::is_nonzero
+  - name: aten::q_per_channel_axis
+  - name: aten::q_per_channel_scales
+  - name: aten::q_per_channel_zero_points
   - name: aten::q_scale
   - name: aten::q_zero_point
   - name: aten::qscheme
