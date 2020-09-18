@@ -547,10 +547,10 @@ def squeeze(g, self, dim=None):
     if_node_outputs = g.op("If", cond)
     if_node = if_node_outputs.node()
     if_block = torch.onnx.utils._add_block(if_node)
-    squeeze_ = torch.onnx.utils._add_node_to_block(if_block, "onnx::Squeeze", self, axes_i=[dim])
+    squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
     torch.onnx.utils._add_output_to_block(if_block, squeeze_)
     else_block = torch.onnx.utils._add_block(if_node)
-    identity_ = torch.onnx.utils._add_node_to_block(else_block, "onnx::Identity", self)
+    identity_ = else_block.op("Identity", self)
     torch.onnx.utils._add_output_to_block(else_block, identity_)
     return if_node_outputs
 
