@@ -30,9 +30,7 @@ void std_var_kernel_impl<at::BFloat16>(TensorIterator& iter, bool unbiased, bool
 
 static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "std_cuda", [&] {
-      std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
-    });
+    std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
   });
 }
 
