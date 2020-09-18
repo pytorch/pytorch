@@ -27,7 +27,7 @@ from torch import multiprocessing as mp
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
 from torch.testing._internal.common_utils import \
-    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CUDA, TEST_WITH_ROCM, run_tests,
+    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, run_tests,
      skipIfNoLapack, suppress_warnings, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
      do_test_dtypes, IS_SANDCASTLE, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -41,7 +41,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import TEST_CUDA, tf32_on_and_off, tf32_is_not_fp32
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -59,7 +59,7 @@ SIZE = 100
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM
 
-if TEST_WITH_CUDA:
+if TEST_CUDA:
     AMPERE_OR_ROCM = tf32_is_not_fp32()
 
 # Wrap base test class into a class to hide it from testing
