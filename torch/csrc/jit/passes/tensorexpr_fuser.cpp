@@ -202,12 +202,6 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-struct nodesComparator {
-  bool operator()(Node* a, Node* b) const {
-    return a->isAfter(b);
-  }
-};
-
 // TODO: if a value has differently typed uses, temporarrily insert a node
 // specializing the type for each use and later remove, instead of bailing
 bool profiledWithDifferentTypes(Value* v) {
@@ -366,19 +360,6 @@ class TensorExprFuser {
     });
   }
 
-  // Add unvisited input nodes to the queue for further merging into the fusion
-  // group.
-  void updateQueue(
-      Node* fusion_group,
-      std::set<Node*, nodesComparator>& queue,
-      const std::unordered_set<Node*>& visited) {
-    for (auto input : fusion_group->inputs()) {
-      if (!visited.count(input->node())) {
-        queue.insert(input->node());
-      }
-    }
-  }
-
   value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
     value_list result;
     for (auto i : inputs) {
@@ -458,6 +439,10 @@ class TensorExprFuser {
         createFusionGroups(b);
       }
     }
+
+    // Try to merge adjacent fusion groups together. Because we have only merged
+    // by looking at graph inputs, without this we would not attempt to merge
+    // adjacent fusion groups that don't have a depdency on each other
 
     std::vector<Node*> initial_fusion_groups;
     for (Node* n : block->nodes()) {
