@@ -107,6 +107,11 @@ std::string getKeyFromDevices(const std::vector<at::Device>& devices) {
   return deviceList;
 }
 
+std::string getKeySendRecv(int myRank, int peer) {
+  std::string sendRecvPair = std::to_string(myRank) + "->" + std::to_string(peer);
+  return sendRecvPair;
+}
+
 // Get the list of devices from list of tensors
 std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
@@ -718,7 +723,9 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::string& devicesKey,
-    const std::vector<at::Device>& devices) {
+    const std::vector<at::Device>& devices,
+    NCCLCommType commType,
+    int myNewRank) {
   // Sanity check
   if (devicesKey.empty()) {
     throw std::runtime_error(
@@ -745,7 +752,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Create the unique NCCL ID and broadcast it
   ncclUniqueId ncclID;
 
-  if (rank_ == 0) {
+  // For point-to-point communication, lower rank of the two will get unique id.
+  if (rank_ == 0 || (commType != NCCLCommType::COLL && myNewRank == 0)) {
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID));
   }
 
@@ -781,8 +789,17 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   for (size_t i = 0; i < devices.size(); ++i) {
     // GPU world size and GPU rank
-    int numRanks = getSize() * devices.size();
-    int rank = getRank() * devices.size() + i;
+    int numRanks, rank;
+
+    if (commType == NCCLCommType::COLL) {
+      numRanks = getSize() * devices.size();
+      rank = getRank() * devices.size() + i;
+    } else {
+    // For point-to-point operation, there are only 2 processes involved so
+    // the GPU rank is either 0 or 1.
+      numRanks = 2;
+      rank = myNewRank;
+    }
     // Get the device index
     int deviceIndex = devices[i].index();
 
@@ -1036,12 +1053,14 @@ template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensors,
     Fn fn,
-    bool isRecv,
+    int peer,
+    NCCLCommType commType,
     PreProcess pre,
     PostProcess post) {
   const auto devices = getDeviceList(tensors);
-  const auto key = getKeyFromDevices(devices);
-  auto& ncclComms = getNCCLComm(key, devices);
+  const auto key = getKeySendRecv(rank_, peer);
+  int myNewRank = rank_ < peer ? 0 : 1;
+  auto& ncclComms = getNCCLComm(key, devices, commType, myNewRank);
 
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
@@ -1049,7 +1068,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
 
-  if (isRecv) {
+  if (commType == NCCLCommType::RECV) {
     // Store references to outputs and futureNCCLCallbackStream to be used by
     // WorkNCCL::getFuture.
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
@@ -1078,8 +1097,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     for (size_t i = 0; i < tensors.size(); ++i) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      // For point-to-point communication, NCCL ranks can only
+      // be 0 or 1.
+      int newTargetRank = 1 - myNewRank;
       C10D_NCCL_CHECK(
-          fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream));
+          fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream, newTargetRank));
     }
   }
 
@@ -1115,11 +1137,13 @@ template <typename Fn>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensor,
     Fn fn,
-    bool isRecv) {
+    int peer,
+    NCCLCommType type) {
   return pointToPoint(
       tensor,
       fn,
-      isRecv,
+      peer,
+      type,
       [](std::vector<at::cuda::CUDAStream>&) {},
       [](std::vector<at::cuda::CUDAStream>&) {});
 }
@@ -1409,16 +1433,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
       tensors,
       [&](at::Tensor& input,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream) {
+          at::cuda::CUDAStream& stream,
+          int dst) {
         return ncclSend(
             input.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
-            dstRank,
+            dst,
             comm,
             stream.stream());
       },
-      /* isRecv */ false);
+      dstRank,
+      NCCLCommType::SEND);
   return ret;
 }
 
@@ -1431,16 +1457,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
       tensors,
       [&](at::Tensor& output,
           ncclComm_t comm,
-          at::cuda::CUDAStream& stream) {
+          at::cuda::CUDAStream& stream,
+          int src) {
         return ncclRecv(
             output.data_ptr(),
             output.numel(),
             getNcclDataType(output.scalar_type()),
-            srcRank,
+            src,
             comm,
             stream.stream());
       },
-      /* isRecv */ true);
+      srcRank,
+      NCCLCommType::RECV);
   return ret;
 }
 #else
