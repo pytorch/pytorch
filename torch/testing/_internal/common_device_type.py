@@ -14,7 +14,7 @@ from torch.testing import \
     (get_all_dtypes)
 
 try:
-    import psutil # type: ignore[import]
+    import psutil  #type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -165,7 +165,8 @@ except ImportError:
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
 
-# set type to List[Any] due to mypy list-of-union issue: https://github.com/python/mypy/issues/3351
+# set type to List[Any] due to mypy list-of-union issue:
+# https://github.com/python/mypy/issues/3351
 device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
@@ -426,8 +427,9 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        # type set to Any and suppressed due to unsupport runtime class: https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any  = type(class_name, (base, empty_class), {})
+        # type set to Any and suppressed due to unsupport runtime class:
+        # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+        device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
