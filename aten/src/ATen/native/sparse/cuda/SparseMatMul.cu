@@ -127,23 +127,236 @@ using ScsrMatrixRef = csrMatrixRef<float>;
 
 #if IS_SPMM_AVAILABLE()
 
-template<class scalar_t>
-csrOutput cuSparse_matrix_multiply(
-    const csrMatrixRef<scalar_t>& lhs,
-    const csrMatrixRef<scalar_t>& rhs,
-    Tensor &output_values, 
-    IntTensor &output_indices)
-{
-  TORCH_INTERNAL_ASSERT(false, "cusparse csr cuda 11 support is WIP.");
+cudaDataType getTensorCudaDataType(Tensor self) {
+  cudaDataType cuda_data_type;
+  switch (self.scalar_type()) {
+    case ScalarType::Float:
+      cuda_data_type = CUDA_R_32F;
+      break;
+    case ScalarType::Double:
+      cuda_data_type = CUDA_R_64F;
+      break;
+    default:
+      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
+      break;
+  }
+  return cuda_data_type;
 }
 
-template<> csrOutput cuSparse_matrix_multiply<float>(
+template <class scalar_t>
+csrOutput cuSparse_matrix_multiply(
+    const csrMatrixRef<scalar_t>& A,
+    const csrMatrixRef<scalar_t>& B,
+    Tensor& output_values,
+    IntTensor& output_indices) {
+  
+  cudaDataType cuda_data_type = getTensorCudaDataType(output_values);
+
+  const int A_num_rows = A.size(0);
+  const int A_num_cols = A.size(1);
+  const int A_num_nnz = A.nnz_;
+
+  const int B_num_rows = B.size(0);
+  const int B_num_cols = B.size(1);
+  const int B_num_nnz = B.nnz_;
+
+  int* dA_csrOffsets = A.csr_pointers_;
+  int* dA_columns = A.csr_indices_;
+  scalar_t* dA_values = A.csr_values_;
+
+  int* dB_csrOffsets = B.csr_pointers_;
+  int* dB_columns = B.csr_indices_;
+  scalar_t* dB_values = B.csr_values_;
+
+  csrOutput out({A.size(0), B.size(1)});
+
+  out.csr_pointers_ = at::empty({out.size(0) + 1}, output_indices.options().dtype(kInt));
+
+  int* dC_csrOffsets = out.csr_pointers_.data_ptr<int>();
+  int* dC_columns = nullptr;
+  scalar_t* dC_values = nullptr; 
+
+  scalar_t alpha = 1.0f;
+  scalar_t beta = 0.0f;
+  cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cudaDataType computeType = cuda_data_type;
+
+  //--------------------------------------------------------------------------
+  // CUSPARSE APIs
+  cusparseHandle_t handle = NULL;
+  cusparseSpMatDescr_t matA, matB, matC;
+  void *dBuffer1 = NULL, *dBuffer2 = NULL;
+  size_t bufferSize1 = 0, bufferSize2 = 0;
+  TORCH_CUDASPARSE_CHECK(cusparseCreate(&handle));
+
+  // Create sparse matrix A in CSR format
+  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
+      &matA,
+      A_num_rows,
+      A_num_cols,
+      A_num_nnz,
+      dA_csrOffsets,
+      dA_columns,
+      dA_values,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_BASE_ZERO,
+      cuda_data_type));
+  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
+      &matB,
+      B_num_rows,
+      B_num_cols,
+      B_num_nnz,
+      dB_csrOffsets,
+      dB_columns,
+      dB_values,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_BASE_ZERO,
+      cuda_data_type));
+  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
+      &matC,
+      A_num_rows,
+      B_num_cols,
+      0,
+      NULL,
+      NULL,
+      NULL,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_32I,
+      CUSPARSE_INDEX_BASE_ZERO,
+      cuda_data_type));
+  //--------------------------------------------------------------------------
+  // SpGEMM Computation
+  cusparseSpGEMMDescr_t spgemmDesc;
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&spgemmDesc));
+
+  // ask bufferSize1 bytes for external memory
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
+      handle,
+      opA,
+      opB,
+      &alpha,
+      matA,
+      matB,
+      &beta,
+      matC,
+      computeType,
+      CUSPARSE_SPGEMM_DEFAULT,
+      spgemmDesc,
+      &bufferSize1,
+      NULL));
+  
+  cudaMalloc((void**)&dBuffer1, bufferSize1);
+
+  // inspect the matrices A and B to understand the memory requiremnent for
+  // the next step
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
+      handle,
+      opA,
+      opB,
+      &alpha,
+      matA,
+      matB,
+      &beta,
+      matC,
+      computeType,
+      CUSPARSE_SPGEMM_DEFAULT,
+      spgemmDesc,
+      &bufferSize1,
+      dBuffer1));
+
+  // ask bufferSize2 bytes for external memory
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_compute(
+      handle,
+      opA,
+      opB,
+      &alpha,
+      matA,
+      matB,
+      &beta,
+      matC,
+      computeType,
+      CUSPARSE_SPGEMM_DEFAULT,
+      spgemmDesc,
+      &bufferSize2,
+      NULL));
+  // todo:     data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
+
+  cudaMalloc((void**)&dBuffer2, bufferSize2);
+
+  // compute the intermediate product of A * B
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_compute(
+      handle,
+      opA,
+      opB,
+      &alpha,
+      matA,
+      matB,
+      &beta,
+      matC,
+      computeType,
+      CUSPARSE_SPGEMM_DEFAULT,
+      spgemmDesc,
+      &bufferSize2,
+      dBuffer2));
+  // get matrix C non-zero entries C_num_nnz1
+  int64_t C_num_rows1, C_num_cols1, C_num_nnz1;
+  TORCH_CUDASPARSE_CHECK(
+      cusparseSpMatGetSize(matC, &C_num_rows1, &C_num_cols1, &C_num_nnz1));
+  // allocate matrix C
+  // allocate C offsets
+  out.nnz_ = C_num_nnz1;
+
+  // CHECK_CUDA(cudaMalloc((void**)&dC_csrOffsets, (A_num_rows + 1) * sizeof(int)))
+  // CHECK_CUDA(cudaMalloc((void**)&dC_columns, C_num_nnz1 * sizeof(int)))
+  // CHECK_CUDA(cudaMalloc((void**)&dC_values, C_num_nnz1 * sizeof(float)))
+
+  out.csr_indices_ = at::empty({out.nnz_}, output_indices.options().dtype(kInt));
+  out.csr_values_ = at::empty({out.nnz_}, output_values.options());
+  dC_columns = out.csr_indices_.data_ptr<int>();
+  dC_values = out.csr_values_.data_ptr<scalar_t>();
+  
+  // update matC with the new pointers
+  TORCH_CUDASPARSE_CHECK(
+      cusparseCsrSetPointers(matC, dC_csrOffsets, dC_columns, dC_values));
+
+  // copy the final products to the matrix C
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_copy(
+      handle,
+      opA,
+      opB,
+      &alpha,
+      matA,
+      matB,
+      &beta,
+      matC,
+      computeType,
+      CUSPARSE_SPGEMM_DEFAULT,
+      spgemmDesc));
+
+  // destroy matrix/vector descriptors
+  TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_destroyDescr(spgemmDesc));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matA));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matB));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matC));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroy(handle));
+
+  cudaFree(dBuffer1);
+  cudaFree(dBuffer2);
+  //--------------------------------------------------------------------------
+
+  return out;
+}
+
+template csrOutput cuSparse_matrix_multiply<float>(
     const csrMatrixRef<float>& lhs,
     const csrMatrixRef<float>& rhs,
     Tensor &output_values, 
     IntTensor &output_indices);
 
-template<> csrOutput cuSparse_matrix_multiply<double>(
+template csrOutput cuSparse_matrix_multiply<double>(
     const csrMatrixRef<double>& lhs,
     const csrMatrixRef<double>& rhs,
     Tensor &output_values, 

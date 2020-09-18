@@ -3097,7 +3097,7 @@ class TestSparse(TestCase):
             self.assertEqual(a.grad.to_dense(), a_dense.grad)
             self.assertEqual(b.grad.to_dense(), b_dense.grad)
 
-        def test_op(sparse_dims, nnz, shape_a, shape_b):
+        def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
             b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
 
@@ -3134,11 +3134,10 @@ class TestSparse(TestCase):
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
 
-        for n in range(2, 3):
-            for m in range(2, 3):
-                for p in range(2, 3):
-                    test_op(2, 10, [n, m], [m, p])
-
+        for n in range(2, 5):
+            for m in range(2, 8):
+                for p in range(2, 8):
+                    test_sparse_matmul(2, 10, [n, m], [m, p])
         test_error_cases()
 
 class TestUncoalescedSparse(TestSparse):
