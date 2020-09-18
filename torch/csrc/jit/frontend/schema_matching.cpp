@@ -45,6 +45,10 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
           return t->isSubtypeOf(list_type->getElementType());
         });
   }
+  if (auto vltuple = type->cast<VariableLengthTupleType>()) {
+    return vltuple->getElementType()->isSubtypeOf(list_type->getElementType());
+  }
+
   return false;
 }
 
@@ -66,12 +70,12 @@ Value* tryConvertToType(
   }
 
   if (auto value_tuple = value->type()->cast<TupleType>()) {
+    auto unwrapped_type = unwrapOptional(concrete_type);
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
-    if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
+    if (convertibleToList(value->type(), unwrapped_type)) {
       auto unpacked = createTupleUnpack(value);
-      auto elem_type =
-          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+      auto elem_type = unwrapped_type->expect<ListType>()->getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
@@ -93,6 +97,18 @@ Value* tryConvertToType(
       }
     }
   }
+
+#if 0
+  if (auto value_tuple = value->type()->cast<VariableLengthTupleType>()) {
+    auto unwrapped_type = unwrapOptional(concrete_type);
+    // Allow homogeneous tuples to be casted implicitly to lists of appropriate
+    if (convertibleToList(value->type(), unwrapped_type)) {
+      auto unpacked = createTupleUnpack(value);
+      auto elem_type = unwrapped_type->expect<ListType>()->getElementType();
+      value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+    }
+  }
+#endif
 
   // implicit conversions
   if (allow_conversions) {

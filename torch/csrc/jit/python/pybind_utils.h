@@ -577,8 +577,11 @@ inline IValue toIValue(
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return device->device;
     }
+    case TypeKind::VariableLengthTupleType:
     case TypeKind::ListType: {
-      const auto& elem_type = type->expect<ListType>()->getElementType();
+      const auto& elem_type = type->kind() == TypeKind::ListType
+          ? type->expect<ListType>()->getElementType()
+          : type->expect<VariableLengthTupleType>()->getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:

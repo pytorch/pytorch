@@ -69,6 +69,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if(t.kind() == TypeKind::VariableLengthTupleType) {
+    auto prim = t.cast<VariableLengthTupleType>()->getElementType();
+    out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
     auto prim = t.cast<OptionalType>()->getElementType();
     out << *prim << "?";
@@ -361,6 +364,14 @@ MatchTypeReturn matchTypeVariables(
         return matchTypeVariables(
             lt_formal->getElementType(), *maybe_tuple_unified, type_env);
       }
+    } else if (auto vltup_actual = actual->cast<VariableLengthTupleType>()) {
+      const auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), vltup_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        // propagate the errMsg onward
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
     }
 
     std::stringstream ss;
@@ -385,6 +396,28 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
+  } else if (auto lt_formal = formal->cast<VariableLengthTupleType>()) {
+    if (auto lt_actual = actual->cast<VariableLengthTupleType>()) {
+      const auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        // propagate the errMsg onward
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else if (auto tup_type = actual->cast<TupleType>()) {
+      std::stringstream ss;
+      auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
+      if (maybe_tuple_unified) {
+        return matchTypeVariables(
+            lt_formal->getElementType(), *maybe_tuple_unified, type_env);
+      }
+    }
+
+    std::stringstream ss;
+    ss << "Cannot match " << lt_formal->repr_str() << " to "
+       << actual->repr_str();
+    return ss.str();
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
       const auto innerMatch = matchTypeVariables(
@@ -820,6 +853,20 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << "]";
   }
   return ss.str();
+}
+
+bool VariableLengthTupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyTupleType::Kind) {
+    return true;
+  }
+  if (rhs_->kind() == ListType::Kind) {
+    return true;
+  }
+
+  return false;
 }
 
 static std::vector<bool> findContiguous(

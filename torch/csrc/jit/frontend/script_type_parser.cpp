@@ -28,10 +28,12 @@ TypePtr ScriptTypeParser::subscriptToType(
   if (typeName == "Tuple") {
     auto subscript_exprs = subscript.subscript_exprs();
     // Arbitrary-length homogeneous tuple as defined in PEP-484
-    if (subscript_exprs.size() == 2 && subscript_exprs[1].kind() == TK_DOTS) {
-      auto elem_type = parseTypeFromExprImpl(subscript_exprs[0]);
-      // Alias arbitrary-length tuple to ListType
-      return ListType::create(elem_type);
+    if (subscript_exprs.size() == 2) {
+      auto second_kind = subscript_exprs[1].kind();
+      if (second_kind == TK_DOTS || second_kind == TK_ELLIPSIS) {
+        auto elem_type = parseTypeFromExprImpl(subscript_exprs[0]);
+        return VariableLengthTupleType::create(elem_type);
+      }
     }
     std::vector<TypePtr> subscript_expr_types;
     for (auto expr : subscript_exprs) {

@@ -57,7 +57,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(VariableLengthTupleType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -889,6 +890,42 @@ struct CAFFE2_API ListType
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
     ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    return ss.str();
+  }
+};
+
+struct VariableLengthTupleType;
+using VariableLengthTupleTypePtr = std::shared_ptr<VariableLengthTupleType>;
+struct CAFFE2_API VariableLengthTupleType
+    : public SingleElementType<TypeKind::VariableLengthTupleType, VariableLengthTupleType> {
+  // It's not exactly a singleton, but there should be exactly one instance of
+  // Tuple[T, ...] for every T
+  friend struct Type;
+  template <typename... T>
+  static VariableLengthTupleTypePtr create(T&&... all) {
+    return VariableLengthTupleTypePtr(
+        new VariableLengthTupleType(std::forward<T>(all)...)); // NOLINT(modernize-make-shared)
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << getElementType()->str() << "[]";
+    return ss.str();
+  }
+
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return create(contained_types.at(0));
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
+ private:
+  VariableLengthTupleType(TypePtr elem) : SingleElementType(elem) {}
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Tuple[" << getElementType()->annotation_str(printer) << ", Ellipsis]";
     return ss.str();
   }
 };
