@@ -50,8 +50,6 @@ if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
-      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
-      ${JIT_TEST_SRCS}
       )
 endif()
 
