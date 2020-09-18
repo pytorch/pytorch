@@ -3484,14 +3484,14 @@ Returns:
 
 Example::
 
-    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0, 3))
     tensor([ 0,  2,  1,  0])
 
-    >>> torch.histogram(torch.arange(4),torch.arange(5),density=True)
+    >>> torch.histogram(torch.arange(4), torch.arange(5), density=True)
     tensor([0.2500, 0.2500, 0.2500, 0.2500], dtype=torch.float64)
 
     >>> a = torch.arange(5)
-    >>> bin_edges = torch.range(0,4,.4)
+    >>> bin_edges = torch.range(0, 4, .4)
     >>> hist = a.histogram(density=True)
     >>> hist
     tensor([0.5000, 0.0000, 0.5000, 0.0000, 0.5000, 0.0000, 0.5000, 0.5000, 0.0000,
