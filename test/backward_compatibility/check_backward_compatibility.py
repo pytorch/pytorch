@@ -109,6 +109,11 @@ def allow_listed(schema, allow_list):
             return True
     return False
 
+# The nightly will fail to parse newly added syntax to schema declarations
+# Add new schemas that will fail the nightly here
+dont_parse_list = [
+    ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
+]
 
 def dont_parse(schema_line):
     for item in dont_parse_list:
@@ -179,6 +184,10 @@ if __name__ == "__main__":
             line = f.readline()
             if not line:
                 break
+
+            if dont_parse(line.strip()):
+                print("Not parsing schema line: ", line.strip())
+                continue
             s = parse_schema(line.strip())
             slist.append(s)
 
