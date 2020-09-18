@@ -50,3 +50,5 @@ class QuantizedEngine(types.ModuleType):
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = QuantizedEngine(sys.modules[__name__], __name__)
+engine: str
+supported_engines: List[str]

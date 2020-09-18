@@ -11,13 +11,12 @@ supported_qengines.remove('none')
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 # QNNPACK throws ASAN heap-buffer-overflow error.
-if 'qnnpack' in supported_qengines:
-    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
-        supported_qengines.remove('qnnpack')
+if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_MACOS, IS_WINDOWS]):
+    supported_qengines.remove('qnnpack')
 
-"""Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
+    """Computes the output shape given convolution parameters."""
     return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
                      * (dilation - 1)) / stride) + 2 * output_padding + 1
 
