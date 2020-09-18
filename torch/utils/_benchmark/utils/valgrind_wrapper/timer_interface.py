@@ -117,7 +117,10 @@ class CallgrindStats(object):
 class _ValgrindWrapper(object):
     def __init__(self):
         self._valgrind_available = not subprocess.run(
-            ["which", "valgrind"], capture_output=True).returncode
+            ["which", "valgrind"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).returncode
 
         self._build_type = None
         build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
@@ -187,7 +190,6 @@ class _ValgrindWrapper(object):
                 ],
                 stdout=f_stdout_stderr,
                 stderr=subprocess.STDOUT,
-                capture_output=False,
             )
             if valgrind_invocation.returncode:
                 error_report = ""
@@ -207,7 +209,8 @@ class _ValgrindWrapper(object):
                         f"--inclusive={'yes' if inclusive else 'no'}",
                         callgrind_out
                     ],
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     check=True,
                 )
 
@@ -306,7 +309,8 @@ class _ValgrindWrapper(object):
             # =============================================================================
             callgrind_stat = check_result(subprocess.run(
                 ["callgrind_control", "--stat"],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             ))
 
             stat_lines = callgrind_stat.stdout.decode("utf-8").splitlines()
