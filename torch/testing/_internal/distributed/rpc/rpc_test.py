@@ -130,6 +130,19 @@ class MyPickleClass:
         self.t = val
 
 
+class SlowPickleClass:
+    def __init__(self, t):
+        self.t = t
+
+    def __getstate__(self):
+        time.sleep(self.t)
+        return (self.t, )
+
+    def __setstate__(self, obj):
+        self.t = obj[0]
+        time.sleep(self.t)
+
+
 class MyClass:
     def __init__(self, a):
         self.a = a
@@ -921,6 +934,17 @@ class RpcTest(RpcAgentTestFixture):
             expected[info.name] = info.id
 
         self.assertEqual(expected, results)
+
+    @dist_init
+    def test_all_gather_timeout(self):
+        rpc._set_rpc_timeout(0.1)
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "timed out after 0\.10 seconds"):
+                rpc.api._all_gather(SlowPickleClass(0.5))
+        else:
+            with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
+                rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
