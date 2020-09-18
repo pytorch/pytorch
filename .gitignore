@@ -264,6 +264,3 @@ TAGS
 
 # bazel symlinks
 bazel-*
-
-cachegrind*
-callgrind*
