@@ -6021,25 +6021,28 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
+    @precisionOverride({torch.float32: 1e-3, torch.float64: 1e-8,
+                        torch.complex64: 1e-3, torch.complex128: 1e-8})
     @skipCUDAIf(
         _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
         "On cuda 9.2, torch.inverse relies on magma"
     )
     @skipCPUIfNoLapack
-    def test_inverse(self, device):
+    @dtypes(torch.float32, torch.float64)
+    def test_inverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def test_inverse_helper(matrix, batches, n):
-            identity = torch.eye(n, dtype=torch.float64, device=device)
+            identity = torch.eye(n, dtype=dtype, device=device)
 
             # correctness test, check matrix*matrix_inverse == identity
             matrix_inverse = torch.inverse(matrix)
 
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse), atol=1e-8, rtol=0)
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix), atol=1e-8, rtol=0)
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
 
             # torch.inverse with out and batches
-            matrix_inverse_out = torch.empty(*batches, n, n, dtype=torch.float64, device=device)
+            matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
             torch.inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
@@ -6049,7 +6052,9 @@ class TestTorchDeviceType(TestCase):
                 for mat in matrix.contiguous().view(-1, n, n):
                     expected_inv_list.append(torch.inverse(mat))
                 expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                self.assertEqual(matrix_inverse, expected_inv)
+                # single-inverse is done using MAGMA, while batched inverse is done using cuBLAS
+                # individual values can be significantly different, hence higher atol is used
+                self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=0)
 
         for batches, n in product(
             [[], [1], [4], [2, 3], [32]],
@@ -6058,11 +6063,11 @@ class TestTorchDeviceType(TestCase):
             # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
             if batches and batches[0] == 32 and n == 256:
                 continue
-            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches).to(device)
+            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
             test_inverse_helper(_matrices, batches, n)
             test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
             test_inverse_helper(
-                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)
+                random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype, device=device)
                 .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                 batches, n
             )
@@ -6073,7 +6078,7 @@ class TestTorchDeviceType(TestCase):
 
         # test for zero-sized tensor
         def test_inverse_helper_zero_size(size):
-            data = torch.zeros(*size, device=device)
+            data = torch.zeros(*size, dtype=dtype, device=device)
             out = torch.inverse(data)
             self.assertTrue(out.size() == data.size())
 
@@ -6086,11 +6091,41 @@ class TestTorchDeviceType(TestCase):
             return
 
         from numpy.linalg import inv
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 2).to(device).permute(0, 2, 1)
+        matrices = random_fullrank_matrix_distinct_singular_value(3, 2, dtype=dtype, device=device).permute(0, 2, 1)
         assert not matrices.is_contiguous()
         matrices_inverse = torch.inverse(matrices)
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
+
+    # TODO: once there is more support for complex dtype, they shall be added to above test
+    @unittest.expectedFailure
+    @skipCUDAIf(
+        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
+        "On cuda 9.2, torch.inverse relies on magma"
+    )
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64, torch.complex128)
+    def test_inverse_complex_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def test_inverse_helper(matrix, batches, n):
+            identity = torch.eye(n, dtype=dtype, device=device)
+
+            # correctness test, check matrix*matrix_inverse == identity
+            matrix_inverse = torch.inverse(matrix)
+
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+
+            # torch.inverse with out and batches
+            matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
+            torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+
+        batches = [1]
+        n = 5
+        _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
+        test_inverse_helper(_matrices, batches, n)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
