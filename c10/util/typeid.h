@@ -329,7 +329,7 @@ class C10_API TypeMeta final {
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  explicit TypeMeta(const size_t index) noexcept
+  explicit TypeMeta(const uint16_t index) noexcept
   : index_(index) {
   }
 
@@ -377,9 +377,9 @@ class C10_API TypeMeta final {
     return data().name_;
   }
   /**
-   * index matches static_cast<size_t>ScalarType for corresponding TypeMetas
+   * index matches static_cast<uint16_t>ScalarType for corresponding TypeMetas
    */
-  inline size_t index() noexcept {
+  inline uint16_t index() noexcept {
     return index_;
   }
 
@@ -446,12 +446,12 @@ class C10_API TypeMeta final {
   // non-ScalarTypes are added through here
   static std::mutex instanceMutex_;
   template <class T>
-  static size_t addTypeMetaDataInstance() {
+  static uint16_t addTypeMetaDataInstance() {
     std::vector<detail::TypeMetaData>& instances = typeMetaDataInstances();
     std::lock_guard<std::mutex> lock(instanceMutex_);
     auto typeId = TypeIdentifier::Get<T>();
     auto typeName = c10::util::get_fully_qualified_type_name<T>();
-    size_t size = instances.size();
+    uint16_t size = instances.size();
     instances.emplace_back(
       sizeof(T),
       detail::_PickNew<T>(),
@@ -466,35 +466,32 @@ class C10_API TypeMeta final {
 
   // specializations return indexes into typeMetaDataInstances()
   template <class T>
-  C10_API static size_t _typeMetaDataInstance() noexcept;
+  C10_API static uint16_t _typeMetaDataInstance() noexcept;
 
   //
   // TypeMeta just wraps this index
   //
 
-  size_t index_;
+  uint16_t index_;
 
   inline const detail::TypeMetaData& data() const {
     return typeMetaDataInstances()[index_];
   }
 };
 
-// template <>
-// C10_EXPORT size_t TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept;
-
 // specializations of TypeMeta::_typeMetaDataInstance for ScalarType types
 
 #define DEFINE_SCALAR_METADATA_INSTANCE(T, name) \
   template <>                                                               \
-  constexpr size_t TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
-    return static_cast<size_t>(ScalarType::name); \
+  constexpr uint16_t TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    return static_cast<uint16_t>(ScalarType::name); \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
 
 template <>
-constexpr size_t TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
-  return static_cast<size_t>(ScalarType::Undefined);
+constexpr uint16_t TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
+  return static_cast<uint16_t>(ScalarType::Undefined);
 }
 
 inline TypeMeta::TypeMeta() noexcept
@@ -545,8 +542,8 @@ inline std::ostream& operator<<(
 
 #define CAFFE_KNOWN_TYPE(T)                                                 \
   template <>                                                               \
-  EXPORT_IF_NOT_GCC size_t TypeMeta::_typeMetaDataInstance<T>() noexcept {  \
-    static const size_t index = addTypeMetaDataInstance<T>();               \
+  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaDataInstance<T>() noexcept {  \
+    static const uint16_t index = addTypeMetaDataInstance<T>();               \
     return index;                                                           \
   }
 

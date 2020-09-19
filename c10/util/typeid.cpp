@@ -25,6 +25,7 @@ std::vector<detail::TypeMetaData>& TypeMeta::typeMetaDataInstances() {
   static std::vector<detail::TypeMetaData> instances = []{
     std::lock_guard<std::mutex> lock(instanceMutex_);
     std::vector<detail::TypeMetaData> vec;
+
 #define ADD_SCALAR_TYPE_META(T, name) \
     { /* ScalarType::name */ \
       auto typeId = TypeIdentifier::Get<T>(); \
@@ -41,7 +42,8 @@ std::vector<detail::TypeMetaData>& TypeMeta::typeMetaDataInstances() {
     }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(ADD_SCALAR_TYPE_META)
 #undef ADD_SCALAR_TYPE_META
-    // Undefined
+
+    // ScalarType::Undefined
     vec.emplace_back(
         0,
         nullptr,
