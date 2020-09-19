@@ -20,11 +20,10 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     ReduceOp,
+    Store,
+    PrefixStore,
+    ProcessGroup,
 )
-from . import PrefixStore
-from . import ProcessGroup
-from . import Store
-
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True

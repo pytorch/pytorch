@@ -3,13 +3,24 @@ from typing import Optional
 from datetime import timedelta
 
 # distributed/c10d/init.cpp
-class FileStore:
+class ProcessGroup:
+    ...
+class Store:
+    kDefaultTimeout: timedelta
+    kNoTimeout: timedelta
+class PrefixStore(Store):
+    def __init__(
+        self,
+        prefix: str,
+        store: Store
+    ): ...
+class FileStore(Store):
     def __init__(
         self,
         path: str,
         numWorkers: int
     ): ...
-class TCPStore:
+class TCPStore(Store):
     def __init__(
         self,
         masterAddr: Optional[str],

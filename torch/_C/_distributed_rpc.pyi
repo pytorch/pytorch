@@ -2,13 +2,9 @@ from typing import Iterator, Tuple, Dict, Optional, List, Any, overload, Callabl
 from datetime import timedelta
 import torch
 from ._autograd import ProfilerConfig, ProfilerState
+from ._distributed_c10d import ProcessGroup, Store
 
 # mypy type annotations
-# distributed/rpc/init.cpp
-class Store:
-    ...
-class ProcessGroup:
-    ...
 # distributed/rpc/init.cpp
 class _TensorPipeRpcBackendOptionsBase:
     num_worker_threads: int
