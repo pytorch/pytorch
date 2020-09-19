@@ -41,7 +41,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off, _get_torch_cuda_version, TEST_MAGMA
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -6022,65 +6022,65 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
+        "On cuda 9.2, torch.inverse relies on magma"
+    )
     @skipCPUIfNoLapack
     def test_inverse(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        # no batches: 2-D tensors
-        matrix = random_fullrank_matrix_distinct_singular_value(5).to(device)
-        matrix_inverse = torch.inverse(matrix)
+        def test_inverse_helper(matrix, batches, n):
+            identity = torch.eye(n, dtype=torch.float64, device=device)
 
-        identity = torch.eye(5, dtype=torch.float64, device=device)
-        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, rtol=0, msg='inverse value')
-        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, rtol=0, msg='inverse value')
+            # correctness test, check matrix*matrix_inverse == identity
+            matrix_inverse = torch.inverse(matrix)
 
-        matrix_inverse_out = torch.empty(5, 5, dtype=torch.float64, device=device)
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0, msg='inverse value in-place')
-        # second call, now that matrix_inverse_out is transposed
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0, msg='inverse value in-place')
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse), atol=1e-8, rtol=0)
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix), atol=1e-8, rtol=0)
 
-        # one batch
-        matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)
-        matrix_inverse = torch.inverse(matrix)
-        expected_inv = matrix.squeeze(0).inverse()
-        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
+            # torch.inverse with out and batches
+            matrix_inverse_out = torch.empty(*batches, n, n, dtype=torch.float64, device=device)
+            torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
-        # four batches
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 4).to(device)
-        expected_inv_list = []
-        for i in range(0, 4):
-            expected_inv_list.append(torch.inverse(matrices[i]))
-        expected_inv = torch.stack(expected_inv_list)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
+            # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
+            if matrix.ndim > 2:
+                expected_inv_list = []
+                for mat in matrix.contiguous().view(-1, n, n):
+                    expected_inv_list.append(torch.inverse(mat))
+                expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
+                self.assertEqual(matrix_inverse, expected_inv)
 
-        # six batches (2 x 3)
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 2, 3).to(device)
-        expected_inv_list = []
-        for mat in matrices.view(-1, 5, 5):
-            expected_inv_list.append(torch.inverse(mat))
-        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
+        for batches, n in product(
+            [[], [1], [4], [2, 3], [32]],
+            [5, 256]
+        ):
+            # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
+            if batches and batches[0] == 32 and n == 256:
+                continue
+            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches).to(device)
+            test_inverse_helper(_matrices, batches, n)
+            test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
+            test_inverse_helper(
+                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)
+                .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
+                batches, n
+            )
 
         # incorrect input test
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.inverse(torch.randn(2, 3, 4, 3))
 
-        # correctness test
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
-        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
+        # test for zero-sized tensor
+        def test_inverse_helper_zero_size(size):
+            data = torch.zeros(*size, device=device)
+            out = torch.inverse(data)
+            self.assertTrue(out.size() == data.size())
 
-        # torch.inverse with out and batches
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
-        matrices_inverse = torch.empty(3, 5, 5, dtype=torch.float64, device=device)
-        torch.inverse(matrices, out=matrices_inverse)
-        self.assertEqual(torch.inverse(matrices), matrices_inverse)
+        test_inverse_helper_zero_size([0, 0])
+        test_inverse_helper_zero_size([3, 0, 0])
+        test_inverse_helper_zero_size([0, 3, 3])
 
         # non-contiguous inputs
         if not TEST_NUMPY:
@@ -6839,15 +6839,15 @@ class TestTorchDeviceType(TestCase):
     def test_inverse_many_batches(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 256, 256).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                         torch.eye(5, dtype=torch.float64).to(device).expand_as(matrices))
+        def test_inverse_many_batches_helper(b, n):
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
+            matrices_inverse = torch.inverse(matrices)
+            self.assertEqual(torch.matmul(matrices_inverse, matrices),
+                             torch.eye(b, dtype=torch.float64, device=device).expand_as(matrices))
 
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 512, 512).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse),
-                         torch.eye(3, dtype=torch.float64).to(device).expand_as(matrices))
+        test_inverse_many_batches_helper(5, 256)
+        test_inverse_many_batches_helper(3, 512)
+        test_inverse_many_batches_helper(64, 64)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -10914,10 +10914,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -11136,10 +11132,6 @@ class TestTorchDeviceType(TestCase):
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         from scipy import stats
         size = 1000
         for from_ in [-42, 0, 4.2]:
@@ -12261,10 +12253,7 @@ class TestTorchDeviceType(TestCase):
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
 
-            if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                # TODO: https://github.com/pytorch/pytorch/issues/33793
-                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.bool:
+            if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
@@ -17151,7 +17140,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             t = torch.rand(1000, device=device).to(dtype) * r
             self._i0_helper(t)
 
-    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
@@ -17159,7 +17148,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # The domain is (-13.25, 13.25)
         self._i0_range_helper(13.25, device, dtype)
 
-    @dtypesIfCUDA(*([torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
@@ -17174,7 +17163,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # The domain is (-709.75, 709.75)
         self._i0_range_helper(709.75, device, dtype)
 
-    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
@@ -17646,10 +17635,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_full_range(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17684,10 +17669,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17777,10 +17758,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17839,10 +17816,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_default(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -19804,20 +19777,20 @@ tensor_op_tests = [
     ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
@@ -19851,15 +19824,16 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        _float_types2, _cpu_types, True),
+        torch.testing.get_all_fp_dtypes(), _cpu_types, True),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _float_types, _cpu_types, True),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-1, 1e-5, _types2, _cpu_types, True,
+        1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
@@ -19974,9 +19948,9 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('minimum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
-    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
-    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, _float_types2, _cpu_types, False),
+    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     # Double here because the CPU result will be wrong otherwise
     ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
         1e-3, 1e-5, 1e-5, [torch.double], _cpu_types, False, [slowTest]),
@@ -20000,7 +19974,7 @@ tensor_op_tests = [
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
+    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
