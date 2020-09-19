@@ -3,6 +3,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -24,7 +25,10 @@ struct Command final {
 
     void bind(VkPipeline pipeline);
     void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
-    void dispatch();
+    void copy(VkBuffer source, VkBuffer destination, size_t size);
+    void dispatch(const Shader::WorkGroup& work_group);
+
+    void submit(VkQueue queue, VkFence fence);
 
    private:
     VkCommandBuffer command_buffer_;

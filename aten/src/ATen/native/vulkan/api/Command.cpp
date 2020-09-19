@@ -99,7 +99,60 @@ void Command::Buffer::bind(
       nullptr);
 }
 
-void Command::Buffer::dispatch() {
+void Command::Buffer::copy(
+    const VkBuffer source,
+    const VkBuffer destination,
+    const size_t size) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      source,
+      "Invalid Vulkan source buffer!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      destination,
+      "Invalid Vulkan destination buffer!");
+
+  const VkBufferCopy buffer_copy{
+    0u,
+    0u,
+    size,
+  };
+
+  vkCmdCopyBuffer(
+      command_buffer_,
+      source,
+      destination,
+      1u,
+      &buffer_copy);
+}
+
+void Command::Buffer::dispatch(const Shader::WorkGroup& work_group) {
+  vkCmdDispatch(
+      command_buffer_,
+      work_group.x,
+      work_group.y,
+      work_group.z);
+}
+
+void Command::Buffer::submit(
+    const VkQueue queue,
+    const VkFence fence) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      queue,
+      "Invalid Vulkan queue!");
+
+  const VkSubmitInfo submit_info{
+    VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    nullptr,
+    0u,
+    nullptr,
+    nullptr,
+    1u,
+    &command_buffer_,
+    0u,
+    nullptr,
+  };
+
+  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence));
 }
 
 Command::Pool::Pool(const GPU& gpu)
