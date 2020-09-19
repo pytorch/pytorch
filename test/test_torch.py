@@ -7761,7 +7761,7 @@ class TestTorchDeviceType(TestCase):
                 A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
+            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper), atol=1e-4, rtol=0)
 
         for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
             cholesky_test_helper(3, batchsize, upper)
