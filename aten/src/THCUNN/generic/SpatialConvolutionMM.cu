@@ -114,9 +114,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateOutput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
@@ -263,7 +260,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, weight);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_updateGradInput)(
@@ -277,10 +273,6 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
   weight = THNN_(newViewWeightMM2d)(state, weight);
@@ -376,7 +368,6 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_accGradParameters)(
@@ -391,10 +382,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            accreal scale_) {
-
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradParameters not suppported with BFloat16");
-  #else
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, gradBias, columns, ones);
   if (gradWeight) {
@@ -546,7 +533,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif
