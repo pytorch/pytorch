@@ -52,9 +52,11 @@ FIELDS = (
     'legacy_dispatch',
     'type_dispatch',
     'natives',
+    'is_checks',
+    'ops',
     *BACKENDS,
 )
-FMT = '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t' + \
+FMT = '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t' + \
       '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'
 
 
@@ -164,6 +166,17 @@ def load_analysis_result():
                 deps = opinfo.get('type_dispatch', set())
                 deps.add(m.groups()[0])
                 opinfo['type_dispatch'] = deps
+            elif depname.startswith('at::Tensor::is_'):
+                m = re.match(r'^at::Tensor::(is_.*)\(', depname)
+                if not m:
+                    continue
+                deps = opinfo.get('is_checks', set())
+                deps.add(m.groups()[0])
+                opinfo['is_checks'] = deps
+            elif depname.startswith('aten::') or depname.startswith('quantized::') or depname.startswith('prepacked'):
+                ops = opinfo.get('ops', set())
+                ops.add(depname)
+                opinfo['ops'] = ops
 
 
 def dump_ops_table():

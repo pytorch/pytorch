@@ -526,9 +526,33 @@ private:
         auto curNode = queue.front();
         queue.pop_front();
         auto curName = _demangle(curNode);
-        if (curName.find("at::native") == 0 ||
-            (curName.find("at::") == 0 && curName.find("Type") != std::string::npos)) {
+
+        // Some interesting intermediate nodes to keep in the result graph.
+        if (curName.rfind("at::native", 0) == 0 ||
+            curName.rfind("at::TypeDefault", 0) == 0 ||
+            curName.rfind("at::CPUType", 0) == 0 ||
+            curName.rfind("at::SparseCPUType", 0) == 0 ||
+            curName.rfind("at::MkldnnCPUType", 0) == 0 ||
+            curName.rfind("at::CUDAType", 0) == 0 ||
+            curName.rfind("at::SparseCUDAType", 0) == 0 ||
+            curName.rfind("at::QuantizedCPUType", 0) == 0 ||
+            curName.rfind("at::QuantizedCUDAType", 0) == 0 ||
+            curName.rfind("at::VulkanType", 0) == 0 ||
+            curName.rfind("at::Tensor::is_cuda", 0) == 0 ||
+            curName.rfind("at::Tensor::is_hip", 0) == 0 ||
+            curName.rfind("at::Tensor::is_sparse", 0) == 0 ||
+            curName.rfind("at::Tensor::is_mkldnn", 0) == 0 ||
+            curName.rfind("at::Tensor::is_vulkan", 0) == 0 ||
+            curName.rfind("at::Tensor::is_quantized", 0) == 0) {
           (*output)[key].insert(curNode);
+        }
+        // Some intermediate nodes that most ops call and lead towards same fan-outs.
+        if (curName.rfind("torch::jit::parseSchemaOrName", 0) == 0 ||
+            curName.rfind("c10::Dispatcher::checkSchemaCompatibility", 0) == 0 ||
+            curName.rfind("c10::impl::make_boxed_from_unboxed_functor", 0) == 0 ||
+            curName.rfind("at::autocast::WrapFunction_", 0) == 0 ||
+            curName.rfind("at::TensorIterator", 0) == 0) {
+          continue;
         }
         if (keyNodes.count(curNode)) {
           // Output links between key nodes.

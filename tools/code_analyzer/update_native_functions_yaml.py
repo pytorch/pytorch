@@ -39,7 +39,17 @@ def load_classify_ops_output(fname):
 def dispatch_stub_ops_filter(ops_table):
     res = {}
     for op in ops_table:
-        if op['DispatchStub'] and not op['has_dispatch']:
+        # skip those already have dispatch section.
+        if op['has_dispatch']:
+            continue
+        # skip those calling any Tensor::is_sparse() / Tensor::is_quantized() / etc.
+        if op['is_checks']:
+            continue
+        # skip those calling any other non-trivial aten ops.
+        if op['ops']:
+            continue
+        # if it calls any DispatchStub then make it CPU/CUDA specific.
+        if op['DispatchStub']:
             res[op['name']] = 'CPU, CUDA'
     return res
 
