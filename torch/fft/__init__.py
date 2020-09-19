@@ -112,8 +112,10 @@ Args:
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
         trimmed to the length ``s[i]`` before computing the FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
     dim (Tuple[int], optional): Dimensions to be transformed.
-        Default: all dimensions.
+        Default: all dimensions, or the last ``len(s)`` dimensions if :attr:`s` is given.
     norm (str, optional): Normalization mode. For the forward transform
         (:func:`~torch.fft.fftn`), these correspond to:
 
@@ -153,8 +155,10 @@ Args:
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
         trimmed to the length ``s[i]`` before computing the IFFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
     dim (Tuple[int], optional): Dimensions to be transformed.
-        Default: all dimensions.
+        Default: all dimensions, or the last ``len(s)`` dimensions if :attr:`s` is given.
     norm (str, optional): Normalization mode. For the backward transform
         (:func:`~torch.fft.ifftn`), these correspond to:
 
@@ -312,8 +316,10 @@ Args:
     s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
         trimmed to the length ``s[i]`` before computing the real FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
     dim (Tuple[int], optional): Dimensions to be transformed.
-        Default: all dimensions.
+        Default: all dimensions, or the last ``len(s)`` dimensions if :attr:`s` is given.
     norm (str, optional): Normalization mode. For the forward transform
         (:func:`~torch.fft.rfftn`), these correspond to:
 
@@ -377,14 +383,15 @@ Note:
 
 Args:
     input (Tensor): the input tensor
-    s (Tuple[int], optional): Output size in the transformed dimensions.
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
         If given, each dimension ``dim[i]`` will either be zero-padded or
-        trimmed to give an output length ``s[i]`` after computing the real IFFT.
+        trimmed to the length ``s[i]`` before computing the real FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
         Defaults to even output in the last dimension:
         ``s[-1] = 2*(input.size(dim[-1]) - 1)``.
     dim (Tuple[int], optional): Dimensions to be transformed.
         The last dimension must be the half-Hermitian compressed dimension.
-        Default: all dimensions.
+        Default: all dimensions, or the last ``len(s)`` dimensions if :attr:`s` is given.
     norm (str, optional): Normalization mode. For the backward transform
         (:func:`~torch.fft.irfftn`), these correspond to:
 
