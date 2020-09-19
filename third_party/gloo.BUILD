@@ -71,6 +71,7 @@ cc_library(
         exclude = [
             "gloo/cuda*.cc",
             "gloo/rendezvous/redis_store.cc",
+            "gloo/common/win.cc",
         ],
     ),
     copts = [
