@@ -301,8 +301,6 @@ Adapter Runtime::select(const Selector& selector) {
   TORCH_CHECK(
       false,
       "Vulkan: no adapter was selected as part of device enumeration!");
-
-  return Adapter{};
 }
 
 Runtime* initialize() {
