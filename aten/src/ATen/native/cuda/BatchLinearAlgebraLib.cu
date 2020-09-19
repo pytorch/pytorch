@@ -107,14 +107,14 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 
   if (self.dim() > 2 && batch_size > 1) {
     Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
   } else {
     int64_t info = 0;
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, info);
     });
     singleCheckErrors(info, "inverse_cuda");

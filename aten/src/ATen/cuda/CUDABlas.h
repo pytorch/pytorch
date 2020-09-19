@@ -155,6 +155,10 @@ template<>
 void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
 template<>
 void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
+template<>
+void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<double>));
+template<>
+void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
 
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
@@ -168,6 +172,10 @@ template<>
 void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
 template<>
 void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
+template<>
+void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
+template<>
+void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
 
 #endif // CUDART_VERSION
 
