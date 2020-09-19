@@ -152,7 +152,7 @@ class TestFX(JitTestCase):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
         class NoLeafModulesTracer(Tracer):
-            def is_leaf_module(self, m):
+            def is_leaf_module(self, m, qualname):
                 return False
 
         class MyReluMod(torch.nn.Module):
@@ -446,8 +446,16 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
-        st = SimpleTest()
-        traced = symbolic_trace(st)
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.st = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.st(x)
+
+        n = Nested()
+        traced = symbolic_trace(n)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
         x = torch.rand(3, 4)
