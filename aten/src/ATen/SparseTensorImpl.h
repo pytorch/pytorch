@@ -31,7 +31,7 @@ struct CAFFE2_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
@@ -217,7 +217,7 @@ public:
     refresh_numel();
   }
 private:
-    explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+    explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta, at::Tensor indices, at::Tensor values);
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)

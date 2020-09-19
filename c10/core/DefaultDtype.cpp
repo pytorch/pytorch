@@ -14,10 +14,10 @@ void set_default_dtype(caffe2::TypeMeta dtype) {
   }
 }
 
-const caffe2::TypeMeta& get_default_dtype() {
+const caffe2::TypeMeta get_default_dtype() {
   return default_dtype;
 }
-const caffe2::TypeMeta& get_default_complex_dtype() {
+const caffe2::TypeMeta get_default_complex_dtype() {
   return default_complex_dtype;
 }
 } // namespace c10

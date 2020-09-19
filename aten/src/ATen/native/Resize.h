@@ -73,7 +73,7 @@ static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset,
-    const caffe2::TypeMeta& data_type,
+    const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
       detail::computeStorageNbytes(size, stride, data_type.itemsize());

@@ -79,11 +79,11 @@ class C10_API TypeIdentifier final
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
+ private:
   static constexpr TypeIdentifier uninitialized() {
     return TypeIdentifier(c10::util::type_index{0});
   }
 
- private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
   friend class TypeMeta; // TODO Is this friend an issue?
 };
@@ -377,7 +377,7 @@ class C10_API TypeMeta final {
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
-  TypeMeta(TypeMeta&& rhs) noexcept = default;
+  TypeMeta(TypeMeta& rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
@@ -438,8 +438,8 @@ class C10_API TypeMeta final {
   }
 
   friend bool operator==(
-      const TypeMeta& lhs,
-      const TypeMeta& rhs) noexcept;
+      const TypeMeta lhs,
+      const TypeMeta rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -503,13 +503,13 @@ inline TypeMeta::TypeMeta() noexcept
 }
 
 inline bool operator==(
-    const TypeMeta& lhs,
-    const TypeMeta& rhs) noexcept {
+    const TypeMeta lhs,
+    const TypeMeta rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
 inline bool operator!=(
-    const TypeMeta& lhs,
-    const TypeMeta& rhs) noexcept {
+    const TypeMeta lhs,
+    const TypeMeta rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
