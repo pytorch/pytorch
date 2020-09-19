@@ -1217,7 +1217,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         Use :func:`torch.linalg.norm` instead.
 
     Args:
-        input (Tensor): the input tensor. If dim is None and x has more than 2 dimensions, 
+        input (Tensor): the input tensor. If dim is None and x has more than 2 dimensions,
             norm of the the input flattened to 1-D will be returned.
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
