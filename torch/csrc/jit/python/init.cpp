@@ -520,7 +520,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_get_trigger_value",
-          [](const std::string& trigger_name) {
+          [](const std::string& trigger_name) -> int {
             using namespace torch::jit::tensorexpr;
             ExecutionTrigger* trigger =
                 ExecutionTriggerList::GetInstance().FindByName(trigger_name);
@@ -647,8 +647,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
-          [](script::Module& module) {
-            return vulkanOptimizeForMobile(module);
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return vulkanOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
