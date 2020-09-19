@@ -76,8 +76,7 @@ class Graph:
 
     def graph_copy(self, g : 'Graph'):
         """
-        Create a new graph containing the same nodes as `self` but without
-        `output` set. Thus, you can add new nodes to this graph copy.
+        Append all nodes from graph `g` to this graph
         """
         val_map : Dict[Node, Node] = {}
         for node in g._nodes:

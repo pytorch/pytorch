@@ -56,7 +56,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
     # we shouldn't trace into any of the submodules, they were not
     # because they were not traced in the original GraphModule
     class KeepModules(Tracer):
-        def is_leaf_module(self, _: torch.nn.Module) -> bool:
+        def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
     return KeepModules().trace(CodeOnlyModule(body))

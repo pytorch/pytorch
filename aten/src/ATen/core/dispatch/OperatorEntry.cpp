@@ -220,7 +220,13 @@ void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher,
 }
 
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  for (auto k : c10::getRuntimeDispatchKeys(dispatch_key)) {
+  // Handle Undefined separately since it isn't a runtime key but we have an entry in dispatchTable_.
+  // See Note [Undefined in dispatchTable_]
+  if (dispatch_key == DispatchKey::Undefined) {
+    updateDispatchTableEntry_(dispatcher, dispatch_key);
+    return;
+  }
+  for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
   // Registering to backend key might affect computed entry at its Autograd backend key due to 2.2.
@@ -231,6 +237,12 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
 }
 
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {
+  // Note [Undefined in dispatchTable_]
+  // (1) it gives people place to specify functionality that should run when there are no dispatch keys,
+  //     e.g., an empty TensorList argument
+  // (2) it would let us remove the explicit error checking code in the dispatch hotpath, and so when
+  //     no dispatch keys are available we just slide into the undefined handler which would then raise
+  //     the error message./
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
   }
