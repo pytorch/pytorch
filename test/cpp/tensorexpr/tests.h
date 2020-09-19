@@ -214,6 +214,7 @@ namespace jit {
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
   _(SimplifyReorderForCond)                 \
+  _(SimplifyFuseConditions)                 \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
