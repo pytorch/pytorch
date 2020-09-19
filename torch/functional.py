@@ -1217,7 +1217,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         Use :func:`torch.linalg.norm` instead.
 
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): the input tensor. If dim is None and x has more than 2 dimensions, 
+            norm of the the input flattened to 1-D will be returned.
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
@@ -1234,23 +1235,21 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             vector norm will be calculated, if it is 2-tuple of ints, matrix norm
             will be calculated. If the value is None, matrix norm will be calculated
             when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
+            calculated when the input tensor only has one dimension.
         keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
-            :attr:`out` = ``None``. Default: ``False``
+            :attr:`out` = ``None``. Default: ``False``.
         out (Tensor, optional): the output tensor. Ignored if
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
-            :attr:'dtype' while performing the operation. Default: None.
+            :attr:`dtype` while performing the operation. Default: ``None``.
 
 
     Example::
 
         >>> import torch
-        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> a = torch.arange(9, dtype=torch.float) - 4
         >>> b = a.reshape((3, 3))
         >>> torch.norm(a)
         tensor(7.7460)
@@ -1260,14 +1259,14 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         tensor(4.)
         >>> torch.norm(b, float('inf'))
         tensor(4.)
-        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> c = torch.tensor([[1, 2, 3],[-1, 1, 4]] , dtype=torch.float)
         >>> torch.norm(c, dim=0)
         tensor([1.4142, 2.2361, 5.0000])
         >>> torch.norm(c, dim=1)
         tensor([3.7417, 4.2426])
         >>> torch.norm(c, p=1, dim=1)
         tensor([6., 6.])
-        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> d = torch.arange(8, dtype=torch.float).reshape(2, 2, 2)
         >>> torch.norm(d, dim=(1,2))
         tensor([ 3.7417, 11.2250])
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
