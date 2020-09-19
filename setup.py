@@ -162,7 +162,7 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
+
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")

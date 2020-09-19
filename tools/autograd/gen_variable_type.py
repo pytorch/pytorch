@@ -22,7 +22,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from __future__ import print_function
+
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
