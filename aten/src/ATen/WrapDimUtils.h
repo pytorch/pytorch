@@ -30,8 +30,8 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
-static inline void maybe_wrap_dims_n(int64_t * dims, int64_t ndims, int64_t dim_post_expr) {
-  // wrap each of dims basing on dim_post_expr
+// wrap each dim in the dims array, taking dim_post_expr as the true number of dimensions
+static inline void maybe_wrap_dims_n(int64_t* dims, int64_t ndims, int64_t dim_post_expr) {
   if (dim_post_expr <= 0) {
     dim_post_expr = 1; // this will make range [-1, 0]
   }
@@ -48,6 +48,8 @@ static inline void maybe_wrap_dims_n(int64_t * dims, int64_t ndims, int64_t dim_
   }
 }
 
+// Wrap each dim in a contiguous container, taking dim_post_expr as the true number of dimensions
+// E.g. could also be std::array or c10::SmallVector
 template <typename Container>
 inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
   return maybe_wrap_dims_n(dims.data(), dims.size(), dim_post_expr);
