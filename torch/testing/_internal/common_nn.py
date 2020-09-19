@@ -3890,7 +3890,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3900,7 +3900,7 @@ criterion_tests = [
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3911,7 +3911,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3922,7 +3922,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3933,7 +3933,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='KLDivLoss',
@@ -3967,7 +3967,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -3979,7 +3979,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -4022,7 +4022,7 @@ criterion_tests = [
         desc="1d",
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -4032,7 +4032,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
@@ -4181,7 +4181,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4191,7 +4191,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d_alert_nondeterministic',
-        # check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=(not TEST_WITH_ROCM),
         test_cpu=False,
         decorator=expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', fn_has_device_arg=False)
     ),
@@ -4204,7 +4204,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4215,7 +4215,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4225,7 +4225,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='higher_dim',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4235,7 +4235,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
@@ -4307,7 +4307,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
         desc='scalar',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MSELoss',
@@ -4317,7 +4317,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_forward_only=True,
         desc='prec',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -4329,7 +4329,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
