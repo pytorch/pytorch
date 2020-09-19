@@ -523,7 +523,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
         the user for their runtime backend.
         Example graph::
 
-            graph(%0 : Float(2, strides=[1]2, 3:4, 4:1, requires_grad=0, device=cpu)):
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
                 %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
                 %4 : None = prim::Constant()
                 %5 : Float(2, strides=[1]2, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
@@ -531,7 +531,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
 
         is exported as::
 
-            graph(%0 : Float(2, strides=[1]2, 3:4, 4:1, requires_grad=0, device=cpu)):
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
                 %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
                 %4 : None = prim::Constant()
                 %5 : Float(2, strides=[1]2, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
