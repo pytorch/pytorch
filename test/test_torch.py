@@ -10897,10 +10897,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -11119,10 +11115,6 @@ class TestTorchDeviceType(TestCase):
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         from scipy import stats
         size = 1000
         for from_ in [-42, 0, 4.2]:
@@ -12244,10 +12236,7 @@ class TestTorchDeviceType(TestCase):
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
 
-            if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                # TODO: https://github.com/pytorch/pytorch/issues/33793
-                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.bool:
+            if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
@@ -17629,10 +17618,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_full_range(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17667,10 +17652,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17760,10 +17741,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17822,10 +17799,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_default(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
