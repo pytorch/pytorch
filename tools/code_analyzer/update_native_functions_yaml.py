@@ -6,10 +6,18 @@ file programmatically.
 Install ruamel.yaml which supports round trip dump and preserves comments in yaml:
   pip install ruamel.yaml
 
-Run the script to produce new native_functions.yaml to stdout:
-  python tools/code_analyzer/update_native_functions_yaml.py
+How to run the script:
+  1. First run the classify_ops.sh script:
+
+    tools/code_analyzer/classify_ops.sh
+
+  2. Run the script to produce new native_functions.yaml to stdout:
+
+    python tools/code_analyzer/update_native_functions_yaml.py \
+      --classify_ops_result ops_table.tsv | tee native_functions.yaml
 """
 
+import argparse
 import sys
 import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap
@@ -69,6 +77,14 @@ def update_native_functions(dispatch_updates):
     yaml.dump(raw_nfs, sys.stdout)
 
 if __name__ == '__main__':
-    ops_table = load_classify_ops_output('/tmp/table')
+    parser = argparse.ArgumentParser(
+        description='Util to process & update native_functions.yaml')
+    parser.add_argument(
+        '--classify_ops_result',
+        required=True,
+        help='input tsv file produced by classify_ops.sh script')
+    args = parser.parse_args()
+
+    ops_table = load_classify_ops_output(args.classify_ops_result)
     dispatch_updates = dispatch_stub_ops_filter(ops_table)
     update_native_functions(dispatch_updates)

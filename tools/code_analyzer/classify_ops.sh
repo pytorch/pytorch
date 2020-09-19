@@ -16,11 +16,14 @@ cd $ROOT
 
 # Build PyTorch itself to produce Declarations.yaml.
 # TODO: directly call codegen script?
-python setup.py develop
+BUILD_BINARY=OFF \
+  BUILD_TEST=OFF \
+  USE_DISTRIBUTED=OFF \
+  python setup.py develop
 
 # Call code analyzer to analyze DispatchStub call graph.
 rm -rf build_code_analyzer
 ANALYZE_TORCH=1 tools/code_analyzer/build.sh -debug_path=true
 
 # Call master script.
-python -m tools.code_analyzer.classify_ops
+python -m tools.code_analyzer.classify_ops | tee ops_table.tsv
