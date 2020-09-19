@@ -9504,7 +9504,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        if self.device_type == 'cuda':
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
