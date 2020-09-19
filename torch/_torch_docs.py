@@ -3459,7 +3459,8 @@ Example::
 
 add_docstr(torch.histogram,
            r"""
-histogram(input, bins=10, weights=None, min=0, max=0, density=False) -> Tensor
+histogram(input, bins=10, weights=None, range=None, density=False) -> (Tensor, Tensor)
+histogram(input, bins, weights=None, density=False) -> (Tensor, Tensor)
 
 Computes the histogram of a tensor.
 
@@ -3468,38 +3469,36 @@ Args:
     bins (int or 1D Tensor): If int, defines the number of bins. If Tensor,
         defines a monotonically increasing sequence of bin edges, allowing
         for non-uniform bins. Default: 10
-    min (float): lower end of the range (inclusive), ignored if bins is a Tensor
-    max (float): upper end of the range (inclusive), ignored if bins is a Tensor
+    range (tuple of floats, optional): Defines the lower and upper ends of the
+        range if bins is an integer.
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
-    density (bool): If ``False``, the result will contain the number of samples in
-        each bin. If ``True``, the result is the value of the
-        probability *density* function at the bin, normalized such that
-        the *integral* over the range is 1. Note that the sum of the
-        histogram values will not be equal to 1 unless bins of unity
-        width are chosen; it is not a probability *mass* function.
+    density (bool): If ``False``, the result will contain the (weighted) number
+        of samples in each bin. If ``True``, the result is normalized to
+        `bin_count / bin_volume / total` such that the integral of the interpolated
+        function over the range is 1.
 
 Returns:
     Tensor: a tensor of shape ``[bins]``
 
 Example::
 
-    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0, 3))
-    tensor([ 0,  2,  1,  0])
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.))
+    (tensor([0, 2, 1, 0]), tensor([0.0000, 0.7500, 1.5000, 2.2500, 3.0000]))
 
     >>> torch.histogram(torch.arange(4), torch.arange(5), density=True)
-    tensor([0.2500, 0.2500, 0.2500, 0.2500], dtype=torch.float64)
+    (tensor([0.2500, 0.2500, 0.2500, 0.2500], dtype=torch.float64),
+     tensor([0, 1, 2, 3, 4]))
 
     >>> a = torch.arange(5)
-    >>> bin_edges = torch.range(0, 4, .4)
-    >>> hist = a.histogram(density=True)
+    >>> hist, edges = a.histogram(density=True)
     >>> hist
-    tensor([0.5000, 0.0000, 0.5000, 0.0000, 0.5000, 0.0000, 0.5000, 0.5000, 0.0000,
-        0.0000], dtype=torch.float64)
+    tensor([0.5000, 0.0000, 0.5000, 0.0000, 0.0000, 0.5000, 0.0000, 0.5000, 0.0000,
+        0.5000], dtype=torch.float64)
     >>> hist.sum()
     tensor(2.5000, dtype=torch.float64)
-    >>> (hist*(bin_edges[1:]-bin_edges[:-1])).sum()
-    tensor(1.0000, dtype=torch.float64)
+    >>> (hist*(edges[1:]-edges[:-1])).sum()
+    tensor(1., dtype=torch.float64)
 
 
 """.format(**common_args))
