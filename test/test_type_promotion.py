@@ -7,7 +7,7 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes, onlyCPU)
+                                                        dtypes, dtypesIfCUDA, onlyCPU)
 
 if TEST_NUMPY:
     import numpy as np
@@ -958,21 +958,21 @@ class TestTypePromotion(TestCase):
         self.assertEqual(result, a - b, exact_dtype=False)
         self.assertNotEqual(result, a.double() - b, exact_dtype=False)
 
-    def test_atan2_type_promotion(self, device):
+    @dtypesIfCUDA(*itertools.product(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False),
+                                     torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False,
+                                                            include_complex=False),
+                               torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False,
+                                                            include_complex=False)))
+    def test_atan2_type_promotion(self, device, dtypes):
+        dtype1, dtype2 = dtypes
         default_float = torch.get_default_dtype()
-        include_half = False
-        if self.device_type == 'cuda':
-            # Half is not supported on CPU.
-            include_half = True
-
-        dtypes = torch.testing.get_all_fp_dtypes(include_half=include_half, include_bfloat16=False) + \
-            torch.testing.get_all_int_dtypes()
 
         def is_int(dtype):
-            return dtype in torch.testing.get_all_int_dtypes()
+            return dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
 
         def is_float(dtype):
-            return dtype in torch.testing.get_all_fp_dtypes(include_half=include_half, include_bfloat16=False)
+            return dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)
 
         def get_binary_float_result_type(x, y):
             dtype1 = x.dtype
@@ -986,10 +986,9 @@ class TestTypePromotion(TestCase):
             elif is_int(dtype1) and is_int(dtype2):
                 return default_float
 
-        for dtype1, dtype2 in itertools.permutations(dtypes, r=2):
-            x = torch.tensor(1, dtype=dtype1, device=device)
-            y = torch.tensor(2, dtype=dtype2, device=device)
-            self.assertEqual(get_binary_float_result_type(x, y), torch.atan2(x, y).dtype)
+        x = torch.tensor(1, dtype=dtype1, device=device)
+        y = torch.tensor(2, dtype=dtype2, device=device)
+        self.assertEqual(get_binary_float_result_type(x, y), torch.atan2(x, y).dtype)
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 
