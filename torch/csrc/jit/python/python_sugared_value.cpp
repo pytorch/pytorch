@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
+#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -573,6 +574,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr;
   }
 
+  // Check if it's a property.
+  auto prop =
+      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+  if (prop) {
+    return MethodValue(self_, prop->getter->name())
+        .call(loc, m, {}, {}, /*n_binders=*/1);
+  }
+
   // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
@@ -712,8 +721,12 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
 
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-      py::hasattr(obj, "_fields");
+  int is_tuple_class = PyObject_IsSubclass(obj.ptr(), tuple_type);
+  if (is_tuple_class == -1) {
+    PyErr_Clear();
+    return false;
+  }
+  return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
@@ -762,14 +775,13 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 }
 
 bool isEnumClass(py::object obj) {
-  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
-  if (!py::cast<bool>(is_class)) {
-    return false;
-  }
-
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
+  if (ret == -1) {
+    PyErr_Clear();
+    return false;
+  }
   return ret == 1;
 }
 
@@ -783,6 +795,56 @@ std::shared_ptr<SugaredValue> createSimpleEnumValue(
                             .attr("try_ann_to_type")(enum_class, loc));
   auto enum_ivalue = toIValue(obj, enum_type);
   return toSimple(m.graph()->insertConstant(enum_ivalue, loc));
+}
+
+std::shared_ptr<SugaredValue> PythonSliceClass::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  if (!attributes.empty()) {
+    throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
+  }
+
+  static constexpr int64_t default_start = 0;
+  static constexpr int64_t default_stop = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t default_step = 1;
+  Graph& graph = *(caller.graph());
+
+  auto ValOr = [&](Value* given, int64_t default_val) {
+    if (!given || given->type()->isSubtypeOf(NoneType::get())) {
+      return graph.insertConstant(default_val, loc);
+    }
+    return given;
+  };
+
+  Value* start;
+  Value* stop;
+  Value* step;
+  size_t n = inputs.size();
+  // Slice's constructor signature is Slice(start=None, stop, step=None)
+  if (n == 1) {
+    // Case where only `stop` is specified.
+    start = ValOr(nullptr, default_start);
+    stop = ValOr(inputs[0].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 2) {
+    // Case where `start` and `stop` are specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 3) {
+    // Case where `start`, `stop` and `step` are all specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(inputs[2].value(graph), default_step);
+  } else {
+    throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
+                           << n;
+  }
+
+  return std::make_shared<SliceValue>(start, stop, step);
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -979,6 +1041,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto rcb = py::module::import("torch._jit_internal")
                    .attr("createResolutionCallbackFromClosure")(obj);
     return std::make_shared<PythonValue>(obj, rcb);
+  }
+
+  if (obj.is(py::module::import("builtins").attr("slice"))) {
+    return std::make_shared<PythonSliceClass>();
   }
 
   return std::make_shared<PythonValue>(obj);

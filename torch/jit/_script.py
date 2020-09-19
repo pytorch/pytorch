@@ -272,6 +272,7 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
+        __ignored_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
         def __init__(self):
             super(ScriptModule, self).__init__()
