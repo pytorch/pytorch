@@ -318,6 +318,36 @@ void IRPrinter::visit(const RoundOff* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const MaxTerm* v) {
+  os() << "MaxTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
+  os() << ")";
+}
+
+void IRPrinter::visit(const MinTerm* v) {
+  os() << "MinTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
+  os() << ")";
+}
+
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->accumulator() << ", ";
@@ -471,6 +501,11 @@ void IRPrinter::visit(const AtomicAdd* v) {
   }
   os() << "], " << *v->value() << ");";
   os() << std::endl;
+}
+
+void IRPrinter::visit(const SyncThreads* v) {
+  emitIndent();
+  os() << "__syncthreads();\n";
 }
 
 void IRPrinter::emitIndent() {

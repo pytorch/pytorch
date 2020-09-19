@@ -1,9 +1,18 @@
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
+#include <test/cpp/api/support.h>
+
+
+// Tests that the fft function can be called as usual
+TEST(FFTTest, unclobbered_fft) {
+    auto t = torch::randn({64, 2}, torch::dtype(torch::kDouble));
+    torch::fft(t, 1);
+}
+
+// Clobbers torch::fft the function with torch::fft the namespace
 #include <torch/fft.h>
 
-#include <test/cpp/api/support.h>
 
 // NOTE: Visual Studio and ROCm builds don't understand complex literals
 //   as of August 2020

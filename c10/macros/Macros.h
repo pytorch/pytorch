@@ -174,6 +174,16 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_UNLIKELY(expr)  (expr)
 #endif
 
+/// C10_NOINLINE - Functions whose declaration is annotated with this will not
+/// be inlined.
+#ifdef __GNUC__
+#define C10_NOINLINE __attribute__((__noinline__))
+#elif _MSC_VER
+#define C10_NOINLINE __declspec(noinline)
+#else
+#define C10_NOINLINE
+#endif
+
 #include <sstream>
 #include <string>
 
@@ -294,6 +304,9 @@ __host__ __device__
 #endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
+// Warning: __has_trivial_copy for GCC may not always detect the non-POD
+// correctly. For example, T = std::unique_ptr may evaluate to true and be
+// treated as POD. This can cause unexpected behavior.
 #if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
@@ -333,7 +346,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
@@ -341,7 +354,7 @@ __host__ __device__
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr

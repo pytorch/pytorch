@@ -664,5 +664,39 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
   return nullptr;
 }
 
+std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  const auto& names_values = enum_type_->enumNamesValues();
+  auto it = std::find_if(
+      names_values.begin(),
+      names_values.end(),
+      [&field](const at::EnumNameValue& nv) { return nv.first == field; });
+  if (it == names_values.end()) {
+    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
+                           << " has no attribute '" << field << "'";
+  }
+  auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+      enum_type_, it->first, it->second);
+  return std::make_shared<SimpleValue>(
+      m.graph()->insertConstant(IValue(enum_holder), loc));
+}
+
+SugaredValuePtr SugaredEnumClass::iter(const SourceRange& loc, Function& m) {
+  const auto& names_values = enum_type_->enumNamesValues();
+  auto enum_value_ivalues = c10::impl::GenericList(enum_type_);
+  enum_value_ivalues.reserve(names_values.size());
+  for (const auto& name_value : names_values) {
+    auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+        enum_type_, name_value.first, name_value.second);
+    enum_value_ivalues.emplace_back(enum_holder);
+  }
+
+  auto enum_values_list_constant = std::make_shared<SimpleValue>(
+      m.graph()->insertConstant(enum_value_ivalues, loc));
+  return enum_values_list_constant;
+}
+
 } // namespace jit
 } // namespace torch

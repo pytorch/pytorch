@@ -9,6 +9,7 @@ import weakref
 from torch._C import _add_docstr
 from numbers import Number
 import functools
+from typing import Optional
 
 
 def _wrap_type_error_to_not_implemented(f):
@@ -54,13 +55,13 @@ class Tensor(torch._C._TensorBase):
                 if self.is_quantized:
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
-                    elif self.qscheme() == torch.per_channel_affine:
+                    elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                         quantizer_params = self.qscheme(), \
                             self.q_per_channel_scales(), \
                             self.q_per_channel_zero_points(), \
                             self.q_per_channel_axis()
                     else:
-                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                        raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
                     new_tensor = torch._utils._rebuild_qtensor(
                         new_storage,
                         self.storage_offset(),
@@ -105,7 +106,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params = (torch.per_tensor_affine,
                                     self.q_scale(),
                                     self.q_zero_point())
-            elif self.qscheme() == torch.per_channel_affine:
+            elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                 # convert scales and zero points to tuple to avoid recursive calls
                 # when/if we get multi-axis quantized tensors in the future, the shape
                 # is recoverable from the main tensor shape
@@ -114,7 +115,7 @@ class Tensor(torch._C._TensorBase):
                                     self.q_per_channel_zero_points(),
                                     self.q_per_channel_axis())
             else:
-                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
+                raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             args = (self.storage(),
                     self.storage_offset(),
                     tuple(self.size()),
@@ -394,8 +395,10 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
-             center=True, pad_mode='reflect', normalized=False, onesided=True):
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
         r"""See :func:`torch.stft`
 
         .. warning::
@@ -408,23 +411,27 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
                 win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided
+                onesided=onesided, return_complex=return_complex
             )
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
-                          pad_mode, normalized, onesided)
+                          pad_mode, normalized, onesided, return_complex=return_complex)
 
-    def istft(self, n_fft, hop_length=None, win_length=None, window=None,
-              center=True, normalized=False, onesided=True, length=None):
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(
                 Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
-                window=window, center=center, normalized=normalized, onesided=onesided, length=None
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
             )
         return torch.istft(self, n_fft, hop_length, win_length, window, center,
-                           normalized, onesided, length)
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         relevant_args = (self,)

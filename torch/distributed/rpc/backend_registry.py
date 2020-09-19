@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
 from datetime import timedelta
@@ -23,8 +22,8 @@ def _backend_type_repr(self):
 _backend_type_doc = """
     An enum class of available backends.
 
-    PyTorch ships with two builtin backends: ``BackendType.PROCESS_GROUP`` and
-    ``BackendType.TENSORPIPE``. Additional ones can be registered using the
+    PyTorch ships with two builtin backends: ``BackendType.TENSORPIPE`` and
+    ``BackendType.PROCESS_GROUP``. Additional ones can be registered using the
     :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
 """
 

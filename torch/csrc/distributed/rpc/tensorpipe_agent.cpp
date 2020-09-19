@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -450,8 +451,8 @@ void TensorPipeAgent::pipeWrite(
       rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
   auto devices = getDevicesForTensors(
       pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
-  std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
-      std::move(rpcMessage), std::move(devices));
+  std::tie(tpMessage, tpBuffers) =
+      tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
 
   pipe->write(
       std::move(tpMessage),

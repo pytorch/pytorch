@@ -31,7 +31,6 @@ namespace torch {
 namespace jit {
 
 using namespace torch::jit::fuser;
-using namespace torch::jit::fuser;
 
 namespace {
 

@@ -1,10 +1,20 @@
 set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
+add_library(torchbind_test SHARED ${JIT_TEST_ROOT}/test_custom_class.cpp)
+target_link_libraries(torchbind_test torch)
+
+add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
+target_link_libraries(jitbackend_test torch)
+
+if(INSTALL_TEST)
+  install(TARGETS torchbind_test DESTINATION lib)
+  install(TARGETS jitbackend_test DESTINATION lib)
+endif()
+
 set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
-  ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_base.cpp
   ${JIT_TEST_ROOT}/test_base.h
   ${JIT_TEST_ROOT}/test_class_import.cpp
