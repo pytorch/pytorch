@@ -12,6 +12,17 @@ if(INSTALL_TEST)
 endif()
 
 set(JIT_TEST_SRCS
+)
+
+if(USE_CUDA)
+  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
+endif()
+
+set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
+
+add_executable(test_jit
+  ${TORCH_ROOT}/test/cpp/common/main.cpp
+  ${JIT_TEST_ROOT}/gtest.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
@@ -37,6 +48,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_jit_type.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
+  ${JIT_TEST_ROOT}/test_memory_dag.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp
@@ -50,16 +62,6 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_utils.cpp
 )
 
-if(USE_CUDA)
-  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
-endif()
-
-set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
-
-add_executable(test_jit
-  ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${JIT_TEST_ROOT}/gtest.cpp
-  ${JIT_TEST_SRCS})
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
