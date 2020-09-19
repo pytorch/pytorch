@@ -59,7 +59,7 @@ SIZE = 100
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM
 
-if TEST_CUDA:
+if TEST_CUDA and not TEST_WITH_ROCM:
     AMPERE_OR_ROCM = tf32_is_not_fp32()
 
 # Wrap base test class into a class to hide it from testing
