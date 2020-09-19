@@ -19773,11 +19773,7 @@ tensor_op_tests = [
         1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-<<<<<<< HEAD
-        1e-1, 1e-5, _types, _types),
-=======
         1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
->>>>>>> 620c99997997227bfdcf418d8c67c6c648177d40
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
