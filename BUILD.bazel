@@ -1686,7 +1686,7 @@ cc_library(
 
 cc_library(
     name = "caffe2",
-    srcs = glob( [
+    srcs = [
         "caffe2/db/create_db_op.cc",
         "caffe2/db/protodb.cc",
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
@@ -1705,7 +1705,7 @@ cc_library(
         ":caffe2_sgd_srcs",
         ":caffe2_transforms_srcs",
         ":caffe2_utils_srcs",
-    ], exclude = [third_party/gloo/gloo/common/win.cc], ),
+    ],
     copts = CAFFE2_COPTS + ["-mf16c"],
     linkstatic = 1,
     visibility = ["//visibility:public"],
@@ -1749,7 +1749,7 @@ cc_library(
 
 cu_library(
     name = "caffe2_cuda",
-    srcs = glob( [":caffe2_cu_srcs"], exclude = [third_party/gloo/gloo/common/win.cc], ),
+    srcs = [":caffe2_cu_srcs"],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
