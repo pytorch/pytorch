@@ -414,7 +414,6 @@ class TestQuantizeFx(QuantizationTestCase):
         orig = LinearModelWithSubmodule().eval()
         model = orig
         qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
-
         # symbolically trace
         model = symbolic_trace(model)
         model = prepare_static_fx(model, qconfig_dict)
