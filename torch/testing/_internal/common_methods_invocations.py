@@ -1360,12 +1360,6 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
-        ('fft.fft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
-        ('fft.ifft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
-        ('fft.rfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
-        ('fft.irfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
-        ('fft.hfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
-        ('fft.ihfft', (S, S), NO_ARGS, '', (), (0, 1), (skipCPUIfNoMkl, skipCUDAIfRocm)),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
@@ -1581,12 +1575,6 @@ EXCLUDE_FUNCTIONAL = {
 EXCLUDE_GRADCHECK = {
 }
 EXCLUDE_GRADGRADCHECK = {
-    'fft.fft',
-    'fft.ifft',
-    'fft.rfft',
-    'fft.irfft',
-    'fft.hfft',
-    'fft.ihfft',
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,

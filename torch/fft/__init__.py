@@ -17,10 +17,10 @@ Note:
 
     The Fourier domain representation of any real signal satisfies the
     Hermitian property: `X[i] = conj(X[-i])`. This function always returns both
-    the positive and negative frequency terms, even though for real inputs the
-    negative frequencies are redundant. :func:`~torch.fft.rfft` returns the more
-    efficient "half-complex" representation where only the positive frequencies
-    are stored explicitly.
+    the positive and negative frequency terms even though, for real inputs, the
+    negative frequencies are redundant. :func:`~torch.fft.rfft` returns the
+    more compact one-sided representation where only the positive frequencies
+    are returned.
 
 Args:
     input (Tensor): the input tensor
@@ -154,7 +154,7 @@ Note:
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal length :attr:`n`:
+    properly. So, it is recommended to always pass the signal length :attr:`n`.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -228,7 +228,7 @@ Note:
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal length :attr:`n`:
+    properly. So, it is recommended to always pass the signal length :attr:`n`.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -286,7 +286,7 @@ Computes the inverse of :func:`~torch.fft.hfft`.
 
 :attr:`input` must be a real-valued signal, interpreted in the Fourier domain.
 The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])``.
-:func:`~torch.fft.ihfft` represents this in the onesided form where only the
+:func:`~torch.fft.ihfft` represents this in the one-sided form where only the
 positive frequencies below the Nyquist frequency are included. To compute the
 full output, use :func:`~torch.fft.ifft`.
 
