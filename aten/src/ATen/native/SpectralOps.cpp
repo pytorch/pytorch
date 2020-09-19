@@ -206,6 +206,10 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
 struct ShapeAndDims{
   DimVector shape, dim;
 };
+
+// Pre-process n-dimensional fft's `s` and `dim` arguments.
+// Wraps dimensions and applies defaulting behavior.
+// Also checks transform dims are unique and transform shape is non-empty.
 ShapeAndDims canonicalize_fft_shape_and_dim_args(
     Tensor input, c10::optional<IntArrayRef> shape, c10::optional<IntArrayRef> dim) {
   const int64_t input_dim = input.dim();
@@ -225,10 +229,12 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   }
 
   if (shape) {
+    // Has shape, may have dim
     TORCH_CHECK(!dim || dim->size() == shape->size(),
                 "When given, dim and shape arguments must have the same length");
     TORCH_CHECK(shape->size() <= input_dim,
-                "Shape requires more dims than are present");
+                "Got shape with ", shape->size(), " values but input tensor "
+                "only has ", input_dim, " dimensions.");
     const int64_t transform_ndim = shape->size();
     if (!dim) {
       ret.dim.resize(transform_ndim);
@@ -241,11 +247,13 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
       ret.shape[i] = n == -1 ? input_sizes[ret.dim[i]] : n;
     }
   } else if (!dim) {
+    // No shape, no dim
     ret.dim.resize(input_dim);
     std::iota(ret.dim.begin(), ret.dim.end(), int64_t{0});
     ret.shape.resize(input_dim);
     std::copy(input_sizes.begin(), input_sizes.end(), ret.shape.begin());
   } else {
+    // No shape, has dim
     ret.shape.resize(ret.dim.size());
     for (int64_t i = 0; i < ret.dim.size(); ++i) {
       ret.shape[i] = input_sizes[ret.dim[i]];
@@ -260,7 +268,7 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   return ret;
 }
 
-// Complex to complex nd fft
+// Complex to complex n-dimensional fft
 Tensor fftn_c2c(
     const Tensor& input, IntArrayRef shape, IntArrayRef dim,
     c10::optional<std::string> norm_str, bool forward) {
@@ -272,6 +280,8 @@ Tensor fftn_c2c(
 
   const int64_t transform_ndim = dim.size();
   const auto norm = norm_from_string(norm_str, forward);
+  // _fft_with_size only supports 3 dimensions being transformed at a time.
+  // This limit is inherited from cuFFT.
   constexpr int64_t max_signal_ndim = 3;
 
   // Transform n dimensions, up to 3 at a time
@@ -379,11 +389,12 @@ Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
 
   const auto last_dim = desc.dim.back();
   const auto last_shape = [&]() -> c10::optional<int64_t> {
-    if (s.has_value()) {
-      return desc.shape.back();
-    } else {
+    // If shape is defaulted in the last dimension,
+    // pass nullopt to irfft and let it calculate the default size
+    if (!s.has_value() || (s->back() == -1)) {
       return c10::nullopt;
     }
+    return desc.shape.back();
   }();
   desc.shape.pop_back();
   desc.dim.pop_back();
