@@ -255,10 +255,7 @@ public:
     // Dump the op-schema -> function and function -> op-schema mappings into
     // the same `deps` graph with function -> function mappings as they will
     // be processed together next.
-    SET registrations;
-    scanOpRegistration(opRegistrationInsts, &registrations, &deps);
-    keyNodes.insert(registrations.begin(), registrations.end());
-
+    scanOpRegistration(opRegistrationInsts, &keyNodes, &deps);
     scanOpInvocation(opInvocationInsts, &keyNodes, &deps);
 
     // Shrink the graph by removing intermediate nodes (functions) while
@@ -267,7 +264,7 @@ public:
     std::shared_ptr<PATH> path = DebugPath ? std::make_shared<PATH>() : nullptr;
     simplifyGraph(deps, keyNodes, &result, path.get());
 
-    printAsYAML(std::cout, registrations, result, path.get());
+    printAsYAML(std::cout, keyNodes, result, path.get());
     return false;
   }
 
@@ -525,11 +522,6 @@ private:
       while (!queue.empty()) {
         auto curNode = queue.front();
         queue.pop_front();
-        auto curName = _demangle(curNode);
-        if (curName.find("at::native") == 0 ||
-            (curName.find("at::") == 0 && curName.find("Type") != std::string::npos)) {
-          (*output)[key].insert(curNode);
-        }
         if (keyNodes.count(curNode)) {
           // Output links between key nodes.
           (*output)[key].insert(curNode);
@@ -546,11 +538,9 @@ private:
   static void scanOpSchemaStrAndFunction(
       Instruction* src, const VALUE_SET& blocked,
       const std::string& contextualNamespace,
-      bool isInvocation,
       SET* visitedOps, SET* visitedFunctions) {
     std::shared_ptr<VALUE_MAP> debugPath =
         (Verbose > 2 ? std::make_shared<VALUE_MAP>() : nullptr);
-    std::vector<std::string> part;
     auto callback = [&](Value* V) -> void {
       if (auto schemaStr = extractOpSchema(contextualNamespace, V)) {
         if (visitedOps) {
@@ -568,17 +558,7 @@ private:
                         << *visitedOps->begin() << std::endl;
             }
           } else {
-            if (isInvocation) {
-              if (part.empty()) {
-                part.push_back(*schemaStr);
-              } else {
-                const std::string& opname =
-                    !schemaStr->empty() ? part[0] + "." + *schemaStr : part[0];
-                (*visitedOps).insert(opname);
-              }
-            } else {
-              (*visitedOps).insert(*schemaStr);
-            }
+            (*visitedOps).insert(*schemaStr);
           }
         }
         if (Verbose > 1) {
@@ -661,7 +641,7 @@ private:
       // going from one op registration call to another op registration call via
       // the global registry object.
       scanOpSchemaStrAndFunction(
-          I, instructions, contextualNamespace, false, &visitedOps, &visitedFunctions);
+          I, instructions, contextualNamespace, &visitedOps, &visitedFunctions);
       if (visitedOps.size() != 1) {
         std::cerr << "[WARNING] found " << visitedOps.size() << " ops ( ";
         for (auto& op : visitedOps) {
@@ -745,7 +725,7 @@ private:
       }
       std::string caller = I->getFunction()->getName();
       SET visitedOps;
-      scanOpSchemaStrAndFunction(I, {}, {}, false /*true*/, &visitedOps, nullptr);
+      scanOpSchemaStrAndFunction(I, {}, {}, &visitedOps, nullptr);
       if (visitedOps.size() != 1) {
         std::cerr << "[WARNING] found " << visitedOps.size() << " ops ( ";
         for (auto& op : visitedOps) {
@@ -817,7 +797,7 @@ private:
                 << " op schema strings in one value!" << std::endl;
     }
     const std::string schemaStr = schemaStrs[0];
-    auto pos = schemaStr.find_first_of("(");
+    auto pos = schemaStr.find_first_of(".(");
     return std::make_shared<std::string>(
         pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos));
   }
