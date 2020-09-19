@@ -203,7 +203,8 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
   return out;
 }
 
-struct ShapeAndDims{
+// Dimensions to transform, and the signal shape in those dimensions
+struct ShapeAndDims {
   DimVector shape, dim;
 };
 
@@ -236,11 +237,13 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
                 "Got shape with ", shape->size(), " values but input tensor "
                 "only has ", input_dim, " dimensions.");
     const int64_t transform_ndim = shape->size();
+    // If shape is given, dims defaults to the last shape.size() dimensions
     if (!dim) {
       ret.dim.resize(transform_ndim);
       std::iota(ret.dim.begin(), ret.dim.end(), input_dim - transform_ndim);
     }
 
+    // Translate shape of -1 to the default length
     ret.shape.resize(transform_ndim);
     for (int64_t i = 0; i < transform_ndim; ++i) {
       const auto n = (*shape)[i];
