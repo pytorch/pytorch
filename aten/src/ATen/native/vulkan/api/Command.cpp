@@ -125,7 +125,12 @@ void Command::Buffer::copy(
       &buffer_copy);
 }
 
-void Command::Buffer::dispatch() {
+void Command::Buffer::dispatch(const Shader::WorkGroup& work_group) {
+  vkCmdDispatch(
+      command_buffer_,
+      work_group.x,
+      work_group.y,
+      work_group.z);
 }
 
 void Command::Buffer::submit(

@@ -162,8 +162,8 @@ api::Resource::Image maybe_allocate_image(
 
 void copy_staging_to_buffer(
     api::Command::Buffer command_buffer,
-    const api::Resource::Buffer staging,
-    const api::Resource::Buffer buffer) {
+    const vTensor::Buffer& staging,
+    const vTensor::Buffer& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       staging,
       "Invalid Vulkan staging buffer!");
@@ -175,15 +175,13 @@ void copy_staging_to_buffer(
   command_buffer.copy(
       staging.handle,
       buffer.handle,
-      std::min(
-          staging.memory.allocation_info.size,
-          buffer.memory.allocation_info.size));
+      std::min(staging.range, buffer.range));
 }
 
 void copy_buffer_to_staging(
     api::Command::Buffer command_buffer,
-    const api::Resource::Buffer buffer,
-    const api::Resource::Buffer staging) {
+    const vTensor::Buffer& buffer,
+    const vTensor::Buffer& staging) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer,
       "Invalid Vulkan buffer!");
@@ -191,12 +189,17 @@ void copy_buffer_to_staging(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       staging,
       "Invalid Vulkan staging buffer!");
+
+  command_buffer.copy(
+      buffer.handle,
+      staging.handle,
+      std::min(staging.range, buffer.range));
 }
 
 void copy_buffer_to_image(
     api::Command::Buffer command_buffer,
-    const api::Resource::Buffer buffer,
-    const api::Resource::Image image) {
+    const vTensor::Buffer& buffer,
+    const vTensor::Image& image) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer,
       "Invalid Vulkan buffer!");
@@ -208,8 +211,8 @@ void copy_buffer_to_image(
 
 void copy_image_to_buffer(
     api::Command::Buffer command_buffer,
-    const api::Resource::Image image,
-    const api::Resource::Buffer buffer) {
+    const vTensor::Image& image,
+    const vTensor::Buffer& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       image,
       "Invalid Vulkan image!");
@@ -252,7 +255,7 @@ const vTensor* vTensor::host_impl() const {
     command_buffer.begin();
     {
       if (dirty_.image) {
-        copy_image_to_buffer(command_buffer, image_, buffer_);
+        copy_image_to_buffer(command_buffer, image_.object, buffer_.object);
         dirty_.image = 0u;
 
         if (staging_) {
@@ -261,7 +264,7 @@ const vTensor* vTensor::host_impl() const {
       }
 
       if (dirty_.buffer && staging_) {
-        copy_buffer_to_staging(command_buffer, buffer_, staging_);
+        copy_buffer_to_staging(command_buffer, buffer_.object, staging_.object);
         dirty_.buffer = 0u;
       }
     }
@@ -288,7 +291,7 @@ vTensor* vTensor::host_impl(const Access::Flags access) {
   return tensor;
 }
 
-api::Resource::Memory& vTensor::wait_impl(const Access::Flags access) {
+api::Resource::Memory& vTensor::wait_impl() {
   enforce_invariants();
 
   api::Resource::Buffer& buffer = staging_ ? staging_ : buffer_;
@@ -297,7 +300,7 @@ api::Resource::Memory& vTensor::wait_impl(const Access::Flags access) {
   return buffer.memory;
 }
 
-VkBuffer vTensor::buffer() const & {
+vTensor::Buffer vTensor::buffer() const & {
   enforce_invariants();
 
   if (dirty_.staging || dirty_.image) {
@@ -307,11 +310,11 @@ VkBuffer vTensor::buffer() const & {
     command_buffer.begin();
     {
       if (dirty_.staging) {
-        copy_staging_to_buffer(command_buffer, staging_, buffer_);
+        copy_staging_to_buffer(command_buffer, staging_.object, buffer_.object);
         dirty_.staging = 0u;
       }
       else if (dirty_.image) {
-        copy_image_to_buffer(command_buffer, image_, buffer_);
+        copy_image_to_buffer(command_buffer, image_.object, buffer_.object);
         dirty_.image = 0u;
       }
     }
@@ -319,11 +322,11 @@ VkBuffer vTensor::buffer() const & {
     command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
-  return buffer_.handle;
+  return buffer_.object;
 }
 
-VkBuffer vTensor::buffer(const Access::Flags access) & {
-  const VkBuffer buffer = const_cast<const vTensor&>(*this).buffer();
+vTensor::Buffer vTensor::buffer(const Access::Flags access) & {
+  const vTensor::Buffer buffer = const_cast<const vTensor&>(*this).buffer();
 
   if (buffer && (access & Access::Write)) {
     dirty_.buffer = 1;
@@ -332,7 +335,7 @@ VkBuffer vTensor::buffer(const Access::Flags access) & {
   return buffer;
 }
 
-VkImage vTensor::image() const & {
+vTensor::Image vTensor::image() const & {
   enforce_invariants();
 
   if (dirty_.staging || dirty_.buffer) {
@@ -342,13 +345,13 @@ VkImage vTensor::image() const & {
     command_buffer.begin();
     {
       if (dirty_.staging) {
-        copy_staging_to_buffer(command_buffer, staging_, buffer_);
+        copy_staging_to_buffer(command_buffer, staging_.object, buffer_.object);
         dirty_.staging = 0u;
         dirty_.buffer = 1u;
       }
 
       if (dirty_.buffer) {
-        copy_buffer_to_image(command_buffer, buffer_, image_);
+        copy_buffer_to_image(command_buffer, buffer_.object, image_.object);
         dirty_.buffer = 0u;
       }
     }
@@ -356,11 +359,11 @@ VkImage vTensor::image() const & {
     command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
-  return image_.handle;
+  return image_.object;
 }
 
-VkImage vTensor::image(const Access::Flags access) & {
-  const VkImage image = const_cast<const vTensor&>(*this).image();
+vTensor::Image vTensor::image(const Access::Flags access) & {
+  const vTensor::Image image = const_cast<const vTensor&>(*this).image();
 
   if (image && (access & Access::Write)) {
     dirty_.image = 1;
@@ -370,9 +373,6 @@ VkImage vTensor::image(const Access::Flags access) & {
 }
 
 void vTensor::enforce_invariants() const {
-  // std::cout << "dirty_.image: " << dirty_.image << std::endl;
-  // std::cout << "dirty_.buffer: " << dirty_.buffer << std::endl;
-  // std::cout << "dirty_.staging: " << dirty_.staging << std::endl;
   TORCH_INTERNAL_ASSERT(!context_ || (context_ && buffer_));
   TORCH_INTERNAL_ASSERT(!dirty_.image || (image_ && dirty_.image));
   TORCH_INTERNAL_ASSERT(!dirty_.buffer || (buffer_ && dirty_.buffer));
