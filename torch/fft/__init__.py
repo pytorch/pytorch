@@ -23,10 +23,10 @@ Note:
 
     The Fourier domain representation of any real signal satisfies the
     Hermitian property: `X[i] = conj(X[-i])`. This function always returns both
-    the positive and negative frequency terms, even though for real inputs the
-    negative frequencies are redundant. :func:`~torch.fft.rfft` returns the more
-    efficient "half-complex" representation where only the positive frequencies
-    are stored explicitly.
+    the positive and negative frequency terms even though, for real inputs, the
+    negative frequencies are redundant. :func:`~torch.fft.rfft` returns the
+    more compact one-sided representation where only the positive frequencies
+    are returned.
 
 Args:
     input (Tensor): the input tensor
@@ -102,18 +102,17 @@ Note:
 
     The Fourier domain representation of any real signal satisfies the
     Hermitian property: ``X[i_1, ..., i_n] = conj(X[-i_1, ..., -i_n])``. This
-    function always returns all positive and negative frequency terms, even
-    though for real inputs, half of these values are redundant.
-    :func:`~torch.fft.rfftn` returns the more efficient "half-complex"
-    representation where only the positive frequencies of the last dimension
-    are stored explicitly.
+    function always returns all positive and negative frequency terms even
+    though, for real inputs, half of these values are redundant.
+    :func:`~torch.fft.rfftn` returns the more compact one-sided representation
+    where only the positive frequencies of the last dimension are returned.
 
 Args:
     input (Tensor): the input tensor
-    s (Tuple[int], optional): Signal size in the transformed dimensions. If
-        given, the input will either be zero-padded or trimmed to this length
-        before computing the FFT.
-    dim (Tuple[int], optional): Dimensions to be Fourier transformed.
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the FFT.
+    dim (Tuple[int], optional): Dimensions to be transformed.
         Default: all dimensions.
     norm (str, optional): Normalization mode. For the forward transform
         (:func:`~torch.fft.fftn`), these correspond to:
@@ -136,8 +135,8 @@ Example:
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> fftn = torch.fft.fftn(t)
 
-    The Fourier transform is separable, so :func:`~torch.fft.fftn` here is
-    equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
+    The discrete Fourier transform is separable, so :func:`~torch.fft.fftn`
+    here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
 
     >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
     >>> torch.allclose(fftn, two_ffts)
@@ -151,10 +150,10 @@ Computes the N dimensional inverse discrete Fourier transform of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    s (Tuple[int], optional): Signal size in the transformed dimensions. If
-        given, the input will either be zero-padded or trimmed to this length
-        before computing the IFFT.
-    dim (Tuple[int], optional): Dimensions to be inverse Fourier transformed.
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the IFFT.
+    dim (Tuple[int], optional): Dimensions to be transformed.
         Default: all dimensions.
     norm (str, optional): Normalization mode. For the backward transform
         (:func:`~torch.fft.ifftn`), these correspond to:
@@ -177,8 +176,8 @@ Example:
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> ifftn = torch.fft.ifftn(t)
 
-    The Fourier transform is separable, so :func:`~torch.fft.ifftn` here is
-    equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
+    The discrete Fourier transform is separable, so :func:`~torch.fft.ifftn`
+    here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
 
     >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
     >>> torch.allclose(ifftn, two_iffts)
@@ -252,7 +251,7 @@ Note:
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal length :attr:`n`:
+    properly. So, it is recommended to always pass the signal length :attr:`n`.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -310,10 +309,10 @@ last dimension.
 
 Args:
     input (Tensor): the input tensor
-    s (Tuple[int], optional): Signal size in the transformed dimensions. If
-        given, the input will either be zero-padded or trimmed to this length
-        before computing the real FFT.
-    dim (Tuple[int], optional): Dimensions to be Fourier transformed.
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the real FFT.
+    dim (Tuple[int], optional): Dimensions to be transformed.
         Default: all dimensions.
     norm (str, optional): Normalization mode. For the forward transform
         (:func:`~torch.fft.rfftn`), these correspond to:
@@ -345,8 +344,8 @@ Example:
     >>> torch.allclose(fftn[..., :6], rfftn)
     True
 
-    The Fourier transform is separable, so :func:`~torch.fft.rfftn` here is
-    equivalent to a combination of :func:`~torch.fft.fft` and
+    The discrete Fourier transform is separable, so :func:`~torch.fft.rfftn`
+    here is equivalent to a combination of :func:`~torch.fft.fft` and
     :func:`~torch.fft.rfft`:
 
     >>> two_ffts = torch.fft.fft(torch.fft.rfft(x, dim=1), dim=0)
@@ -374,16 +373,16 @@ Note:
     the original data, as given by :attr:`s`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal length :attr:`s`:
+    properly. So, it is recommended to always pass the signal shape :attr:`s`.
 
 Args:
     input (Tensor): the input tensor
-    s (Tuple[int], optional): Output size in the transformed dimensions. If
-        given, the input will either be zero-padded or trimmed to this length
-        before computing the real IFFT.
+    s (Tuple[int], optional): Output size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to give an output length ``s[i]`` after computing the real IFFT.
         Defaults to even output in the last dimension:
         ``s[-1] = 2*(input.size(dim[-1]) - 1)``.
-    dim (Tuple[int], optional): Dimensions to be inverse Fourier transformed.
+    dim (Tuple[int], optional): Dimensions to be transformed.
         The last dimension must be the half-Hermitian compressed dimension.
         Default: all dimensions.
     norm (str, optional): Normalization mode. For the backward transform
@@ -414,7 +413,7 @@ Example:
     >>> torch.fft.irfft(T).size()
     torch.Size([10, 10])
 
-    So, it is recommended to always pass the signal length :attr:`s`:
+    So, it is recommended to always pass the signal shape :attr:`s`.
 
     >>> roundtrip = torch.fft.irfft(T, t.size())
     >>> roundtrip.size()
@@ -453,7 +452,7 @@ Note:
     the original data, as given by :attr:`n`. This is because each input shape
     could correspond to either an odd or even length signal. By default, the
     signal is assumed to be even length and odd signals will not round-trip
-    properly. So, it is recommended to always pass the signal length :attr:`n`:
+    properly. So, it is recommended to always pass the signal length :attr:`n`.
 
 Args:
     input (Tensor): the input tensor representing a half-Hermitian signal
@@ -511,7 +510,7 @@ Computes the inverse of :func:`~torch.fft.hfft`.
 
 :attr:`input` must be a real-valued signal, interpreted in the Fourier domain.
 The IFFT of a real signal is Hermitian-symmetric, ``X[i] = conj(X[-i])``.
-:func:`~torch.fft.ihfft` represents this in the onesided form where only the
+:func:`~torch.fft.ihfft` represents this in the one-sided form where only the
 positive frequencies below the Nyquist frequency are included. To compute the
 full output, use :func:`~torch.fft.ifft`.
 
