@@ -499,7 +499,7 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(IndexError, "Dimension out of range"):
                 func(a, dim=(3,))
 
-            with self.assertRaisesRegex(RuntimeError, "Shape requires more dims"):
+            with self.assertRaisesRegex(RuntimeError, "tensor only has 3 dimensions"):
                 func(a, s=(10, 10, 10, 10))
 
         c = torch.complex(a, a)
