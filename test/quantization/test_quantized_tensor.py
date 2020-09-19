@@ -472,15 +472,26 @@ class TestQuantizedTensor(TestCase):
         qc = deepcopy(q)
         self.assertEqual(qc, q)
 
-    def test_qtensor_clone(self):
+    def test_clone(self):
         numel = 10
         scale = 0.5
         zero_point = 10
-        for device in get_supported_device_types():
-            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
-                q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point,
-                                                   device=device, dtype=dtype)
-                q = q2.clone()
+
+        options = itertools.product(
+            get_supported_device_types(),
+            [torch.qint8, torch.quint8, torch.qint32])
+
+        for device, dtype in options:
+            per_tensor_quantized = torch._empty_affine_quantized(
+                [numel], scale=scale, zero_point=zero_point,
+                device=device, dtype=dtype)
+            per_channel_quantized = torch._empty_per_channel_affine_quantized(
+                [numel], scales=torch.tensor([scale]), zero_points=torch.tensor([zero_point]), axis=0,
+                device=device, dtype=dtype)
+            qtensors = [per_tensor_quantized, per_channel_quantized]
+
+            for q in qtensors:
+                q2 = q.clone()
                 # Check to make sure the scale and zero_point has been copied.
                 self.assertEqual(q, q2)
 
