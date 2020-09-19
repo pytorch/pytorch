@@ -299,7 +299,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # easier to other targets that depend on this. However, in that case, by not
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
-    add_library(tensorpipe_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h")
+    add_library(tensorpipe_agent
+      "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
+      "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
+      "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
+      "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
+      )
     target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
     add_dependencies(tensorpipe_agent torch c10d)
     if(USE_TENSORPIPE)
@@ -1267,6 +1272,27 @@ endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)
+
+  foreach(test_src ${ATen_VEC256_TEST_SRCS})
+    foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY) 
+        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)  
+        separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
+        add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
+        target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
+        target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${ATen_CPU_INCLUDE})
+        target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY}  CPU_CAPABILITY_${CPU_CAPABILITY})
+        target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE  ${FLAGS})
+        if(NOT MSVC)
+              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers) 
+        endif(NOT MSVC)
+        add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
+    endforeach()
+  endforeach()
+
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")

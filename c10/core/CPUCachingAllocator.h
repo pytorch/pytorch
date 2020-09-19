@@ -39,24 +39,24 @@ class C10_API CPUCachingAllocator {
     // As a result of above invariants, allocated memory ptr cannot be in
     // available_map_ unless it is in allocation_map_ as well.
     ska::flat_hash_map<size_t, c10::SmallVector<void*, 16>> available_map_;
+    inline void* allocate_and_cache(const size_t bytes);
+    void free_cached();
+  protected:
     static ska::flat_hash_map<void*, size_t> allocation_map_;
     // Since allocation_map, which is a global instance, is mutated/read via
     // all public APIs we need a global mutex.
     static std::mutex mutex_;
-    inline void* allocate_and_cache(const size_t bytes);
-    void free_cached();
   public:
     static void record_free(void* ptr);
+    virtual ~CPUCachingAllocator();
     // Checks the cache to see if allocation of size bytes can be found.
     // If so return cached memory, else
     // allocates memory, records it for caching and returns.
-    void* allocate(const size_t bytes);
+    virtual void* allocate(const size_t bytes);
     // Checks if the memory being freed is was marked for allocation by
     // an earlier call to allocate. If so cache the allocation.
     // Otherwise free.
-    void free(void* ptr);
-    // Mainly for testing
-    ~CPUCachingAllocator();
+    virtual void free(void* ptr);
 };
 
 CPUCachingAllocator* GetDefaultCPUCachingAllocator();
