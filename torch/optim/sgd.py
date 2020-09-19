@@ -45,8 +45,8 @@ class SGD(Optimizer):
 
         .. math::
             \begin{aligned}
-                v_{t+1} & = \mu * v_{t} + \text{lr} * g_{t+1}, \\
-                p_{t+1} & = p_{t} - v_{t+1}.
+                v_{t+1} & = \mu * v_{t} - \text{lr} * g_{t+1}, \\
+                p_{t+1} & = p_{t} + v_{t+1}.
             \end{aligned}
 
         The Nesterov version is analogously modified.
