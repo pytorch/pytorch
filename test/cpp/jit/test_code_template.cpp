@@ -1,6 +1,6 @@
-#include "test/cpp/jit/test_base.h"
-#include "test/cpp/jit/test_utils.h"
+#include <gtest/gtest.h>
 
+#include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/code_template.h"
 
 namespace torch {
@@ -33,8 +33,7 @@ static const auto ct_expect = R"(
   int notest(int a)
   )";
 
-void testCodeTemplate() {
-  {
+TEST(TestCodeTemplate, Copying) {
     TemplateEnv e;
     e.s("hi", "foo");
     e.v("what", {"is", "this"});
@@ -43,9 +42,9 @@ void testCodeTemplate() {
     ASSERT_EQ(e.s("hi"), "foo");
     ASSERT_EQ(c.s("hi"), "foo2");
     ASSERT_EQ(e.v("what")[0], "is");
-  }
+}
 
-  {
+TEST(TestCodeTemplate, Formatting) {
     TemplateEnv e;
     e.v("args", {"hi", "8"});
     e.v("bar", {"what\non many\nlines...", "7"});
@@ -57,7 +56,6 @@ void testCodeTemplate() {
     // std::cout << "'" << s << "'\n";
     // std::cout << "'" << ct_expect << "'\n";
     ASSERT_EQ(s, ct_expect);
-  }
 }
 
 } // namespace jit
