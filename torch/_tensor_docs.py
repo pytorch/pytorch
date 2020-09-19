@@ -1154,18 +1154,28 @@ dist(other, p=2) -> Tensor
 See :func:`torch.dist`
 """)
 
-add_docstr_all('div',
-               r"""
+add_docstr_all('div', r"""
 div(value) -> Tensor
 
 See :func:`torch.div`
 """)
 
-add_docstr_all('div_',
-               r"""
+add_docstr_all('div_', r"""
 div_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
+""")
+
+add_docstr_all('divide', r"""
+divide(value) -> Tensor
+
+See :func:`torch.divide`
+""")
+
+add_docstr_all('divide_', r"""
+divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.divide`
 """)
 
 add_docstr_all('dot',
@@ -2244,18 +2254,28 @@ movedim(source, destination) -> Tensor
 See :func:`torch.movedim`
 """)
 
-add_docstr_all('mul',
-               r"""
+add_docstr_all('mul', r"""
 mul(value) -> Tensor
 
-See :func:`torch.mul`
+See :func:`torch.mul`.
 """)
 
-add_docstr_all('mul_',
-               r"""
-mul_(value)
+add_docstr_all('mul_', r"""
+mul_(value) -> Tensor
 
-In-place version of :meth:`~Tensor.mul`
+In-place version of :meth:`~Tensor.mul`.
+""")
+
+add_docstr_all('multiply', r"""
+multiply(value) -> Tensor
+
+See :func:`torch.multiply`.
+""")
+
+add_docstr_all('multiply_', r"""
+multiply_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.multiply`.
 """)
 
 add_docstr_all('multinomial',
