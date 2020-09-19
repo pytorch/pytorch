@@ -565,7 +565,16 @@ void magmaOrgqr<c10::complex<float>>(
     magma_int_t nb,
     magma_int_t* info) {
   MagmaStreamSyncGuard guard;
-  magma_cungqr_gpu(m, n, k, reinterpret_cast<magmaFloatComplex*>(dA), ldda, reinterpret_cast<magmaFloatComplex*>(tau), reinterpret_cast<magmaFloatComplex*>(dT), nb, info);
+  magma_cungqr_gpu(
+    m,
+    n,
+    k,
+    reinterpret_cast<magmaFloatComplex*>(dA),
+    ldda,
+    reinterpret_cast<magmaFloatComplex*>(tau),
+    reinterpret_cast<magmaFloatComplex*>(dT),
+    nb,
+    info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
