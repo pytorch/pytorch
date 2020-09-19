@@ -1,4 +1,5 @@
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
@@ -38,9 +39,10 @@
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
@@ -119,8 +121,7 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if !defined(__HIP_PLATFORM_HCC__)
-TORCH_API void runJITCPPTests(bool runCuda);
-TORCH_API void runTENSOREXPRCPPTests(bool runCuda);
+TORCH_API void runJITCPPTests();
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -183,8 +184,11 @@ void initJITBindings(PyObject* module) {
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
       .def(
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
+      .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
+      .def("_jit_pass_onnx_node_shape_type_inference", ONNXShapeTypeInference)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -369,6 +373,26 @@ void initJITBindings(PyObject* module) {
             }
             PropagateInputShapes(graph);
           })
+      .def(
+          "_jit_interpret_graph",
+          [](std::shared_ptr<Graph>& graph, py::tuple inputs) {
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = graph->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            Code code(graph, "<on-demand-func>");
+            InterpreterState(code).run(stack);
+            return createPyObjectForStack(std::move(stack));
+          },
+          py::doc(
+              "Interpret a JIT graph with given inputs without running any optimization passes on it"))
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
@@ -395,27 +419,15 @@ void initJITBindings(PyObject* module) {
 #if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
-          [](bool runCuda) {
+          []() {
             // We have to release the GIL inside this method, because if we
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             pybind11::gil_scoped_release _no_gil;
-            return runJITCPPTests(runCuda);
-          },
-          py::arg("run_cuda"))
+            return runJITCPPTests();
+          })
       .def("_jit_has_cpp_tests", []() { return true; })
-      .def(
-          "_run_tensorexpr_cpp_tests",
-          [](bool runCuda) {
-            // We have to release the GIL inside this method, because if we
-            // happen to initialize the autograd engine in these tests, the
-            // newly spawned worker threads will try to initialize their
-            // PyThreadState*, and they need the GIL for this.
-            pybind11::gil_scoped_release _no_gil;
-            return runTENSOREXPRCPPTests(runCuda);
-          },
-          py::arg("run_cuda"))
       .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
       .def("_jit_run_cpp_tests", []() { throw std::exception(); })
@@ -508,7 +520,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_get_trigger_value",
-          [](const std::string& trigger_name) {
+          [](const std::string& trigger_name) -> int {
             using namespace torch::jit::tensorexpr;
             ExecutionTrigger* trigger =
                 ExecutionTriggerList::GetInstance().FindByName(trigger_name);
@@ -554,6 +566,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
+      .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
+      .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
@@ -633,8 +647,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
-          [](script::Module& module) {
-            return vulkanOptimizeForMobile(module);
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return vulkanOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -897,13 +912,67 @@ void initJITBindings(PyObject* module) {
             docstring << "  " << op->schema() << "\n";
           }
 
-          return py::cpp_function(
-              [operations](py::args args, py::kwargs kwargs) {
+          auto func = py::cpp_function(
+              [operations, symbol](py::args args, py::kwargs kwargs) {
+                std::vector<py::handle> overloaded_args;
+                size_t total_arg_num = args.size() + kwargs.size();
+                for (size_t i = 0; i < args.size(); ++i) {
+                  is_tensor_and_append_overloaded(
+                      args[i].ptr(), &overloaded_args);
+                  is_tensor_list_and_append_overloaded(
+                      args[i].ptr(),
+                      &overloaded_args,
+                      static_cast<int>(total_arg_num),
+                      false /* throw_error */);
+                }
+                // NB: for kwargs, we cannot guarantee the order of appending
+                // is the same as the argument order in operator's schema.
+                // This is suboptimal, but should be fine. Later when we have
+                // better schema matching and argument parsing, we could
+                // match the operator in `operations` first, then the order will
+                // be guaranteed.
+                for (auto item : kwargs) {
+                  is_tensor_and_append_overloaded(
+                      item.second.ptr(), &overloaded_args);
+                  is_tensor_list_and_append_overloaded(
+                      item.second.ptr(),
+                      &overloaded_args,
+                      total_arg_num,
+                      false /* throw_error */);
+                }
+                if (overloaded_args.size() > 0) {
+                  std::vector<py::object> overloaded_types;
+                  overloaded_types.reserve(overloaded_args.size());
+                  for (auto& oarg : overloaded_args) {
+                    overloaded_types.push_back(
+                        py::reinterpret_borrow<py::object>(
+                            (PyObject*)Py_TYPE(oarg.ptr())));
+                  }
+                  py::tuple py_types = py::cast(overloaded_types);
+                  py::object ret;
+                  std::string ns = symbol.ns().toUnqualString();
+                  std::string method_name = symbol.toUnqualString();
+                  auto self_func = py::module::import("torch")
+                                       .attr("ops")
+                                       .attr(ns.c_str())
+                                       .attr(method_name.c_str());
+                  std::string module_name("torch.ops");
+                  module_name.append(ns);
+                  return pybind11::reinterpret_steal<py::object>(
+                      handle_torch_function_no_python_arg_parser(
+                          overloaded_args,
+                          args.ptr(),
+                          kwargs.ptr(),
+                          method_name.c_str(),
+                          self_func.ptr(),
+                          module_name.c_str()));
+                }
                 return invokeOperatorFromPython(
                     operations, std::move(args), std::move(kwargs));
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
+          return func;
         } catch (const c10::Error& error) {
           throw std::runtime_error(error.what_without_backtrace());
         }

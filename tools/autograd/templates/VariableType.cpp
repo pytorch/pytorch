@@ -1,4 +1,5 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/TypeDefault.h>
 #include <torch/library.h>
@@ -28,6 +29,7 @@
 
 using namespace at;
 using namespace torch::autograd::generated;
+using namespace torch::autograd::generated::details;
 
 namespace torch { namespace autograd {
 

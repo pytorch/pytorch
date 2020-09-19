@@ -342,6 +342,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_type",
+              // Intentionally not releasing GIL, as most accesses just
+              // retrieve cached type py::object
+              &PyRRef::getRRefType,
+              R"(
+                  Returns the type of the data object referenced by this
+                  ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. On a user, this will trigger an
+                  RPC to fetch the ``type`` object from the owner. After this
+                  function is run once, the ``type`` object is cached by the
+                  ``RRef``, and subsequent invocations no longer trigger RPC.
+              )")
+          .def(
               "_get_future",
               [](const PyRRef& self) {
                 return std::make_shared<jit::PythonFutureWrapper>(

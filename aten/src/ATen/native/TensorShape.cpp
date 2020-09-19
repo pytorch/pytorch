@@ -118,6 +118,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "unsupported operation: the input tensors cannot refer to any of the "
         "output memory locations. Found overlap in input tensor ", i);
   }
+  at::assert_no_internal_overlap(result);
 
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
@@ -196,6 +197,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)  // Already checked above
       .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
@@ -222,6 +224,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
+        .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
         .add_output(result_slice)
         .add_input(tensor)
@@ -927,6 +930,12 @@ Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
 
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
@@ -1045,6 +1054,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
   return result;
+}
+
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -1782,6 +1797,28 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
+Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+  auto ndimension = input_sizes.size();
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
+
+  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
+    return grad.diag(diagonal);
+  }
+
+  // Input was a matrix but was not square
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(diagonal);
+  diag.copy_(grad);
+  return grad_input;
+}
+
+Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
               src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
@@ -1799,10 +1836,14 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   wrap_dims(src, normalized_src);
   wrap_dims(dst, normalized_dst);
 
-  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `source` (", src, ")");
-  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `destination` (", dst, ")");
+  auto all_unique = [](const DimVector& dims) {
+    DimVector copy = dims;
+    std::sort(copy.begin(), copy.end());
+    auto duplicate = std::adjacent_find(copy.begin(), copy.end());
+    return duplicate == copy.end();
+  };
+  TORCH_CHECK(all_unique(normalized_src), "movedim: repeated dim in `source` (", src, ")");
+  TORCH_CHECK(all_unique(normalized_dst), "movedim: repeated dim in `destination` (", dst, ")");
 
   // TODO: The algorithm below can probably be optimized.
   // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
