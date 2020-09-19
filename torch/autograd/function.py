@@ -5,7 +5,7 @@ from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
-from typing import Any
+from typing import Any, List, Optional
 
 
 class _ContextMethodMixin(object):
@@ -84,7 +84,8 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
     _is_legacy = False
 
     def apply(self, *args):
-        return self._forward_cls.backward(self, *args)
+        # _forward_cls is defined by derived class
+        return self._forward_cls.backward(self, *args)  # type: ignore
 
 
 class FunctionMeta(type):
@@ -115,8 +116,8 @@ class FunctionMeta(type):
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
-
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
+# mypy doesn't understand `with_metaclass` from torch._six
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore
     r"""Records operation history and defines formulas for differentiating ops.
 
     See the Note on extending the autograd engine for more details on how to use
@@ -330,7 +331,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res = []
+        res: List[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
