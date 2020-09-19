@@ -1082,6 +1082,10 @@ struct to_ir {
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      // Found an exit statement in this block. The remaining statements aren't
+      // reachable so we don't emit them.
+      if (exit_blocks.count(environment_stack->block()))
+        return;
     }
   }
 

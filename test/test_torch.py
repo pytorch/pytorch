@@ -10897,10 +10897,6 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -11119,10 +11115,6 @@ class TestTorchDeviceType(TestCase):
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         from scipy import stats
         size = 1000
         for from_ in [-42, 0, 4.2]:
@@ -12244,10 +12236,7 @@ class TestTorchDeviceType(TestCase):
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
 
-            if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                # TODO: https://github.com/pytorch/pytorch/issues/33793
-                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.bool:
+            if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
@@ -17629,10 +17618,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_full_range(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17667,10 +17652,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_from_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17760,10 +17741,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_to(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -17822,10 +17799,6 @@ else:
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_random_default(self, device, dtype):
-        # TODO: https://github.com/pytorch/pytorch/issues/33793
-        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-            raise unittest.SkipTest("Crashes with CUDA error: unspecified launch failure")
-
         size = 2000
         alpha = 0.1
 
@@ -19787,20 +19760,20 @@ tensor_op_tests = [
     ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-5, 1e-5, _types, _cpu_types, False),
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
-        1e-1, 1e-5, _float_types2),
+        1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
@@ -19834,15 +19807,16 @@ tensor_op_tests = [
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        _float_types2, _cpu_types, True),
+        torch.testing.get_all_fp_dtypes(), _cpu_types, True),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _float_types, _cpu_types, True),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3, _types2),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-1, 1e-5, _types2, _cpu_types, True,
+        1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
@@ -19957,9 +19931,9 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('minimum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
-    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
-    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, _float_types2, _cpu_types, False),
+    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     # Double here because the CPU result will be wrong otherwise
     ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
         1e-3, 1e-5, 1e-5, [torch.double], _cpu_types, False, [slowTest]),
@@ -19983,7 +19957,7 @@ tensor_op_tests = [
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
+    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
