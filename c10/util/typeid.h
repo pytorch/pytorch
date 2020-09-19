@@ -79,11 +79,11 @@ class C10_API TypeIdentifier final
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
+ private:
   static constexpr TypeIdentifier uninitialized() {
     return TypeIdentifier(c10::util::type_index{0});
   }
 
- private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
   friend class TypeMeta; // TODO Is this friend an issue?
 };
