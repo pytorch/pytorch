@@ -159,16 +159,23 @@ class C10_EXPORT vTensor final {
     buffer - image usage.)
   */
 
-  VkBuffer buffer() const &;
-  VkBuffer buffer(Access::Flags access) &;
+  // Intentionally restricting user access to the buffer and image objects only,
+  // as opposed to their underlying memory, for the sake of predictability and
+  // efficiency.
 
-  VkImage image() const &;
-  VkImage image(Access::Flags access) &;
+  typedef api::Resource::Buffer::Object Buffer;
+  typedef api::Resource::Image::Object Image;
+
+  Buffer buffer() const &;
+  Buffer buffer(Access::Flags access) &;
+
+  Image image() const &;
+  Image image(Access::Flags access) &;
 
  private:
   const vTensor* host_impl() const;
   vTensor* host_impl(Access::Flags access);
-  api::Resource::Memory& wait_impl(Access::Flags access);
+  api::Resource::Memory& wait_impl();
 
   // These overloads are intentionally disabled to enforce a usage pattern
   // wherein the Tensor's lifetime exceeds that of the scope in which the
@@ -182,11 +189,11 @@ class C10_EXPORT vTensor final {
   template<typename Type, Access::Flags kAccess>
   Future<Type, kAccess> host() && = delete;
 
-  VkBuffer buffer() const && = delete;
-  VkBuffer buffer(Access::Flags access) && = delete;
+  Buffer buffer() const && = delete;
+  Buffer buffer(Access::Flags access) && = delete;
 
-  VkImage image() const && = delete;
-  VkImage image(Access::Flags access) && = delete;
+  Image image() const && = delete;
+  Image image(Access::Flags access) && = delete;
 
  private:
   void enforce_invariants() const;
@@ -268,7 +275,7 @@ vTensor::Future<Type, kAccess>::wait() const & {
       "vTensor::Future is in an invalid state!  "
       "Potential reason: This future is moved from.");
 
-  return tensor_->wait_impl(kAccess).template map<Type, kAccess>();
+  return tensor_->wait_impl().template map<Type, kAccess>();
 }
 
 template<typename Type>

@@ -75,9 +75,6 @@ class Context final {
   class Deleter final {
    public:
     void operator()(VkDevice device) const;
-
-   private:
-    VkDevice device_;
   };
 
  private:

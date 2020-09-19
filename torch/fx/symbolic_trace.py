@@ -99,7 +99,7 @@ class Tracer(TracerBase):
             return self.create_node('get_param', qualname, (), {})
         return super().create_arg(a)
 
-    def is_leaf_module(self, m: torch.nn.Module) -> bool:
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
         """
         A method to specify whether a given `nn.Module` is a "leaf" module.
 
@@ -109,6 +109,13 @@ class Tracer(TracerBase):
         are leaf modules. All other modules are traced through and
         their constituent ops are recorded, unless specified otherwise
         via this parameter.
+
+        Args
+        m - The module itself
+        module_qualified_name - The path to root of this module. For example,
+            if you have a module hierarchy where submodule `foo` contains
+            submodule `bar`, which contains submodule `baz`, that module will
+            appear with the qualified name `foo.bar.baz` here.
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
@@ -135,11 +142,11 @@ class Tracer(TracerBase):
         orig_call = torch.nn.Module.__call__
 
         def module_call_wrapper(mod, *args, **kwargs):
-            if not self.is_leaf_module(mod):
+            module_qualified_name = _find_module(root, mod)
+            if not self.is_leaf_module(mod, module_qualified_name):
                 return orig_call(mod, *args, **kwargs)
             else:
-                target = _find_module(root, mod)
-                return _create_proxy(self, 'call_module', target, args, kwargs)
+                return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
         try:
             torch.nn.Module.__call__ = module_call_wrapper
             self.graph.output(self.create_arg(fn(*args)))
