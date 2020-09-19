@@ -297,6 +297,7 @@ class Reducer {
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
     std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
+    at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.
     bool useStaticWorldSize;

@@ -575,7 +575,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       workHandle->wait();
       auto results = workHandle->result();
       // Guard against the results being empty
-      TORCH_INTERNAL_ASSERT(!results.empty());
+      TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();
       divFactor_ = res.item().to<int>();
     }
