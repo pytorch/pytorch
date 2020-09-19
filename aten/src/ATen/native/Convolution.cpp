@@ -62,6 +62,7 @@ std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
       << "  benchmark = " << params.benchmark
       << "  deterministic = " << params.deterministic
       << "  cudnn_enabled = " << params.cudnn_enabled
+      << "  allow_tf32 = " << params.allow_tf32
       << "}";
   return out;
 }

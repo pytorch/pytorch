@@ -14,8 +14,13 @@ class CuDNNError : public c10::Error {
 
 }  // namespace c10
 
+#define AT_CUDNN_CHECK(EXPR) _AT_CUDNN_CHECK(EXPR, "")
+
+// ConvolutionArgs args
+#define AT_CUDNN_CHECK_WITH_CONV_ARGS(EXPR, _args, ...) _AT_CUDNN_CHECK(EXPR, "\n", _args, ##__VA_ARGS__)
+
 // See Note [CHECK macro]
-#define AT_CUDNN_CHECK(EXPR)                                                                  \
+#define _AT_CUDNN_CHECK(EXPR, ...)                                                            \
   do {                                                                                        \
     cudnnStatus_t status = EXPR;                                                              \
     if (status != CUDNN_STATUS_SUCCESS) {                                                     \
@@ -23,9 +28,10 @@ class CuDNNError : public c10::Error {
         TORCH_CHECK_WITH(CuDNNError, false,                                                   \
             "cuDNN error: ",                                                                  \
             cudnnGetErrorString(status),                                                      \
-            ". This error may appear if you passed in a non-contiguous input.");              \
+            ". This error may appear if you passed in a non-contiguous input.", __VA_ARGS__); \
       } else {                                                                                \
-        TORCH_CHECK_WITH(CuDNNError, false, "cuDNN error: ", cudnnGetErrorString(status));    \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                   \
+            "cuDNN error: ", cudnnGetErrorString(status), __VA_ARGS__);                       \
       }                                                                                       \
     }                                                                                         \
   } while (0)
