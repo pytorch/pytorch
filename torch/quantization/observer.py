@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional, Dict, Union
 from collections import OrderedDict
 import torch
 import torch.nn as nn
+from torch.nn.parameter import Parameter
 import re
 
 def _with_args(cls_or_self, **kwargs):
@@ -115,7 +116,7 @@ class _ObserverBase(ObserverBase):
                     reduce_range will be deprecated in a future release of PyTorch."
             )
         self.reduce_range = reduce_range
-        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps]))
+        self.eps = Parameter(torch.tensor([torch.finfo(torch.float32).eps]), requires_grad=False)
         assert self.qscheme in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
@@ -139,7 +140,6 @@ class _ObserverBase(ObserverBase):
                               missing_keys, unexpected_keys, error_msgs):
 
         version = local_metadata.get('version', None)
-
         if version is None or version == 1:
             # eps was moved to a buffer in version 2
             eps = torch.tensor([torch.finfo(torch.float32).eps])
@@ -371,8 +371,8 @@ class MinMaxObserver(_ObserverBase):
                                              reduce_range=reduce_range,
                                              quant_min=quant_min,
                                              quant_max=quant_max)
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+        self.min_val = Parameter(torch.tensor(float('inf')), requires_grad=False)
+        self.max_val = Parameter(torch.tensor(float('-inf')), requires_grad=False)
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -581,8 +581,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                        quant_min=quant_min,
                                                        quant_max=quant_max)
         self.ch_axis = ch_axis
-        self.register_buffer('min_vals', torch.tensor([]))
-        self.register_buffer('max_vals', torch.tensor([]))
+        self.min_vals = Parameter(torch.tensor([]), requires_grad=False)
+        self.max_vals = Parameter(torch.tensor([]), requires_grad=False)
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -757,9 +757,9 @@ class HistogramObserver(_ObserverBase):
                                                 qscheme=qscheme,
                                                 reduce_range=reduce_range)
         self.bins = bins
-        self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor(float('inf')))
-        self.register_buffer('max_val', torch.tensor(float('-inf')))
+        self.histogram = Parameter(torch.zeros(self.bins), requires_grad=False)
+        self.min_val = Parameter(torch.tensor(float('inf')), requires_grad=False)
+        self.max_val = Parameter(torch.tensor(float('inf')), requires_grad=False)
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
