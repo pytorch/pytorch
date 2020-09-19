@@ -22,10 +22,10 @@ void testKernel_1() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1, device=cpu),
-            %1 : Float(5:3,3:1, device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[3, 1], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -61,10 +61,10 @@ void testKernel_2() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1, device=cpu),
-            %1 : Float(5:1,3:5, device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -101,10 +101,10 @@ void testKernel_3() {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,3:1, device=cpu),
-            %1 : Float(5:12,3:2, device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[12, 2], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -144,8 +144,8 @@ void testKernel_4() {
     KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,  3:1, device=cpu),
-            %1 : Float(5:12, 3:2, device=cpu)):
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[12, 2], device=cpu)):
         %2 : Tensor = aten::mul(%0, %1)
         %3 : Tensor = aten::mul(%0, %2)
         return (%3))IR";
@@ -183,8 +183,8 @@ void testKernel_4() {
     KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
-      graph(%0 : Float(8:8, 8:1, device=cpu),
-            %1 : Float(8:8, 8:1, device=cpu)):
+      graph(%0 : Float(8, 8, strides=[8, 1], device=cpu),
+            %1 : Float(8, 8, strides=[8, 1], device=cpu)):
         %2 : Tensor = aten::mul(%0, %1)
         %3 : Tensor, %4 : Tensor = prim::ConstantChunk[dim=1,chunks=2](%2)
         %r : Tensor = aten::mul(%3, %4)
@@ -224,9 +224,9 @@ void testKernel_4() {
     KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
-      graph(%a : Float(4:2, 2:1, device=cpu),
-            %b : Float(4:6, 3:2, 2:1, device=cpu),
-            %c : Float(3:4, 2:2, 2:1, device=cpu)):
+      graph(%a : Float(4, 2, strides=[2, 1], device=cpu),
+            %b : Float(4, 3, 2, strides=[6, 2, 1], device=cpu),
+            %c : Float(3, 2, 2, strides=[4, 2, 1], device=cpu)):
         %one : int = prim::Constant[value=1]()
         %minus_one : int = prim::Constant[value=-1]()
         %three : int = prim::Constant[value=3]()
@@ -287,9 +287,9 @@ void testKernel_4() {
     KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
-      graph(%a : Float(5:6, 3:2, 2:1, device=cpu),
-            %b : Float(5:14, 7:2, 2:1, device=cpu),
-            %c : Float(5:18, 9:2, 2:1, device=cpu)):
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
+            %c : Float(5, 9, 2, strides=[18, 2, 1], device=cpu)):
         %dim : int = prim::Constant[value=1]()
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
         %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
@@ -364,7 +364,7 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 void testKernelSumAllAxes() {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(5:3,3:1, device=cpu)):
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : ${dtype}
         %2 : Tensor = aten::sum(%0, %1)
         return (%2))IR";
@@ -411,7 +411,7 @@ void testKernelSumAllAxes() {
 void testKernelSumOneAxis() {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
-      graph(%0 : Float(5:3,3:1, device=cpu)):
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : int[] = prim::Constant[value=[${dim}]]()
         %2 : bool = prim::Constant[value=${keepdim}]()
         %3 : ${dtype}
@@ -467,7 +467,7 @@ void testKernelSumOneAxis() {
 void testKernelSumMultipleAxes() {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2:18,3:6,2:3,3:1, device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)

@@ -41,7 +41,7 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
 //   %8 : Tensor[] = aten::split_with_sizes(%input, %13, %7)
-//   %9 : Float(2:12, 4:3, 3:1), %10 : Float(1:12, 4:3, 3:1), %11 : Float(2:12,
+//   %9 : Float(2, strides=[1]2, 4:3, 3:1), %10 : Float(1:12, 4:3, 3:1), %11 : Float(2:12,
 //      4:3, 3:1) = prim::ListUnpack(%8) return (%9, %10, %11)
 //
 // After fusion
@@ -50,7 +50,7 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 //   %7 : int = prim::Constant[value=0]()
 //   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3
 //      representing the number of outputs.
-//   %14 : Float(2:12, 4:3, 3:1), %15 : Float(1:12, 4:3, 3:1), %16 : Float(2:12,
+//   %14 : Float(2, strides=[1]2, 4:3, 3:1), %15 : Float(1:12, 4:3, 3:1), %16 : Float(2:12,
 //       4:3, 3:1) = aten::split_with_sizes(%input, %13, %7, %8)
 //   return (%14, %15, %16)
 void FuseWithListUnpack(Node* n) {

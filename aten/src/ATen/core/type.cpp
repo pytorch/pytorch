@@ -28,7 +28,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     if (auto ndim = value->sizes().size()) {
       bool has_valid_strides_info =
-          value->strides().isComplete() && value->strides().size() == ndim;
+          value->strides().isComplete() && value->strides().size() == ndim && *ndim > 0;
 
       out << "(";
       size_t i = 0;
@@ -41,10 +41,20 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info) {
+        out << ",";
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << " strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {
