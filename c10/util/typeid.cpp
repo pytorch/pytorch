@@ -30,19 +30,23 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 // the latter
 //
 
-//
-// TypeMeta/ScalarType bridge
-//
+// implementations of _typeMetaDataInstance<T> for ScalarType types T
 
-// Canonical TypeMetaData instances for C++ types enumerated by ScalarType
-namespace detail {
-static TypeMetaData scalar_type_metas[] = {
-#define SCALAR_TYPE_META(T, name) \
-  _makeScalarTypeMetaDataInstance<T>(ScalarType::name),
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
-#undef SCALAR_TYPE_META
-  // Undefined
-  detail::TypeMetaData(
+#define CAFFE2_SCALARTYPE_TYPE(T, name)                            \
+  template <>                                                                     \
+  EXPORT_IF_NOT_GCC                                                               \
+  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    static detail::TypeMetaData singleton =                                       \
+      detail::_makeScalarTypeMetaDataInstance<T>(ScalarType::name);               \
+    return &singleton;                                                            \
+  }
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CAFFE2_SCALARTYPE_TYPE)
+#undef CAFFE2_SCALARTYPE_TYPE
+
+template <>
+EXPORT_IF_NOT_GCC
+const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
+  static detail::TypeMetaData singleton{
     0,
     nullptr,
     nullptr,
@@ -51,24 +55,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
     nullptr,
     TypeIdentifier::uninitialized(),
     "nullptr (uninitialized)",
-    ScalarType::Undefined)
-};
-}
-
-// _typeMetaDataInstace<T> for these types
-#define DEFINE_SCALAR_TYPE_META_DATA_INSTANCE(T, name)                            \
-  template <>                                                                     \
-  EXPORT_IF_NOT_GCC                                                               \
-  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
-    return &detail::scalar_type_metas[static_cast<int>(ScalarType::name)];        \
-  }
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE_META_DATA_INSTANCE)
-#undef DEFINE_SCALAR_TYPE_META_DATA_INSTANCE
-
-template <>
-EXPORT_IF_NOT_GCC
-const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
-  return &detail::scalar_type_metas[static_cast<int>(ScalarType::Undefined)];
+    ScalarType::Undefined};
+  return &singleton;
 }
 
 //

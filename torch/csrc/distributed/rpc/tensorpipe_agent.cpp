@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {

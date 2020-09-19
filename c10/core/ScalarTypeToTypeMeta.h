@@ -23,6 +23,12 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #undef DEFINE_CASE
 }
 
+namespace {
+  void error_unsupported_typemeta(caffe2::TypeMeta dtype) {
+    TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+  }
+}
+
 /**
  * convert TypeMeta handles to ScalarType enum values
  * Caution: extremely hot
@@ -31,8 +37,8 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
   if (auto scalar_type = dtype.scalarTypeOpt()) {
     return *scalar_type;
   }
-  AT_ERROR(
-      "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+  error_unsupported_typemeta(dtype);
+  return ScalarType::Undefined; // avoids "control reaches end of non-void function"
 }
 
 /**

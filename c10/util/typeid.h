@@ -433,7 +433,7 @@ class C10_API TypeMeta final {
   /**
    * return the optional ScalarType enum value associated with this type.
    */
-  inline c10::optional<ScalarType> scalarTypeOpt() {
+  inline c10::optional<ScalarType> scalarTypeOpt() noexcept {
     return data_->scalarTypeOpt_;
   }
 
