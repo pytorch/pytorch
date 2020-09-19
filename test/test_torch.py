@@ -41,7 +41,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import TEST_CUDA, tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -57,10 +57,7 @@ if TEST_SCIPY:
 
 SIZE = 100
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM
-
-if TEST_CUDA and not TEST_WITH_ROCM:
-    AMPERE_OR_ROCM = tf32_is_not_fp32()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
