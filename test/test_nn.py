@@ -11832,7 +11832,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_activations_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
         self._test_bfloat16_ops(torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
