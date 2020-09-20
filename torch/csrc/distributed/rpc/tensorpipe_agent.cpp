@@ -27,8 +27,6 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
-const std::string kRpcTimeoutErrorStr =
-    "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
 inline void checkCPUTensor(const torch::Tensor& tensor) {
   TORCH_CHECK(
