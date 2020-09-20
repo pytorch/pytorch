@@ -23,19 +23,19 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:canary
+      image: windows-server-2019-nvidia:stable
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 commands:
 
@@ -1112,6 +1112,35 @@ jobs:
           script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
           cat "$script"
           source "$script"
+
+  anaconda_prune:
+    parameters:
+      packages:
+        type: string
+        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
+        default: "pytorch"
+      channel:
+        type: string
+        description: "What channel are we pruning? (eq. pytorch-nightly)"
+        default: "pytorch-nightly"
+    docker:
+      - image: continuumio/miniconda3
+    environment:
+      - PACKAGES: "<< parameters.packages >>"
+      - CHANNEL: "<< parameters.channel >>"
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          no_output_timeout: "1h"
+          command: |
+            conda install -yq anaconda-client
+      - run:
+          name: Prune packages
+          no_output_timeout: "1h"
+          command: |
+              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
+              scripts/release/anaconda-prune/run.sh
 
   pytorch_doc_push:
     resource_class: medium
@@ -6289,12 +6318,6 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3.6-gcc7"
           image_name: "pytorch-linux-xenial-py3.6-gcc7"
       - docker_build_job:
-          name: "docker-pytorch-linux-xenial-rocm3.3-py3.6"
-          image_name: "pytorch-linux-xenial-rocm3.3-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-rocm3.5.1-py3.6"
-          image_name: "pytorch-linux-xenial-rocm3.5.1-py3.6"
-      - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm3.7-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.7-py3.6"
       - pytorch_linux_build:
@@ -7061,6 +7084,24 @@ workflows:
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
           requires:
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+      - anaconda_prune:
+          name: anaconda-prune-pytorch-nightly
+          context: "org-member"
+          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+          channel: pytorch-nightly
+          filters:
+            branches:
+              only:
+                - postnightly
+      - anaconda_prune:
+          name: anaconda-prune-pytorch-test
+          context: "org-member"
+          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+          channel: pytorch-test
+          filters:
+            branches:
+              only:
+                - postnightly
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
@@ -7068,7 +7109,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7081,7 +7122,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7094,7 +7135,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7103,7 +7144,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7122,7 +7163,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7141,7 +7182,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7150,7 +7191,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7168,7 +7209,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7186,7 +7227,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7204,7 +7245,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - update_s3_htmls:
           context: org-member

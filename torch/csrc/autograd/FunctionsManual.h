@@ -151,7 +151,7 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
 Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                     bool complex_input, bool complex_output,
                     bool inverse, IntArrayRef checked_signal_sizes,
-                    bool normalized, bool onesided,
+                    int64_t normalization, bool onesided,
                     IntArrayRef output_sizes);
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(

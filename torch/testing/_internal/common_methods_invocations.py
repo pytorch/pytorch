@@ -532,9 +532,18 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
+        ('true_divide', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
+        ('true_divide', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar', (True,)),
+        ('true_divide', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
+        ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -762,6 +771,16 @@ def method_tests():
         ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
         # END TODO
+        ('quantile', (S, S, S), (0.5,)),
+        ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('quantile', (), (0.5,), 'scalar'),
+        ('nanquantile', (S, S, S), (0.5,)),
+        ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -1641,5 +1660,7 @@ def exclude_tensor_method(name, test_name):
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
+        return True
+    if 'fft.' in name:
         return True
     return False

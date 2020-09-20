@@ -560,7 +560,7 @@ def gen_pyi(declarations_path, out):
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
-        'contiguous': ['def contiguous(self) -> Tensor: ...'],
+        'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
