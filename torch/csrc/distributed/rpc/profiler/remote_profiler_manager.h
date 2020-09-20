@@ -10,7 +10,7 @@ namespace distributed {
 namespace rpc {
 extern const std::string REMOTE_PROFILING_KEY_PREFIX;
 
-class C10_EXPORT RemoteProfilerManager {
+class RemoteProfilerManager {
  public:
   // Retrieves the lazily-initialized RemoteProfilerManager singleton instance.
   static RemoteProfilerManager& getInstance();
