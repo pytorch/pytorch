@@ -3471,15 +3471,15 @@ Args:
         for non-uniform bins. Default: 10
     range (tuple of floats, optional): Defines the lower and upper ends of the
         range if bins is an integer.
-    weights (Tensor): optional, weight for each value in the input tensor.
+    weights (Tensor, optional): Weight for each value in the input tensor.
         Should be of same size as input tensor.
     density (bool): If ``False``, the result will contain the (weighted) number
         of samples in each bin. If ``True``, the result is normalized to
-        `bin_count / bin_volume / total` such that the integral of the interpolated
+        `bin_count / (bin_volume * total)` such that the integral of the interpolated
         function over the range is 1.
 
 Returns:
-    Tensor: a tensor of shape ``[bins]``
+    A (Tensor, Tensor) tuple of the histogram represented as a Tensor, and the bin edges
 
 Example::
 
