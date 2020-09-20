@@ -231,7 +231,10 @@
 # To add an alias do the following:
 #
 # 1) Copy the original functions native_functions.yaml entry, but replace the
-#      original function's name with their own.
+#      original function's name with their own and delete any dispatch
+#      keys for the aliases. Specifying a dispatch key will prevent
+#      autograd from recording the operations the alias performs, which
+#      will stop it from "inheriting" the original operation's autograd behavior.
 # 2) Implement the corresponding functions and have them redispatch to the
 #      original function.
 # 3) Add entries for the alias (and original function, if needed) to
@@ -1238,6 +1241,25 @@
   variants: function, method
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+# divide, alias for div
+- func: divide.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
 
@@ -2344,6 +2366,25 @@
   variants: function, method
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+# multiply, alias for mul
+- func: multiply.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: multiply_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: multiply.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: multiply_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
 
@@ -3643,18 +3684,6 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-
-- func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: pow_out
-    SparseCPU, SparseCUDA: pow_out_sparse_scalar
-
-- func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    CPU, CUDA: pow
-    SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -5905,6 +5934,18 @@
   use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: pow
+
+- func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: pow_out
+    SparseCPU, SparseCUDA: pow_out_sparse_scalar
+
+- func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: pow
+    SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
