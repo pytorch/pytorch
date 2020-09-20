@@ -201,7 +201,9 @@ try:
     from torch._C import _initExtension
 except ImportError:
     import torch._C as _C_for_compiled_check
-    if _C_for_compiled_check.__file__ is None:
+
+    # The __file__ check only works for Python 3.7 and above.
+    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
         raise ImportError(textwrap.dedent('''
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder
@@ -501,9 +503,9 @@ del manager_path
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
 if TYPE_CHECKING:
-    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
-    # PR #43339 for details.  
+    # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
