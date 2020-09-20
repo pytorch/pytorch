@@ -295,6 +295,21 @@ class _Uninitialized final {};
 
 } // namespace detail
 
+//
+// note: these are outside TypeMeta bc gcc seems to have trouble
+// with scalarTypeItemSizes as a constexpr static member used by
+// a public inline instance method
+//
+static constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
+
+// item sizes for TypeMeta::itemsize() fast path
+static constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
+#define SCALAR_TYPE_SIZE(T, name) sizeof(T),
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
+#undef SCALAR_TYPE_SIZE
+    0, // Undefined
+};
+
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
  * as a blob, or the data type of a tensor, with a unique run-time id. It also
@@ -326,7 +341,7 @@ class C10_API TypeMeta final {
 
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
- private:
+private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
   explicit TypeMeta(const uint16_t index) noexcept
@@ -341,11 +356,29 @@ class C10_API TypeMeta final {
     return data().id_;
   }
   /**
+   * true if we represent some ScalarType type
+   */
+  inline bool isScalarType() const noexcept {
+    return index_ < NumScalarTypes;
+  }
+  /**
+   * true if we represent ScalarType scalar_type
+   */
+  inline bool isScalarType(ScalarType scalar_type) const noexcept {
+    return index_ == static_cast<uint16_t>(scalar_type);
+  }
+  /**
    * Returns the size of the item.
    */
-  size_t itemsize() const noexcept {
+  inline size_t itemsize() const noexcept {
+    if (C10_LIKELY(isScalarType())) {
+      return scalarTypeItemSizes[index_];
+    }
     return data().itemsize_;
   }
+  /**
+   * Returns the new function pointer for individual items.
+   */
   New* newFn() const noexcept {
     return data().new_;
   }
@@ -375,12 +408,6 @@ class C10_API TypeMeta final {
    */
   c10::string_view name() const noexcept {
     return data().name_;
-  }
-  /**
-   * index matches static_cast<uint16_t>ScalarType for corresponding TypeMetas
-   */
-  inline uint16_t index() noexcept {
-    return index_;
   }
 
   friend bool operator==(
@@ -431,26 +458,57 @@ class C10_API TypeMeta final {
 #endif
   }
 
- private:
-  //
-  // we store a vector of TypeMetaData instances.
-  // each _typeMetaDataInstance<T> adds a singleton
-  // instance for type T and returns its index.
-  // These are plugged into TypeMeta values created
-  // via TypeMeta::Make<T>
-  //
+  /**
+  * convert ScalarType enum values to TypeMeta handles
+  */
+  static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
+    const size_t index = static_cast<uint16_t>(scalar_type);
+    if (C10_LIKELY(index < NumScalarTypes)) {
+      return TypeMeta(index);
+    }
+    error_unrecognized_scalartype(scalar_type);
+    return TypeMeta(); // avoids "control reaches end of non-void function"
+  }
 
-  // this manages a singleton preinitialized with ScalarTypes
-  static std::vector<detail::TypeMetaData>& typeMetaDataInstances();
+  /**
+   * convert TypeMeta handles to ScalarType enum values
+   */
+  inline ScalarType toScalarType() {
+    if (C10_LIKELY(isScalarType())) {
+      return static_cast<ScalarType>(index_);
+    }
+    error_unsupported_typemeta(*this);
+    return ScalarType::Undefined; // avoids "control reaches end of non-void function"
+  }
 
-  // non-ScalarTypes are added through here
-  static std::mutex instanceMutex_;
+private:
+  static void error_unrecognized_scalartype(ScalarType scalar_type) {
+    TORCH_CHECK(false, "Unrecognized Scalartype ", scalar_type, " (please report this error)");
+  }
+  static void error_unsupported_typemeta(caffe2::TypeMeta dtype) {
+    TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+  }
+
+  // preallocated TypeMetaData instances for ScalarType types
+  static const detail::TypeMetaData& scalarTypeMetaData(uint16_t index);
+
+  // TypeMetaData instances for non-ScalarType types...
+  static std::vector<detail::TypeMetaData>& nonScalarTypeMetaDatas();
+
+  // ...added through here
+  static std::mutex appendMutex_;
   template <class T>
   static uint16_t addTypeMetaDataInstance() {
-    std::vector<detail::TypeMetaData>& instances = typeMetaDataInstances();
-    std::lock_guard<std::mutex> lock(instanceMutex_);
     auto typeId = TypeIdentifier::Get<T>();
     auto typeName = c10::util::get_fully_qualified_type_name<T>();
+    std::vector<detail::TypeMetaData>& instances = nonScalarTypeMetaDatas();
+    // concurrency situation:
+    // the static init for each _typeMetaDataInstance<T> is synchronized,
+    // so we don't need to worry about the same type being added twice.
+    // But different threads might be adding different Ts concurrently.
+    // So while we don't need to test for the presence of T before
+    // appending, we do need to serialize the appends themselves.
+    std::lock_guard<std::mutex> lock(appendMutex_);
     uint16_t size = instances.size();
     instances.emplace_back(
       sizeof(T),
@@ -461,7 +519,7 @@ class C10_API TypeMeta final {
       detail::_PickDelete<T>(),
       typeId,
       typeName);
-    return size;
+    return size + NumScalarTypes;
   }
 
   // specializations return indexes into typeMetaDataInstances()
@@ -475,7 +533,10 @@ class C10_API TypeMeta final {
   uint16_t index_;
 
   inline const detail::TypeMetaData& data() const {
-    return typeMetaDataInstances()[index_];
+    if (C10_LIKELY(isScalarType())) {
+      return scalarTypeMetaData(index_);
+    }
+    return nonScalarTypeMetaDatas()[index_ - NumScalarTypes];
   }
 };
 
