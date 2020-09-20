@@ -51,13 +51,15 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   char transpose_batch1, transpose_batch2;
   int64_t lda, ldb, ldc;
   THCTensor *result_, *batch1_, *batch2_;
-  if (result->stride(1) == 1)
+  if (result->stride(1) == 1 &&
+   (result->size(2) == 1 || result->stride(2) >= std::max<int64_t>(1, result->size(1))))
   {
     transpose_result = false;
     result_ = result;
     ldc = result_->stride(2);
   }
-  else if (result->stride(2) == 1)
+  else if (result->stride(2) == 1 &&
+   (result->size(1) == 1 || result->stride(1) >= std::max<int64_t>(1, result->size(2))))
   {
     transpose_result = true;
 
@@ -80,15 +82,19 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
     ldc = result_->stride(2);
   }
 
+  const int64_t m = result->size(transpose_result ? 2 : 1);
+  const int64_t n = result->size(transpose_result ? 1 : 2);
+  const int64_t k = batch1->size(transpose_result ? 1 : 2);
+
   if (batch1->stride(transpose_result ? 2 : 1) == 1 &&
-   batch1->stride(transpose_result ? 1 : 2) != 0)
+   batch1->stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, m))
   {
     transpose_batch1 = 'n';
     batch1_ = batch1;
     lda = batch1_->stride(transpose_result ? 1 : 2);
   }
   else if (batch1->stride(transpose_result ? 1 : 2) == 1 &&
-   batch1->stride(transpose_result ? 2 : 1) != 0)
+   batch1->stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, k))
   {
     transpose_batch1 = 't';
     batch1_ = batch1;
@@ -107,14 +113,14 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   }
 
   if (batch2->stride(transpose_result ? 2 : 1) == 1 &&
-   batch2->stride(transpose_result ? 1 : 2) != 0)
+   batch2->stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, k))
   {
     transpose_batch2 = 'n';
     batch2_ = batch2;
     ldb = batch2_->stride(transpose_result ? 1 : 2);
   }
   else if (batch2->stride(transpose_result ? 1 : 2) == 1 &&
-   batch2->stride(transpose_result ? 2 : 1) != 0)
+   batch2->stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, n))
   {
     transpose_batch2 = 't';
     batch2_ = batch2;

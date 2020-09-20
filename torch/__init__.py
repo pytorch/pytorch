@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors. It also defines mathematical operations that can be performed over these tensors.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -24,7 +24,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type
+from typing import Set, Type, TYPE_CHECKING
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -92,7 +92,7 @@ if sys.platform == 'win32':
             res = kernel32.AddDllDirectory(dll_path)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
                 raise err
 
     try:
@@ -113,7 +113,7 @@ if sys.platform == 'win32':
             last_error = ctypes.get_last_error()
             if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
             elif res is not None:
                 is_loaded = True
@@ -124,7 +124,7 @@ if sys.platform == 'win32':
             res = kernel32.LoadLibraryW(dll)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
 
     kernel32.SetErrorMode(prev_error_mode)
@@ -191,7 +191,7 @@ else:
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
-if False:
+if TYPE_CHECKING:
     import torch._C as _C
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -296,6 +296,7 @@ def set_default_tensor_type(t):
 def set_default_dtype(d):
     r"""Sets the default floating point dtype to :attr:`d`.
     This dtype is:
+
     1. The inferred dtype for python floats in :func:`torch.tensor`.
     2. Used to infer dtype for python complex numbers. The default complex dtype is set to
        ``torch.complex128`` if default floating point dtype is ``torch.float64``,
@@ -306,7 +307,7 @@ def set_default_dtype(d):
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
-    Example::
+    Example:
         >>> # initial default for floating point is torch.float32
         >>> torch.tensor([1.2, 3]).dtype
         torch.float32
@@ -323,10 +324,67 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 def set_deterministic(d):
-    r"""Sets a global flag to force all operations to use a deterministic
-    implementation if available. If an operation that does not have a
-    deterministic implementation is called while this setting is True, the
-    operation will throw a RuntimeError.
+    r""" Sets whether native PyTorch operations must use deterministic
+    algorithms. When True, operations without deterministic algorithms
+    will throw a :class:RuntimeError when called.
+
+    .. warning::
+        This feature is a beta feature, so it does not affect every
+        nondeterministic operation yet. The following operations are
+        affected by this flag.
+
+    The following normally-nondeterministic operations will act
+    deterministically when `d=True`:
+
+        * :class:`torch.nn.Conv1d` when called on CUDA tensor
+        * :class:`torch.nn.Conv2d` when called on CUDA tensor
+        * :class:`torch.nn.Conv3d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+
+    The following normally-nondeterministic operations will throw a
+    :class:`RuntimeError` when `d=True`:
+
+        * :class:`torch.nn.AvgPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveAvgPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveAvgPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.MaxPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveMaxPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
+        * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
+            and one of the following modes is used:
+            - `linear`
+            - `bilinear`
+            - `bicubic`
+            - `trilinear`
+        * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.CTCLoss` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
+        * :func:`torch.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_select` when called on a CUDA tensor that requires grad
+        * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
+        * :func:`torch.histc` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor
+
+    A handful of CUDA operations are nondeterministic if the CUDA version is
+    10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
+    or `CUBLAS_WORKSPACE_CONFIG=:16:8` is set. See the CUDA documentation for more
+    details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+    If one of these environment variable configurations is not set, a :class:`RuntimeError`
+    will be raised from these operations when called with CUDA tensors:
+
+        * :func:`torch.mm`
+        * :func:`torch.mv`
+        * :func:`torch.bmm`
 
     Note that deterministic operations tend to have worse performance than
     non-deterministic operations.
@@ -338,8 +396,8 @@ def set_deterministic(d):
     _C._set_deterministic(d)
 
 def is_deterministic():
-    r"""Returns True if the global deterministic flag is turned on and
-    operations are being forced to use a deterministic implementation.
+    r"""Returns True if the global deterministic flag is turned on. Refer to
+    :func:`torch.set_deterministic` documentation for more details.
     """
     return _C._get_deterministic()
 
@@ -442,8 +500,11 @@ del manager_path
 # Note that we will see "too many" functions when reexporting this way; there
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
-if False:
-    from torch._C._VariableFunctions import *
+if TYPE_CHECKING:
+    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # signatures already imported. For now these clashes are ignored; see
+    # PR #43339 for details.  
+    from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -483,6 +544,7 @@ del ComplexFloatStorageBase
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
+# import torch.fft  # TODO: enable once torch.fft() is removed
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
@@ -493,6 +555,7 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.linalg
 import torch.hub
 import torch.random
 import torch.distributions

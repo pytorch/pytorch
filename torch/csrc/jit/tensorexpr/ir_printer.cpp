@@ -232,18 +232,22 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[";
-  size_t i = 0;
-  for (const Expr* ind : v->indices()) {
-    if (i++) {
-      os() << ", ";
+  if (v->indices().size() == 0) {
+    os() << *v->base_handle();
+  } else {
+    os() << *v->base_handle() << "[";
+    size_t i = 0;
+    for (const Expr* ind : v->indices()) {
+      if (i++) {
+        os() << ", ";
+      }
+      ind->accept(this);
     }
-    ind->accept(this);
+    if (v->indices().empty()) {
+      os() << "0";
+    }
+    os() << "]";
   }
-  if (v->indices().empty()) {
-    os() << "0";
-  }
-  os() << "]";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
@@ -355,6 +359,11 @@ void IRPrinter::visit(const ReduceOp* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
+  if (v->indices().size() == 0) {
+    os() << *v->base_handle() << " = " << *v->value() << ";" << std::endl;
+    return;
+  }
+
   os() << *v->base_handle() << "[";
   size_t i = 0;
   for (const Expr* ind : v->indices()) {
@@ -393,14 +402,6 @@ void IRPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
 
-  for (const auto& pair : v->varBindings()) {
-    const Var* var = pair.first;
-    const Expr* val = pair.second;
-    emitIndent();
-    os() << var->dtype().ToCppString() << " " << *var << " = " << *val << "; "
-         << std::endl;
-  }
-
   for (Stmt* s : *v) {
     os() << *s;
   }
@@ -426,6 +427,13 @@ void IRPrinter::visit(const Allocate* v) {
 void IRPrinter::visit(const Free* v) {
   emitIndent();
   os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+}
+
+void IRPrinter::visit(const Let* v) {
+  emitIndent();
+  os() << v->dtype().ToCppString() << " " << *v->var();
+  os() << " = " << *v->value();
+  os() << "; " << std::endl;
 }
 
 void IRPrinter::visit(const Cond* v) {
@@ -463,6 +471,11 @@ void IRPrinter::visit(const AtomicAdd* v) {
   }
   os() << "], " << *v->value() << ");";
   os() << std::endl;
+}
+
+void IRPrinter::visit(const SyncThreads* v) {
+  emitIndent();
+  os() << "__syncthreads();\n";
 }
 
 void IRPrinter::emitIndent() {

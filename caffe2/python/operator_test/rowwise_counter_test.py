@@ -27,7 +27,7 @@ class TestRowWiseCounter(hu.HypothesisTestCase):
         n = 5
         curr_iter = np.array([100], dtype=np.int64)
 
-        update_counter = np.random.randint(99, size=h).astype(np.float32)
+        update_counter = np.random.randint(99, size=h).astype(np.float64)
         prev_iter = np.random.rand(h, 1).astype(np.int64)
         indices = np.unique(np.random.randint(0, h, size=n))
         indices.sort(axis=0)

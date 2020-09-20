@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -163,60 +164,17 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 #endif // USE_PYTORCH_QNNPACK
 
 #ifdef USE_FBGEMM
-namespace {
-float RawUint16ToFp16(unsigned short value) {
-  // Convert raw 16 bits half precision floating point number
-  // to single precision floating point number.
-  const unsigned short sign_bits = value >> 15;
-  const unsigned short exponent_bits = value >> 10 & 0x1f;
-  const unsigned short significand_bits = value & 0x3ff;
-
-  const float sign = sign_bits ? -1 : 1;
-  const float significand =
-      1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
-  const float exponent = exponent_bits - 0xf;
-
-  return sign * std::ldexp(significand, exponent);
-}
-
-template <typename T>
-bool CheckAndSaturate(T max_val, T* element) {
-  if (*element > max_val) {
-    *element = max_val;
-    return true;
-  }
-  if (*element < -max_val) {
-    *element = -max_val;
-    return true;
-  }
-  return false;
-}
-
-// The range for using FP16 quantization of weights requires that the elements
-// should be in the range of [5.96e-8, 65504]. If it is out of range, then the
-// number will be saturated to max or min representable values by FP16.
-void HandleWeightsSaturation(int64_t N, float* weight) {
-  const float kFp16Max = RawUint16ToFp16(0x7BFF);
-  bool found_out_of_range = false;
-  for (int64_t i = 0; i < N; ++i) {
-    if (CheckAndSaturate<float>(kFp16Max, weight + i)) {
-      found_out_of_range = true;
-    }
-  }
-  if (found_out_of_range) {
-    TORCH_WARN("FOUND weight out of range ");
-  }
-}
-} // namespace
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
     at::Tensor weight,
     c10::optional<at::Tensor> bias) {
+
+  weight = at::_saturate_weight_to_fp16(weight);
+
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   at::Tensor weight_contig = weight.contiguous();
   float* weight_contig_ptr = weight_contig.data_ptr<float>();
-  HandleWeightsSaturation(K * N, weight_contig_ptr);
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -235,6 +193,13 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 
 namespace at {
 namespace native {
+
+at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
+  float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
+  quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
+  return weight;
+}
+
 namespace {
 
 class QLinearPackWeightInt8 final {

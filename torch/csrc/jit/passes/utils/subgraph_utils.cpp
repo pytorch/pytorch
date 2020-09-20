@@ -11,38 +11,90 @@ bool hasSubgraph(Node* n) {
 
 // Combine the nodes in two subgraph together. The nodes will end up in
 // `mergeTo`, and `mergeFrom` is destroyed.
-void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
+void mergeSubgraph(
+    Node* mergeTo,
+    Node* mergeFrom,
+    std::unordered_map<Value*, Value*>& vmap) {
   Node* nodeBeforeMergeFrom = mergeFrom->prev();
   Node* nodeAfterMergeFrom = mergeFrom->next();
-  unmergeSubgraph(mergeFrom);
+
+  // will be used later to map the node outputs -> new subgraph values
+  std::unordered_map<Value*, Value*> node_outputs_to_subgraph_values;
+  for (size_t i = 0; i < mergeFrom->outputs().size(); ++i) {
+    node_outputs_to_subgraph_values[mergeFrom->output(i)] =
+        getSubgraph(mergeFrom)->outputs().at(i);
+  }
+
+  // unmerge_map will contain mapping from values from the mergeTo's subgraph
+  // (we will call them "original" values) to the corresponding values that we
+  // created in the main graph (we will call them "unmerged" values) as we
+  // unmerged the mergeTo's subgraph.
+  std::unordered_map<Value*, Value*> unmerge_vmap;
+  unmergeSubgraph(mergeFrom, unmerge_vmap);
+
   std::vector<Node*> nodes;
   const auto end_it = nodeBeforeMergeFrom->reverseIterator();
   auto it = nodeAfterMergeFrom->reverseIterator();
   ++it;
+
+  // Now we're merging the "unmerged" nodes into the mergeFrom subgraph. That
+  // will give us a new map: "unmerged" -> "merged".
+  std::unordered_map<Value*, Value*> merge_vmap;
   while (it != end_it) {
     // NB: mergeNodeIntoSubgraph destroys node, hence the complications
     Node* node = *it;
     ++it;
-    mergeNodeIntoSubgraph(node, mergeTo);
+    mergeNodeIntoSubgraph(node, mergeTo, merge_vmap);
+  }
+
+  // Vmap should contain "original" -> "merged" mapping, thus we basically need
+  // to perform the following transformation:
+  // vmap[x] = merge_vmap[unmerge_map[x]]
+  for (auto& kv : unmerge_vmap) {
+    if (merge_vmap.count(kv.second)) {
+      vmap[kv.first] = merge_vmap.at(kv.second);
+    } else {
+      vmap[kv.first] = kv.second;
+    }
+  }
+
+  // fill the value mapping with node output -> new subgraph value
+  for (const auto& mapping : node_outputs_to_subgraph_values) {
+    vmap[mapping.first] = vmap[mapping.second];
   }
 }
+
+// Combine the nodes in two subgraph together. The nodes will end up in
+// `mergeTo`, and `mergeFrom` is destroyed.
+void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
+  std::unordered_map<Value*, Value*> vmap;
+  mergeSubgraph(mergeTo, mergeFrom, vmap);
+}
+
 } // namespace
 
 std::shared_ptr<Graph> getSubgraph(Node* n) {
   return n->g(attr::Subgraph);
 }
 
-void unmergeSubgraph(Node* subgraphNode) {
+void unmergeSubgraph(
+    Node* subgraphNode,
+    std::unordered_map<Value*, Value*>& vmap) {
   // Inline the graph, replace uses of node outputs and destroy the node
   auto outerGraph = subgraphNode->owningGraph();
   WithInsertPoint guard(subgraphNode);
   const auto subgraphOutputs = insertGraph(
-      *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs());
+      *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs(), vmap);
   AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
   }
   subgraphNode->destroy();
+}
+
+void unmergeSubgraph(Node* subgraphNode) {
+  std::unordered_map<Value*, Value*> vmap;
+  unmergeSubgraph(subgraphNode, vmap);
 }
 
 void collectNestedUses(
@@ -96,10 +148,13 @@ std::unordered_set<Value*> closedOverValues(
   return closed_over_values;
 }
 
-void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
+void mergeNodeIntoSubgraph(
+    Node* toMerge,
+    Node* subgraphNode,
+    std::unordered_map<Value*, Value*>& vmap) {
   AT_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
   if (hasSubgraph(toMerge)) {
-    return mergeSubgraph(subgraphNode, toMerge);
+    return mergeSubgraph(subgraphNode, toMerge, vmap);
   }
 
   auto subgraph = getSubgraph(subgraphNode);
@@ -157,6 +212,13 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   auto mergedNode = subgraph->insertNode(
       subgraph->createClone(toMerge, [&](Value* v) { return inputsMap[v]; }));
 
+  for (size_t idx = 0; idx < toMerge->outputs().size(); idx++) {
+    vmap[toMerge->output(idx)] = mergedNode->output(idx);
+  }
+  for (size_t idx = 0; idx < toMerge->inputs().size(); idx++) {
+    vmap[toMerge->input(idx)] = mergedNode->input(idx);
+  }
+
   // If n's outputs were inputs to `group`, remove them since we just merged
   // n in.
   //
@@ -170,6 +232,7 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
       size_t p = it - inputs.begin();
       subgraphNode->removeInput(p);
       subgraph->inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
+      vmap[subgraph->inputs()[p]] = mergedNode->output(i);
       subgraph->eraseInput(p);
     }
   }
@@ -196,14 +259,26 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   // Remove the original node now that the merge is complete
   toMerge->destroy();
 }
+void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
+  std::unordered_map<Value*, Value*> vmap;
+  mergeNodeIntoSubgraph(toMerge, subgraphNode, vmap);
+}
 
-Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
+Node* createSingletonSubgraph(
+    Node* n,
+    Symbol subgraphKind,
+    std::unordered_map<Value*, Value*>& vmap) {
   auto graph = n->owningGraph();
   auto subgraph = graph->create(subgraphKind, 0);
   subgraph->g_(attr::Subgraph, std::make_shared<Graph>(graph->current_scope()));
   subgraph->insertBefore(n);
-  mergeNodeIntoSubgraph(n, subgraph);
+  mergeNodeIntoSubgraph(n, subgraph, vmap);
   return subgraph;
+}
+
+Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
+  std::unordered_map<Value*, Value*> vmap;
+  return createSingletonSubgraph(n, subgraphKind, vmap);
 }
 
 } // namespace SubgraphUtils

@@ -1,12 +1,10 @@
 import torch.distributed.rpc as rpc
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
+)
 
-# In order to run the existing test RPC and Distributed Autograd test suites
-# with Tensorpipe, we introduce a new class in both rpc_test.py and
-# dist_autograd_test.py that inherits from the base test classes and this
-# fixture. In order for this mulitple inheritance to work, this class cannot
-# inherit from RpcAgentTestFixture, since this and the base test classes would
-# then have a common ancestor (RpcAgentTestFixture), which is not allowed.
-class TensorPipeRpcAgentTestFixture(object):
+
+class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def rpc_backend(self):
         return rpc.backend_registry.BackendType[
@@ -19,3 +17,12 @@ class TensorPipeRpcAgentTestFixture(object):
             self.rpc_backend,
             init_method=self.init_method,
         )
+
+    def get_shutdown_error_regex(self):
+        # FIXME Once we consolidate the error messages returned by the
+        # TensorPipe agent put some more specific regex here.
+        error_regexes = [".*"]
+        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+
+    def get_timeout_error_regex(self):
+        return "RPC ran for more than"

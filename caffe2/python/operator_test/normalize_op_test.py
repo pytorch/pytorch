@@ -5,8 +5,7 @@ from __future__ import print_function
 import functools
 
 import numpy as np
-from hypothesis import given
-import hypothesis.strategies as st
+from hypothesis import given, settings
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import copy
@@ -19,6 +18,7 @@ class TestNormalizeOp(hu.HypothesisTestCase):
         ),
         **hu.gcs
     )
+    @settings(max_examples=10, deadline=None)
     def test_normalize(self, X, gc, dc):
         def ref_normalize(X, axis):
             x_normed = X / np.maximum(
@@ -41,6 +41,7 @@ class TestNormalizeOp(hu.HypothesisTestCase):
         ),
         **hu.gcs
     )
+    @settings(max_examples=10, deadline=None)
     def test_normalize_L1(self, X, gc, dc):
         def ref(X, axis):
             norm = abs(X).sum(axis=axis, keepdims=True)

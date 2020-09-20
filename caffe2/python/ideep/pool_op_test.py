@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -22,6 +22,7 @@ class PoolTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
            **mu.gcs)
+    @settings(deadline=10000)
     def test_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
                          method, gc, dc):
@@ -33,9 +34,11 @@ class PoolTest(hu.HypothesisTestCase):
             stride=stride,
             pad=pad,
             kernel=kernel,
+            device_option=dc[0],
         )
         X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32)
+            batch_size, input_channels, size, size
+        ).astype(np.float32)
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
@@ -49,7 +52,7 @@ class PoolTest(hu.HypothesisTestCase):
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **mu.gcs)
+           **mu.gcs_cpu_ideep)
     def test_int8_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
                          method, gc, dc):

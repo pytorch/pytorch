@@ -25,6 +25,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -42,6 +43,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -50,6 +52,13 @@ std::vector<std::string> _dynamic_quantizable_call_funcs = {
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
+};
+
+std::vector<std::string> _static_weight_only_quant_aten_funcs = {
+    "embedding_bag",
+};
+std::vector<std::string> _static_weight_only_quant_call_funcs = {
+    "embedding_bag",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -98,6 +107,7 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "unsqueeze_",
     "detach",
     "detach_",
+    "stack",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -221,8 +231,6 @@ bool matchAtenFuncToUse(
       (!n.has_value() || n.value() == use.offset);
 }
 
-// Check if `use` is a CallFunction of name `func_name` and if value
-// `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
@@ -255,12 +263,21 @@ bool matchArgPattern(
   return false;
 }
 
+// TODO add other op signatures.
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs(
-          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
-      CallFuncArgs({{"linear", 2}}));
+      // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
+      // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"embedding_bag", 0}}),
+      // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
+      // %offsets.1, %max_norm, %norm_type, %scale_grad_by_freq, %mode, %sparse,
+      // %per_sample_weights.1, %include_last_offset)
+      CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
 
@@ -270,6 +287,14 @@ bool isBiasOfConvOrLinear(Value* v) {
       AtenFuncArgs(
           {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  return result;
+}
+
+bool isEmbeddingBagNonInput(Value* v) {
+  bool result = matchArgPattern(
+      v,
+      AtenFuncArgs({{"embedding_bag", 2}, {"embedding_bag", 6}}),
+      CallFuncArgs({}));
   return result;
 }
 
@@ -451,6 +476,13 @@ bool userDefinedCallFunction(Node* n) {
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
+bool isWeightOnlyStaticQuantOp(Node* n) {
+  return isFunctionNode(
+      n,
+      _static_weight_only_quant_call_funcs,
+      _static_weight_only_quant_aten_funcs);
+}
+
 bool nodeQuantizable(Node* n, QuantType quant_type) {
   bool is_dynamic = quant_type == QuantType::DYNAMIC;
   return isFunctionNode(
@@ -527,8 +559,10 @@ bool hitGraphInput(Value* value) {
 // Get the module access path for a Value representing a module instance
 // by tracing back the GetAttr nodes and recording all the attribute
 // names along the way.
-// For example, the module access path will be ['sub', 'basic_block', 'conv1']
-// for `self.sub.basic_block.conv1`
+// Assuming 'self.sub.basic_block.conv1',
+// Input1: Value instance of conv1
+// Input2: Value instance of self
+// Output: ['sub', 'basic_block', 'conv1']
 std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   std::vector<std::string> path;
   // Iterator to traverse back the GetAttr calls
@@ -552,6 +586,10 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   return path;
 }
 
+// Assuming self.foo.bar.conv1,
+// Input1: Module instance of self
+// Input2: ['foo', 'bar', 'conv1']
+// Output: Module instance of conv1
 Module findChildModule(
     const Module& module,
     const std::vector<std::string>& path) {
@@ -606,13 +644,16 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
+std::string removeTorchMangle(const std::string& orig_name) {
+  static std::regex mangle_re("\\.___torch_mangle_\\d+");
+  auto qualified_name = std::regex_replace(orig_name, mangle_re, "");
+  return qualified_name;
+}
+
 c10::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-    return qualified_name;
+    return removeTorchMangle(type->name()->qualifiedName());
   }
   return c10::nullopt;
 }
@@ -702,31 +743,6 @@ bool is_batchnorm3d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
-}
-
-bool is_half_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp16")));
-  return (fp16_type->toScalarType() == c10::kHalf);
-}
-
-bool is_float_dtype(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp32")));
-  return (fp16_type->toScalarType() == c10::kFloat);
-}
-
-bool is_false_value(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-
-  auto default_param = toIValue(match_vmap.at(vmap.at("false")));
-  return default_param->toBool() == false;
 }
 
 } // namespace jit

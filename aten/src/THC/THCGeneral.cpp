@@ -4,6 +4,7 @@
 #include <THC/THCCachingHostAllocator.h>
 #include <THC/THCGeneral.hpp>
 
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
 
@@ -43,8 +44,8 @@ void THCudaInit(THCState* state)
     state->cudaHostAllocator = getTHCCachingHostAllocator();
   }
 
-  int numDevices = 0;
-  THCudaCheck(cudaGetDeviceCount(&numDevices));
+  // We want to throw if there are no GPUs
+  int numDevices = static_cast<int>(c10::cuda::device_count_ensure_non_zero());
   state->numDevices = numDevices;
 
   c10::cuda::CUDACachingAllocator::init(numDevices);

@@ -278,4 +278,41 @@ static inline Tensor same_stride_to(const Tensor& original_tensor, const at::Ten
   return strided_to;
 }
 
+// Creates a dimension permutation array that can be given to `at::permute()`, which will shift
+// the two specified dimensions to the end of a tensor, without changing the order of
+// the other dimensions. `dim1` will be placed at the very end, and `dim0` will be
+// placed just to the left of it.
+//
+// For instance, given a 4-D tensor, dimensions 1 and 3 can be shifted to the end by
+// calling `create_dim_backshift_permutation(1, 3, 4)`. The resulting vector will
+// be `vec(0, 2, 1, 3)`.
+static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0, int64_t dim1, int64_t ndim) {
+  TORCH_CHECK(
+    (dim0 != dim1) && (dim0 < ndim) && (dim0 >= 0) && (dim1 < ndim) && (dim1 >= 0),
+    "duplicate or invalid dimensions");
+  std::vector<int64_t> permutation(ndim);
+  int64_t cur_permuted_dim = 0;
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+    if ((dim_ind != dim0) && (dim_ind != dim1)) {
+      permutation[cur_permuted_dim++] = dim_ind;
+    }
+  }
+  permutation[cur_permuted_dim++] = dim0;
+  permutation[cur_permuted_dim] = dim1;
+  return permutation;
+}
+
+// Creates a dimension permutation array that can be given to `at::permute()`, which
+// will reverse a given permutation.
+// The reverse permutation array is created by swapping the indices and their
+// associated values from the given permutation array.
+static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
+  int64_t ndim = permutation.size();
+  std::vector<int64_t> reverse_permutation(ndim);
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+    reverse_permutation[permutation[dim_ind]] = dim_ind;
+  }
+  return reverse_permutation;
+}
+
 }}  // namespace at::native

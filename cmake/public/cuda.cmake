@@ -74,7 +74,7 @@ if(CUDA_FOUND)
     message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
   message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION_STRING})
+  if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
     # Force CUDA to be processed for again next time
     # TODO: I'm not sure if this counts as an implementation detail of
     # FindCUDA
@@ -267,6 +267,17 @@ if(CAFFE2_USE_CUDNN)
     set_property(
         TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    # Lines below use target_link_libraries because we support cmake 3.5+.
+    # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
+    # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
+    # "Item names starting with -, but not -l or -framework, are treated as linker flags.
+    #  Note that such flags will be treated like any other library link item for purposes
+    #  of transitive dependencies, so they are generally safe to specify only as private
+    #  link items that will not propagate to dependents."
+    # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
+    # flouting the warning, but I can't think of a better (3.5+ compatible) way.
+    target_link_libraries(caffe2::cudnn INTERFACE
+        "-Wl,--exclude-libs,libcudnn_static.a")
   endif()
 endif()
 

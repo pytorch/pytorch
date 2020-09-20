@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -252,7 +253,9 @@ SugaredValuePtr ModuleValue::getitem(
       throw ErrorReport(loc) << "Key Error, " << idx_str;
     }
     throw ErrorReport(loc)
-        << "Unable to extract string literal index. ModuleDict indexing is only supported with string literals.";
+        << "Unable to extract string literal index. "
+        << "ModuleDict indexing is only supported with string literals. "
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
@@ -401,6 +404,18 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
+    const py::object& obj,
+    Function& m,
+    const SourceRange& loc) {
+  auto annotation_type = py::module::import("torch.jit.annotations")
+                             .attr("try_ann_to_type")(obj, loc);
+  TORCH_INTERNAL_ASSERT(!annotation_type.is_none());
+  auto type = py::cast<TypePtr>(annotation_type);
+  auto enum_type = type->expect<EnumType>();
+  return std::make_shared<SugaredEnumClass>(enum_type);
+}
+
 // helper function for instantiating a SugaredValue from an IValue
 std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
@@ -436,10 +451,15 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (selfType->hasAttribute(field) &&
       selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
-    const auto submoduleConcreteType =
-        concreteType_->findSubmoduleConcreteType(field);
+    if (const auto submoduleConcreteType =
+            concreteType_->findSubmoduleConcreteType(field)) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    }
+
     return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+        m.graph()->insertGetAttr(self_, field),
+        ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
   } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
@@ -484,21 +504,26 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   // 5. Check if it's an attribute of the original Python class that this
   // ScriptModule was derived from. The only class attributes we handle are
   // methods.
+  const auto maybePyClass = concreteType_->getPyClass();
+  if (!maybePyClass) {
+    // ConcreteType doesn't always have an originating Python class, e.g. if it
+    // was derived from a serialized ScriptModule. In this case, we've exhausted
+    // our options for attr lookup.
+    return nullptr;
+  }
   py::object unboundMethod = py::getattr(
-      concreteType_->getPyClass(),
-      field.c_str(),
-      pybind11::cast<pybind11::none>(Py_None));
+      *maybePyClass, field.c_str(), pybind11::cast<pybind11::none>(Py_None));
 
   if (py::isinstance<py::function>(unboundMethod)) {
-    bool isStaticFn = py::cast<bool>(
-        py::module::import("torch._jit_internal")
-            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    bool isStaticFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_static_fn")(*maybePyClass, field.c_str()));
     if (isStaticFn) {
       // Functions within the module annotated with @staticmethod do not need
       // binding.
-      py::object staticFn = py::module::import("torch._jit_internal")
-                                .attr("get_static_fn")(
-                                    concreteType_->getPyClass(), field.c_str());
+      py::object staticFn =
+          py::module::import("torch._jit_internal")
+              .attr("get_static_fn")(*maybePyClass, field.c_str());
       return toSugaredValue(staticFn, m, loc);
     }
     // For Python methods that we're trying to call directly, we need to bind
@@ -655,6 +680,36 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
 
+std::shared_ptr<SugaredValue> PythonExceptionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  Value* error_message = nullptr;
+  if (inputs.size() == 0) {
+    error_message = insertConstant(*caller.graph(), "", loc);
+  } else if (inputs.size() == 1) {
+    error_message = inputs.at(0).value(*caller.graph());
+  } else {
+    std::vector<Value*> message_values;
+    message_values.reserve(inputs.size() + attributes.size());
+
+    for (auto inp : inputs) {
+      message_values.push_back(inp.value(*caller.graph()));
+    }
+    for (auto kwarg_inp : attributes) {
+      message_values.push_back(kwarg_inp.value(*caller.graph()));
+    }
+    error_message =
+        caller.graph()
+            ->insertNode(caller.graph()->createTuple(message_values))
+            ->output();
+  }
+
+  return std::make_shared<ExceptionMessageValue>(error_message);
+}
+
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
   return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
@@ -704,6 +759,30 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   }
   get_python_cu()->register_type(tt);
   return tt;
+}
+
+bool isEnumClass(py::object obj) {
+  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
+  if (!py::cast<bool>(is_class)) {
+    return false;
+  }
+
+  auto enum_type_obj =
+      py::cast<py::object>(py::module::import("enum").attr("Enum"));
+  int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
+  return ret == 1;
+}
+
+std::shared_ptr<SugaredValue> createSimpleEnumValue(
+    const py::object& obj,
+    Function& m,
+    const SourceRange& loc) {
+  auto enum_class = obj.attr("__class__");
+  auto enum_type =
+      py::cast<TypePtr>(py::module::import("torch.jit.annotations")
+                            .attr("try_ann_to_type")(enum_class, loc));
+  auto enum_ivalue = toIValue(obj, enum_type);
+  return toSimple(m.graph()->insertConstant(enum_ivalue, loc));
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -776,11 +855,20 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
+    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
       py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("rpc_sync").ptr()) {
+    return SpecialFormValue::create(prim::rpc_sync);
+  } else if (
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
+    return SpecialFormValue::create(prim::rpc_remote);
 #endif
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
@@ -792,6 +880,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+  }
+
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("_is_exception")(obj))) {
+    return std::make_shared<PythonExceptionValue>(obj);
   }
 
   if (py::isinstance<py::function>(obj)) {
@@ -818,12 +911,23 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<NamedTupleConstructor>(tuple_type);
   }
 
-  py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
-  if (py::cast<bool>(isClass)) {
+  if (isEnumClass(obj)) {
+    return createSugaredEnumClassFromObj(obj, m, loc);
+  }
+
+  auto enum_type = py::module::import("enum").attr("Enum");
+  py::bool_ is_enum_value = py::isinstance(obj, enum_type);
+  if (py::cast<bool>(is_enum_value)) {
+    return createSimpleEnumValue(obj, m, loc);
+  }
+
+  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
+  if (py::cast<bool>(is_class)) {
     py::str qualifiedName =
         py::module::import("torch._jit_internal").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
     auto qualname = c10::QualifiedName(qualifiedName);
+
     if (auto classType = pyCu->get_class(qualname)) {
       return std::make_shared<PythonClassValue>(classType, obj);
     } else {

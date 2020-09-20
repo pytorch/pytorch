@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
@@ -48,20 +49,14 @@ namespace at {
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
-
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
 #ifdef C10_MOBILE
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
+  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::getRuntimeDispatchKeySet(DispatchKey::Autograd));
 #endif
 }
 }

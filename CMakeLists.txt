@@ -121,10 +121,14 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+cmake_dependent_option(
+    BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
+    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF)
-option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -132,13 +136,15 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
+option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CLANG_CODE_COVERAGE "Compile C/C++ with clang code coverage flags" OFF)
+option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -357,6 +363,10 @@ if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+
 if(NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
   list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
@@ -373,7 +383,7 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE")
   endif()
 endif()
 
@@ -391,7 +401,12 @@ endif()
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_EXPORT")
+    string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
+  endif()
+  if(BUILD_MOBILE_AUTOGRAD)
+    set(INTERN_DISABLE_AUTOGRAD OFF)
+  else()
+    set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
   set(BUILD_CAFFE2_OPS OFF)
@@ -401,7 +416,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_FBGEMM OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
-  set(INTERN_DISABLE_AUTOGRAD ON)
   set(INTERN_USE_EIGEN_BLAS ON)
   # Disable developing mobile interpreter for actual mobile build.
   # Enable it elsewhere to capture build error.
@@ -449,7 +463,7 @@ enable_testing()
 
 # ---[ Build variables set within the cmake tree
 include(cmake/BuildVariables.cmake)
-set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
+set(CAFFE2_ALLOWLIST "" CACHE STRING "A allowlist file of files that one should build.")
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -472,35 +486,35 @@ endif()
 include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
 endif()
 
 if(USE_QNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_QNNPACK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
 endif()
 
 if(USE_XNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")
 endif()
 
 if(USE_VULKAN)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
 endif()
 
 if(USE_VULKAN_WRAPPER)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_WRAPPER")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
-# ---[ Whitelist file if whitelist is specified
-include(cmake/Whitelist.cmake)
+# ---[ Allowlist file if allowlist is specified
+include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
@@ -512,116 +526,155 @@ endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+  string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=return-type")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-array-bounds")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+  string(APPEND CMAKE_CXX_FLAGS " -Wall")
+  string(APPEND CMAKE_CXX_FLAGS " -Wextra")
+  string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-psabi")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
   endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=pedantic")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=redundant-decls")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=old-style-cast")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=pedantic")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=redundant-decls")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=old-style-cast")
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-invalid-partial-specialization")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-typedef-redefinition")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-inconsistent-missing-override")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-aligned-allocation-unavailable")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-inconsistent-missing-override")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-aligned-allocation-unavailable")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
+    string(APPEND CMAKE_CXX_FLAGS " -Qunused-arguments")
     if(${COLORIZE_OUTPUT})
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
+      string(APPEND CMAKE_CXX_FLAGS " -fcolor-diagnostics")
     endif()
   endif()
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
     if(${COLORIZE_OUTPUT})
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+      string(APPEND CMAKE_CXX_FLAGS " -fdiagnostics-color=always")
     endif()
   endif()
   if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
     OR(CMAKE_COMPILER_IS_GNUCXX
     AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
+    string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
   endif()
   if(WERROR)
     check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
     if(NOT COMPILER_SUPPORT_WERROR)
       set(WERROR FALSE)
     else()
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+      string(APPEND CMAKE_CXX_FLAGS " -Werror")
     endif()
   endif(WERROR)
   if(NOT APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-but-set-variable")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-maybe-uninitialized")
   endif()
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
-  set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
+  string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
+  string(APPEND CMAKE_CXX_FLAGS " -fno-math-errno")
+  string(APPEND CMAKE_CXX_FLAGS " -fno-trapping-math")
   check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
   if(HAS_WERROR_FORMAT)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=format")
+    string(APPEND CMAKE_CXX_FLAGS " -Werror=format")
   endif()
 endif()
 
 if(USE_ASAN)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
-    set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
 
-# invoke clang code coverage flags
-if(CLANG_CODE_COVERAGE)
-  list(APPEND CMAKE_C_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
-  list(APPEND CMAKE_CXX_FLAGS  -fprofile-instr-generate -fcoverage-mapping)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
+  float32x4x2_t v;
+  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  vst1q_f32_x2(a, v);
+  return 0;
+}" HAS_VST1)
+
+  if(NOT HAS_VST1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
+  float a[] = {1.0, 1.0};
+  vld1q_f32_x2(a);
+  return 0;
+}" HAS_VLD1)
+
+  if(NOT HAS_VLD1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
+  endif()
+endif()
+
+
+# Add code coverage flags to supported compilers
+if(USE_CPP_CODE_COVERAGE)
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    string(APPEND CMAKE_C_FLAGS  " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_CXX_FLAGS  " --coverage -fprofile-abs-path")
+  elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_C_FLAGS  " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+  else()
+    message(ERROR "Code coverage for compiler ${CMAKE_CXX_COMPILER_ID} is unsupported")
+  endif()
+
 endif()
 
 if(APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
 endif()
 
 if(EMSCRIPTEN)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
 endif()
 
 if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s")
+    string(APPEND CMAKE_CXX_FLAGS " -s")
   else()
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -s")
   endif()
 endif()
 
@@ -758,7 +811,11 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules)
+# If master flag for buildling Caffe2 is disabled, we also disable the
+# build for Caffe2 related operator modules.
+if(BUILD_CAFFE2)
+  add_subdirectory(modules)
+endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules

@@ -175,7 +175,7 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
     scalar_t* bottom_diff) {
   CUDA_KERNEL_LOOP(index, height*width) {
     int h = index / width;
-    int w = index % width;
+    int w = index - h * width;
     int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
     int phend = p_end(h, pad_h, pooled_height, stride_h);
     int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);

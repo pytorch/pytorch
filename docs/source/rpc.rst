@@ -139,54 +139,13 @@ to configure the backend's behavior.
     :members:
 
 
-Process Group Backend
-"""""""""""""""""""""
-
-The Process Group agent, which is the default, instantiates a process group from
-the :mod:`~torch.distributed` module and utilizes its point-to-point
-communication capabilities to send RPC messages across. Internally, the process
-group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
-
-Gloo has been hardened by years of extensive use in PyTorch and is thus very
-reliable. However, as it was designed to perform collective communication, it
-may not always be the best fit for RPC. For example, each networking operation
-is synchronous and blocking, which means that it cannot be run in parallel with
-others. Moreover, it opens a connection between all pairs of nodes, and brings
-down all of them when one fails, thus reducing the resiliency and the elasticity
-of the system.
-
-Example::
-
-    >>> import os
-    >>> from torch.distributed import rpc
-    >>> os.environ['MASTER_ADDR'] = 'localhost'
-    >>> os.environ['MASTER_PORT'] = '29500'
-    >>>
-    >>> rpc.init_rpc(
-    >>>     "worker1",
-    >>>     rank=0,
-    >>>     world_size=2,
-    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-    >>>         num_send_recv_threads=16,
-    >>>         rpc_timeout=20 # 20 second timeout
-    >>>     )
-    >>> )
-    >>>
-    >>> # omitting init_rpc invocation on worker2
-
-
-.. autoclass:: ProcessGroupRpcBackendOptions
-    :members:
-    :inherited-members:
-
-
 TensorPipe Backend
 """"""""""""""""""
 
 .. warning::
     The TensorPipe backend is a **beta feature**.
 
-The TensorPipe agent leverages `the TensorPipe library
+The TensorPipe agent, which is the default, leverages `the TensorPipe library
 <https://github.com/pytorch/tensorpipe>`_, which provides a natively
 point-to-point communication primitive specifically suited for machine learning
 that fundamentally addresses some of the limitations of Gloo. Compared to Gloo,
@@ -217,7 +176,6 @@ Example::
     >>>     "worker1",
     >>>     rank=0,
     >>>     world_size=2,
-    >>>     backend=rpc.BackendType.TENSORPIPE,
     >>>     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
     >>>         num_worker_threads=8,
     >>>         rpc_timeout=20 # 20 second timeout
@@ -227,6 +185,48 @@ Example::
     >>> # omitting init_rpc invocation on worker2
 
 .. autoclass:: TensorPipeRpcBackendOptions
+    :members:
+    :inherited-members:
+
+
+Process Group Backend
+"""""""""""""""""""""
+
+The Process Group agent instantiates a process group from
+the :mod:`~torch.distributed` module and utilizes its point-to-point
+communication capabilities to send RPC messages. Internally, the process
+group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
+
+Gloo has been hardened by years of extensive use in PyTorch and is thus very
+reliable. However, as it was designed to perform collective communication, it
+may not always be the best fit for RPC. For example, each networking operation
+is synchronous and blocking, which means that it cannot be run in parallel with
+others. Moreover, it opens a connection between all pairs of nodes, and brings
+down all of them when one fails, thus reducing the resiliency and the elasticity
+of the system.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     backend=rpc.BackendType.PROCESS_GROUP,
+    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+    >>>         num_send_recv_threads=16,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+
+.. autoclass:: ProcessGroupRpcBackendOptions
     :members:
     :inherited-members:
 
@@ -297,3 +297,4 @@ The RPC tutorial introduces users to the RPC framework and provides two example 
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__

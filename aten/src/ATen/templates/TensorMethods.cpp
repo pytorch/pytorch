@@ -12,21 +12,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#ifdef USE_STATIC_DISPATCH
-#include <ATen/TypeDefault.h>
-#include <ATen/CPUType.h>
-#include <ATen/QuantizedCPUType.h>
-#ifdef USE_VULKAN
-#include <ATen/VulkanType.h>
-#endif
-#endif
-
 namespace at {
-
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 Tensor Tensor::cpu() const {
   return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);

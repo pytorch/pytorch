@@ -55,7 +55,7 @@ class ProcessGroup {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
-    virtual std::vector<at::Tensor> result() const;
+    virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
@@ -88,6 +88,10 @@ class ProcessGroup {
     virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
 
     virtual void abort();
+
+    // Returns a Future object that will be associated with the completion of
+    // work. Only NCCL backend is currently supported.
+    virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
    protected:
     // Completes the work object and optionally sets the exception in a

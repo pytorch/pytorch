@@ -23,6 +23,7 @@
 #include <bitset>
 #include <cusparse.h>
 #include <cuda_runtime_api.h>
+#include <memory>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
@@ -732,7 +733,7 @@ Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deter
   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
-#if !(defined(__HIP_PLATFORM_HCC__) || defined(_WIN32) || defined(_WIN64))
+#if !(defined(__HIP_PLATFORM_HCC__) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -817,9 +818,9 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
 #if defined __HIP_PLATFORM_HCC__
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
-#elif defined(_WIN32) || defined(_WIN64)
-  TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows");
-#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)
+#elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
+  TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
+#elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)  // linux cuda >= 10.1 or windows cuda >= 11.0
 
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -872,13 +873,13 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   Tensor indices_dim1 = indices[1].to(ScalarType::Int);
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
-  int64_t mat_el_end_indices_host[num_matrices];
+  std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
   int64_t* mat_el_end_indices_device;
 
   cudaMalloc(&mat_el_end_indices_device, num_matrices*sizeof(int64_t));
   search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
   cudaMemcpy(
-    mat_el_end_indices_host,
+    mat_el_end_indices_host.get(),
     mat_el_end_indices_device,
     num_matrices*sizeof(int64_t),
     cudaMemcpyDeviceToHost

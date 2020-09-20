@@ -1,3 +1,4 @@
+import pickle
 import torch
 import warnings
 from torch._six import string_classes
@@ -97,7 +98,7 @@ class Backend(object):
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
-        """ 
+        """
         setattr(Backend, name.upper(), func)
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -180,7 +181,7 @@ def _get_group_rank(group, rank):
     try:
         group_rank = _pg_group_ranks[group][rank]
     except KeyError:
-        raise RuntimeError("The global rank is not part of the group")
+        raise RuntimeError(f"The global rank {rank} is not part of the group {group}") from None
     return group_rank
 
 
@@ -1156,6 +1157,235 @@ def all_gather_multigpu(output_tensor_lists,
         work.wait()
 
 
+def _object_to_tensor(obj):
+    buffer = pickle.dumps(obj)
+    byte_storage = torch.ByteStorage.from_buffer(buffer)
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
+    return byte_tensor, local_size
+
+
+def _tensor_to_object(tensor, tensor_size):
+    buf = tensor.numpy().tobytes()[:tensor_size]
+    out = pickle.loads(buf)
+    return out
+
+
+def all_gather_object(object_list, obj, group=group.WORLD):
+    """
+    Gathers picklable objects from the whole group into a list. Similar to
+    :func:`all_gather`, but Python objects can be passed in. Note that the object
+    must be picklable in order to be gathered.
+
+    Arguments:
+        object_list (list[Any]): Output list. It should be correctly sized as the
+            size of the group for this collective and will contain the output.
+        object (Any): Pickable Python object to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on
+
+    Returns:
+        None. If the calling rank is part of this group, the output of the
+        collective will be populated into the input ``object_list``. If the
+        calling rank is not part of the group, the passed in ``object_list`` will
+        be unmodified.
+
+    .. note:: Note that this API differs slightly from the :func:`all_gather`
+        collective since it does not provide an ``async_op`` handle and thus
+        will be a blocking call.
+
+    .. warning::
+        :func:`all_gather_object` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    input_tensor, local_size = _object_to_tensor(obj)
+    group_backend = get_backend(group)
+    my_rank = get_rank()
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
+    # Gather all local sizes. This is so that we can find the max size, and index
+    # until the correct size when deserializing the tensors.
+    group_size = get_world_size(group=group)
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+        my_rank if is_nccl_backend else "cpu"
+    )
+    object_size_list = [
+        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
+    ]
+    # Allgather tensor sizes
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = max(object_size_list)
+    # Resize tensor to max size across all ranks.
+    input_tensor.resize_(max_object_size)
+    coalesced_output_tensor = torch.empty(
+        max_object_size * group_size, dtype=torch.uint8
+    ).to(my_rank if is_nccl_backend else "cpu")
+    # Output tensors are nonoverlapping views of coalesced_output_tensor
+    output_tensors = [
+        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
+        for i in range(group_size)
+    ]
+    all_gather(output_tensors, input_tensor, group=group)
+    # Deserialize outputs back to object.
+    for i, tensor in enumerate(output_tensors):
+        tensor = tensor.type(torch.ByteTensor)
+        tensor_size = object_size_list[i]
+        object_list[i] = _tensor_to_object(tensor, tensor_size)
+
+
+def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
+    """
+    Gathers picklable objects from the whole group in a single process.
+    Similar to :func:`gather`, but Python objects can be passed in. Note that the
+    object must be picklable in order to be gathered.
+
+    Arguments:
+        obj (Any): Input object. Must be picklable.
+        object_gather_list (list[Any]): Output list. On the ``dst`` rank, it
+            should be correctly sized as the size of the group for this
+            collective and will contain the output. Must be ``None`` on non-dst
+            ranks. (default is ``None``)
+        dst (int, optional): Destination rank. (default is 0)
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        None. On the ``dst`` rank, ``object_gather_list`` will contain the
+        output of the collective.
+
+    .. note:: Note that this API differs slightly from the gather collective
+        since it does not provide an async_op handle and thus will be a blocking
+        call.
+
+    .. note:: Note that this API is not supported when using the NCCL backend.
+
+    .. warning::
+        :func:`gather_object` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    # Ensure object_gather_list is specified appopriately.
+    my_rank = get_rank()
+    _validate_output_list_for_rank(my_rank, dst, object_gather_list)
+    input_tensor, local_size = _object_to_tensor(obj)
+    group_backend = get_backend(group)
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
+    # Gather all local sizes. This is so that we can find the max size, and index
+    # until the correct size when deserializing the tensors.
+    group_size = get_world_size(group=group)
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+        my_rank if is_nccl_backend else "cpu"
+    )
+    object_size_list = [
+        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
+    ]
+    # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
+    # since each rank needs to broadcast a tensor of the same (maximal) size.
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = max(object_size_list)
+    # Resize tensor to max size across all ranks.
+    input_tensor.resize_(max_object_size)
+    # Avoid populating output tensors if the result won't be gathered on this rank.
+    if my_rank == dst:
+        coalesced_output_tensor = torch.empty(
+            max_object_size * group_size, dtype=torch.uint8
+        ).to(my_rank if is_nccl_backend else "cpu")
+        # Output tensors are nonoverlapping views of coalesced_output_tensor
+        output_tensors = [
+            coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
+            for i in range(group_size)
+        ]
+    # All ranks call gather with equal-sized tensors.
+    gather(
+        input_tensor,
+        gather_list=output_tensors if my_rank == dst else None,
+        dst=dst,
+        group=group,
+    )
+    if my_rank != dst:
+        return
+    for i, tensor in enumerate(output_tensors):
+        tensor = tensor.type(torch.ByteTensor)
+        tensor_size = object_size_list[i]
+        object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
+
+
+def broadcast_object_list(object_list, src, group=group.WORLD):
+    """
+    Broadcasts picklable objects in ``object_list`` to the whole group. Similar
+    to :func:`broadcast`, but Python objects can be passed in.
+    Note that all objects in ``object_list`` must be picklable in order to be
+    broadcasted.
+
+    Arguments:
+        object_list (List[Any]): List of input objects to broadcast.
+            Each object must be picklable. Only objects on the ``src`` rank will
+            be broadcast, but each rank must provide lists of equal sizes.
+        src (int): Source rank from which to broadcast ``object_list``.
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        ``None``. If rank is part of the group, ``object_list`` will contain the
+        broadcasted objects from ``src`` rank.
+
+    .. note:: Note that this API differs slightly from the broadcast collective
+        since it does not provide an ``async_op`` handle and thus will be a
+        blocking call.
+
+    .. warning::
+        :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    my_rank = get_rank()
+    # Serialize object_list elements to tensors on src rank.
+    if my_rank == src:
+        tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
+        object_sizes_tensor = torch.cat(size_list)
+    else:
+        object_sizes_tensor = torch.LongTensor(len(object_list))
+
+    group_backend = get_backend(group)
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        object_sizes_tensor = object_sizes_tensor.to(my_rank)
+
+    # Broadcast object sizes
+    broadcast(object_sizes_tensor, src=src, group=group)
+
+    # Concatenate and broadcast serialized object tensors
+    if my_rank == src:
+        object_tensor = torch.cat(tensor_list)
+    else:
+        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+
+    if is_nccl_backend:
+        object_tensor = object_tensor.to(my_rank)
+    broadcast(object_tensor, src=src, group=group)
+    # Deserialize objects using their stored sizes.
+    offset = 0
+    if my_rank != src:
+        for i, obj_size in enumerate(object_sizes_tensor):
+            obj_view = object_tensor[offset : offset + obj_size]
+            obj_view = obj_view.type(torch.ByteTensor)
+            offset += obj_size
+            object_list[i] = _tensor_to_object(obj_view, obj_size)
+
+
 def all_gather(tensor_list,
                tensor,
                group=group.WORLD,
@@ -1258,6 +1488,18 @@ def all_gather_coalesced(output_tensor_lists,
     else:
         work.wait()
 
+def _validate_output_list_for_rank(my_rank, dst, gather_list):
+    if dst == my_rank:
+        if not gather_list:
+            raise ValueError(
+                "Argument ``gather_list`` must be specified on destination rank."
+            )
+    elif gather_list:
+        raise ValueError(
+            "Argument ``gather_list`` must NOT be specified "
+            "on non-destination ranks."
+        )
+
 
 def gather(tensor,
            gather_list=None,
@@ -1293,18 +1535,9 @@ def gather(tensor,
         return
 
     my_rank = get_rank()
-    if dst == my_rank:
-        if not gather_list:
-            raise ValueError("Argument ``gather_list`` must be specified "
-                             "on destination rank.")
-        input_tensors = [tensor]
-        output_tensors = [gather_list]
-    else:
-        if gather_list:
-            raise ValueError("Argument ``gather_list`` must NOT be specified "
-                             "on non-destination ranks.")
-        input_tensors = [tensor]
-        output_tensors = []
+    _validate_output_list_for_rank(my_rank, dst, gather_list)
+    output_tensors = [gather_list] if dst == my_rank else []
+    input_tensors = [tensor]
 
     opts = GatherOptions()
     opts.rootRank = dst
@@ -1603,7 +1836,7 @@ def all_to_all(output_tensor_list,
     return gathered list of tensors in output list.
 
     Arguments:
-        output_tensor_list (list[Tensor]): List of tensors to be gathered one 
+        output_tensor_list (list[Tensor]): List of tensors to be gathered one
             per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.

@@ -393,6 +393,7 @@ class TestAppendNet(test_util.TestCase):
 
 class TestExtractPredictorNet(test_util.TestCase):
 
+    @unittest.skipIf('ImageInput' not in workspace.RegisteredOperators(), "Needs OpenCV")
     def test_extract_simple(self):
         from caffe2.python import brew
         from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet

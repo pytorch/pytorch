@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 
@@ -1152,6 +1152,7 @@ class TestLayers(LayersTestCase):
         X=hu.arrays(dims=[5, 2]),
         num_to_collect=st.integers(min_value=3, max_value=3),
     )
+    @settings(deadline=1000)
     def testReservoirSamplingWithID(self, X, num_to_collect):
         ID = np.array([1, 2, 3, 1, 2], dtype=np.int64)
         input_record = self.new_record(
@@ -2120,6 +2121,7 @@ class TestLayers(LayersTestCase):
         enable_diagnose=st.booleans(),
         **hu.gcs
     )
+    @settings(deadline=1000)
     def testAdaptiveWeight(
         self, num, feed_weight, use_inv_var_parameterization, use_log_barrier,
         enable_diagnose, gc, dc
@@ -2177,6 +2179,7 @@ class TestLayers(LayersTestCase):
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def testHomotopyWeight(self, gc, dc):
         input_record = self.new_record(schema.RawTuple(2))
         data = np.random.random(2)

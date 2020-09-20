@@ -33,7 +33,7 @@ class ExpandDimsSqueezeTest(hu.HypothesisTestCase):
     @given(
         squeeze_dims=st.lists(st.integers(0, 3), min_size=1, max_size=3),
         inplace=st.booleans(),
-        **mu.gcs
+        **mu.gcs_cpu_ideep
         )
     def test_squeeze_fallback(self, squeeze_dims, inplace, gc, dc):
         shape = [
@@ -92,7 +92,7 @@ class ExpandDimsSqueezeTest(hu.HypothesisTestCase):
     @given(
         squeeze_dims=st.lists(st.integers(0, 3), min_size=1, max_size=3),
         inplace=st.booleans(),
-        **mu.gcs
+        **mu.gcs_cpu_ideep
         )
     def test_expand_dims_fallback(self, squeeze_dims, inplace, gc, dc):
         oshape = [

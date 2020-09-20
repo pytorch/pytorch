@@ -601,6 +601,18 @@ void addInputs(Node* n, const char* name, const at::Tensor& value) {
 void addInputs(
     Node* n,
     const char* name,
+    const c10::optional<at::Tensor>& value) {
+  if (value.has_value()) {
+    addInputs(n, name, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
     const c10::optional<at::Generator>& value) {
   if (value.has_value() && value->defined()) {
     detail::badArgType(*value);
@@ -886,6 +898,11 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << "are outputs of torch.split), this might still be safe.";
     warn(ss.str().c_str());
   }
+}
+void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const c10::optional<at::Tensor>& tensor) {
+  ensureUniqueIfOutOfPlaced(name, tensor.has_value() ? *tensor : at::Tensor());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -230,7 +230,9 @@ struct PythonPrintImpl {
       return false;
 
     // subgraph may use this more than once, so disable inlining
-    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async)
+    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async ||
+        use.user->kind() == prim::rpc_sync ||
+        use.user->kind() == prim::rpc_remote)
       return false;
 
     // isinstance appearing in an if expression
@@ -672,6 +674,8 @@ struct PythonPrintImpl {
       }
     } else if (const auto interfaceType = type->cast<InterfaceType>()) {
       registerDependency(interfaceType);
+    } else if (const auto enumType = type->cast<EnumType>()) {
+      registerDependency(enumType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -834,11 +838,6 @@ struct PythonPrintImpl {
   }
 
   static bool containsNonASCIIString(const IValue& val) {
-    // TODO: This change breaks forward compatibility.
-    // Temporarily turning off serialization (torch.save only) of non ASCII
-    // string literals. We will turn it on a week.
-    return false;
-
     bool hasNonASCII = false;
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
@@ -1416,6 +1415,22 @@ struct PythonPrintImpl {
                 << ":\n";
           indent();
           body_ << "  pass\n";
+        }
+      }
+    } else if (auto enumType = type->cast<EnumType>()) {
+      body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
+
+      std::string value_wrapper = "";
+      if (enumType->getValueType() == StringType::get()) {
+        value_wrapper = "\"";
+      }
+
+      {
+        auto guard = WithIndented();
+        for (const auto& name_value : enumType->enumNamesValues()) {
+          indent();
+          body_ << name_value.first << " = " << value_wrapper
+                << name_value.second << value_wrapper << "\n";
         }
       }
     } else {

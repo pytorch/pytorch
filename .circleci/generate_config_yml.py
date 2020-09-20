@@ -8,10 +8,9 @@ Please see README.md in this directory for details.
 import os
 import shutil
 import sys
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.bazel_definitions
@@ -83,6 +82,7 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
+        cimodel.data.simple.docker_definitions.get_workflow_jobs,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
@@ -90,7 +90,6 @@ def gen_build_workflows_tree():
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
         cimodel.data.simple.bazel_definitions.get_workflow_jobs,
-        caffe2_build_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
@@ -105,29 +104,12 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    docker_builder_functions = [
-        cimodel.data.simple.docker_definitions.get_workflow_jobs
-    ]
-
     return {
         "workflows": {
             "binary_builds": {
                 "when": r"<< pipeline.parameters.run_binary_tests >>",
                 "jobs": [f() for f in binary_build_functions],
             },
-            "docker_build": OrderedDict(
-                {
-                    "triggers": [
-                        {
-                            "schedule": {
-                                "cron": miniutils.quote("0 15 * * 0"),
-                                "filters": {"branches": {"only": ["master"]}},
-                            }
-                        }
-                    ],
-                    "jobs": [f() for f in docker_builder_functions],
-                }
-            ),
             "build": {"jobs": [f() for f in build_workflows_functions]},
         }
     }
@@ -140,12 +122,10 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
-    File("build-parameters/caffe2-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
     File("job-specs/pytorch-job-specs.yml"),
-    File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),

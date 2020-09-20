@@ -4,6 +4,7 @@ from torch._six import container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain
+import warnings
 
 
 class _RequiredParameter(object):
@@ -163,13 +164,32 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self):
-        r"""Clears the gradients of all optimized :class:`torch.Tensor` s."""
+    def zero_grad(self, set_to_none: bool = False):
+        r"""Set the gradients of all optimized :class:`torch.Tensor` s to zero.
+
+        Arguments:
+            set_to_none (bool): instead of setting to zero, set the grad to None.
+                This is will in general have lower memory footprint, and can modestly improve performance.
+                However, it changes certain behaviors. For example:
+                1. When user tries to access the gradient value and perform manual ops on it.
+                A None attribute or a Tensor full of 0s will be different.
+                2. If the user requests `zero_grad(set_to_none=True)` followed by a backward pass, `.grad` s
+                are guaranteed to be None for params that did not receive a gradient.
+                3. `torch.optim` optimizers have a different behavior if the gradient is 0 or None
+                (in one case it does the step with a gradient of 0 and in the other it skip
+                the step altogether).
+        """
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    p.grad.detach_()
-                    p.grad.zero_()
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+                        p.grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
@@ -218,6 +238,12 @@ class Optimizer(object):
                                  name)
             else:
                 param_group.setdefault(name, default)
+
+        params = param_group['params']
+        if len(params) != len(set(params)):
+            warnings.warn("optimizer contains a parameter group with duplicate parameters; "
+                          "in future, this will cause an error; "
+                          "see github.com/pytorch/pytorch/issues/40967 for more information", stacklevel=3)
 
         param_set = set()
         for group in self.param_groups:

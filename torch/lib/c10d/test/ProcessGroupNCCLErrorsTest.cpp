@@ -124,17 +124,18 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
  protected:
-  std::pair<bool, std::string> skipTest() {
+  bool skipTest() {
     if (cudaNumDevices() == 0) {
-      return std::make_pair(true, "Skipping test since CUDA is not available");
+      LOG(INFO) << "Skipping test since CUDA is not available";
+      return true;
     }
 #ifdef USE_C10D_NCCL
-    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion
-        ? std::make_pair(true, "Skipping test since NCCL version is too old")
-        : std::make_pair(false, "");
-#else
-    return std::make_pair(false, "");
+    if (torch::cuda::nccl::version() < kNcclErrorHandlingVersion) {
+      LOG(INFO) << "Skipping test since NCCL version is too old";
+      return true;
+    }
 #endif
+    return false;
   }
 
   void SetUp() override {
@@ -159,11 +160,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
-  bool skip;
-  std::string skipReason;
-  std::tie(skip, skipReason) = skipTest();
-  if (skip) {
-    LOG(INFO) << skipReason;
+  if (skipTest()) {
     return;
   }
 
@@ -190,11 +187,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
-  bool skip;
-  std::string skipReason;
-  std::tie(skip, skipReason) = skipTest();
-  if (skip) {
-    LOG(INFO) << skipReason;
+  if (skipTest()) {
     return;
   }
 
@@ -216,11 +209,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  bool skip;
-  std::string skipReason;
-  std::tie(skip, skipReason) = skipTest();
-  if (skip) {
-    LOG(INFO) << skipReason;
+  if (skipTest()) {
     return;
   }
 

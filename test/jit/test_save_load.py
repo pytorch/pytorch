@@ -5,6 +5,7 @@ import random
 import torch
 from itertools import product as product
 from torch import Tensor
+from torch.testing._internal.common_utils import TemporaryFileName
 from typing import NamedTuple
 
 # Make the helper files in test/ importable
@@ -515,9 +516,6 @@ class TestSaveLoad(JitTestCase):
         self.assertTrue((a == 2.).all())
         self.assertTrue((b == 1.).all())
 
-        with self.assertRaisesRegex(RuntimeError, ".+is currently unsupported.+"):
-            current_module(2)
-
     # Tests that torch.full behavior which is the same from prior versions
     #   to version 5 is preserved.
     # NOTE: while torch.full in eager PyTorch accepts a requires_grad argument,
@@ -877,3 +875,53 @@ class TestSaveLoad(JitTestCase):
         torch.jit.save(sm, contains_both)
         contains_both.seek(0)
         sm = torch.jit.load(contains_both)
+
+    def test_save_load_with_extra_files(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return a
+
+        # specifically test binary data
+        value = b"bar\x00\xffbaz"
+
+        expected_extra_files = {}
+        expected_extra_files['foo'] = value
+        # verify that str to bytes conversion also works
+        expected_extra_files['foo2'] = "bar"
+        m = MyMod()
+
+        # Save to file.
+        with TemporaryFileName() as fname:
+            m.save(fname, _extra_files=expected_extra_files)
+            # values don't matter
+            extra_files = {'foo': '', 'foo2': None}
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual(value, extra_files['foo'])
+            # results come back always as bytes
+            self.assertEqual(b"bar", extra_files['foo2'])
+
+            # Use torch.jit API
+            torch.jit.save(m, fname, _extra_files=expected_extra_files)
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual(value, extra_files['foo'])
+
+        # Save to buffer.
+        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
+        extra_files = {'foo': ''}
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual(value, extra_files['foo'])
+
+        # Use torch.jit API
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
+        buffer.seek(0)
+        extra_files = {'foo': ''}
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual(value, extra_files['foo'])
+
+        # Non-existent file 'bar'
+        with self.assertRaises(RuntimeError):
+            extra_files['bar'] = ''
+            torch.jit.load(buffer, _extra_files=extra_files)

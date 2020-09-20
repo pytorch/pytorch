@@ -54,7 +54,7 @@ class TestRegularizerContext(LayersTestCase):
 
 
 class TestRegularizer(LayersTestCase):
-    @given(X=hu.arrays(dims=[2, 5], elements=st.floats(min_value=-1.0, max_value=1.0)))
+    @given(X=hu.arrays(dims=[2, 5], elements=hu.floats(min_value=-1.0, max_value=1.0)))
     def test_log_barrier(self, X):
         param = core.BlobReference("X")
         workspace.FeedBlob(param, X)
@@ -83,12 +83,12 @@ class TestRegularizer(LayersTestCase):
             npt.assert_allclose(x, y, rtol=1e-3)
 
     @given(
-        X=hu.arrays(dims=[2, 5], elements=st.floats(min_value=-1.0, max_value=1.0)),
+        X=hu.arrays(dims=[2, 5], elements=hu.floats(min_value=-1.0, max_value=1.0)),
         left_open=st.booleans(),
         right_open=st.booleans(),
-        eps=st.floats(min_value=1e-6, max_value=1e-4),
-        ub=st.floats(min_value=-1.0, max_value=1.0),
-        lb=st.floats(min_value=-1.0, max_value=1.0),
+        eps=hu.floats(min_value=1e-6, max_value=1e-4),
+        ub=hu.floats(min_value=-1.0, max_value=1.0),
+        lb=hu.floats(min_value=-1.0, max_value=1.0),
         **hu.gcs_cpu_only
     )
     def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc):

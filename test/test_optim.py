@@ -357,6 +357,10 @@ class TestOptim(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([torch.zeros(3, layout=torch.sparse_coo)])
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
@@ -490,6 +494,14 @@ class TestOptim(TestCase):
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
+
+    def test_duplicate_params_in_param_group(self):
+        param = Variable(torch.randn(5, 5))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            optim.SGD([param, param], lr=0.1)
+            self.assertEqual(len(w), 1)
+            self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
 
 
 class SchedulerTestNet(torch.nn.Module):

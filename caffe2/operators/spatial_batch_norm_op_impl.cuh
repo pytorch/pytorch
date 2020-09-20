@@ -3,6 +3,8 @@
 
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
+#include <limits>
+
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
@@ -37,16 +39,9 @@ __global__ void ComputeFusedParamCUDAKernel<float>(
     float* beta) {
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    const float scale_x_rstd =
-        __ldg(scale + c) * rsqrtf(__ldg(var + c) + epsilon);
-    alpha[c] = scale_x_rstd;
-    beta[c] = fmaf(-scale_x_rstd, __ldg(mean + c), __ldg(bias + c));
-#else
     const float scale_x_rstd = scale[c] * rsqrtf(var[c] + epsilon);
     alpha[c] = scale_x_rstd;
-    beta[c] = fmaf(-scale_x_rstd, mean[c], bias[c]);
-#endif
+    beta[c] = -scale_x_rstd * mean[c] + bias[c];
   }
 }
 
@@ -57,33 +52,19 @@ __global__ void ComputeBatchMomentsCUDAKernel(
     const T* batch_mean_sum,
     const T* batch_var_sum,
     T* mean,
-    T* var);
-
-template <>
-__global__ void ComputeBatchMomentsCUDAKernel<float>(
-    const int C,
-    const float scale,
-    const float* batch_mean_sum,
-    const float* batch_var_sum,
-    float* mean,
-    float* var) {
+    T* var) {
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    const float mu = scale * __ldg(batch_mean_sum + c);
+    const T mu = scale * batch_mean_sum[c];
     mean[c] = mu;
-    var[c] = fmaf(scale, __ldg(batch_var_sum + c), -mu * mu);
-#else
-    const float mu = scale * batch_mean_sum[c];
-    mean[c] = mu;
-    var[c] = fmaf(scale, batch_var_sum[c], -mu * mu);
-#endif
+    var[c] = scale * batch_var_sum[c] - mu * mu;
   }
 }
 
 template <typename T>
 __global__ void ComputeRunningMomentsAndFusedParamCUDAKernel(
     const int C,
+    const int reduce_size,
     const T momentum,
     const T epsilon,
     const T* scale,
@@ -99,6 +80,7 @@ __global__ void ComputeRunningMomentsAndFusedParamCUDAKernel(
 template <>
 __global__ void ComputeRunningMomentsAndFusedParamCUDAKernel<float>(
     const int C,
+    const int reduce_size,
     const float momentum,
     const float epsilon,
     const float* scale,
@@ -113,24 +95,17 @@ __global__ void ComputeRunningMomentsAndFusedParamCUDAKernel<float>(
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   const float a = 1.0f - momentum;
   const float b = momentum;
+  const float unbias_scale = reduce_size == 1
+      ? std::numeric_limits<float>::infinity()
+      : static_cast<float>(reduce_size) / static_cast<float>(reduce_size - 1);
   if (c < C) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    const float rstd_val = rsqrtf(__ldg(var + c) + epsilon);
-    const float scale_x_rstd = __ldg(scale + c) * rstd_val;
-    running_mean[c] = fmaf(a, __ldg(mean + c), b * __ldg(running_mean + c));
-    running_var[c] = fmaf(a, __ldg(var + c), b * __ldg(running_var + c));
-    rstd[c] = rstd_val;
-    alpha[c] = scale_x_rstd;
-    beta[c] = fmaf(-scale_x_rstd, __ldg(mean + c), __ldg(bias + c));
-#else
     const float rstd_val = rsqrtf(var[c] + epsilon);
     const float scale_x_rstd = scale[c] * rstd_val;
-    running_mean[c] = fmaf(a, mean[c], b * running_mean[c]);
-    running_var[c] = fmaf(a, var[c], b * running_var[c]);
+    running_mean[c] = a * mean[c] + b * running_mean[c];
+    running_var[c] = a * unbias_scale * var[c] + b * running_var[c];
     rstd[c] = rstd_val;
     alpha[c] = scale_x_rstd;
-    beta[c] = fmaf(-scale_x_rstd, mean[c], bias[c]);
-#endif
+    beta[c] = -scale_x_rstd * mean[c] + bias[c];
   }
 }
 
@@ -148,49 +123,19 @@ __global__ void ComputeMultiBatchScaleBiasGradientsAndFusedParamsCUDAKernel(
     T* dbias,
     T* alpha,
     T* beta,
-    T* gamma);
-
-template <>
-__global__ void
-ComputeMultiBatchScaleBiasGradientsAndFusedParamsCUDAKernel<float>(
-    const int C,
-    const float batch_scale,
-    const float mean_scale,
-    const float* scale,
-    const float* mean,
-    const float* rstd,
-    const float* dscale_sum,
-    const float* dbias_sum,
-    float* dscale,
-    float* dbias,
-    float* alpha,
-    float* beta,
-    float* gamma) {
+    T* gamma) {
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    const float dscale_val = __ldg(dscale_sum + c) * batch_scale;
-    const float dbias_val = __ldg(dbias_sum + c) * batch_scale;
-    const float scale_x_rstd = __ldg(scale + c) * __ldg(rstd + c);
-    const float dscale_x_rstd = dscale_val * __ldg(rstd + c);
-    dscale[c] = dscale_val;
-    dbias[c] = dbias_val;
-    alpha[c] = scale_x_rstd;
-    beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
-    gamma[c] = scale_x_rstd * fmaf(__ldg(mean + c), dscale_x_rstd, -dbias_val) *
-        mean_scale;
-#else
-    const float dscale_val = dscale_sum[c] * batch_scale;
-    const float dbias_val = dbias_sum[c] * batch_scale;
-    const float scale_x_rstd = scale[c] * rstd[c];
-    const float dscale_x_rstd = dscale_val * rstd[c];
+    const T dscale_val = dscale_sum[c] * batch_scale;
+    const T dbias_val = dbias_sum[c] * batch_scale;
+    const T scale_x_rstd = scale[c] * rstd[c];
+    const T dscale_x_rstd = dscale_val * rstd[c];
     dscale[c] = dscale_val;
     dbias[c] = dbias_val;
     alpha[c] = scale_x_rstd;
     beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
     gamma[c] =
-        scale_x_rstd * fmaf(mean[c], dscale_x_rstd, -dbias_val) * mean_scale;
-#endif
+        scale_x_rstd * (mean[c] * dscale_x_rstd - dbias_val) * mean_scale;
   }
 }
 
@@ -220,29 +165,13 @@ __global__ void ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel(
   for (int i = threadIdx.x; i < N; i += blockDim.x) {
     for (int j = threadIdx.y; j < HxW; j += blockDim.y) {
       const int index = (i * C + c) * HxW + j;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-      ds_val += __ldg(dY + index) * __ldg(X + index);
-      db_val += __ldg(dY + index);
-#else
       ds_val += dY[index] * X[index];
       db_val += dY[index];
-#endif
     }
   }
   ds_val = BlockReduce2D<T, kBlockDimX, kBlockDimY>(ds_storage).Sum(ds_val);
   db_val = BlockReduce2D<T, kBlockDimX, kBlockDimY>(db_storage).Sum(db_val);
   if (threadIdx.x == 0 && threadIdx.y == 0) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    ds_val = (ds_val - __ldg(mean + c) * db_val) * __ldg(rstd + c);
-    const T scale_x_rstd = __ldg(scale + c) * __ldg(rstd + c);
-    const T dscale_x_rstd = ds_val * __ldg(rstd + c);
-    dscale[c] = ds_val;
-    dbias[c] = db_val;
-    alpha[c] = scale_x_rstd;
-    beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
-    gamma[c] =
-        scale_x_rstd * (__ldg(mean + c) * dscale_x_rstd - db_val) * mean_scale;
-#else
     ds_val = (ds_val - mean[c] * db_val) * rstd[c];
     const T scale_x_rstd = scale[c] * rstd[c];
     const T dscale_x_rstd = ds_val * rstd[c];
@@ -251,7 +180,6 @@ __global__ void ComputeScaleBiasGradientsAndFusedParamsNCHWCUDAKernel(
     alpha[c] = scale_x_rstd;
     beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
     gamma[c] = scale_x_rstd * (mean[c] * dscale_x_rstd - db_val) * mean_scale;
-#endif
   }
 }
 
@@ -267,43 +195,16 @@ __global__ void ComputeScaleGradientAndFusedParamsNHWCCUDAKernel(
     T* dscale,
     T* alpha,
     T* beta,
-    T* gamma);
-
-template <>
-__global__ void ComputeScaleGradientAndFusedParamsNHWCCUDAKernel<float>(
-    const int C,
-    const float mean_scale,
-    const float* dYxX,
-    const float* dbias,
-    const float* scale,
-    const float* mean,
-    const float* rstd,
-    float* dscale,
-    float* alpha,
-    float* beta,
-    float* gamma) {
+    T* gamma) {
   const int c = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
-    const float ds = fmaf(-__ldg(dbias + c), __ldg(mean + c), __ldg(dYxX + c)) *
-        __ldg(rstd + c);
+    const T ds = (dYxX[c] - dbias[c] * mean[c]) * rstd[c];
     dscale[c] = ds;
-    const float scale_x_rstd = __ldg(scale + c) * __ldg(rstd + c);
-    const float dscale_x_rstd = ds * __ldg(rstd + c);
+    const T scale_x_rstd = scale[c] * rstd[c];
+    const T dscale_x_rstd = ds * rstd[c];
     alpha[c] = scale_x_rstd;
     beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
-    gamma[c] = scale_x_rstd *
-        fmaf(__ldg(mean + c), dscale_x_rstd, -__ldg(dbias + c)) * mean_scale;
-#else
-    const float ds = fmaf(-dbias[c], mean[c], dYxX[c]) * rstd[c];
-    dscale[c] = ds;
-    const float scale_x_rstd = scale[c] * rstd[c];
-    const float dscale_x_rstd = ds * rstd[c];
-    alpha[c] = scale_x_rstd;
-    beta[c] = -scale_x_rstd * dscale_x_rstd * mean_scale;
-    gamma[c] =
-        scale_x_rstd * fmaf(mean[c], dscale_x_rstd, -dbias[c]) * mean_scale;
-#endif
+    gamma[c] = scale_x_rstd * (mean[c] * dscale_x_rstd - dbias[c]) * mean_scale;
   }
 }
 
@@ -317,32 +218,13 @@ __global__ void ComputeXGradientNCHWCUDAKernel(
     const T* alpha,
     const T* beta,
     const T* gamma,
-    T* dX);
-
-template <>
-__global__ void ComputeXGradientNCHWCUDAKernel<float>(
-    const int C,
-    const int M,
-    const int HxW,
-    const float* dY,
-    const float* X,
-    const float* alpha,
-    const float* beta,
-    const float* gamma,
-    float* dX) {
+    T* dX) {
   const int nc = blockIdx.x / M;
   const int c = nc % C;
   const int x = blockIdx.x % M * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (x < HxW) {
     const int index = nc * HxW + x;
-#if __CUDA_ARCH__ >= 350
-    dX[index] = fmaf(
-        __ldg(alpha + c),
-        __ldg(dY + index),
-        fmaf(__ldg(beta + c), __ldg(X + index), __ldg(gamma + c)));
-#else
-    dX[index] = fmaf(alpha[c], dY[index], fmaf(beta[c], X[index], gamma[c]));
-#endif
+    dX[index] = alpha[c] * dY[index] + beta[c] * X[index] + gamma[c];
   }
 }
 
@@ -355,29 +237,11 @@ __global__ void ComputeXGradientNHWCCUDAKernel(
     const T* alpha,
     const T* beta,
     const T* gamma,
-    T* dX);
-
-template <>
-__global__ void ComputeXGradientNHWCCUDAKernel(
-    const int C,
-    const int HxW,
-    const float* dY,
-    const float* X,
-    const float* alpha,
-    const float* beta,
-    const float* gamma,
-    float* dX) {
+    T* dX) {
   const int c = blockIdx.y * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (c < C) {
     const int index = blockIdx.x * C + c;
-#if __CUDA_ARCH__ >= 350
-    dX[index] = fmaf(
-        __ldg(alpha + c),
-        __ldg(dY + index),
-        fmaf(__ldg(beta + c), __ldg(X + index), __ldg(gamma + c)));
-#else
-    dX[index] = fmaf(alpha[c], dY[index], fmaf(beta[c], X[index], gamma[c]));
-#endif
+    dX[index] = alpha[c] * dY[index] + beta[c] * X[index] + gamma[c];
   }
 }
 
@@ -420,6 +284,7 @@ template <>
 template <typename T>
 void SpatialBNOp<CUDAContext>::ComputeRunningMomentsAndFusedParam(
     const int C,
+    const int reduce_size,
     const T* scale,
     const T* bias,
     const T* mean,
@@ -433,6 +298,7 @@ void SpatialBNOp<CUDAContext>::ComputeRunningMomentsAndFusedParam(
   ComputeRunningMomentsAndFusedParamCUDAKernel<T>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           C,
+          reduce_size,
           static_cast<T>(momentum_),
           static_cast<T>(epsilon_),
           scale,

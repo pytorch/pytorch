@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -14,11 +14,12 @@ import numpy as np
 
 class TestWeightedSumOp(serial.SerializedTestCase):
 
-    @serial.given(
+    @given(
         n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
         in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
         seed=st.integers(min_value=0, max_value=65535),
         **hu.gcs)
+    @settings(deadline=10000)
     def test_weighted_sum(
             self, n, m, d, in_place, engine, seed, gc, dc):
         input_names = []
@@ -60,6 +61,7 @@ class TestWeightedSumOp(serial.SerializedTestCase):
     @given(n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
            grad_on_w=st.booleans(),
            seed=st.integers(min_value=0, max_value=65535), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_weighted_sum_grad(
             self, n, m, d, grad_on_w, seed, gc, dc):
         input_names = []

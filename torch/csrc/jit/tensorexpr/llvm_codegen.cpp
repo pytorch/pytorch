@@ -50,6 +50,8 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
+  std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
+  const Block* scope_;
 
  private:
   llvm::LLVMContext& getContext();
@@ -101,6 +103,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const FunctionCall* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
+  void visit(const Let* v) override;
   void visit(const Cond* v) override;
 
   llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
@@ -620,13 +623,14 @@ void LLVMCodeGenImpl::visit(const Max* v) {
     return;
   }
 
-  if (v->propagate_nans()) {
-    value_ = irb_.CreateBinaryIntrinsic(llvm::Intrinsic::maximum, lhs, rhs);
-    return;
-  }
-
   value_ = irb_.CreateSelect(
-      irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs);
+      irb_.CreateFCmp(
+          llvm::FCmpInst::FCMP_UNO,
+          lhs,
+          llvm::ConstantFP::get(lhs->getType(), 0.0)),
+      lhs,
+      irb_.CreateSelect(
+          irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs));
 }
 
 void LLVMCodeGenImpl::visit(const Min* v) {
@@ -641,13 +645,14 @@ void LLVMCodeGenImpl::visit(const Min* v) {
     return;
   }
 
-  if (v->propagate_nans()) {
-    value_ = irb_.CreateBinaryIntrinsic(llvm::Intrinsic::minimum, lhs, rhs);
-    return;
-  }
-
   value_ = irb_.CreateSelect(
-      irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs);
+      irb_.CreateFCmp(
+          llvm::FCmpInst::FCMP_UNO,
+          lhs,
+          llvm::ConstantFP::get(lhs->getType(), 0.0)),
+      lhs,
+      irb_.CreateSelect(
+          irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs));
 }
 
 void LLVMCodeGenImpl::visit(const CompareSelect* v) {
@@ -1011,24 +1016,21 @@ void LLVMCodeGenImpl::visit(const For* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
-  for (auto pair : v->varBindings()) {
-    const Var* v = pair.first;
-    pair.second->accept(this);
-    if (!varToVal_.count(v)) {
-      varToVal_.emplace(v, value_);
-    } else {
-      throw std::runtime_error("var should not exist before");
-    }
-  }
+  const Block* last = scope_;
+  scope_ = v;
 
   for (Stmt* s : *v) {
     s->accept(this);
   }
 
-  for (auto pair : v->varBindings()) {
-    const Var* v = pair.first;
-    if (varToVal_.erase(v) != 1) {
-      throw std::runtime_error("erasing var that doesn't exist");
+  scope_ = last;
+
+  auto it = scopeToVar_.find(v);
+  if (it != scopeToVar_.end()) {
+    for (const Var* e : it->second) {
+      if (varToVal_.erase(e) != 1) {
+        throw std::runtime_error("erasing var that doesn't exist");
+      }
     }
   }
 }
@@ -1570,6 +1572,16 @@ void LLVMCodeGenImpl::visit(const Free* v) {
   llvm::Value* ptr = varToVal_.at(v->buffer_var());
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
+  }
+}
+
+void LLVMCodeGenImpl::visit(const Let* v) {
+  v->value()->accept(this);
+  if (!varToVal_.count(v->var())) {
+    varToVal_.emplace(v->var(), value_);
+    scopeToVar_[scope_].push_back(v->var());
+  } else {
+    throw std::runtime_error("var should not exist before");
   }
 }
 

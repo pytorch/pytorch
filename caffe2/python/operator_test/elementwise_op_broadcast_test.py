@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import numpy as np
 import operator
 
@@ -75,18 +75,22 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_broadcast_Add(self, gc, dc):
         self.__test_binary_op(gc, dc, "Add", operator.add)
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_broadcast_Mul(self, gc, dc):
         self.__test_binary_op(gc, dc, "Mul", operator.mul)
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_broadcast_Sub(self, gc, dc):
         self.__test_binary_op(gc, dc, "Sub", operator.sub)
 
-    @serial.given(**hu.gcs)
+    @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_broadcast_powt(self, gc, dc):
         np.random.seed(101)
 
