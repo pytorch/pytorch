@@ -1,5 +1,4 @@
 #include <torch/csrc/distributed/rpc/request_callback_no_python.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
@@ -13,6 +12,10 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+
+#ifdef USE_CUDA
+#include <torch/cuda.h>
+#endif
 
 namespace torch {
 namespace distributed {
@@ -486,9 +489,14 @@ void RequestCallbackNoPython::processRpc(
       auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
       // If requested with CUDA from caller but CUDA is not available on this
       // machine, fallback to CPU and log a warning instead of crashing.
+      #ifdef USE_CUDA
+      int cudaNumDevices = torch::cuda::device_count();
+      #else
+      int cudaNumDevices = 0;
+      #endif
       if (profilingConfig.state ==
               torch::autograd::profiler::ProfilerState::CUDA &&
-          !at::cuda::is_available()) {
+          cudaNumDevices == 0) {
         profilingConfig = torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU,
             profilingConfig.report_input_shapes,
@@ -499,9 +507,9 @@ void RequestCallbackNoPython::processRpc(
             << "Falling back to CPU profiling only.";
       }
       TORCH_INTERNAL_ASSERT(
-          !profilingConfig.state ==
+          profilingConfig.state !=
                   torch::autograd::profiler::ProfilerState::CUDA ||
-              at::cuda::is_available(),
+              cudaNumDevices > 0,
           "Profiler state set to CUDA but CUDA not available.");
       const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
