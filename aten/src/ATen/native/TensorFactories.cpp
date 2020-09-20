@@ -165,13 +165,16 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    !(options.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  const MemoryFormat memory_format =
+    optional_memory_format.value_or(
+      options.memory_format_opt().value_or(
+        MemoryFormat::Contiguous));
 
   AT_ASSERT(options.device().type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
@@ -184,9 +187,9 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
     allocator = at::getCPUAllocator();
   }
 
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
+  const int64_t nelements = prod_intlist(size);
+  const caffe2::TypeMeta dtype = options.dtype();
+  const int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -201,7 +204,6 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   return tensor;
@@ -278,7 +280,7 @@ Tensor empty_like(
   TensorOptions options =
       self.options()
           .merge_in(options_)
-          .merge_in(TensorOptions().memory_format(optional_memory_format));
+          .merge_memory_format(optional_memory_format);
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&

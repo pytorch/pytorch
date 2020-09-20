@@ -20,7 +20,7 @@ Tensor empty_affine_quantized(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  auto options = options_.merge_memory_format(optional_memory_format);
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
@@ -42,7 +42,7 @@ Tensor empty_per_channel_affine_quantized(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  auto options = options_.merge_memory_format(optional_memory_format);
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");

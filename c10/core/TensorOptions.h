@@ -362,7 +362,33 @@ struct C10_API TensorOptions {
     if (!r.has_requires_grad()) r.set_requires_grad(requires_grad_opt());
     if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory_opt());
     if (!r.has_memory_format()) r.set_memory_format(memory_format_opt());
+
+    TensorOptions merged = *this;
+    if (options.has_device()) merged.set_device(options.device_opt());
+    if (options.has_dtype()) merged.set_dtype(options.dtype_opt());
+    if (options.has_layout()) merged.set_layout(options.layout_opt());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (options.has_requires_grad()) merged.set_requires_grad(options.requires_grad_opt());
+    if (options.has_pinned_memory()) merged.set_pinned_memory(options.pinned_memory_opt());
+    if (options.has_memory_format()) merged.set_memory_format(options.memory_format_opt());
+
+    if (merged.device_opt() != r.device_opt()) std::cout << "HEY device \n";
+    if (merged.dtype_opt() != r.dtype_opt()) std::cout << "HEY dtype \n";
+    if (merged.layout_opt() != r.layout_opt()) std::cout << "HEY layout \n";
+    if (merged.requires_grad_opt() != r.requires_grad_opt()) std::cout << "HEY requires_grad \n";
+    if (merged.pinned_memory_opt() != r.pinned_memory_opt()) std::cout << "HEY pinned_memory \n";
+    if (merged.memory_format_opt() == r.memory_format_opt()) std::cout << "HEY memory_format \n";
+
     return r;
+  }
+
+  // TODO remove after TensorOptions rationalization
+  TensorOptions merge_memory_format(c10::optional<MemoryFormat> optional_memory_format) const noexcept {
+    TensorOptions merged = *this;
+    if (optional_memory_format.has_value()) {
+      merged.set_memory_format(*optional_memory_format);
+    }
+    return merged;
   }
 
   // Resolves the tensor type set specified by the current construction axes.
@@ -528,7 +554,7 @@ struct C10_API TensorOptions {
   // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
-  caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
+  caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 16-bit
   Device device_ = at::kCPU; // 32-bit
   Layout layout_ = at::kStrided; // 8-bit
   MemoryFormat memory_format_ = MemoryFormat::Contiguous; // 8-bit
