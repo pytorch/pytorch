@@ -273,6 +273,7 @@ class _RemoteModule(nn.Module):
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
+
     def named_buffers(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
