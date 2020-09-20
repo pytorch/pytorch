@@ -220,6 +220,17 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         }
         return;
       }
+      if (field == "strides") {
+        seen_strides = true;
+        L.expect('=');
+        parseList('[', ',', ']', [&] {
+          const std::string& num = L.expect(TK_NUMBER).text();
+          std::string::size_type num_len;
+          size_t stride = c10::stoi(num, &num_len);
+          strides.push_back(stride);
+        });
+        return;
+      }
       throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
     }
     if (device.has_value() || requires_grad.has_value()) {
@@ -241,14 +252,6 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
     dims.emplace_back(dim);
-    if (seen_strides || L.cur().kind == ':') {
-      L.expect(':');
-      seen_strides = true;
-      const std::string& num = L.expect(TK_NUMBER).text();
-      std::string::size_type num_len;
-      size_t stride = c10::stoi(num, &num_len);
-      strides.push_back(stride);
-    }
   });
   if (seen_strides) {
     at::IntArrayRef strides_ref(strides);
