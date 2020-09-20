@@ -188,7 +188,7 @@ void testFuserPass_Multidevice() {
     KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
-          %y : Float(20:1, device=cuda:0),
+          %y : Float(20, strides=[1], device=cuda:0),
           %z : Float(30, strides=[1], device=cpu)):
       %dim : int = prim::Constant[value=0]()
       %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
@@ -210,7 +210,7 @@ void testFuserPass_Multidevice() {
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
-          %z : Float(10:1, device=cuda:0)):
+          %z : Float(10, strides=[1], device=cuda:0)):
       %dim : int = prim::Constant[value=0]()
       %xy_list : Tensor[] = prim::ListConstruct(%x, %y)
       %xy_cat : Tensor = aten::cat(%xy_list, %dim)
@@ -232,7 +232,7 @@ void testFuserPass_Multidevice() {
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
-          %z : Float(10:1, device=cuda:0)):
+          %z : Float(10, strides=[1], device=cuda:0)):
       %z2 : Tensor = aten::mul(%z, %z)
       %dim : int = prim::Constant[value=0]()
       %xy_list : Tensor[] = prim::ListConstruct(%x, %y, %z2)
@@ -253,7 +253,7 @@ void testFuserPass_Multidevice() {
     KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
-          %y : Float(20:1, device=cuda:0)):
+          %y : Float(20, strides=[1], device=cuda:0)):
       %r : Tensor = aten::mul(%x, %y)
       return (%r))IR";
     auto g = std::make_shared<Graph>();
@@ -269,8 +269,8 @@ void testFuserPass_Multidevice() {
     WithCPUFuser cf;
     KernelScope kernel_scope;
     const auto graph_string = R"IR(
-    graph(%x : Float(10:1, device=cuda:0),
-          %y : Float(20:1, device=cuda:1),
+    graph(%x : Float(10, strides=[1], device=cuda:0),
+          %y : Float(20, strides=[1], device=cuda:1),
           %z : Float(20, strides=[1], device=cpu)):
       %x2 : Tensor = aten::mul(%x, %x)
       %y2 : Tensor = aten::mul(%y, %y)

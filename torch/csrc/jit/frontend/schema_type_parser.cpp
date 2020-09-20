@@ -190,7 +190,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
   // known sizes and strides. The type might also have requires_grad and/or
   // device option. Examples of types we're handling here:
-  //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
+  //   Long(10, 8, 6, strides=[48, 6, 1], requires_grad=0, device=cuda:1)
   //   Float(10, *, 20, device=cuda:1)
   //   Float(requires_grad=1)
   std::vector<c10::optional<int64_t>> dims;

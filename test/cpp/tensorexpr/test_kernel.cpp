@@ -24,8 +24,8 @@ void testKernel_1() {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -62,9 +62,9 @@ void testKernel_2() {
 
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
-            %1 : Float(5:1,3:5, device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -103,8 +103,8 @@ void testKernel_3() {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
-        %2 : Float(5:3,3:1) = aten::mul(%0, %1)
-        %3 : Float(5:3,3:1) = aten::mul(%0, %2)
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -144,7 +144,7 @@ void testKernel_4() {
     KernelScope kernel_scope;
 
     const auto graph_string = R"IR(
-      graph(%0 : Float(5:3,  3:1, device=cpu),
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[12, 2], device=cpu)):
         %2 : Tensor = aten::mul(%0, %1)
         %3 : Tensor = aten::mul(%0, %2)
