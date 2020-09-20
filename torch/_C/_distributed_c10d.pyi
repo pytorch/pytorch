@@ -160,8 +160,14 @@ class ProcessGroup:
         opts: AllreduceCoalescedOptions = AllreduceCoalescedOptions(),
     ) -> Work: ...
 class ProcessGroupMPI(ProcessGroup):
+    def __init__(
+        self,
+        rank: int,
+        size: int,
+        pgComm: int,
+    ): ...
     @staticmethod
-    def create(ranks: List[int]): ...
+    def create(ranks: List[int]) -> ProcessGroupMPI: ...
 class ProcessGroupNCCL(ProcessGroup):
     def __init__(
         self,

@@ -3,7 +3,7 @@ import torch
 import warnings
 from torch._six import string_classes
 from datetime import timedelta
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
@@ -31,17 +31,17 @@ _GLOO_AVAILABLE = True
 
 
 try:
-    from. import ProcessGroupMPI
+    from torch._C._distributed_c10d import ProcessGroupMPI
 except ImportError:
     _MPI_AVAILABLE = False
 
 try:
-    from. import ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupNCCL
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    from. import ProcessGroupGloo
+    from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
 
@@ -480,6 +480,7 @@ def _new_process_group_helper(world_size,
     is_default_group = (len(group_ranks) == 0)
 
     backend = Backend(backend)
+    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
     if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError(
@@ -503,7 +504,6 @@ def _new_process_group_helper(world_size,
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
         prefix_store = PrefixStore(group_name, store)
-
         if backend == Backend.GLOO:
             pg = ProcessGroupGloo(
                 prefix_store,

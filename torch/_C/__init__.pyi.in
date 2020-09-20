@@ -662,14 +662,14 @@ class Def(TreeView):
 
 class Decl(TreeView):
     ...
-# defined in torch/csrc/distributed/rpc/init.cpp
-def _rpc_init() -> _bool: ... # rpc_init
+# Defined in torch/csrc/distributed/rpc/init.cpp
+def _rpc_init() -> _bool: ...
 
-# defined in torch/csrc/distributed/autograd/init.cpp
-def _dist_autograd_init() -> _bool: ... # dist_autograd_init
+# Defined in torch/csrc/distributed/autograd/init.cpp
+def _dist_autograd_init() -> _bool: ...
 
-# defined in torch/csrc/distributed/c10d/init.cpp
-def _c10d_init() -> _bool: ... # c10d_init
+# Defined in torch/csrc/distributed/c10d/init.cpp
+def _c10d_init() -> _bool: ...
 
-# define in torch/csrc/distributed/rpc/testing/init.cpp
-def _faulty_agent_init() -> _bool: ... #faulty_agent_init
+# Defined in torch/csrc/distributed/rpc/testing/init.cpp
+def _faulty_agent_init() -> _bool: ...
