@@ -511,7 +511,7 @@ class Quantizer:
 
         to_be_removed = []
         for name, module in model.named_modules():
-            if is_activation_post_process(module):
+            if 'activation_post_process_' in name.split('.')[-1]:
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
