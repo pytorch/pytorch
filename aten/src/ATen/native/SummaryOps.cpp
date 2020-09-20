@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 
 #include <tuple>
 
@@ -60,7 +61,7 @@ template <typename input_t>
 inline int64_t getbin(input_t x, input_t min, input_t max, int64_t bins) {
   if (x == max)
     return bins - 1;
-  return (int64_t)((x - min) * bins / (max - min));
+  return static_cast<int64_t>((x - min) * bins / (max - min));
 }
 
 ///////////////// histogram /////////////////
@@ -72,16 +73,17 @@ Tensor _histogram_cpu_template_uniformbins(
     input_t min,
     input_t max,
     bool density) {
-
+  // This is done to avoid divide by zero. Technically, it results in incorrect behavior in that case,
+  // but it is consistent with numpy.
   if (min == max) {
-    min -= 1;
-    max += 1;
+    min -= .5;
+    max += .5;
   }
   TORCH_CHECK(nbins > 0, "bins must be > 0");
-  // Check if range is finite, hack to keep MSVC from complaining
   TORCH_CHECK(
-      !(std::isinf((double)min) || std::isinf((double)max) ||
-        std::isnan((double)min) || std::isnan((double)max)),
+      !(std::isinf(static_cast<double>(min)) ||
+        std::isinf(static_cast<double>(max)) ||
+        _isnan(min) || _isnan(max)),
       "range of [",
       min,
       ", ",
@@ -90,10 +92,9 @@ Tensor _histogram_cpu_template_uniformbins(
   TORCH_CHECK(min < max, "max must be larger than min");
 
   bool has_weights = weights.defined();
-  TORCH_CHECK(
-      !has_weights || weights.size(0) == self.size(0),
-      "input and weights should have the same length");
-
+  if (has_weights && weights.size(0) != self.size(0)) {
+    AT_ERROR("input and weights should have the same length");
+  }
   Tensor output;
   int64_t self_size = self.size(0);
 
@@ -102,6 +103,8 @@ Tensor _histogram_cpu_template_uniformbins(
     output = native::zeros({nbins}, weights.options());
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
+    // This does the actual work of computing the histogram.
+    // This is single threaded, as other similar operators are single-threaded in PyTorch today, and a multi-threaded one would be tricky to implement.
     for (int64_t i = 0; i < self_size; i++) {
       if (self_p[i] >= min && self_p[i] <= max)
         output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
@@ -139,6 +142,18 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
     const Tensor& weights,
     bool density) {
 
+  // Weights having a different shape from input is not supported yet. TO DO:
+  // Add support for weights broadcastable to input
+  bool has_weights = weights.defined();
+  Tensor flattened_weights;
+  if (has_weights) {
+    TORCH_CHECK(
+        weights.sizes() == self.sizes(),
+        "histogram only supports input and weights of the same shape");
+    flattened_weights = weights.flatten(0).contiguous();
+  }
+
+
   // If range is not defined, compute min and max from the values in the Tensor
   Scalar min;
   Scalar max;
@@ -157,14 +172,14 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
           return _histogram_cpu_template_uniformbins<scalar_t, float>(
               self.flatten(0).contiguous(),
               bins,
-              weights.contiguous(),
+              flattened_weights,
               min.to<scalar_t>(),
               max.to<scalar_t>(),
               density);
         return _histogram_cpu_template_uniformbins<scalar_t, double>(
             self.flatten(0).contiguous(),
             bins,
-            weights.contiguous().to(kDouble),
+            flattened_weights.to(kDouble),
             min.to<scalar_t>(),
             max.to<scalar_t>(),
             density);
@@ -202,11 +217,18 @@ std::tuple<Tensor, Tensor> histogram(
       at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
           .item<bool>(),
       "bins must increase monotonically");
+  Tensor flattened_weights;
+  if (weights.defined()) {
+    TORCH_CHECK(
+        weights.sizes() == self.sizes(),
+        "histogram only supports input and weights of the same shape");
+    flattened_weights = weights.flatten(0).contiguous();
+  }
   int64_t nbins = bins.size(0) - 1;
   Tensor index = searchsorted(bins, self, false, true);
   index.clamp_(0, nbins + 2);
   index = index.where(self != bins[-1], index - 1);
-  Tensor hist = bincount(index.flatten(0), weights, nbins + 2);
+  Tensor hist = bincount(index.flatten(0), flattened_weights, nbins + 2);
 
   hist = hist.slice(0, 1, -1);
 

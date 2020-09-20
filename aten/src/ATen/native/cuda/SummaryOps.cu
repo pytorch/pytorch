@@ -369,8 +369,8 @@ Tensor _histogram_uniformbins_cuda_template(
   input_t minvalue = min;
   input_t maxvalue = max;
   if (minvalue == maxvalue) {
-    minvalue -= 1;
-    maxvalue += 1;
+    minvalue -= .5;
+    maxvalue += .5;
   }
   TORCH_CHECK(nbins > 0, "bins must be > 0");
 #ifndef __HIP_PLATFORM_HCC__
@@ -396,10 +396,6 @@ Tensor _histogram_uniformbins_cuda_template(
 #endif
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
   bool has_weights = weights.defined();
-  TORCH_CHECK(
-      !has_weights || weights.numel() == self.numel(),
-      "input and weights should have the same length");
-
   Tensor output;
   if (has_weights) {
     output = native::zeros({nbins}, weights.options());
@@ -461,12 +457,18 @@ std::tuple<Tensor,Tensor> _histogram_cuda(
     c10::optional<ArrayRef<double>> range,
     const Tensor& weights,
     bool density) {
+  // Weights having a different shape from input is not supported yet. TO DO:
+  // Add support for weights broadcastable to input
+  bool has_weights = weights.defined();
+  if (has_weights)
+    TORCH_CHECK(
+        weights.sizes() == self.sizes(),
+        "histogram only supports input and weights of the same shape");
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
-
   // If range is not defined, compute min and max
   Scalar min;
   Scalar max;
