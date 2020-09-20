@@ -25,4 +25,11 @@ if is_available():
     # this.
 
     from .distributed_c10d import _backend
-    from torch._C._distributed_c10d import FileStore, TCPStore
+    from torch._C._distributed_c10d import (
+        FileStore,
+        TCPStore,
+        ProcessGroupGloo,
+        ProcessGroupMPI,
+        ProcessGroupGloo,
+        ProcessGroupNCCL,
+    )

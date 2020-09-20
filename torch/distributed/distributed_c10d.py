@@ -3,7 +3,7 @@ import torch
 import warnings
 from torch._six import string_classes
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
@@ -69,7 +69,7 @@ class Backend(object):
     MPI = "mpi"
     TCP = "tcp"
 
-    def __new__(cls, name):
+    def __new__(cls, name: str):
         if not isinstance(name, string_classes):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
@@ -106,11 +106,11 @@ class Backend(object):
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
 # compatibility with pre-c10d distributed package.
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
-_backend = Backend.UNDEFINED
+_backend: str = Backend.UNDEFINED
 dist_backend = Backend
 
 
-class reduce_op(object):
+class _reduce_op(object):
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
@@ -129,7 +129,7 @@ class reduce_op(object):
                       "torch.distributed.ReduceOp instead")
         return object.__getattribute__(self, key)
 
-reduce_op = reduce_op()
+reduce_op = _reduce_op()
 
 
 class group(object):
@@ -145,14 +145,14 @@ class GroupMember(object):
 # Cached process groups
 # For NCCL and GLOO pg, it is a map from ProcessGroup to (Backend, Store)
 # For MPI pg, it is a map from ProcessGroup to (Backend, None)
-_pg_map: Dict[ProcessGroup, Optional[Store]] = {}
+_pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
 # Process group's names, map from ProcessGroup to str
 _pg_names: Dict[ProcessGroup, str] = {}
 # Process group's global rank to local rank mapping
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 
 # Default process group state
-_default_pg = None
+_default_pg: Optional[ProcessGroup] = None
 _default_pg_init_method = None
 
 # Process group count for default naming
@@ -220,6 +220,7 @@ def _get_group_size(group):
     """
     if group is GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         return _default_pg.size()
     if group not in _pg_group_ranks:
         raise RuntimeError("The given group does not exist")
@@ -298,7 +299,8 @@ def _get_default_store():
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
                            "please make sure to call init_process_group.")
-    _, default_store = _pg_map[_default_pg]
+    assert _default_pg is not None
+    default_store = _pg_map[_default_pg]
     return default_store
 
 
@@ -316,14 +318,17 @@ def get_backend(group=group.WORLD):
 
     """
     _check_default_pg()
-
     if group == GroupMember.WORLD:
+        assert _default_pg is not None
         pg = _default_pg
     else:
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    return _pg_map.get(pg, None)[0]
+    assert pg in _pg_map
+    pg_store = _pg_map.get(pg)
+    assert pg_store is not None
+    return pg_store[0]
 
 
 def init_process_group(backend,
@@ -490,6 +495,7 @@ def _new_process_group_helper(world_size,
         # If this is a subgroup (which means group_ranks is specified),
         # we check if the current process is a member of the new group.
         if not is_default_group:
+            assert _default_pg is not None
             global_rank = _default_pg.rank()
             if global_rank not in group_ranks:
                 return GroupMember.NON_GROUP_MEMBER
@@ -554,6 +560,7 @@ def destroy_process_group(group=group.WORLD):
     else:
         pg = group
 
+    assert pg is not None
     if _pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
 
@@ -574,6 +581,7 @@ def destroy_process_group(group=group.WORLD):
         # process group is in good state, we aren't dealing with failures.
         _group_count = 0
     else:
+        assert pg is not None
         del _pg_map[pg]
         del _pg_names[pg]
         del _pg_group_ranks[pg]
@@ -599,6 +607,7 @@ def get_rank(group=group.WORLD):
         return -1
 
     _check_default_pg()
+    assert _default_pg is not None
     if group == GroupMember.WORLD:
         return _default_pg.rank()
 
@@ -647,6 +656,7 @@ def isend(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         return _default_pg.send([tensor], dst, tag)
     else:
         group_dst_rank = _get_group_rank(group, dst)
@@ -677,6 +687,7 @@ def irecv(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         return _default_pg.recv([tensor], src, tag)
     else:
         group_src_rank = _get_group_rank(group, src)
@@ -703,6 +714,7 @@ def send(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         _default_pg.send([tensor], dst, tag).wait()
     else:
         group_dst_rank = _get_group_rank(group, dst)
@@ -738,6 +750,7 @@ def recv(tensor,
     else:
         pg = group
 
+    assert pg is not None
     if src is None:
         work = pg.recv_anysource([tensor], tag)
         work.wait()
@@ -799,6 +812,7 @@ def broadcast_multigpu(tensor_list,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.broadcast(tensor_list, opts)
     else:
         group_src_rank = _get_group_rank(group, src)
@@ -842,6 +856,7 @@ def broadcast(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.broadcast([tensor], opts)
     else:
         group_src_rank = _get_group_rank(group, src)
@@ -894,6 +909,7 @@ def all_reduce_multigpu(tensor_list,
     opts.reduceOp = op
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allreduce(tensor_list, opts)
     else:
         work = group.allreduce(tensor_list, opts)
@@ -936,6 +952,7 @@ def all_reduce(tensor,
     opts.reduceOp = op
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allreduce([tensor], opts)
     else:
         work = group.allreduce([tensor], opts)
@@ -987,6 +1004,7 @@ def all_reduce_coalesced(tensors,
     opts.reduceOp = op
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allreduce_coalesced(tensors, opts)
     else:
         work = group.allreduce_coalesced(tensors, opts)
@@ -1042,6 +1060,7 @@ def reduce_multigpu(tensor_list,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.reduce(tensor_list, opts)
     else:
         group_dst_rank = _get_group_rank(group, dst)
@@ -1089,6 +1108,7 @@ def reduce(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.reduce([tensor], opts)
     else:
         group_dst_rank = _get_group_rank(group, dst)
@@ -1149,6 +1169,7 @@ def all_gather_multigpu(output_tensor_lists,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allgather(output_tensor_lists, input_tensor_list)
     else:
         work = group.allgather(output_tensor_lists, input_tensor_list)
@@ -1161,7 +1182,7 @@ def all_gather_multigpu(output_tensor_lists,
 
 def _object_to_tensor(obj):
     buffer = pickle.dumps(obj)
-    byte_storage = torch.ByteStorage.from_buffer(buffer)
+    byte_storage = torch.ByteStorage.from_buffer(buffer)  # type: ignore[attr-defined]
     byte_tensor = torch.ByteTensor(byte_storage)
     local_size = torch.LongTensor([byte_tensor.numel()])
     return byte_tensor, local_size
@@ -1213,7 +1234,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(  # type: ignore[call-overload]
         my_rank if is_nccl_backend else "cpu"
     )
     object_size_list = [
@@ -1235,7 +1256,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)
+        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1285,7 +1306,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
+    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(  # type: ignore[call-overload]
         my_rank if is_nccl_backend else "cpu"
     )
     object_size_list = [
@@ -1317,7 +1338,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.ByteTensor)
+        tensor = tensor.type(torch.ByteTensor)  # type: ignore[call-overload]
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1383,7 +1404,7 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.ByteTensor)
+            obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
@@ -1414,6 +1435,7 @@ def all_gather(tensor_list,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allgather([tensor_list], [tensor])
     else:
         work = group.allgather([tensor_list], [tensor])
@@ -1480,6 +1502,7 @@ def all_gather_coalesced(output_tensor_lists,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.allgather_coalesced(
             output_tensor_lists, input_tensor_list)
     else:
@@ -1546,6 +1569,7 @@ def gather(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.gather(output_tensors, input_tensors, opts)
     else:
         group_dst_rank = _get_group_rank(group, dst)
@@ -1612,6 +1636,7 @@ def scatter(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.scatter(output_tensors, input_tensors, opts)
     else:
         group_src_rank = _get_group_rank(group, src)
@@ -1677,6 +1702,7 @@ def reduce_scatter_multigpu(output_tensor_list,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.reduce_scatter(
             output_tensor_list,
             input_tensor_lists,
@@ -1724,6 +1750,7 @@ def reduce_scatter(output,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.reduce_scatter([output], [input_list], opts)
     else:
         work = group.reduce_scatter([output], [input_list], opts)
@@ -1820,6 +1847,7 @@ def all_to_all_single(output,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.alltoall_base(output, input, output_split_sizes, input_split_sizes, opts)
     else:
         work = group.alltoall_base(output, input, output_split_sizes, input_split_sizes, opts)
@@ -1911,6 +1939,7 @@ def all_to_all(output_tensor_list,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.alltoall(output_tensor_list, input_tensor_list, opts)
     else:
         work = group.alltoall(output_tensor_list, input_tensor_list, opts)
@@ -1942,6 +1971,7 @@ def barrier(group=group.WORLD,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
+        assert _default_pg is not None
         work = _default_pg.barrier()
     else:
         work = group.barrier()
@@ -1982,6 +2012,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
 
     global _pg_group_ranks
 
+    assert _default_pg is not None
     default_backend, default_store = _pg_map[_default_pg]
     global_rank = _default_pg.rank()
     global_world_size = _default_pg.size()

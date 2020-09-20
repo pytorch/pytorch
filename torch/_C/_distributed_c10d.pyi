@@ -1,13 +1,18 @@
+from torch import Tensor
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from datetime import timedelta
 
 # distributed/c10d/init.cpp
-class ProcessGroup:
-    ...
+class Work:
+    def wait(self) -> bool: ...
+    def source_rank(self) -> int: ...
 class Store:
     kDefaultTimeout: timedelta
     kNoTimeout: timedelta
+    def set(self, key: str, value: str): ...
+    def get(self, key: str) -> bytes: ...
+    def add(self, key: str, value: int) -> int: ...
 class PrefixStore(Store):
     def __init__(
         self,
@@ -38,6 +43,8 @@ class ReduceOp(Enum):
     BOR = 5
     BXOR = 6
     UNUSED = 7
+class AllGatherOptions:
+    timeout: timedelta
 class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
@@ -62,3 +69,112 @@ class ReduceScatterOptions:
 class ScatterOptions:
     rootRank: int
     timeout: timedelta
+class BarrierOptions: ...
+class ProcessGroup:
+    def __init__(self): ...
+    def rank(self) -> int: ...
+    def size(self) -> int: ...
+    def allgather(
+        self,
+        outputTensors: List[List[Tensor]],
+        inputTensors: List[Tensor],
+        opts: AllGatherOptions = AllGatherOptions(),
+    ) -> Work: ...
+    def allgather_coalesced(
+        self,
+        outputTensors: List[List[Tensor]],
+        inputTensors: List[Tensor],
+        opts: AllGatherOptions = AllGatherOptions(),
+    ) -> Work: ...
+    def gather(
+        self,
+        outputTensors: List[List[Tensor]],
+        inputTensors: List[Tensor],
+        opts: GatherOptions = GatherOptions(),
+    ) -> Work: ...
+    def scatter(
+        self,
+        outputTensors: List[Tensor],
+        inputTensors: List[List[Tensor]],
+        opts: ScatterOptions = ScatterOptions(),
+    ) -> Work: ...
+    def send(
+        self,
+        tensors: List[Tensor],
+        dstRank: int,
+        tag: int,
+    ) -> Work: ...
+    def recv(
+        self,
+        tensors: List[Tensor],
+        srcRank: int,
+        tag: int,
+    ) -> Work: ...
+    def recv_anysource(
+        self,
+        tensors: List[Tensor],
+        tag: int
+    ) -> Work: ...
+    def reduce_scatter(
+        self,
+        outputTensors: List[Tensor],
+        inputTensors: List[List[Tensor]],
+        opts: ReduceScatterOptions = ReduceScatterOptions(),
+    ) -> Work: ...
+    def alltoall_base(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+        outputSplitSizes: List[int],
+        inputSplitSizes: List[int],
+        opts: AllToAllOptions = AllToAllOptions(),
+    ) -> Work: ...
+    def alltoall(
+        self,
+        outputTensor: List[Tensor],
+        inputTensor: List[Tensor],
+        opts: AllToAllOptions = AllToAllOptions(),
+    ) -> Work: ...
+    def broadcast(
+        self,
+        tensors: List[Tensor],
+        opts: BroadcastOptions = BroadcastOptions(),
+    ) -> Work: ...
+    def barrier(
+        self,
+        opts: BarrierOptions = BarrierOptions()
+    ) -> Work: ...
+    def reduce(
+        self,
+        tensors: List[Tensor],
+        opts: ReduceOptions = ReduceOptions(),
+    ) -> Work: ...
+    def allreduce(
+        self,
+        tensors: List[Tensor],
+        opts: AllreduceOptions = AllreduceOptions(),
+    ) -> Work:  ...
+    def allreduce_coalesced(
+        self,
+        tensors: List[Tensor],
+        opts: AllreduceCoalescedOptions = AllreduceCoalescedOptions(),
+    ) -> Work: ...
+class ProcessGroupMPI(ProcessGroup):
+    @staticmethod
+    def create(ranks: List[int]): ...
+class ProcessGroupNCCL(ProcessGroup):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        timeout: timedelta,
+    ): ...
+class ProcessGroupGloo(ProcessGroup):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        timeout: timedelta,
+    ): ...
