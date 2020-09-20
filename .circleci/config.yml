@@ -23,19 +23,19 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:canary
+      image: windows-server-2019-nvidia:stable
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 commands:
 
@@ -7109,7 +7109,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7144,7 +7144,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7191,7 +7191,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7245,7 +7245,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - update_s3_htmls:
           context: org-member
