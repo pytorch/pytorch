@@ -1,4 +1,4 @@
-from typing import Iterator, Tuple, Dict, Optional, List, Any, overload, Callable, Type
+from typing import Iterator, Tuple, Dict, Optional, List, Any, overload, Callable, Type, Generic, TypeVar
 from datetime import timedelta
 import torch
 from ._autograd import ProfilerConfig, ProfilerState
@@ -76,11 +76,6 @@ class _RpcAgent:
 class PyRRef:
     @staticmethod
     def _deserialize(tp: Tuple) -> 'PyRRef': ...
-# distributed/rpc/rref_impl.h
-@overload
-def RRef(arg: Any): ...
-@overload
-def RRef(module_cls: Any, module_interface_cls: Optional[Type]): ...
 # distributed/rpc/rpc_agent.h
 class RpcBackendOptions:
     rpcTimeoutSeconds: float

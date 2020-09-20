@@ -39,6 +39,7 @@ def get_arg_return_types_from_interface(module_interface):
 
     arg_str_list = []
     arg_type_str_list = []
+    assert method_schema is not None
     for argument in method_schema.arguments:
         arg_str_list.append(argument.name)
 
