@@ -3,43 +3,24 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/typeid.h>
 
+// these just expose TypeMeta/ScalarType bridge functions in c10
+// TODO move to typeid.h (or codemod away) when TypeMeta et al
+// are moved from caffe2 to c10 (see note at top of typeid.h)
+
 namespace c10 {
 
 /**
  * convert ScalarType enum values to TypeMeta handles
  */
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype, name) \
-  case ScalarType::name:         \
-    return caffe2::TypeMeta::Make<ctype>();
-
-  switch (scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    case ScalarType::Undefined:
-      return caffe2::TypeMeta();
-    default:
-      AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
-  }
-#undef DEFINE_CASE
-}
-
-namespace {
-  void error_unsupported_typemeta(caffe2::TypeMeta dtype) {
-    TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
-  }
+  return caffe2::TypeMeta::fromScalarType(scalar_type);
 }
 
 /**
  * convert TypeMeta handles to ScalarType enum values
- * Caution: extremely hot
  */
 static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
-  const size_t index = dtype.index();
-  if (index <= static_cast<size_t>(ScalarType::Undefined)) {
-    return static_cast<ScalarType>(index);
-  }
-  error_unsupported_typemeta(dtype);
-  return ScalarType::Undefined; // avoids "control reaches end of non-void function"
+  return dtype.toScalarType();
 }
 
 /**
@@ -49,14 +30,14 @@ static inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::
   if (!type_meta.has_value()) {
     return c10::nullopt;
   }
-  return typeMetaToScalarType(*type_meta);
+  return type_meta->toScalarType();
 }
 
 /**
  * convenience: equality across TypeMeta/ScalarType conversion
  */
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
-  return m.index() == static_cast<size_t>(t);
+  return m.isScalarType(t);
 }
 
 static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {

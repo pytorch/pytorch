@@ -14,37 +14,32 @@ namespace detail {
 C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
-  AT_ERROR(msg);
+  TORCH_CHECK(false, msg);
 }
 } // namespace detail
 
-std::mutex TypeMeta::instanceMutex_;
-
-// prepopulate instance vector with ScalarType types
-std::vector<detail::TypeMetaData>& TypeMeta::typeMetaDataInstances() {
-  static std::vector<detail::TypeMetaData> instances = []{
-    std::lock_guard<std::mutex> lock(instanceMutex_);
-    std::vector<detail::TypeMetaData> vec;
-
-#define ADD_SCALAR_TYPE_META(T, name) \
-    { /* ScalarType::name */ \
-      auto typeId = TypeIdentifier::Get<T>(); \
-      auto typeName = c10::util::get_fully_qualified_type_name<T>(); \
-      vec.emplace_back( \
-        sizeof(T), \
-        detail::_PickNew<T>(), \
-        detail::_PickPlacementNew<T>(), \
-        detail::_PickCopy<T>(), \
-        detail::_PickPlacementDelete<T>(), \
-        detail::_PickDelete<T>(), \
-        typeId, \
-        typeName); \
-    }
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(ADD_SCALAR_TYPE_META)
-#undef ADD_SCALAR_TYPE_META
-
+//
+// TypeMetaData instances for ScalarType types.
+// TypeMeta values for T will contain T's index,
+// equal to the ScalarType enum value for T.
+//
+const detail::TypeMetaData& TypeMeta::scalarTypeMetaData(uint16_t index) {
+  static const detail::TypeMetaData instances[NumScalarTypes] = {
+#define SCALAR_TYPE_META(T, name) \
+    /* ScalarType::name */ \
+    detail::TypeMetaData( \
+      sizeof(T), \
+      detail::_PickNew<T>(), \
+      detail::_PickPlacementNew<T>(), \
+      detail::_PickCopy<T>(), \
+      detail::_PickPlacementDelete<T>(), \
+      detail::_PickDelete<T>(), \
+      TypeIdentifier::Get<T>(), \
+      c10::util::get_fully_qualified_type_name<T>()),
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
+#undef SCALAR_TYPE_META
     // ScalarType::Undefined
-    vec.emplace_back(
+    detail::TypeMetaData(
         0,
         nullptr,
         nullptr,
@@ -52,13 +47,25 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(ADD_SCALAR_TYPE_META)
         nullptr,
         nullptr,
         TypeIdentifier::uninitialized(),
-        "nullptr (uninitialized)");
-    return vec;
-  }();
-  return instances;
+        "nullptr (uninitialized)")
+  };
+  return instances[index];
 }
 
-// other known types
+// see TypeMeta::addTypeMetaDataInstance
+std::mutex TypeMeta::appendMutex_;
+
+//
+// TypeMetaData instances for non-ScalarType types.
+// Conceptually this is the second chunk of a single array of instances
+// that begins with the scalarTypeMetaDataInstances.
+// CAFFE_KNOWN_TYPE(T) adds a TypeMetaData entry for T to this vector,
+// and TypeMeta values for T will contain the entry's upshifted index.
+//
+std::vector<detail::TypeMetaData>& TypeMeta::nonScalarTypeMetaDatas() {
+  static std::vector<detail::TypeMetaData> instances;
+  return instances;
+}
 
 CAFFE_KNOWN_TYPE(std::string)
 CAFFE_KNOWN_TYPE(uint16_t)
