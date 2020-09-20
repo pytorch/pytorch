@@ -38,7 +38,7 @@ class GradBucket {
 // DDP's c10d reducer allows communication hooks defined as a sub class
 // of CommHookInterface. CommHookInterface is an abstract class and can
 // be used to implement both Python and CPP hooks.
-struct CommHookInterface {
+struct TORCH_DDP_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
@@ -59,7 +59,7 @@ struct CommHookInterface {
 
 // PythonCommHook enables registering a python hook to c10d reducer and is a
 // sub class of CommHookInterface.
-class PythonCommHook : public CommHookInterface {
+class TORCH_DDP_API PythonCommHook : public CommHookInterface {
  public:
   // The constructor takes a state and a callable hook. Inputs are Python
   // objects. The state is passed to the hook in runHook function can be used to

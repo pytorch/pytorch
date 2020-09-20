@@ -35,7 +35,7 @@ using torch::utils::Future;
 // will be defined as __declspec(dllimport) when compiling with MSVC,
 // and we have thread_local variables defined in class RRefContext
 // which are not allowed to added __declspec(dllimport).
-class RRefContext {
+class TORCH_DDP_API RRefContext {
  public:
   static RRefContext& getInstance();
   // NB: This method must be called before destructing RRefContext singleton.

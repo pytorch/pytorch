@@ -10,7 +10,7 @@ namespace distributed {
 namespace rpc {
 extern const std::string REMOTE_PROFILING_KEY_PREFIX;
 
-class RemoteProfilerManager {
+class TORCH_DDP_API RemoteProfilerManager {
  public:
   // Retrieves the lazily-initialized RemoteProfilerManager singleton instance.
   static RemoteProfilerManager& getInstance();
