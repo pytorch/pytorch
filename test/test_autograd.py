@@ -49,6 +49,23 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf)
 
+_END_SENTINEL = object()
+
+def getattr_qualified(obj, qname, default=None):
+    """ Like getattr but works with qualified names
+
+    e.g. getattr(torch, 'fft.rfft')
+    """
+    path = qname.split('.')
+    if len(path) > 1 and path[0] == 'fft':
+        import torch.fft  # noqa: F401
+
+    for name in path:
+        obj = getattr(obj, name, _END_SENTINEL)
+        if obj is _END_SENTINEL:
+            return default
+    return obj
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -4752,9 +4769,10 @@ def add_test(
                                                          output_variable, (self_variable,) + args_variable)
 
                     # functional interface tests
-                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                    torch_fn = getattr_qualified(torch, name)
+                    if torch_fn is not None and name not in EXCLUDE_FUNCTIONAL:
                         def fn(*inputs):
-                            output = getattr(torch, name)(*inputs, **kwargs)
+                            output = torch_fn(*inputs, **kwargs)
                             return output_process_fn(output)
 
                         f_args_variable = (self_variable,) + args_variable
@@ -4772,7 +4790,7 @@ def add_test(
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         else:
                             self_and_args_variable = (self_variable,) + args_variable
-                            output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
+                            output_variable = torch_fn(*self_and_args_variable, **kwargs_variable)
                         if isinstance(output_variable, torch.autograd.Variable):
                             if output_variable.is_sparse:
                                 rand = randn_like(output_variable.to_dense()).to_sparse()
