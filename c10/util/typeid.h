@@ -411,8 +411,8 @@ private:
   }
 
   friend bool operator==(
-      const TypeMeta& lhs,
-      const TypeMeta& rhs) noexcept;
+      const TypeMeta lhs,
+      const TypeMeta rhs) noexcept;
 
   template <typename T>
   bool Match() const noexcept {
@@ -560,13 +560,13 @@ inline TypeMeta::TypeMeta() noexcept
 }
 
 inline bool operator==(
-    const TypeMeta& lhs,
-    const TypeMeta& rhs) noexcept {
+    const TypeMeta lhs,
+    const TypeMeta rhs) noexcept {
   return (lhs.index_ == rhs.index_);
 }
 inline bool operator!=(
-    const TypeMeta& lhs,
-    const TypeMeta& rhs) noexcept {
+    const TypeMeta lhs,
+    const TypeMeta rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
