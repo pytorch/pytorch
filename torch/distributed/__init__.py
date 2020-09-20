@@ -30,6 +30,5 @@ if is_available():
         TCPStore,
         ProcessGroupGloo,
         ProcessGroupMPI,
-        ProcessGroupGloo,
         ProcessGroupNCCL,
     )
