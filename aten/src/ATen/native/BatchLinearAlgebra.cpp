@@ -431,7 +431,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor &self) {
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
