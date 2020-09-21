@@ -991,6 +991,16 @@ struct CAFFE2_API FutureType
     return create(contained_types.at(0));
   }
 
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs->cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    }
+    return false;
+  }
+
  private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 

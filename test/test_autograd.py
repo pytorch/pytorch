@@ -32,7 +32,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck, skipIfRocm)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -48,6 +48,23 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf)
+
+_END_SENTINEL = object()
+
+def getattr_qualified(obj, qname, default=None):
+    """ Like getattr but works with qualified names
+
+    e.g. getattr(torch, 'fft.rfft')
+    """
+    path = qname.split('.')
+    if len(path) > 1 and path[0] == 'fft':
+        import torch.fft  # noqa: F401
+
+    for name in path:
+        obj = getattr(obj, name, _END_SENTINEL)
+        if obj is _END_SENTINEL:
+            return default
+    return obj
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2852,19 +2869,6 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             x.resize_([3, 2])
 
-    @skipIfRocm
-    def test_profiler_custom_op(self):
-        inst = torch.classes._TorchScriptTesting._PickleTester([3, 4])
-
-        with torch.autograd.profiler.profile() as prof:
-            torch.ops._TorchScriptTesting.take_an_instance(inst)
-
-        found_event = False
-        for e in prof.function_events:
-            if e.name == '_TorchScriptTesting::take_an_instance':
-                found_event = True
-        self.assertTrue(found_event)
-
     def test_profiler_propagation(self):
         def foo(x):
             with record_function("in_foo") as rf:
@@ -3225,13 +3229,13 @@ class TestAutograd(TestCase):
         with record_function("inner"):
             # test that exiting the record function after starting another one
             # doesn't throw.
-            rf.__exit__()
+            rf.__exit__(None, None, None)
 
         with record_function("inner"):
             rf.__enter__()
         # test that exiting the record function after ending another one
         # doesn't throw.
-        rf.__exit__()
+        rf.__exit__(None, None, None)
 
 
     def test_dir(self):
@@ -4765,9 +4769,10 @@ def add_test(
                                                          output_variable, (self_variable,) + args_variable)
 
                     # functional interface tests
-                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                    torch_fn = getattr_qualified(torch, name)
+                    if torch_fn is not None and name not in EXCLUDE_FUNCTIONAL:
                         def fn(*inputs):
-                            output = getattr(torch, name)(*inputs, **kwargs)
+                            output = torch_fn(*inputs, **kwargs)
                             return output_process_fn(output)
 
                         f_args_variable = (self_variable,) + args_variable
@@ -4785,7 +4790,7 @@ def add_test(
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         else:
                             self_and_args_variable = (self_variable,) + args_variable
-                            output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
+                            output_variable = torch_fn(*self_and_args_variable, **kwargs_variable)
                         if isinstance(output_variable, torch.autograd.Variable):
                             if output_variable.is_sparse:
                                 rand = randn_like(output_variable.to_dense()).to_sparse()
