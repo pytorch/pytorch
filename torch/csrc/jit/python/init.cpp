@@ -285,7 +285,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quant_finalize",
           [](Module& module, int quant_type_int,
-             std::vector<std::string>& preserved_attrs) {
+             const std::vector<std::string>& preserved_attrs) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return Finalize(module, quant_type, preserved_attrs);
           },

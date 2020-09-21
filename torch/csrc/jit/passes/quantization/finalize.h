@@ -50,7 +50,7 @@ TORCH_API void InsertPrepackUnpack(Module& module);
 TORCH_API script::Module Finalize(
     script::Module& module,
     QuantType quant_type = QuantType::STATIC,
-    const std::vector<std::string> preserved_attrs& = std::vector<std::string>());
+    const std::vector<std::string>& preserved_attrs = std::vector<std::string>());
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 
