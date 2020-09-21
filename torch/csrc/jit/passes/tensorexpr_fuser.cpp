@@ -288,6 +288,11 @@ class TensorExprFuser {
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
+    // we maintain alias db correctness during initial fusion, but it is
+    // difficult to maintain correctness after inlining so inline only after
+    // fusion is done.
+    inlineSmallFusionGroups(graph_->block());
+    GRAPH_DUMP("After inlining small fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
@@ -439,7 +444,6 @@ class TensorExprFuser {
 
     Node* prev_fusion_group =
         initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
-    std::vector<Node*> post_merge_fusion_groups;
 
     for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
       // Try merging the just created fusion group into the previous one.
@@ -463,16 +467,6 @@ class TensorExprFuser {
         post_merge_fusion_groups.push_back(prev_fusion_group);
         prev_fusion_group = fusion_group;
       }
-    }
-
-    // We were adding groups into the vector lagging by one - catch up with
-    // adding the last one
-    if (prev_fusion_group) {
-      post_merge_fusion_groups.push_back(prev_fusion_group);
-    }
-
-    for (Node* n : post_merge_fusion_groups) {
-      inlineIfTooSmall(n);
     }
   }
 
@@ -506,6 +500,18 @@ class TensorExprFuser {
       return true;
     }
     return false;
+  }
+
+  void inlineSmallFusionGroups(Block* block) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+      Node* n = *it;
+      it++;
+
+      for (Block* b : n->blocks()) {
+        inlineSmallFusionGroups(b);
+      }
+      inlineIfTooSmall(n);
+    }
   }
 
   c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
