@@ -377,14 +377,16 @@ def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
 
 
-def slow_add(x, y):
+def slow_add(x, y, device="cpu"):
     time.sleep(1)
-    return torch.add(x, y)
+    x = x.to(device)
+    y = y.to(device)
+    return torch.add(x, y).cpu()
 
 
 @rpc.functions.async_execution
-def slow_async_add(to, x, y):
-    return rpc.rpc_async(to, slow_add, args=(x, y))
+def slow_async_add(to, x, y, device="cpu"):
+    return rpc.rpc_async(to, slow_add, args=(x, y, device))
 
 
 @rpc.functions.async_execution
@@ -1260,37 +1262,39 @@ class RpcTest(RpcAgentTestFixture):
 
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
-        x = torch.ones(2, device=device)
-        y = torch.ones(2, device=device)
+        x = torch.ones(2)
+        y = torch.ones(2)
         with torch.autograd.profiler.profile() as prof:
-            ret = rpc.rpc_async(dst1, slow_async_add, args=(dst2, x, y), timeout=20)
+            ret = rpc.rpc_async(
+                dst1, slow_async_add, args=(dst2, x, y, device), timeout=20
+            )
             out = ret.wait()
 
         function_events = prof.function_events
         # slow_async_add resulted in an RPC from dst1 -> dst2, so this should be
         # recorded.
         key_prefix = _build_rpc_profiling_key(
-            RPCExecMode.ASYNC,
-            slow_async_add.__qualname__,
-            worker_name(self.rank),
-            dst1
+            RPCExecMode.ASYNC, slow_async_add.__qualname__, worker_name(self.rank), dst1
         )
 
         nested_rpc_key_prefix = _build_rpc_profiling_key(
-            RPCExecMode.ASYNC,
-            slow_add.__qualname__,
-            dst1,
-            dst2
+            RPCExecMode.ASYNC, slow_add.__qualname__, dst1, dst2
         )
         expected_key = key_prefix + REMOTE_OP_STR + nested_rpc_key_prefix
         remote_events = [event for event in function_events if event.is_remote]
-        rpc_remote_event = [event for event in remote_events if event.name == expected_key]
+        rpc_remote_event = [
+            event for event in remote_events if event.name == expected_key
+        ]
         self.assertEqual(1, len(rpc_remote_event))
         rpc_remote_event = rpc_remote_event[0]
         self.assertEqual(rpc_remote_event.node_id, (self.rank + 1) % self.world_size)
         # slow_async_add's RPC does an add on dst2, which should be reflected as well.
-        remote_add_key = expected_key + REMOTE_OP_STR + torch.jit._builtins._find_builtin(torch.add)
-        remote_add_event = [event for event in remote_events if event.name == remote_add_key]
+        remote_add_key = (
+            expected_key + REMOTE_OP_STR + torch.jit._builtins._find_builtin(torch.add)
+        )
+        remote_add_event = [
+            event for event in remote_events if event.name == remote_add_key
+        ]
         self.assertEqual(1, len(remote_add_event))
         remote_add_event = remote_add_event[0]
         # Validate that node_id is dst2.
@@ -1298,18 +1302,18 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rpc_profiling_async_function(self):
+        initialize_pg(self.init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
-            initialize_pg(self.init_method, self.rank, self.world_size)
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
     @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
+        initialize_pg(self.init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
-            initialize_pg(self.init_method, self.rank, self.world_size)
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
