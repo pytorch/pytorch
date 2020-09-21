@@ -367,7 +367,7 @@ void testCudaTestRand01() {
     sum1 += v;
     sum2 += v * v;
     sum3 += v * v * v;
-    ASSERT_TRUE(v >= 0 && v < 1, "invalid value: ", i, ", ", v);
+    ASSERT_TRUE(v >= 0 && v < 1);
   }
   sum1 /= N;
   sum2 /= N;
