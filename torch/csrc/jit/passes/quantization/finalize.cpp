@@ -73,9 +73,10 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module,
-                QuantType quant_type,
-                const std::vector<std::string>& preserved_attrs) {
+Module Finalize(
+    Module& module,
+    QuantType quant_type,
+    const std::vector<std::string>& preserved_attrs) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
