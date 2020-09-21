@@ -4530,9 +4530,9 @@ for shape in [(1,), ()]:
     def test_nan_to_num(self):
         a = torch.randn(3, 3, 3, 3)
         with torch.no_grad():
-            a[torch.randn_like(a) < 0.2] = float('nan')
-            a[torch.randn_like(a) < 0.2] = float('inf')
-            a[torch.randn_like(a) < 0.2] = -float('inf')
+            a[torch.rand_like(a) < 0.2] = float('nan')
+            a[torch.rand_like(a) < 0.2] = float('inf')
+            a[torch.rand_like(a) < 0.2] = -float('inf')
 
         a.requires_grad = True
 
