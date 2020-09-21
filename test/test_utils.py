@@ -628,6 +628,13 @@ class TestBenchmarkUtils(TestCase):
         # This acts as a control to compare to a different way to measure the same value.
         self.assertLess(small.median, blocked_medium.median)
 
+    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows")
+    def test_collect_callgrind(self):
+        # Note: this test is incomplete. Pushing in this form in order to
+        # start debugging CI failures.
+        python_only_timer = benchmark_utils.Timer("sum([1, 1])")
+        stats = python_only_timer.collect_callgrind()
+
     def test_compare(self):
         compare = benchmark_utils.Compare([
             benchmark_utils.Timer(

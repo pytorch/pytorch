@@ -1,3 +1,4 @@
+"""Intermediate layer between `Timer` and `valgrind`."""
 import collections
 import dataclasses
 import os
@@ -7,9 +8,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import List, Tuple
+from typing import DefaultDict, Dict, List, Optional, Tuple
 
 import torch
+from torch.utils.cpp_extension import load_inline
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -19,57 +21,106 @@ class CallgrindStats(object):
     number: int
     num_threads: int
     built_with_debug_symbols: bool
-    baseline_inclusive_stats: List[Tuple[int, str]]
-    baseline_exclusive_stats: List[Tuple[int, str]]
-    stmt_inclusive_stats: List[Tuple[int, str]]
-    stmt_exclusive_stats: List[Tuple[int, str]]
+    baseline_inclusive_stats: Tuple[Tuple[int, str], ...]
+    baseline_exclusive_stats: Tuple[Tuple[int, str], ...]
+    stmt_inclusive_stats: Tuple[Tuple[int, str], ...]
+    stmt_exclusive_stats: Tuple[Tuple[int, str], ...]
 
-    def __repr__(self):
-        # Pad lines after the first to align properly.
-        stmt = self.stmt.replace('\n', '\n' + ' ' * 9)
-        setup = self.setup.replace('\n', '\n' + ' ' * 9)
-        baseline_ct = self._counts(
-            self.baseline_exclusive_stats,include_lookdict_unicode=True)
-        baseline_ct_no_unicode = self._counts(
-            self.baseline_exclusive_stats, include_lookdict_unicode=False)
-        lines = [
-            f"{super().__repr__()}",
-            f"  stmt:  {stmt}",
-            f"  setup: {setup}",
-            f"  {self.num_threads} thread{'s' if self.num_threads > 1 else ''}",
-            f"{'':>25}All{'':>10}Noisy symbols removed",
-            f"  Instructions: {self.counts():>12}{'':>15}{self.counts(include_lookdict_unicode=False):>12}",
-            f"  Baseline:     {baseline_ct:>12}{'':>15}{baseline_ct_no_unicode:>12}",
-        ]
+    def __repr__(self) -> str:
+        newline = "\n"  # `\` cannot appear in fstring code section.
+        base_stats = self.baseline_exclusive_stats
+        self_stats = self.stmt_exclusive_stats
+        output = textwrap.dedent(f"""
+        {super().__repr__()}
+          stmt:  {self.stmt.replace(newline, newline + ' ' * 9)}
+          setup: {self.setup.replace(newline, newline + ' ' * 9)}
+          {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
+        {'':>25}All{'':>10}Noisy symbols removed
+          Instructions: {self._counts(self_stats, True):>12}{'':>15}{self._counts(self_stats, False):>12}
+          Baseline:     {self._counts(base_stats, True):>12}{'':>15}{self._counts(base_stats, False):>12}
+        """).strip()
         if not self.built_with_debug_symbols:
-            lines.extend([
-                "Warning: PyTorch was not built with debug symbols.",
-                "         Source information may be limited. Rebuild with",
-                "         REL_WITH_DEB_INFO=1 for more detailed results.",
-            ])
-        return "\n".join(lines)
+            output += (
+                "Warning: PyTorch was not built with debug symbols."
+                "         Source information may be limited. Rebuild with"
+                "         REL_WITH_DEB_INFO=1 for more detailed results."
+            )
+        return output
 
-    def stats(self, inclusive=False):
+    def stats(self, inclusive: bool = False) -> Tuple[Tuple[int, str], ...]:
+        """Returns stats as a tuple of (count, function)
+
+        `inclusive` matches the semantics of callgrind. If True, the counts
+        include instructions executed by children. `inclusive=True` is useful
+        for identifying hot spots in code; `inclusive=False` is useful for
+        identifying reducing noise when diffing counts from two different
+        runs. (See CallgrindStats.delta(...) for more details)
+        """
         if inclusive:
             first, second = self.stmt_inclusive_stats, self.baseline_inclusive_stats
         else:
             first, second = self.stmt_exclusive_stats, self.baseline_exclusive_stats
         return self._diff(first, second)
 
-    def counts(self, include_lookdict_unicode=True):
+    def counts(self, include_lookdict_unicode: bool = True) -> int:
+        """Returns the total number of instructions executed.
+
+        Several instructions in the CPython interpreter are rather noisy. These
+        instructions involve unicode to dictionary lookups which Python uses to
+        map variable names. By default these are included, but setting
+        `include_lookdict_unicode=False` will exclude them and generally lead
+        to less noisy counts.
+        """
         return self._counts(self.stmt_exclusive_stats, include_lookdict_unicode)
 
-    @staticmethod
-    def _counts(stats, include_lookdict_unicode):
-        return sum(
-            c for c, fn in stats
-            if include_lookdict_unicode
-            or "dictobject.c:lookdict_unicode" not in fn
-        )
+    # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
+    def delta(self, other, inclusive: bool = False, subtract_baselines: bool = True):
+        """Diff two sets of counts.
 
+        One common reason to collect instruction counts is to determine the
+        the effect that a particular change will have on the number of instructions
+        needed to perform some unit of work. If a change increases that number, the
+        next logical question is "why". This generally involves looking at what part
+        if the code increased in instruction count. This function automates that
+        process so that one can easily diff counts on both an inclusive and
+        exclusive basis. The `subtract_baselines` argument allows one to disable
+        baseline correction, though in most cases it shouldn't matter as the
+        baselines are expected to more or less cancel out.
+        """
+        if subtract_baselines:
+            first = self.stats(inclusive=inclusive)
+            second = other.stats(inclusive=inclusive)
+        else:
+            if inclusive:
+                first, second = self.stmt_inclusive_stats, other.stmt_inclusive_stats
+            else:
+                first, second = self.stmt_exclusive_stats, other.stmt_exclusive_stats
+        return self._diff(first, second)
+
+    # FIXME: Once 3.7 is the minimum version, type annotate output
     def as_standardized(self):
-        def strip_prefix(stats):
-            counts = collections.defaultdict(int)
+        """Strip some prefixes from function strings.
+
+        When comparing two different sets of instruction counts, on stumbling
+        block can be path prefixes. Callgrind includes the full filepath
+        when reporting a function (as it should). However, this can cause
+        issues when diffing profiles. If a key component such as Python
+        or PyTorch was built in separate locations in the two profiles, which
+        can result in something resembling:
+            23234231 /tmp/first_build_dir/thing.c:foo(...)
+             9823794 /tmp/first_build_dir/thing.c:bar(...)
+              ...
+               53453 .../aten/src/Aten/...:function_that_actually_changed(...)
+              ...
+             -9823794 /tmp/second_build_dir/thing.c:bar(...)
+            -23234231 /tmp/second_build_dir/thing.c:foo(...)
+
+        Stripping prefixes can ameliorate this issue by regularizing the
+        strings and causing better cancelation of equivilent call sites
+        when diffing.
+        """
+        def strip_prefix(stats: Tuple[Tuple[int, str], ...]) -> Tuple[Tuple[int, str], ...]:
+            counts: DefaultDict[str, int] = collections.defaultdict(int)
 
             # "Python" and "Objects" come from CPython.
             prefix_truncations = ("build/aten/", "Python/", "Objects/")
@@ -79,7 +130,7 @@ class CallgrindStats(object):
                     fn = re.sub(r"^.+" + new_prefix, new_prefix, fn)
                 fn = re.sub(r"\s\[.+\]$", "", fn)
                 counts[fn] += c
-            return sorted([(c, fn) for fn, c in counts.items() if c], reverse=True)
+            return tuple(sorted([(c, fn) for fn, c in counts.items() if c], reverse=True))
 
         return CallgrindStats(
             stmt=self.stmt,
@@ -93,47 +144,66 @@ class CallgrindStats(object):
             stmt_exclusive_stats=strip_prefix(self.stmt_exclusive_stats),
         )
 
-    def delta(self, other, inclusive=False, subtract_baselines=True):
-        # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
-        if subtract_baselines:
-            first = self.stats(inclusive=inclusive)
-            second = other.stats(inclusive=inclusive)
-        else:
-            if inclusive:
-                first, second = self.stmt_inclusive_stats, other.stmt_inclusive_stats
-            else:
-                first, second = self.stmt_exclusive_stats, other.stmt_exclusive_stats
-        return self._diff(first, second)
+    @staticmethod
+    def _counts(stats, include_lookdict_unicode: bool) -> int:
+        return sum(
+            c for c, fn in stats
+            if include_lookdict_unicode
+            or "dictobject.c:lookdict_unicode" not in fn
+        )
 
     @staticmethod
-    def _diff(first: List[Tuple[int, str]], second: List[Tuple[int, str]]):
+    def _diff(first: Tuple[Tuple[int, str], ...], second: Tuple[Tuple[int, str], ...]) -> Tuple[Tuple[int, str], ...]:
         counts = collections.defaultdict(int, {fn: c for c, fn in first})
         assert len(counts) == len(first)
         for c, fn in second:
             counts[fn] -= c
 
-        return sorted([(c, fn) for fn, c in counts.items() if c], reverse=True)
+        return tuple(sorted([(c, fn) for fn, c in counts.items() if c], reverse=True))
+
 
 class _ValgrindWrapper(object):
     def __init__(self):
-        self._valgrind_available = not subprocess.run(
-            ["which", "valgrind"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        ).returncode
+        cwd = os.path.split(os.path.abspath(__file__))[0]
+        with open(os.path.join(cwd, "callgrind_bindings.cpp"), "rt") as f:
+            src = f.read()
 
-        self._build_type = None
+        # We use `load_inline` rather than `load` because supports the `functions`
+        # argument and allows the C++ src to use TORCH_CHECK.
+        self._callgrind_bindings = load_inline(
+            name="callgrind_bindings",
+            cpp_sources=[src],
+            extra_include_paths=[cwd],
+            functions=["supported_platform", "toggle"],
+        )
+
+        self._commands_available: Dict[str, bool] = {}
+        if self._callgrind_bindings.supported_platform():
+            # Only bother checking on supported platforms.
+            for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
+                self._commands_available[cmd] = not subprocess.run(
+                    ["which", cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                ).returncode
+
+        self._build_type: Optional[str] = None
         build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
-        self._baseline_cache = {}
+        self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[Tuple[int, str], ...], Tuple[Tuple[int, str], ...]]] = {}
 
     def _validate(self):
-        if not self._valgrind_available:
-            raise OSError("Could not find `valgrind`")
+        if not self._callgrind_bindings.supported_platform():
+            raise OSError("Valgrind is not supported on this platform.")
+
+        missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
+        if missing_cmds:
+            raise OSError("Missing: " + ", ".join(missing_cmds))
 
     def collect_callgrind(self, stmt: str, setup: str, number: int, num_threads: int):
+        """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
         cache_key = (number, num_threads)
         if cache_key not in self._baseline_cache:
@@ -162,18 +232,41 @@ class _ValgrindWrapper(object):
         )
 
     def _invoke(self, stmt: str, setup: str, number: int, num_threads: int):
+        """Core invocation method for Callgrind collection.
+
+        Valgrind operates by effectively replacing the CPU with an emulated
+        version which allows it to instrument any code at the cost of severe
+        performance degradation. This has the practical effect that in order
+        to collect Callgrind statistics, a new process has to be created
+        running under `valgrind`. The steps for this process are:
+
+        1) Create a scratch directory.
+        2) Codegen a run script. (_ValgrindWrapper._construct_script)
+            Inside the run script:
+                * Validate that Python and torch match the parent process
+                * Validate that it is indeed running under valgrind
+                * Execute `setup` and warm up `stmt`
+                * Begin collecting stats
+                * Run the `stmt` loop
+                * Stop collecting stats
+        3) Parse the run results.
+        4) Cleanup the scratch directory.
+        """
         working_dir = tempfile.mkdtemp()
         script_file = os.path.join(working_dir, "timer_callgrind.py")
         callgrind_out = os.path.join(working_dir, "callgrind.out")
         error_log = os.path.join(working_dir, "error.txt")
+        stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
-        f_stdout_stderr = open(stdout_stderr_log, "wt")
+        f_stdout_stderr = open(stdout_stderr_log, "wb")
+        shutil.copy(self._callgrind_bindings.__file__, working_dir)
 
         try:
             with open(script_file, "wt") as f:
                 f.write(self._construct_script(
                     stmt=stmt, setup=setup, number=number,
-                    num_threads=num_threads, error_log=error_log))
+                    num_threads=num_threads, error_log=error_log,
+                    stat_log=stat_log))
 
             valgrind_invocation = subprocess.run(
                 [
@@ -240,7 +333,7 @@ class _ValgrindWrapper(object):
             shutil.rmtree(working_dir)
 
     @staticmethod
-    def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str):
+    def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str, stat_log: str):
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"
         # However a loop in Python is surprisingly expensive, and significantly
@@ -266,7 +359,7 @@ class _ValgrindWrapper(object):
             import time
 
             import torch
-            from torch.utils._benchmark.utils.valgrind_wrapper import bindings
+            import callgrind_bindings
             torch.set_num_threads({num_threads})
 
             PID = os.getpid()
@@ -307,13 +400,19 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == Callgrind management =====================================================
             # =============================================================================
-            callgrind_stat = check_result(subprocess.run(
-                ["callgrind_control", "--stat"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            ))
+            with open("{stat_log}", "wb") as stat_file:
+                # If many instances of callgrind are running at once, the output of
+                # `callgrind_control` may exceed 16kb which would cause `subprocess.PIPE`
+                # to deadlock. So instead we use a file.
+                callgrind_stat = check_result(subprocess.run(
+                    ["callgrind_control", "--stat"],
+                    stdout=stat_file,
+                    stderr=subprocess.STDOUT,
+                ))
 
-            stat_lines = callgrind_stat.stdout.decode("utf-8").splitlines()
+            with open("{stat_log}", "rt") as stat_file:
+                stat_lines = stat_file.read().splitlines()
+
             if f"PID {{PID}}: python {{__file__}}" not in stat_lines:
                 log_failure("Process does not appear to be running callgrind.")
 
@@ -323,13 +422,13 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            bindings.toggle()
+            callgrind_bindings.toggle()
             {blocked_stmt}
 
             # Sleep is to allow the interpreter to catch up before we stop collecting in
             # order to reduce jitter.
             time.sleep(0.01)
-            bindings.toggle()
+            callgrind_bindings.toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(stmt, " " * 4),
             blocked_stmt=blocked_stmt,
@@ -338,6 +437,7 @@ class _ValgrindWrapper(object):
             warmup_number=min(number, 10),
             num_threads=num_threads,
             error_log=error_log,
+            stat_log=stat_log,
             parent_interpreter=sys.executable,
             torch_file=torch.__file__,
         )
