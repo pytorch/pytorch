@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
 from functools import partial, wraps
@@ -7,7 +6,7 @@ import sys
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import _rref_context_get_debug_info
+from torch.distributed.rpc import _rref_context_get_debug_info  # type: ignore[attr-defined]
 
 
 if not dist.is_available():
