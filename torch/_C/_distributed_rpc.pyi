@@ -13,6 +13,7 @@ class _TensorPipeRpcBackendOptionsBase:
     _init_method: str
     rpc_timeout: timedelta
     device_maps: Dict[str, Dict[int, int]]
+    @overload
     def __init__(
         self,
         num_worker_threads: int,
@@ -21,6 +22,15 @@ class _TensorPipeRpcBackendOptionsBase:
         rpc_timeout: timedelta,
         init_method: str,
         device_maps: Dict[str, Dict[int, int]]): ...
+    @overload
+    def __init__(
+            self,
+            rpc_timeout: timedelta,
+            init_method: str,
+            num_worker_threads: int,
+            _transports: Optional[List],
+            _channels: Optional[List]
+        ): ...
     def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
 class ProcessGroupAgent:
     def __init__(

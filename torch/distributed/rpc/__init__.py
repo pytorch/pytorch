@@ -29,7 +29,7 @@ if is_available():
         _set_profiler_node_id,
         _is_current_rpc_agent_set,
         RpcBackendOptions,
-        _TensorPipeRpcBackendOptionsBase,
+        _TensorPipeRpcBackendOptionsBase as TensorPipeRpcBackendOptions,
         ProcessGroupRpcBackendOptions,
     )  # noqa: F401
     from .api import *  # noqa: F401
@@ -40,16 +40,6 @@ if is_available():
     import torch.distributed.autograd as dist_autograd
 
     import numbers
-
-    class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
-        def __init__(
-            self,
-            rpc_timeout: timedelta,
-            init_method: str,
-            num_worker_threads: int,
-            _transports: Optional[List],
-            _channels: Optional[List]
-        ): ...
 
     def init_rpc(
         name,
