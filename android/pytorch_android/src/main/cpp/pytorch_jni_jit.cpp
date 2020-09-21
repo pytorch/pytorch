@@ -67,25 +67,22 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
   torch::jit::Module module_;
-  c10::DeviceType deviceType_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
-      facebook::jni::alias_ref<jstring> modelPath,
-      jint device) {
-    return makeCxxInstance(modelPath, device);
+      facebook::jni::alias_ref<jstring> modelPath) {
+    return makeCxxInstance(modelPath);
   }
 
 #ifdef __ANDROID__
   static facebook::jni::local_ref<jhybriddata> initHybridAndroidAsset(
       facebook::jni::alias_ref<jclass>,
       facebook::jni::alias_ref<jstring> assetName,
-      facebook::jni::alias_ref<jobject> assetManager,
-      jint device) {
-    return makeCxxInstance(assetName, assetManager, device);
+      facebook::jni::alias_ref<jobject> assetManager) {
+    return makeCxxInstance(assetName, assetManager);
   }
 #endif
 
@@ -130,19 +127,17 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     ((void)once);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
     preModuleLoadSetup();
     JITCallGuard guard;
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
-    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 
 #ifdef __ANDROID__
   PytorchJni(
       facebook::jni::alias_ref<jstring> assetName,
-      facebook::jni::alias_ref<jobject> assetManager,
-      jint device) {
+      facebook::jni::alias_ref<jobject> assetManager) {
     preModuleLoadSetup();
     JNIEnv* env = facebook::jni::Environment::current();
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager.get());
@@ -171,7 +166,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();
-    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 #endif
 
@@ -197,14 +191,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     auto output = [&]() {
       JITCallGuard guard;
@@ -225,14 +212,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
