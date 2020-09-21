@@ -88,13 +88,7 @@ inline int64_t getTime() {
 #endif
 }
 
-// Old GCC versions generate warnings incorrectly
-// see https://stackoverflow.com/questions/2463113/g-c0x-enum-class-compiler-warnings
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif
-enum class TORCH_API ProfilerState {
+enum class C10_API_ENUM ProfilerState {
     Disabled,
     CPU, // CPU-only profiling
     CUDA, // CPU + CUDA events
@@ -123,15 +117,12 @@ struct TORCH_API ProfilerConfig {
 
 };
 
-enum class TORCH_API EventKind : uint16_t {
+enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange,
   MemoryAlloc,
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 struct TORCH_API Event final {
   Event(

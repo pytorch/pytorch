@@ -46,7 +46,7 @@ class QuantTest(serial.SerializedTestCase):
             {"X": [5, 2]},
             debug=True,
             adjust_batch=True,
-            black_list=[0],
+            block_list=[0],
             use_onnx=False,
         )
         num_onnxified_ops = sum(

@@ -59,7 +59,6 @@ class Val;
 class IterDomain;
 class TensorDomain;
 class TensorView;
-class TensorIndex;
 class Bool;
 class Float;
 class Half;
@@ -74,9 +73,34 @@ class BinaryOp;
 class TernaryOp;
 class ReductionOp;
 class BroadcastOp;
+
+// Kernel IR
+namespace kir {
+
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
+
+class IterDomain;
+class TensorDomain;
+class TensorView;
+
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
+
+class TensorIndex;
+class Allocate;
 class ForLoop;
 class IfThenElse;
-class Allocate;
+class GridReduction;
+class Sync;
+
+} // namespace kir
 
 /*
  * By default, all IR nodes are handled in this dispatch, and will call an empty
@@ -102,7 +126,6 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const IterDomain*) {}
   virtual void handle(const TensorDomain*) {}
   virtual void handle(const TensorView*) {}
-  virtual void handle(const TensorIndex*) {}
   virtual void handle(const Bool*) {}
   virtual void handle(const Float*) {}
   virtual void handle(const Half*) {}
@@ -117,9 +140,30 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const TernaryOp*) {}
   virtual void handle(const ReductionOp*) {}
   virtual void handle(const BroadcastOp*) {}
-  virtual void handle(const ForLoop*) {}
-  virtual void handle(const IfThenElse*) {}
-  virtual void handle(const Allocate*) {}
+
+  // Kernel IR nodes
+  virtual void handle(const kir::Bool*) {}
+  virtual void handle(const kir::Float*) {}
+  virtual void handle(const kir::Half*) {}
+  virtual void handle(const kir::Int*) {}
+  virtual void handle(const kir::NamedScalar*) {}
+
+  virtual void handle(const kir::IterDomain*) {}
+  virtual void handle(const kir::TensorDomain*) {}
+  virtual void handle(const kir::TensorView*) {}
+
+  virtual void handle(const kir::UnaryOp*) {}
+  virtual void handle(const kir::BinaryOp*) {}
+  virtual void handle(const kir::TernaryOp*) {}
+  virtual void handle(const kir::ReductionOp*) {}
+  virtual void handle(const kir::BroadcastOp*) {}
+
+  virtual void handle(const kir::TensorIndex*) {}
+  virtual void handle(const kir::GridReduction*) {}
+  virtual void handle(const kir::ForLoop*) {}
+  virtual void handle(const kir::IfThenElse*) {}
+  virtual void handle(const kir::Allocate*) {}
+  virtual void handle(const kir::Sync*) {}
 };
 
 class TORCH_CUDA_API OptOutDispatch {
@@ -142,7 +186,6 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(IterDomain*) {}
   virtual void handle(TensorDomain*) {}
   virtual void handle(TensorView*) {}
-  virtual void handle(TensorIndex*) {}
   virtual void handle(Bool*) {}
   virtual void handle(Float*) {}
   virtual void handle(Half*) {}
@@ -157,9 +200,30 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(TernaryOp*) {}
   virtual void handle(ReductionOp*) {}
   virtual void handle(BroadcastOp*) {}
-  virtual void handle(ForLoop*) {}
-  virtual void handle(IfThenElse*) {}
-  virtual void handle(Allocate*) {}
+
+  // Kernel IR nodes
+  virtual void handle(kir::Bool*) {}
+  virtual void handle(kir::Float*) {}
+  virtual void handle(kir::Half*) {}
+  virtual void handle(kir::Int*) {}
+  virtual void handle(kir::NamedScalar*) {}
+
+  virtual void handle(kir::IterDomain*) {}
+  virtual void handle(kir::TensorDomain*) {}
+  virtual void handle(kir::TensorView*) {}
+
+  virtual void handle(kir::UnaryOp*) {}
+  virtual void handle(kir::BinaryOp*) {}
+  virtual void handle(kir::TernaryOp*) {}
+  virtual void handle(kir::ReductionOp*) {}
+  virtual void handle(kir::BroadcastOp*) {}
+
+  virtual void handle(kir::TensorIndex*) {}
+  virtual void handle(kir::GridReduction*) {}
+  virtual void handle(kir::ForLoop*) {}
+  virtual void handle(kir::IfThenElse*) {}
+  virtual void handle(kir::Allocate*) {}
+  virtual void handle(kir::Sync*) {}
 };
 
 class TORCH_CUDA_API OptInConstDispatch {
@@ -187,9 +251,6 @@ class TORCH_CUDA_API OptInConstDispatch {
   }
   virtual void handle(const TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
-  }
-  virtual void handle(const TensorIndex*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorIndex.");
   }
   virtual void handle(const Bool*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
@@ -229,14 +290,73 @@ class TORCH_CUDA_API OptInConstDispatch {
   virtual void handle(const BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
-  virtual void handle(const ForLoop*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
+
+  // Kernel IR
+  //
+  // TODO: move to a specialized visitor
+  //
+
+  virtual void handle(const kir::Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Bool.");
   }
-  virtual void handle(const Allocate*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
+  virtual void handle(const kir::Float*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Float.");
   }
-  virtual void handle(const IfThenElse*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
+  virtual void handle(const kir::Half*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Half.");
+  }
+  virtual void handle(const kir::Int*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Int.");
+  }
+  virtual void handle(const kir::NamedScalar*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::NamedScalar.");
+  }
+
+  virtual void handle(const kir::IterDomain*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::IterDomain.");
+  }
+  virtual void handle(const kir::TensorDomain*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorDomain.");
+  }
+  virtual void handle(const kir::TensorView*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorView.");
+  }
+
+  virtual void handle(const kir::UnaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::UnaryOp.");
+  }
+  virtual void handle(const kir::BinaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::BinaryOp.");
+  }
+  virtual void handle(const kir::TernaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TernaryOp.");
+  }
+  virtual void handle(const kir::ReductionOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::ReductionOp.");
+  }
+  virtual void handle(const kir::BroadcastOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::BroadcastOp.");
+  }
+
+  virtual void handle(const kir::GridReduction*) {
+    TORCH_INTERNAL_ASSERT(
+        false, "Handle not overriden for kir::GridReduction.");
+  }
+  virtual void handle(const kir::ForLoop*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::ForLoop.");
+  }
+  virtual void handle(const kir::Allocate*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Allocate.");
+  }
+  virtual void handle(const kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Sync.");
+  }
+  virtual void handle(const kir::IfThenElse*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::IfThenElse.");
+  }
+
+  virtual void handle(const kir::TensorIndex*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorIndex.");
   }
 };
 
@@ -266,9 +386,6 @@ class TORCH_CUDA_API OptInDispatch {
   virtual void handle(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
-  virtual void handle(TensorIndex*) {
-    AT_ERROR("Handle not overriden for TensorIndex.");
-  }
   virtual void handle(Bool*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
@@ -282,7 +399,7 @@ class TORCH_CUDA_API OptInDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
   virtual void handle(NamedScalar*) {
-    AT_ERROR("Handle not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -307,14 +424,72 @@ class TORCH_CUDA_API OptInDispatch {
   virtual void handle(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
-  virtual void handle(ForLoop*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
+
+  // Kernel IR
+  //
+  // TODO: move to a specialized visitor
+  //
+
+  virtual void handle(kir::Bool*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
-  virtual void handle(Allocate*) {
-    AT_ERROR("Handle not overriden for Allocate.");
+  virtual void handle(kir::Float*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
-  virtual void handle(IfThenElse*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
+  virtual void handle(kir::Half*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
+  }
+  virtual void handle(kir::Int*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
+  }
+  virtual void handle(kir::NamedScalar*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::NamedScalar.");
+  }
+  virtual void handle(kir::TensorIndex*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorIndex.");
+  }
+
+  virtual void handle(kir::IterDomain*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::IterDomain.");
+  }
+  virtual void handle(kir::TensorDomain*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorDomain.");
+  }
+  virtual void handle(kir::TensorView*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TensorView.");
+  }
+
+  virtual void handle(kir::UnaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::UnaryOp.");
+  }
+  virtual void handle(kir::BinaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::BinaryOp.");
+  }
+  virtual void handle(kir::TernaryOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::TernaryOp.");
+  }
+  virtual void handle(kir::ReductionOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::ReductionOp.");
+  }
+  virtual void handle(kir::BroadcastOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::BroadcastOp.");
+  }
+
+  virtual void handle(kir::GridReduction*) {
+    TORCH_INTERNAL_ASSERT(
+        false, "Handle not overriden for kir::GridReduction.");
+  }
+  virtual void handle(kir::ForLoop*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::ForLoop.");
+  }
+  virtual void handle(kir::Allocate*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Allocate.");
+  }
+  virtual void handle(kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::Sync.");
+  }
+  virtual void handle(kir::IfThenElse*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for kir::IfThenElse.");
   }
 };
 
@@ -361,7 +536,7 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
   virtual Statement* mutate(TensorView*);
-  virtual Statement* mutate(TensorIndex*);
+  virtual Statement* mutate(kir::TensorIndex*);
   virtual Statement* mutate(Bool*);
   virtual Statement* mutate(Float*);
   virtual Statement* mutate(Half*);
@@ -375,10 +550,12 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(BinaryOp*);
   virtual Statement* mutate(TernaryOp*);
   virtual Statement* mutate(ReductionOp*);
+  virtual Statement* mutate(kir::GridReduction*);
   virtual Statement* mutate(BroadcastOp*);
-  virtual Statement* mutate(ForLoop*);
-  virtual Statement* mutate(IfThenElse*);
-  virtual Statement* mutate(Allocate*);
+  virtual Statement* mutate(kir::ForLoop*);
+  virtual Statement* mutate(kir::IfThenElse*);
+  virtual Statement* mutate(kir::Allocate*);
+  virtual Statement* mutate(kir::Sync*);
 };
 
 class TORCH_CUDA_API OptInMutator {
@@ -417,8 +594,8 @@ class TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
   }
-  virtual Statement* mutate(TensorIndex*) {
-    AT_ERROR("Mutate not overriden for TensorIndex.");
+  virtual Statement* mutate(kir::TensorIndex*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorIndex.");
   }
   virtual Statement* mutate(Bool*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
@@ -430,7 +607,7 @@ class TORCH_CUDA_API OptInMutator {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
   }
   virtual Statement* mutate(NamedScalar*) {
-    AT_ERROR("Mutate not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -452,16 +629,22 @@ class TORCH_CUDA_API OptInMutator {
   virtual Statement* mutate(ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
   }
+  virtual Statement* mutate(kir::GridReduction*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GridReduction.");
+  }
   virtual Statement* mutate(BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");
   }
-  virtual Statement* mutate(ForLoop*) {
+  virtual Statement* mutate(kir::ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ForLoop.");
   }
-  virtual Statement* mutate(Allocate*) {
-    AT_ERROR("Mutate not overriden for Allocate.");
+  virtual Statement* mutate(kir::Allocate*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Allocate.");
   }
-  virtual Statement* mutate(IfThenElse*) {
+  virtual Statement* mutate(kir::Sync*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Sync.");
+  }
+  virtual Statement* mutate(kir::IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IfThenElse.");
   }
 };

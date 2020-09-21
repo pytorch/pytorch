@@ -9,6 +9,7 @@ import weakref
 from torch._C import _add_docstr
 from numbers import Number
 import functools
+from typing import Optional
 
 
 def _wrap_type_error_to_not_implemented(f):
@@ -54,13 +55,13 @@ class Tensor(torch._C._TensorBase):
                 if self.is_quantized:
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
-                    elif self.qscheme() == torch.per_channel_affine:
+                    elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                         quantizer_params = self.qscheme(), \
                             self.q_per_channel_scales(), \
                             self.q_per_channel_zero_points(), \
                             self.q_per_channel_axis()
                     else:
-                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                        raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
                     new_tensor = torch._utils._rebuild_qtensor(
                         new_storage,
                         self.storage_offset(),
@@ -105,7 +106,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params = (torch.per_tensor_affine,
                                     self.q_scale(),
                                     self.q_zero_point())
-            elif self.qscheme() == torch.per_channel_affine:
+            elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                 # convert scales and zero points to tuple to avoid recursive calls
                 # when/if we get multi-axis quantized tensors in the future, the shape
                 # is recoverable from the main tensor shape
@@ -114,7 +115,7 @@ class Tensor(torch._C._TensorBase):
                                     self.q_per_channel_zero_points(),
                                     self.q_per_channel_axis())
             else:
-                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
+                raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             args = (self.storage(),
                     self.storage_offset(),
                     tuple(self.size()),
@@ -394,8 +395,10 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
-             center=True, pad_mode='reflect', normalized=False, onesided=True):
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
         r"""See :func:`torch.stft`
 
         .. warning::
@@ -408,23 +411,27 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
                 win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided
+                onesided=onesided, return_complex=return_complex
             )
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
-                          pad_mode, normalized, onesided)
+                          pad_mode, normalized, onesided, return_complex=return_complex)
 
-    def istft(self, n_fft, hop_length=None, win_length=None, window=None,
-              center=True, normalized=False, onesided=True, length=None):
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(
                 Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
-                window=window, center=center, normalized=normalized, onesided=onesided, length=None
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
             )
         return torch.istft(self, n_fft, hop_length, win_length, window, center,
-                           normalized, onesided, length)
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         relevant_args = (self,)
@@ -690,6 +697,8 @@ class Tensor(torch._C._TensorBase):
         # CUDA devices are little-endian and tensors are stored in native byte
         # order. 1-byte entries are endian-agnostic.
         typestr = {
+            torch.complex64: "<c8",
+            torch.complex128: "<c16",
             torch.float16: "<f2",
             torch.float32: "<f4",
             torch.float64: "<f8",
@@ -807,30 +816,45 @@ class Tensor(torch._C._TensorBase):
             [name for name in names if not is_ellipsis(name)],
             ellipsis_idx)
 
-    def unflatten(self, dim, namedshape):
-        r"""Unflattens the named dimension :attr:`dim`, viewing it in the shape
-        specified by :attr:`namedshape`.
+    def unflatten(self, dim, sizes):
+        r"""Expands the dimension :attr:`dim` of the :attr:`self` tensor over multiple dimensions
+        of sizes given by :attr:`sizes`.
+
+        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Tuple[int]` as well
+          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (Tuple[(name: str, size: int)])
+          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
+          of elements in the original dim being unflattened.
 
         Arguments:
-            namedshape: (iterable of ``(name, size)`` tuples).
+            dim (Union[int, str]): Dimension to unflatten
+            sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 
-        Examples::
+        Examples:
+            >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
+            torch.Size([3, 2, 2, 1])
+            >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
+            tensor([[[-1.1772,  0.0180],
+                    [ 0.2412,  0.1431]],
 
-            >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
-            >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
-            >>> imgs.names, imgs.shape
-            (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
+                    [[-1.1819, -0.8899],
+                    [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
 
         .. warning::
             The named tensor API is experimental and subject to change.
-
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, namedshape)
-        names, sizes = unzip_namedshape(namedshape)
+
+        if not sizes:
+            raise RuntimeError("unflatten: sizes must be non-empty")
+
+        names = None
+        if isinstance(sizes, OrderedDict) or (isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))):
+            names, sizes = unzip_namedshape(sizes)
         return super(Tensor, self).unflatten(dim, sizes, names)
+
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""

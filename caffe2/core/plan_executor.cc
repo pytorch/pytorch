@@ -54,7 +54,7 @@ class ExceptionWrapper {
 struct NetDefInfo {
   const NetDef* netDef;
   // in order to keep the "override existing nets" on the top-level workflow,
-  // we need to makr the nets that already exist so that we can override them
+  // we need to mark the nets that already exist so that we can override them
   // exactly once.
   bool needsOverride;
 };
@@ -144,7 +144,7 @@ inline bool getShouldStop(const Blob* b) {
 /**
  * Injects a blob named 'GLOBAL_WORKSPACE_ID' for each workspace, only if
  * another blob named 'NODE_ID' is present. 'NODE_ID' blob can be used in a
- * distribued run and in this case 'GLOBAL_WORKSPACE_ID' can be used across
+ * distributed run and in this case 'GLOBAL_WORKSPACE_ID' can be used across
  * machines for other purposes (e.g. to support model parallelism). Essentially,
  * 'GLOBAL_WORKSPACE_ID' is an identifier for a workspace that is unique across
  * all 'NODE_ID's.
@@ -550,10 +550,6 @@ bool RunPlanOnWorkspace(
     LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
               << net_def.type() << "', #ops: " << net_def.op_size()
               << ", num_workers: " << net_def.num_workers();
-    for (int j = 0; j < net_def.op_size(); j++) {
-      auto op = net_def.op(j);
-      LOG(INFO) << op.type();
-    }
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

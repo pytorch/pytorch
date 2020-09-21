@@ -12,7 +12,8 @@ namespace c10d {
 void broadcast_coalesced(
     std::shared_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
-    size_t buffer_size);
+    size_t buffer_size,
+    int rank = 0);
 
 // This class passes bucket contents tensor (for multiple replicas) to
 // DDP communication hook.
@@ -20,22 +21,29 @@ void broadcast_coalesced(
 // mappings as well.
 class GradBucket {
  public:
-  explicit GradBucket(std::vector<at::Tensor> tensors);
-  const std::vector<at::Tensor>& getTensors();
+  explicit GradBucket(const std::vector<at::Tensor>& tensors)
+      : tensors_(tensors) {}
+  // Each tensor in the list that getTensors returns refers to the replica on
+  // each device. There will be multiple replicas only in the case of single
+  // process multiple device mode. In the single process single device mode,
+  // this list would consist of only a single tensor.
+  const std::vector<at::Tensor>& getTensors() const {
+    return tensors_;
+  }
 
  private:
   std::vector<at::Tensor> tensors_;
 };
 
-// DDP's c10d reducer allows communcation hooks defined as a sub class
+// DDP's c10d reducer allows communication hooks defined as a sub class
 // of CommHookInterface. CommHookInterface is an abstract class and can
 // be used to implement both Python and CPP hooks.
 struct TORCH_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
-  // runHook takes a GradBucket type bucket and passses the tensors of
-  // this grad bucket to hook's callaback. This function is called once
+  // runHook takes a GradBucket type bucket and passes the tensors of
+  // this grad bucket to hook's callback. This function is called once
   // the bucket is ready. The hook can perform whatever processing is
   // needed and return a Future that will hold the new value of the grad
   // bucket's tensors once ready.
@@ -61,7 +69,7 @@ class TORCH_API PythonCommHook : public CommHookInterface {
   PythonCommHook(py::object state, py::object hook);
 
   ~PythonCommHook() override {
-    pybind11::gil_scoped_acquire ag;
+    py::gil_scoped_acquire ag;
     state_.dec_ref();
     hook_.dec_ref();
     // explicitly setting PyObject* state_ and hook_ to nullptr to prevent

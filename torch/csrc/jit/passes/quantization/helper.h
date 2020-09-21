@@ -29,6 +29,8 @@ TORCH_API bool isWeight(Value* v);
 // quantize
 TORCH_API bool isBiasOfConvOrLinear(Value* v);
 
+TORCH_API bool isEmbeddingBagNonInput(Value* v);
+
 // Get the use as scalar input of clamp ops for the input value
 c10::optional<Use> getClampScalarInputUse(Value* v);
 
@@ -43,6 +45,12 @@ TORCH_API bool isScalar(Value* v);
 
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
+
+// Converts a mangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+// into an unmangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+TORCH_API std::string removeTorchMangle(const std::string& orig_name);
 
 // Return the module name that corresponds to the value.
 TORCH_API c10::optional<std::string> getModuleName(Value* value);
@@ -92,6 +100,9 @@ TORCH_API bool nodeQuantizable(
     Node* n,
     QuantType quant_type = QuantType::STATIC);
 
+// Nodes which only require quantization of weight value, eg. embedding_bag
+bool isWeightOnlyStaticQuantOp(Node* n);
+
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
 TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
@@ -102,6 +113,13 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // Check if `use` is a CallFunction of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
+    const Use& use,
+    const std::string& func_name,
+    c10::optional<int> nth_arg);
+
+// Check if `use` is a AtenFunction of name `func_name` and if value
+// `v` is the nth argument (if provided) of the function
+bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
     c10::optional<int> nth_arg);

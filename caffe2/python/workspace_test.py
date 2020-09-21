@@ -15,7 +15,7 @@ from caffe2.python import core, test_util, workspace, model_helper, brew
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 
 
 class TestWorkspace(unittest.TestCase):
@@ -648,6 +648,7 @@ class TestTransform(htu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=1, max_value=10),
            output_dim=st.integers(min_value=1, max_value=10),
            batch_size=st.integers(min_value=1, max_value=10))
+    @settings(deadline=10000)
     def test_registry_invalid(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -657,6 +658,7 @@ class TestTransform(htu.HypothesisTestCase):
                 m.net.Proto())
 
     @given(value=st.floats(min_value=-1, max_value=1))
+    @settings(deadline=10000)
     def test_apply_transform_if_faster(self, value):
 
         init_net = core.Net("init_net")

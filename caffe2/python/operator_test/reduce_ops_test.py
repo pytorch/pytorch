@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -83,6 +83,7 @@ class TestReduceOps(serial.SerializedTestCase):
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), keepdims=st.booleans(),
            num_axes=st.integers(1, 3), **hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_sum(self, n, m, k, t, keepdims, num_axes, gc, dc):
         X = np.random.randn(n, m, k, t).astype(np.float32)
         self.run_reduce_op_test(
@@ -96,6 +97,7 @@ class TestReduceOps(serial.SerializedTestCase):
 
     @given(n=st.integers(1, 3), m=st.integers(1, 3), k=st.integers(1, 3),
            keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_reduce_l1(self, n, m, k, keepdims, num_axes, gc, dc):
         X = np.arange(n * m * k, dtype=np.float32) - 0.5
         np.random.shuffle(X)
@@ -204,7 +206,8 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
         self.assertGradientChecks(
             device, op, in_data, 0, [0], stepsize=1e-2, threshold=1e-2)
 
-    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_front_sum(self, num_reduce_dim, gc, dc):
         X = np.random.rand(7, 4, 3, 5).astype(np.float32)
 
@@ -251,6 +254,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             np.testing.assert_allclose(output, ref_sum(X)[0], atol=1e-3)
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_reduce_front_sum_with_length(self, dc, gc):
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
@@ -269,7 +273,8 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceFrontSum", ref_sum, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
 
-    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_front_mean(self, num_reduce_dim, gc, dc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -282,6 +287,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceFrontMeanGradient", X, ref_mean, num_reduce_dim)
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_reduce_front_mean_with_length(self, dc, gc):
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
@@ -359,6 +365,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             ["X", "lengths"], ref_max)
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_back_sum(self, dc, gc):
         num_reduce_dim = 1
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
@@ -372,6 +379,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceBackSumGradient", X, ref_sum, num_reduce_dim)
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_back_sum_with_length(self, dc, gc):
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
@@ -390,7 +398,8 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceBackSum", ref_sum, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
 
-    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @settings(deadline=10000)
     def test_reduce_back_mean(self, num_reduce_dim, dc, gc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -403,6 +412,7 @@ class TestReduceFrontReductions(serial.SerializedTestCase):
             "ReduceBackMeanGradient", X, ref_mean, num_reduce_dim)
 
     @given(**hu.gcs)
+    @settings(deadline=1000)
     def test_reduce_back_mean_with_length(self, dc, gc):
         num_reduce_dim = 1
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)

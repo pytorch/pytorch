@@ -138,6 +138,63 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       {spec.max_batch_size, 50});
 }
 
+TEST(BoundShapeInference, SparseLengthsSum8BitRowwiseSparse) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "SparseLengthsSum8BitRowwiseSparse",
+      "",
+      {"Weights", "Data", "Lengths", "Mapping"},
+      {"Out"},
+      {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Weights",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1000, 58},
+          TensorProto_DataType_INT8));
+  shape_map.emplace(
+      "Mapping",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT},
+          {2000},
+          TensorProto_DataType_INT32));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Weights",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {1000, 58},
+      TensorProto_DataType_INT8);
+  verifyShapeInfo(
+      out_shape,
+      "Mapping",
+      {TensorBoundShape_DimType_CONSTANT},
+      {2000},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Data",
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
+      {spec.max_batch_size * spec.max_seq_size},
+      TensorProto_DataType_INT64);
+  verifyShapeInfo(
+      out_shape,
+      "Lengths",
+      {TensorBoundShape_DimType_BATCH},
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Out",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 50});
+}
+
 TEST(BoundShapeInference, SparseLengthsSumFused4BitRowwise) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(

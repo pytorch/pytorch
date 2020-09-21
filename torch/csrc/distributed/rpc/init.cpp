@@ -95,7 +95,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // unqualified "hash" function call. However the
           // argument-dependent lookup for the function "hash" doesn't get
           // triggered in this context because it conflicts with the struct
-          // torch::hash, so  we need to use the qualified name
+          // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
           .def("__repr__", [](const WorkerInfo& workerInfo) {
@@ -342,6 +342,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_type",
+              // Intentionally not releasing GIL, as most accesses just
+              // retrieve cached type py::object
+              &PyRRef::getRRefType,
+              R"(
+                  Returns the type of the data object referenced by this
+                  ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. On a user, this will trigger an
+                  RPC to fetch the ``type`` object from the owner. After this
+                  function is run once, the ``type`` object is cached by the
+                  ``RRef``, and subsequent invocations no longer trigger RPC.
+              )")
+          .def(
               "_get_future",
               [](const PyRRef& self) {
                 return std::make_shared<jit::PythonFutureWrapper>(
@@ -455,44 +468,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_TENSORPIPE
+
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
-      module,
-      "TensorPipeRpcBackendOptions",
-      rpcBackendOptions,
-      R"(
-          The backend options for
-          :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
-          :class:`~torch.distributed.rpc.RpcBackendOptions`.
-
-          Arguments:
-              num_worker_threads (int, optional): The number of threads in the
-                  thread-pool used by
-                  :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
-                  requests (default: 16).
-              rpc_timeout (float, optional): The default timeout, in seconds,
-                  for RPC requests (default: 60 seconds). If the RPC has not
-                  completed in this timeframe, an exception indicating so will
-                  be raised. Callers can override this timeout for individual
-                  RPCs in :meth:`~torch.distributed.rpc.rpc_sync` and
-                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
-              init_method (str, optional): The URL to initialize the distributed
-                  store used for rendezvous. It takes any value accepted for the
-                  same argument of :meth:`~torch.distributed.init_process_group`
-                  (default: ``env://``).
-      )")
+      module, "_TensorPipeRpcBackendOptionsBase", rpcBackendOptions)
       .def(
           py::init<
               int,
               optional<std::vector<std::string>>,
               optional<std::vector<std::string>>,
               float,
-              std::string>(),
+              std::string,
+              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod)
+          py::arg("init_method") = kDefaultInitMethod,
+          py::arg("device_maps") =
+              std::unordered_map<std::string, tensorpipe::DeviceMap>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -500,20 +495,33 @@ PyObject* rpc_init(PyObject* /* unused */) {
               The number of threads in the thread-pool used by
               :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
               requests.
-          )");
+          )")
+      .def_readwrite(
+          "device_maps",
+          &TensorPipeRpcBackendOptions::deviceMaps,
+          R"(The device map locations.)")
+      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init<
-              const std::shared_ptr<::c10d::Store>& /* store */,
-              std::string /* selfName */,
-              worker_id_t /* selfId */,
-              int /* worldSize */,
-              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
-              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      std::string selfName,
+                      worker_id_t selfId,
+                      int worldSize,
+                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      TensorPipeRpcBackendOptions opts) {
+            return std::make_shared<TensorPipeAgent>(
+                store,
+                std::move(selfName),
+                selfId,
+                worldSize,
+                std::move(processGroup),
+                std::move(opts),
+                std::make_unique<RequestCallbackImpl>());
+          }),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
@@ -542,7 +550,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_reverse_device_maps",
+          // intentionally not releasing GIL to avoid unnecessary context switch
+          &TensorPipeAgent::setReverseDeviceMaps);
+
+#endif // USE_TENSORPIPE
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
@@ -751,9 +765,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             applications responsibility to make sure that the above assumption
             always holds.
       )");
-  module.def(
-      "_disable_jit_rref_pickle",
-      &disableJitRRefPickle);
+  module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
 }

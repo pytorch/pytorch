@@ -395,6 +395,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
     }
   });
 
+  AT_CUDA_CHECK(cudaGetLastError());
+
   if (inputSize == 1) {
     result.resize_({n_sample});
   }

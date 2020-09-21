@@ -9,6 +9,7 @@
 ## PyTorch
 
 .coverage
+coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
@@ -49,15 +50,15 @@ test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
-torch/__init__.pyi
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
+torch/_VF.pyi
 torch/nn/functional.pyi
-torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
+torch/testing/_internal/data/*.pt
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
@@ -108,9 +109,6 @@ env
 
 # macOS dir files
 .DS_Store
-
-# Symbolic files
-tools/shared/cwrap_common.py
 
 # Ninja files
 .ninja_deps
