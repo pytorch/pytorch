@@ -121,6 +121,8 @@ class TestLinalg(TestCase):
         m = torch.randn(5, 5).to(device=device,
                                  dtype=torch.result_type(a, b))
         for op in (torch.addr, torch.Tensor.addr):
+            # pass the integer 1 to the torch.result_type as both
+            # the default values of alpha and beta are integers (alpha=1, beta=1)
             desired_dtype = torch.result_type(m, 1)
             result = op(m, a, b)
             self.assertEqual(result.dtype, desired_dtype)
