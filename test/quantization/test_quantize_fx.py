@@ -368,6 +368,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
 
+    @skipIfNoFBGEMM
     def test_qat_and_script(self):
         class TwoLayerLinear(nn.Module):
             def __init__(self):
@@ -403,8 +404,83 @@ class TestQuantizeFx(QuantizationTestCase):
         # run one round to make sure model runs
         x = torch.randn(5, 5)
         scripted(x)
-        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="activation_post_process', 4, exactly=True) \
+        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
                    .run(scripted.graph)
+
+        # disable fake_quant and observer
+        for epoch in range(3):
+            if epoch == 1:
+                scripted.apply(torch.quantization.disable_observer)
+            if epoch == 2:
+                scripted.apply(torch.quantization.disable_fake_quant)
+
+        # ensure the fake_quant and observer have been disabled.
+        matches = ['.fake_quant_enabled', '.observer_enabled']
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([0], dtype=torch.uint8))
+
+        # enable them back
+        scripted.apply(torch.quantization.enable_fake_quant)
+        scripted.apply(torch.quantization.enable_observer)
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([1], dtype=torch.uint8))
+
+    @skipIfNoFBGEMM
+    def test_save_observer_state_dict(self):
+        class TwoLayerLinear(nn.Module):
+            def __init__(self):
+                super(TwoLayerLinear, self).__init__()
+                self.fc1 = nn.Linear(5, 5)
+                self.fc2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.subm = TwoLayerLinear()
+                self.fc = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.subm(x)
+                x = self.fc(x)
+                return x
+
+        model = Model().eval()
+        qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
+
+        # symbolically trace
+        model = symbolic_trace(model)
+        model = prepare_static_fx(model, qconfig_dict)
+
+        # run it through input
+        x = torch.randn(5, 5)
+        model(x)
+
+        quant = convert_static_fx(model)
+
+        # save state_dict of model
+        import io
+        b = io.BytesIO()
+        torch.save(model.state_dict(), b)
+        b.seek(0)
+
+        # Load the stats into new model
+        model_2 = Model().eval()
+        model_2 = symbolic_trace(model_2)
+        model_2 = prepare_static_fx(model_2, qconfig_dict)
+
+        loaded_dict = torch.load(b)
+        model_2.load_state_dict(loaded_dict)
+
+        quant_2 = convert_static_fx(model_2)
+
+        # Verify that loaded state dict produces same results.
+        self.assertEqual(quant(x), quant_2(x))
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops

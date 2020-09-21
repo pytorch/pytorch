@@ -21,6 +21,8 @@ conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 1D convolution over an input signal composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
@@ -56,6 +58,8 @@ conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 
 Applies a 2D convolution over an input image composed of several input
 planes.
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
@@ -95,6 +99,8 @@ conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 3D convolution over an input image composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
@@ -130,6 +136,8 @@ conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
@@ -169,6 +177,8 @@ conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
@@ -210,6 +220,8 @@ conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
@@ -1659,6 +1671,8 @@ def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Shape:
 
