@@ -404,12 +404,12 @@
   self: grad / other
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
-  self: grad * tensor
-  tensor: grad * self
+  self: correct_dtype_gradients(self.scalar_type(), grad * tensor.conj())
+  tensor: correct_dtype_gradients(tensor.scalar_type(), grad * self.conj())
 
 - name: vdot(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("vdot: self")'
-  other: 'not_implemented("vdot: other")'
+  self: correct_dtype_gradients(self.scalar_type(), grad.conj() * other)
+  other: correct_dtype_gradients(other.scalar_type(), grad * self)
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
