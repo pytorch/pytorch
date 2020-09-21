@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
@@ -17,6 +18,7 @@ Node* CreateCastToBoolNode(Value* val, Graph* graph) {
   Node* cast_node = graph->create(onnx::Cast);
   cast_node->addInput(val);
   cast_node->i_(attr::to, ONNX_TYPE_BOOL);
+  cast_node->output()->setType(BoolType::get());
   return cast_node;
 }
 
@@ -228,6 +230,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return node->outputs().vec();
   }
+  GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
   for (Block* block : node->blocks()) {
@@ -242,7 +245,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
       block->return_node()->replaceInputWith(output, id_node->output());
     }
   }
-
+  GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
 }
 

@@ -4,14 +4,17 @@ import inspect
 import runpy
 import threading
 from functools import wraps
+from typing import List, Any, ClassVar
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+from torch.testing import \
+    (get_all_dtypes)
 
 try:
-    import psutil
+    import psutil  # type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -21,7 +24,7 @@ except ImportError:
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Each test method should have one of four signatures:
+#   (1) Each test method should have one of following five signatures:
 #
 #           (1a) testX(self, device)
 #
@@ -35,9 +38,10 @@ except ImportError:
 #                @dtypes(<list of dtypes> or <list of tuples of dtypes>)
 #                testX(self, devices, dtype)
 #
+#           (1e) @ops(<list of OpInfo instances>)
+#                testX(self, device, dtype, op)
 #
-#       Note that the decorators are required for signatures (1b), (1c) and
-#       (1d).
+#       Note that the decorators are required for signatures 1b--1e.
 #
 #       When a test like (1a) is called it will be given a device string,
 #       like 'cpu' or 'cuda:0.'
@@ -54,6 +58,10 @@ except ImportError:
 #
 #       Tests like (1d) take a devices argument like (1b) and a dtype
 #       argument from (1c).
+#
+#       Tests like (1e) are instantiated for each provided OpInfo instance,
+#       with dtypes specified by the OpInfo instance (unless overridden with
+#       an additional @dtypes decorator).
 #
 #   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
@@ -156,11 +164,28 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-device_type_test_bases = []
 
+# set type to List[Any] due to mypy list-of-union issue:
+# https://github.com/python/mypy/issues/3351
+device_type_test_bases: List[Any] = list()
+
+def _construct_test_name(test_name, op, device_type, dtype):
+    if op is not None:
+        test_name += "_" + op.name
+
+    test_name += "_" + device_type
+
+    if dtype is not None:
+        if isinstance(dtype, (list, tuple)):
+            for d in dtype:
+                test_name += "_" + str(d).split('.')[1]
+        else:
+            test_name += "_" + str(dtype).split('.')[1]
+
+    return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type = 'generic_device_type'
+    device_type: str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -204,47 +229,89 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, name, test):
-        test_name = name + "_" + cls.device_type
+    def instantiate_test(cls, name, test, *, generic_cls=None):
 
-        dtypes = cls._get_dtypes(test)
-        if dtypes is None:  # Test has no dtype variants
-            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+        def instantiate_test_helper(cls, name, *, test, dtype, op):
 
-            @wraps(test)
-            def instantiated_test(self, test=test):
-                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                return test(self, device_arg)
+            # Constructs the test's name
+            test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
-            setattr(cls, test_name, instantiated_test)
-        else:  # Test has dtype variants
-            for dtype in dtypes:
-                # Constructs dtype suffix
-                if isinstance(dtype, (list, tuple)):
-                    dtype_str = ""
-                    for d in dtype:
-                        dtype_str += "_" + str(d).split('.')[1]
-                else:
-                    dtype_str = "_" + str(dtype).split('.')[1]
-
-                dtype_test_name = test_name + dtype_str
-                assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
-
+            # wraps instantiated test with op decorators
+            # NOTE: test_wrapper exists because we don't want to apply
+            #   op-specific decorators to the original test.
+            #   Test-sepcific decorators are applied to the original test,
+            #   however.
+            if op is not None and op.decorators is not None:
                 @wraps(test)
-                def instantiated_test(self, test=test, dtype=dtype):
-                    device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                    # Sets precision and runs test
-                    # Note: precision is reset after the test is run
-                    guard_precision = self.precision
-                    try :
-                        self.precision = self._get_precision_override(test, dtype)
-                        result = test(self, device_arg, dtype)
-                    finally:
-                        self.precision = guard_precision
+                def test_wrapper(*args, **kwargs):
+                    return test(*args, **kwargs)
 
-                    return result
+                for decorator in op.decorators:
+                    test_wrapper = decorator(test_wrapper)
 
-                setattr(cls, dtype_test_name, instantiated_test)
+                test_fn = test_wrapper
+            else:
+                test_fn = test
+
+            # Constructs the test
+            @wraps(test)
+            def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
+                if op is not None and op.should_skip(generic_cls.__name__, name,
+                                                     self.device_type, dtype):
+                    self.skipTest("Skipped!")
+
+                device_arg: str = cls.get_primary_device()
+                if hasattr(test_fn, 'num_required_devices'):
+                    device_arg = cls.get_all_devices()
+
+                # Sets precision and runs test
+                # Note: precision is reset after the test is run
+                guard_precision = self.precision
+                try:
+                    self.precision = self._get_precision_override(test_fn, dtype)
+                    args = (arg for arg in (device_arg, dtype, op) if arg is not None)
+                    result = test_fn(self, *args)
+                finally:
+                    self.precision = guard_precision
+
+                return result
+
+            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+            setattr(cls, test_name, instantiated_test)
+
+        # Handles tests using the ops decorator
+        if hasattr(test, "op_list"):
+            for op in test.op_list:
+                # Acquires dtypes, using the op data if unspecified
+                dtypes = cls._get_dtypes(test)
+                if dtypes is None:
+                    if cls.device_type == 'cpu' and op.dtypesIfCPU is not None:
+                        dtypes = op.dtypesIfCPU
+                    elif (cls.device_type == 'cuda' and not TEST_WITH_ROCM
+                          and op.dtypesIfCUDA is not None):
+                        dtypes = op.dtypesIfCUDA
+                    elif (cls.device_type == 'cuda' and TEST_WITH_ROCM
+                          and op.dtypesIfROCM is not None):
+                        dtypes = op.dtypesIfROCM
+                    else:
+                        dtypes = op.dtypes
+
+                # Inverts dtypes if the function wants unsupported dtypes
+                if test.unsupported_dtypes_only is True:
+                    dtypes = [d for d in get_all_dtypes() if d not in dtypes]
+                dtypes = dtypes if dtypes is not None else (None,)
+                for dtype in dtypes:
+                    instantiate_test_helper(cls,
+                                            name,
+                                            test=test,
+                                            dtype=dtype,
+                                            op=op)
+        else:
+            # Handles tests that don't use the ops decorator
+            dtypes = cls._get_dtypes(test)
+            dtypes = tuple(dtypes) if dtypes is not None else (None,)
+            for dtype in dtypes:
+                instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -255,6 +322,11 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    primary_device: ClassVar[str]
+    cudnn_version: ClassVar[Any]
+    no_magma: ClassVar[bool]
+    no_cudnn: ClassVar[bool]
+
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -354,7 +426,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-        device_type_test_class = type(class_name, (base, empty_class), {})
+
+        # type set to Any and suppressed due to unsupport runtime class:
+        # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+        device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -365,8 +440,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     test = test.__func__
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
+                sig = inspect.signature(device_type_test_class.instantiate_test)
+                if len(sig.parameters) == 3:
+                    # Instantiates the device-specific tests
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
+                else:
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
@@ -384,6 +464,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
+
+# Decorator that defines the ops a test should be run with
+# The test signature must be:
+#   <test_name>(self, device, dtype, op)
+# For example:
+# @ops(unary_ufuncs)
+# test_numerics(self, device, dtype, op):
+#   <test_code>
+class ops(object):
+    def __init__(self, op_list, *, unsupported_dtypes_only=False):
+        self.op_list = op_list
+        self.unsupported_dtypes_only = unsupported_dtypes_only
+
+    def __call__(self, fn):
+        fn.op_list = self.op_list
+        fn.unsupported_dtypes_only = self.unsupported_dtypes_only
+        return fn
 
 # Decorator that skips a test if the given condition is true.
 # Notes:

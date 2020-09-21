@@ -72,7 +72,6 @@ Tensor& glu_backward_out(Tensor& grad_input,
   at::sigmoid_out(split_grad_input.first, split_input.second);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(split_grad_input.second)
     .add_input(split_grad_input.first)
     .add_input(split_input.first)
@@ -118,7 +117,6 @@ Tensor& hardglu_backward_out(Tensor& grad_input,
   at::hardsigmoid_out(split_grad_input.first, split_input.second);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(split_grad_input.second)
     .add_input(split_input.second)
     .add_input(split_input.first)

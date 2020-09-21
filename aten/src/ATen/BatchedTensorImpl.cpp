@@ -103,7 +103,7 @@ bool BatchedTensorImpl::has_storage() const {
 }
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+  TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   auto tensor_dim = tensor.dim();
   TORCH_CHECK(
       tensor_dim <= kVmapMaxTensorDims,
@@ -117,7 +117,7 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
 }
 
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  const auto* batched = maybeGetBatched(tensor);
+  const auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     BatchDims bdims;
     bdims.emplace_back(level, dim);

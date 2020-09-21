@@ -8,7 +8,7 @@ import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 
 
 class TestSpecializedSegmentOps(hu.HypothesisTestCase):
@@ -296,6 +296,7 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
         normalize_by_lengths=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_sparse_lengths_sum_8BitsRowwiseOp_cpu_invalid_index(
         self, batchsize, blocksize, normalize_by_lengths, gc, dc
     ):

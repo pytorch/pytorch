@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
@@ -18,6 +18,7 @@ class RMACRegionsOpTest(hu.HypothesisTestCase):
         scales=st.integers(1, 3),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test(self, n, h, w, scales, gc, dc):
         X = np.random.rand(n, 64, h, w).astype(np.float32)
         overlap = 0.4

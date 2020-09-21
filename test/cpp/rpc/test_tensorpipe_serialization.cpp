@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <tensorpipe/core/message.h>
-#include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/torch.h>
 
 #include <memory>
@@ -58,7 +58,11 @@ TEST(TensorpipeSerialize, Base) {
   for (int i = 0; i < recvingTpMessage.payloads.size(); i++) {
     tensorpipe::Message::Payload& srcPayload = sendingTpMessage.payloads[i];
     tensorpipe::Message::Payload& dstPayload = recvingTpMessage.payloads[i];
-    memcpy(dstPayload.data, srcPayload.data, srcPayload.length);
+    if (srcPayload.length) {
+      // Empty vector's data() can return nullptr, use the length to avoid
+      // coying into nullptr
+      memcpy(dstPayload.data, srcPayload.data, srcPayload.length);
+    }
   }
   for (int i = 0; i < recvingTpMessage.tensors.size(); i++) {
     tensorpipe::Message::Tensor& srcTensor = sendingTpMessage.tensors[i];

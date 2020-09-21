@@ -47,16 +47,11 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python aten/src/ATen/gen.py \
+time python -m tools.codegen.gen \
   -s aten/src/ATen \
-  -d build/aten/src/ATen \
-  aten/src/ATen/Declarations.cwrap \
-  aten/src/THCUNN/generic/THCUNN.h \
-  aten/src/ATen/nn.yaml \
-  aten/src/ATen/native/native_functions.yaml
+  -d build/aten/src/ATen
 
 # Copy some required files
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
