@@ -3331,6 +3331,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
+            Note: When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
+            used internally will actually be trilinear. However, when the input is 4-D,
+            the interpolation mode will legitimately be bilinear.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
