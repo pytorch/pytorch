@@ -404,12 +404,11 @@ void TensorPipeAgent::pipeRead(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     std::function<void(
         const tensorpipe::Error&, Message&&, DevicesContext&&)> fn) {
-  pipe->readDescriptor([fn{std::move(fn)}, pipe](
+  pipe->readDescriptor([fn{std::move(fn)}, pipe, this](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
     // TODO: pass these streams to TensorPipe when it can accept streams
-    //auto streams = getStreamsForTpMessage(tpMessage);
-    DevicesContext ctx;
+    DevicesContext ctx(reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
 
     if (error) {
       fn(error, Message(), std::move(ctx));

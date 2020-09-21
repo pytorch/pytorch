@@ -150,23 +150,30 @@ struct DevicesContext {
   void synchronize() {}
 
 #ifndef USE_CUDA
-  DevicesContext() {}
+  explicit DevicesContext(bool noCuda=false) noCuda_(noCuda) {}
 #else
-  DevicesContext() : streams_([]() -> std::vector<CUDAStream> {
-    auto deviceNum = at::cuda::device_count();
-    std::vector<CUDAStream> streams;
-    streams.reserve(deviceNum);
-    for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
-      streams.emplace_back(at::cuda::getStreamFromPool(idx));
-    }
-    return streams;
-  }()) {}
+  explicit DevicesContext(bool noCuda=false)
+      : noCuda_(noCuda),
+        streams_([this]() -> std::vector<CUDAStream> {
+          if (noCuda_) {
+            return {};
+          }
+
+          auto deviceNum = at::cuda::device_count();
+          std::vector<CUDAStream> streams;
+          streams.reserve(deviceNum);
+          for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
+            streams.emplace_back(at::cuda::getStreamFromPool(idx));
+          }
+          return streams;
+        }()) {}
 
   inline const std::vector<CUDAStream>& getCUDAStreams() const {
     return streams_;
   }
 
  private:
+  const bool noCuda_;
   std::vector<CUDAStream> streams_;
 
 #endif
