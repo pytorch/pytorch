@@ -179,7 +179,7 @@ def preprocess(
         if show_progress:
             print(
                 filepath, "->",
-                get_hip_file_path(filepath), result)
+                get_hip_file_path(filepath, is_pytorch_extension), result)
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -477,13 +477,13 @@ def replace_extern_shared(input_string):
     return output_string
 
 
-def get_hip_file_path(filepath):
+def get_hip_file_path(filepath, is_pytorch_extension=False):
     """
     Returns the new name of the hipified file
     """
-    # At the moment, some files are HIPified in place.  The predicate
+    # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    if not is_out_of_place(filepath):
+    if not is_pytorch_extension and not is_out_of_place(filepath):
         return filepath
 
     dirpath, filename = os.path.split(filepath)
@@ -492,10 +492,8 @@ def get_hip_file_path(filepath):
     # Here's the plan:
     #
     # In general, we need to disambiguate the HIPified filename so that
-    # it gets a different name from the original Caffe2 filename, so
-    # that we don't overwrite the original file.  (Additionally,
-    # hcc historically had a bug where if you had two files with
-    # the same basename, they would clobber each other.)
+    # it gets a different name from the original filename, so
+    # that we don't overwrite the original file
     #
     # There's a lot of different naming conventions across PyTorch
     # and Caffe2, but the general recipe is to convert occurrences
@@ -509,12 +507,18 @@ def get_hip_file_path(filepath):
     #
     #   - If the file name contains "CUDA", replace it with "HIP", AND
     #
-    # If NONE of the above occurred, then insert "hip" in the file path
-    # as the direct parent folder of the file
+    #   - ALWAYS replace '.cu' with '.hip', because those files
+    #     contain CUDA kernels that needs to be hipified and processed with
+    #     hip compiler
     #
-    # Furthermore, ALWAYS replace '.cu' with '.hip', because those files
-    # contain CUDA kernels that needs to be hipified and processed with
-    # hcc compiler
+    #   - If we are not hipifying a PyTorch extension, and the parent
+    #     directory name did not change as a result of the above
+    #     transformations, insert "hip" in the file path
+    #     as the direct parent folder of the file
+    #
+    #   - If we are hipifying a PyTorch extension, and the parent directory
+    #     name as well as the filename (incl. extension) did not change as
+    #     a result of the above transformations, insert "_hip" in the filename
     #
     # This isn't set in stone; we might adjust this to support other
     # naming conventions.
@@ -522,6 +526,7 @@ def get_hip_file_path(filepath):
     if ext == '.cu':
         ext = '.hip'
 
+    orig_filename = filename
     orig_dirpath = dirpath
 
     dirpath = dirpath.replace('cuda', 'hip')
@@ -533,8 +538,11 @@ def get_hip_file_path(filepath):
     if dirpath != "caffe2/core":
         root = root.replace('THC', 'THH')
 
-    if dirpath == orig_dirpath:
+    if not is_pytorch_extension and dirpath == orig_dirpath:
         dirpath = os.path.join(dirpath, 'hip')
+
+    if is_pytorch_extension and dirpath == orig_dirpath and (root + ext) == orig_filename:
+        root = root + "_hip"
 
     return os.path.join(dirpath, root + ext)
 
@@ -659,7 +667,7 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
     with open(fin_path, 'r', encoding='utf-8') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -691,7 +699,7 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
                 or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ) or (is_pytorch_extension and any(filename in s for s in all_files)):
-                return templ.format(get_hip_file_path(m.group(1)))
+                return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
             return m.group(0)
         return repl
     output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
