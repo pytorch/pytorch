@@ -29,7 +29,8 @@ if is_available():
         _set_profiler_node_id,
         _is_current_rpc_agent_set,
         RpcBackendOptions,
-        _TensorPipeRpcBackendOptionsBase
+        _TensorPipeRpcBackendOptionsBase,
+        ProcessGroupRpcBackendOptions,
     )  # noqa: F401
     from .api import *  # noqa: F401
     from .backend_registry import BackendType
