@@ -4,13 +4,15 @@ import operator
 import numbers
 import pickle
 import copy
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+from pathlib import Path
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -108,7 +110,7 @@ class TestFX(JitTestCase):
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
-        class NoMutableCallDelegate(DefaultDelegate):
+        class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
@@ -125,7 +127,7 @@ class TestFX(JitTestCase):
         m = MyInplaceMod()
 
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m)
 
         # Test free function
         class MyInplaceMod2(torch.nn.Module):
@@ -134,7 +136,7 @@ class TestFX(JitTestCase):
                 return x
         m2 = MyInplaceMod2()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m2, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m2)
 
         # Test symbolic node as an arg
         class MyInplaceMod3(torch.nn.Module):
@@ -144,13 +146,13 @@ class TestFX(JitTestCase):
                 return x
         m3 = MyInplaceMod3()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m3, delegate_class=NoMutableCallDelegate)
+            NoMutableCallTracer().trace(m3)
 
     def test_leaf_module(self):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
-        class NoLeafModulesDelegate(DefaultDelegate):
-            def is_leaf_module(self, m):
+        class NoLeafModulesTracer(Tracer):
+            def is_leaf_module(self, m, qualname):
                 return False
 
         class MyReluMod(torch.nn.Module):
@@ -162,7 +164,7 @@ class TestFX(JitTestCase):
                 return self.relu(x)
 
         mrm = MyReluMod()
-        sym = symbolic_trace(mrm, delegate_class=NoLeafModulesDelegate)
+        sym = NoLeafModulesTracer().trace(mrm)
         for node in sym.graph.nodes:
             self.assertNotEqual(node.op, 'call_module')
 
@@ -219,8 +221,12 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, (a, b))
 
-    @skipIfRocm
     def test_native_callable(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        torch_root = Path(__file__).resolve().parent.parent
+        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch.ops.load_library(str(p))
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
@@ -318,7 +324,7 @@ class TestFX(JitTestCase):
             # 3) Returns the speficied return value
 
             # FIXME: The following code could be greatly simplified by symbolic_trace'ing
-            # the wrapper with a Delegate that considers the Wrapper instance a root
+            # the wrapper with a Tracer that considers the Wrapper instance a root
             # module, however, I can't get `__call__` exposed on TorchBind classes
             # without it messing up Python `hasattr` for some reason. More digging
             # into CPython's implementation of hasattr is probably in order...
@@ -374,7 +380,7 @@ class TestFX(JitTestCase):
             self.assertTrue(node.name != "getattr")
 
     def test_node_tagging(self):
-        class TaggingDelegate(DefaultDelegate):
+        class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
@@ -386,7 +392,7 @@ class TestFX(JitTestCase):
                 return a + b
 
         m = M()
-        g = symbolic_trace(m, TaggingDelegate).graph
+        g = TaggingTracer().trace(m).graph
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
@@ -416,6 +422,20 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2(torch.rand(4, 4))
 
+    def test_symbolic_trace_sequential(self):
+        class Simple(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        seq = torch.nn.Sequential(
+            Simple(),
+            Simple(),
+            Simple()
+        )
+        traced = symbolic_trace(seq)
+        x = torch.rand(3, 4)
+        self.assertEqual(traced(x), seq(x))
+
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):
             def forward(self, x):
@@ -426,8 +446,16 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
-        st = SimpleTest()
-        traced = symbolic_trace(st)
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.st = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.st(x)
+
+        n = Nested()
+        traced = symbolic_trace(n)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
         x = torch.rand(3, 4)
@@ -445,8 +473,31 @@ class TestFX(JitTestCase):
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
+        self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
         self.assertEqual(copied(x), transformed(x))
+
+    def test_deepcopy_with_submods_params(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.relu(x) + self.param
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(x) - self.param
+
+        baz = Baz()
+        traced = symbolic_trace(baz)
+        copied = copy.deepcopy(traced)
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
@@ -511,6 +562,43 @@ class TestFX(JitTestCase):
         stringed = str(traced.graph)
         for s in ['args', 'kwargs', 'uses']:
             assert s in stringed
+
+    def test_graph_fns(self):
+        g = Graph()
+        a = g.placeholder('a')
+        b = g.call_module('linear', (a,))
+        c = g.get_param('bias')
+        d = g.call_method('add', (b, c))
+        e = g.call_function(torch.sin, (d,))
+        g.output(e)
+        mod = torch.nn.Module()
+        mod.linear = torch.nn.Linear(3, 4)
+        mod.bias = torch.rand(4)
+        gm = GraphModule(mod, g)
+        input = torch.rand(3)
+        r = gm(input)
+        ref = torch.sin(mod.linear(input) + mod.bias)
+        self.assertEqual(r, ref)
+
+    def test_construct_root_dict(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+
+        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
+        add_param : torch.Tensor = torch.rand(3, 4)
+        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+            {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
+
+        assert 'self.foo.bar.baz' in gm.code
+
+        x : torch.Tensor = torch.rand(3, 3)
+        out : torch.Tensor = gm(x)
+        ref_out : torch.Tensor = linear_mod(x) + add_param
+        self.assertEqual(out, ref_out)
 
 
 if __name__ == '__main__':

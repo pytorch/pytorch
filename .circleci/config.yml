@@ -23,19 +23,19 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:canary
+      image: windows-server-2019-nvidia:stable
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:canary
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 commands:
 
@@ -349,33 +349,6 @@ pytorch_windows_params: &pytorch_windows_params
     TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>
     JOB_EXECUTOR: <<parameters.executor>>
-caffe2_params: &caffe2_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    build_ios:
-      type: string
-      default: ""
-    docker_image:
-      type: string
-      default: ""
-    use_cuda_docker_runtime:
-      type: string
-      default: ""
-    build_only:
-      type: string
-      default: ""
-    resource_class:
-      type: string
-      default: "large"
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    BUILD_IOS: << parameters.build_ios >>
-    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
-    DOCKER_IMAGE: << parameters.docker_image >>
-    BUILD_ONLY: << parameters.build_only >>
-  resource_class: << parameters.resource_class >>
 binary_linux_build_params: &binary_linux_build_params
   parameters:
     build_environment:
@@ -642,7 +615,8 @@ jobs:
           EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
-          elif [[ ${BUILD_ENVIRONMENT} == *caffe2* ]]; then
+          elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+            echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
             echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
@@ -813,206 +787,6 @@ jobs:
             .jenkins/pytorch/win-test.sh
       - store_test_results:
           path: test/test-reports
-  caffe2_linux_build:
-    <<: *caffe2_params
-    machine:
-      image: ubuntu-1604:202007-01
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Build
-        no_output_timeout: "1h"
-        command: |
-          set -e
-          cat >/home/circleci/project/ci_build_script.sh \<<EOL
-          # =================== The following code will be executed inside Docker container ===================
-          set -ex
-          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
-
-          # Reinitialize submodules
-          git submodule sync && git submodule update -q --init --recursive
-
-          # conda must be added to the path for Anaconda builds (this location must be
-          # the same as that in install_anaconda.sh used to build the docker image)
-          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-            export PATH=/opt/conda/bin:$PATH
-            sudo chown -R jenkins:jenkins '/opt/conda'
-          fi
-
-          # Build
-          ./.jenkins/caffe2/build.sh
-
-          # Show sccache stats if it is running
-          if pgrep sccache > /dev/null; then
-            sccache --show-stats
-          fi
-          # =================== The above code will be executed inside Docker container ===================
-          EOL
-          chmod +x /home/circleci/project/ci_build_script.sh
-
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
-
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          # Push intermediate Docker image for next phase to use
-          if [ -z "${BUILD_ONLY}" ]; then
-            if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
-              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
-            else
-              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-            fi
-            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            time docker push ${COMMIT_DOCKER_IMAGE}
-          fi
-
-  caffe2_linux_test:
-    <<: *caffe2_params
-    machine:
-      image: ubuntu-1604:202007-01
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Test
-        no_output_timeout: "1h"
-        command: |
-          set -e
-          # TODO: merge this into Caffe2 test.sh
-          cat >/home/circleci/project/ci_test_script.sh \<<EOL
-          # =================== The following code will be executed inside Docker container ===================
-          set -ex
-
-          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
-
-          # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
-          sudo ln /dev/null /dev/raw1394
-
-          # conda must be added to the path for Anaconda builds (this location must be
-          # the same as that in install_anaconda.sh used to build the docker image)
-          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-            export PATH=/opt/conda/bin:$PATH
-          fi
-
-          # Upgrade SSL module to avoid old SSL warnings
-          pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
-
-          pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-
-          # Build
-          ./.jenkins/caffe2/test.sh
-
-          # Remove benign core dumps.
-          # These are tests for signal handling (including SIGABRT).
-          rm -f ./crash/core.fatal_signal_as.*
-          rm -f ./crash/core.logging_test.*
-          # =================== The above code will be executed inside Docker container ===================
-          EOL
-          chmod +x /home/circleci/project/ci_test_script.sh
-
-          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
-            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
-          else
-            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-          fi
-          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-          else
-            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-          fi
-          docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
-
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-  caffe2_macos_build:
-    <<: *caffe2_params
-    macos:
-      xcode: "9.4.1"
-    steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - checkout
-      - run_brew_for_macos_build
-      - run:
-          name: Build
-          no_output_timeout: "1h"
-          command: |
-            set -e
-
-            export IN_CIRCLECI=1
-
-            brew install cmake
-
-            # Reinitialize submodules
-            git submodule sync && git submodule update -q --init --recursive
-
-            # Reinitialize path (see man page for path_helper(8))
-            eval `/usr/libexec/path_helper -s`
-
-            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
-
-            # Install Anaconda if we need to
-            if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
-              rm -rf ${TMPDIR}/anaconda
-              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.anaconda.com/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
-              chmod +x ${TMPDIR}/conda.sh
-              /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
-              rm -f ${TMPDIR}/conda.sh
-              export PATH="${TMPDIR}/anaconda/bin:${PATH}"
-              source ${TMPDIR}/anaconda/bin/activate
-            fi
-
-            pip -q install numpy
-
-            # Install sccache
-            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
-
-            # This IAM user allows write access to S3 bucket for sccache
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            set -x
-
-            export SCCACHE_BIN=${PWD}/sccache_bin
-            mkdir -p ${SCCACHE_BIN}
-            if which sccache > /dev/null; then
-              printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${SCCACHE_BIN}/clang++"
-              chmod a+x "${SCCACHE_BIN}/clang++"
-
-              printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${SCCACHE_BIN}/clang"
-              chmod a+x "${SCCACHE_BIN}/clang"
-
-              export PATH="${SCCACHE_BIN}:$PATH"
-            fi
-
-            # Build
-            if [ "${BUILD_IOS:-0}" -eq 1 ]; then
-              unbuffer scripts/build_ios.sh 2>&1 | ts
-            elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
-              # All conda build logic should be in scripts/build_anaconda.sh
-              unbuffer scripts/build_anaconda.sh 2>&1 | ts
-            else
-              unbuffer scripts/build_local.sh 2>&1 | ts
-            fi
-
-            # Show sccache stats if it is running
-            if which sccache > /dev/null; then
-              sccache --show-stats
-            fi
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -1338,6 +1112,35 @@ jobs:
           script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
           cat "$script"
           source "$script"
+
+  anaconda_prune:
+    parameters:
+      packages:
+        type: string
+        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
+        default: "pytorch"
+      channel:
+        type: string
+        description: "What channel are we pruning? (eq. pytorch-nightly)"
+        default: "pytorch-nightly"
+    docker:
+      - image: continuumio/miniconda3
+    environment:
+      - PACKAGES: "<< parameters.packages >>"
+      - CHANNEL: "<< parameters.channel >>"
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          no_output_timeout: "1h"
+          command: |
+            conda install -yq anaconda-client
+      - run:
+          name: Prune packages
+          no_output_timeout: "1h"
+          command: |
+              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
+              scripts/release/anaconda-prune/run.sh
 
   pytorch_doc_push:
     resource_class: medium
@@ -6494,6 +6297,9 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3-clang5-asan"
           image_name: "pytorch-linux-xenial-py3-clang5-asan"
       - docker_build_job:
+          name: "docker-pytorch-linux-xenial-py3-clang7-onnx"
+          image_name: "pytorch-linux-xenial-py3-clang7-onnx"
+      - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3.8"
           image_name: "pytorch-linux-xenial-py3.8"
       - docker_build_job:
@@ -6511,12 +6317,6 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3.6-gcc7"
           image_name: "pytorch-linux-xenial-py3.6-gcc7"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-rocm3.3-py3.6"
-          image_name: "pytorch-linux-xenial-rocm3.3-py3.6"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-rocm3.5.1-py3.6"
-          image_name: "pytorch-linux-xenial-rocm3.5.1-py3.6"
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm3.7-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.7-py3.6"
@@ -6675,6 +6475,26 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test2"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
+          resource_class: large
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang7_onnx_build
+          requires:
+            - "docker-pytorch-linux-xenial-py3-clang7-onnx"
+          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_py3_clang7_onnx_ort_test1
+          requires:
+            - pytorch_linux_xenial_py3_clang7_onnx_build
+          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test1"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
+          resource_class: large
+      - pytorch_linux_test:
+          name: pytorch_linux_xenial_py3_clang7_onnx_ort_test2
+          requires:
+            - pytorch_linux_xenial_py3_clang7_onnx_build
+          build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test2"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
@@ -7080,31 +6900,6 @@ workflows:
           name: pytorch_bazel_test
           requires:
             - pytorch_bazel_build
-      - caffe2_linux_build:
-          name: caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
-          build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
-      - caffe2_linux_test:
-          name: caffe2_onnx_main_py3_6_clang7_ubuntu16_04_test
-          requires:
-            - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
-          build_environment: "caffe2-onnx-main-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
-          resource_class: large
-      - caffe2_linux_test:
-          name: caffe2_onnx_ort1_py3_6_clang7_ubuntu16_04_test
-          requires:
-            - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
-          build_environment: "caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
-          resource_class: large
-      - caffe2_linux_test:
-          name: caffe2_onnx_ort2_py3_6_clang7_ubuntu16_04_test
-          requires:
-            - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
-          build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:376"
-          resource_class: large
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
@@ -7289,6 +7084,24 @@ workflows:
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
           requires:
             - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+      - anaconda_prune:
+          name: anaconda-prune-pytorch-nightly
+          context: "org-member"
+          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+          channel: pytorch-nightly
+          filters:
+            branches:
+              only:
+                - postnightly
+      - anaconda_prune:
+          name: anaconda-prune-pytorch-test
+          context: "org-member"
+          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
+          channel: pytorch-test
+          filters:
+            branches:
+              only:
+                - postnightly
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
@@ -7296,7 +7109,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7309,7 +7122,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7322,7 +7135,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7331,7 +7144,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7350,7 +7163,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7369,7 +7182,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7378,7 +7191,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7396,7 +7209,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7414,7 +7227,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7432,7 +7245,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
-          vc_version: "14.26"
+          vc_version: ""
           vc_year: "2019"
       - update_s3_htmls:
           context: org-member

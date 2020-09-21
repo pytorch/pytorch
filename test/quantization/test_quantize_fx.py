@@ -19,11 +19,13 @@ from torch.quantization import (
     convert_static_fx,
     quantize_static_fx,
     quantize_dynamic_fx,
+    prepare_qat_fx,
 )
 
 from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     default_qat_qconfig,
     prepare,
     prepare_qat,
@@ -51,6 +53,7 @@ from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
+from torch.testing import FileCheck
 
 import itertools
 import operator
@@ -179,6 +182,54 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    @skipIfNoFBGEMM
+    def test_dynamic_quant_fp16(self):
+        class Linear(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                return F.linear(x, self.weight)
+
+        linear_input = torch.rand(8, 5)
+        linear_weight = torch.rand(10, 5)
+
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        linear_module_input = torch.rand(8, 5)
+
+        tests = [
+            (Linear, (linear_weight,), (linear_input,),
+             ns.call_function(torch.ops.quantized.linear_dynamic),
+             ns.call_function(torch.ops.quantized.linear_prepack_fp16)),
+            (LinearModule, (), (linear_module_input,),
+             ns.call_module(nnqd.Linear),
+             None),
+        ]
+        for (ModuleClass, module_constructor_inputs,
+             inputs, quantized_node, weight_prepack_node) in tests:
+            for debug in [True, False]:
+                node_occurrence = dict()
+                if weight_prepack_node:
+                    if debug:
+                        node_occurrence[weight_prepack_node] = 1
+                    else:
+                        node_occurrence[weight_prepack_node] = 0
+                m = ModuleClass(*module_constructor_inputs).eval()
+                m = symbolic_trace(m)
+                qconfig_dict = {"": float16_dynamic_qconfig}
+                m = quantize_dynamic_fx(m, qconfig_dict, debug=debug)
+                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -316,6 +367,120 @@ class TestQuantizeFx(QuantizationTestCase):
         for name, module in m.named_modules():
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
+
+    @skipIfNoFBGEMM
+    def test_qat_and_script(self):
+        class TwoLayerLinear(nn.Module):
+            def __init__(self):
+                super(TwoLayerLinear, self).__init__()
+                self.fc1 = nn.Linear(5, 5)
+                self.fc2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.subm = TwoLayerLinear()
+                self.fc = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.subm(x)
+                x = self.fc(x)
+                return x
+
+        model = Model()
+        qengine = torch.backends.quantized.engine
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
+
+        # symbolically trace
+        model = symbolic_trace(model)
+        model = prepare_qat_fx(model, qconfig_dict)
+
+        # ensure scripting works
+        scripted = torch.jit.script(model)
+        # run one round to make sure model runs
+        x = torch.randn(5, 5)
+        scripted(x)
+        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
+                   .run(scripted.graph)
+
+        # disable fake_quant and observer
+        for epoch in range(3):
+            if epoch == 1:
+                scripted.apply(torch.quantization.disable_observer)
+            if epoch == 2:
+                scripted.apply(torch.quantization.disable_fake_quant)
+
+        # ensure the fake_quant and observer have been disabled.
+        matches = ['.fake_quant_enabled', '.observer_enabled']
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([0], dtype=torch.uint8))
+
+        # enable them back
+        scripted.apply(torch.quantization.enable_fake_quant)
+        scripted.apply(torch.quantization.enable_observer)
+        for key, v in scripted.state_dict().items():
+            if any(x in key for x in matches):
+                self.assertEqual(v, torch.tensor([1], dtype=torch.uint8))
+
+    @skipIfNoFBGEMM
+    def test_save_observer_state_dict(self):
+        class TwoLayerLinear(nn.Module):
+            def __init__(self):
+                super(TwoLayerLinear, self).__init__()
+                self.fc1 = nn.Linear(5, 5)
+                self.fc2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.subm = TwoLayerLinear()
+                self.fc = nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.subm(x)
+                x = self.fc(x)
+                return x
+
+        model = Model().eval()
+        qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
+
+        # symbolically trace
+        model = symbolic_trace(model)
+        model = prepare_static_fx(model, qconfig_dict)
+
+        # run it through input
+        x = torch.randn(5, 5)
+        model(x)
+
+        quant = convert_static_fx(model)
+
+        # save state_dict of model
+        import io
+        b = io.BytesIO()
+        torch.save(model.state_dict(), b)
+        b.seek(0)
+
+        # Load the stats into new model
+        model_2 = Model().eval()
+        model_2 = symbolic_trace(model_2)
+        model_2 = prepare_static_fx(model_2, qconfig_dict)
+
+        loaded_dict = torch.load(b)
+        model_2.load_state_dict(loaded_dict)
+
+        quant_2 = convert_static_fx(model_2)
+
+        # Verify that loaded state dict produces same results.
+        self.assertEqual(quant(x), quant_2(x))
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
