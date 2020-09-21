@@ -62,8 +62,8 @@ class Reducer {
   // Returns a vector of tensors in each bucket in sequential order.
   std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
 
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_ according
-  // to when tensors received grads in the backward pass.
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // according to when tensors received grads in the backward pass.
   // TODO this function makes broadcast communication call and
   // could be overlapped with next forward() call, thus
   // it could be async. Will make it async when rebuilding buckets for
@@ -89,7 +89,8 @@ class Reducer {
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
       std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-      at::Tensor& tensor, bool useStaticWorldSize);
+      at::Tensor& tensor,
+      bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For
   // each replica, it is a tensor where index i = 1 if the Variable with that
@@ -219,22 +220,16 @@ class Reducer {
     // std::vector<at::cuda::CUDAEvent> events;
   };
 
-  // This function is called inside `initialize_buckets` and
-  // `finalize_backward`. The function call in `initialize_bucket` creates both
-  // views_in and views_out into the contents tensor for each variable's grad.
-  // Views serve as entry points to copy_ each grad's data in/out of the flat
-  // contents tensor. The function call in `finalize_backward` happens only if
-  // DDP communication hook was registered to recrate just views_out with the
-  // result of `future_work`. If called from `finalize_backward`,
-  // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
-  // `bucket_views_in` referring to replica's contents and
-  // `bucket_view_in.copy_(grad)` call inside reducer's
-  // `mark_variable_ready_dense` will work as expected. Note that before the
-  // call in `finalize_backward`, views_out must be cleared.
-  void initialize_bucket_views(
-      BucketReplica& replica,
-      at::Tensor& contents,
-      bool populate_bucket_views_in);
+  // This function is called inside `initialize_buckets`, it initializes both
+  // bucket_views_in and bucket_views_out into the contents tensor for each
+  // variable's grad. Views serve as entry points to copy_ each grad's data
+  // in/out of the flat contents tensor.
+  void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
+
+  // This function is called inside `finalize_backward`, it happens only if
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
+  void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
@@ -315,11 +310,18 @@ class Reducer {
 
   // Division factor for reduction of gradients.
   int divFactor_;
+
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
 };
 
+// This is equivalent to take_tensors but returns indices into the
+// tensor list argument for bucket assignment. Also, it is aware
+// of device placement and will not allow buckets to span devices.
+// The index of tensors[i] assigned to bucket is tensor_indices[i],
+// when tensor_indices is empty, the index of tensors[i] assigned to
+// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
