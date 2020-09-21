@@ -143,7 +143,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
 
 @_require_initialized
-def _all_gather(obj):
+def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
     r"""
     This is similar to torch.distributed.all_gather(), but is using RPC. It
     picks the worker with the smallest name (alphabetic order) as the leader.
@@ -164,6 +164,8 @@ def _all_gather(obj):
         _all_gather_sequence_id += 1
 
     is_leader = leader_name == self_name
+    if timeout == UNSET_RPC_TIMEOUT:
+        timeout = _get_current_rpc_agent()._get_timeout()
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -172,7 +174,8 @@ def _all_gather(obj):
         rpc_sync(
             leader_name,
             _gather_to_leader,
-            args=(sequence_id, self_name, obj)
+            args=(sequence_id, self_name, obj),
+            timeout=timeout,
         )
 
     with _all_gather_dict_lock:
@@ -190,7 +193,8 @@ def _all_gather(obj):
             fut = rpc_async(
                 follower_name,
                 _broadcast_to_followers,
-                args=(sequence_id, states.gathered_objects)
+                args=(sequence_id, states.gathered_objects),
+                timeout=timeout
             )
             worker_name_to_response_future_dict[follower_name] = fut
 
@@ -202,7 +206,6 @@ def _all_gather(obj):
                 failed_followers.append(follower_name)
 
         if failed_followers:
-            timeout = _get_current_rpc_agent()._get_timeout()
             raise RuntimeError(
                 f"Followers {failed_followers} timed out after {timeout:.2f} seconds"
             )
@@ -220,7 +223,7 @@ def _wait_all_workers():
     framework will work after this method returns.
     """
     try:
-        _all_gather(None)
+        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
     except RuntimeError as ex:
         logger.error(str(ex))
 
@@ -274,7 +277,6 @@ def shutdown(graceful=True):
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.shutdown()
     """
-    _set_rpc_timeout(DEFAULT_SHUTDOWN_TIMEOUT)
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
