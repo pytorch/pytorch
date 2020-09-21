@@ -1,7 +1,12 @@
+import logging
+import threading
 
 import torch
 import torch.distributed as dist
-import threading
+
+
+logger = logging.getLogger(__name__)
+
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
@@ -36,7 +41,7 @@ if is_available():
 
     def init_rpc(
         name,
-        backend=BackendType.TENSORPIPE,
+        backend=None,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
@@ -71,7 +76,38 @@ if is_available():
                 are available.
         """
 
-        if not rpc_backend_options:
+        # To avoid breaking users that passed a ProcessGroupRpcBackendOptions
+        # without specifying the backend as PROCESS_GROUP when that was the
+        # default, we try to detect the backend from the options when only the
+        # latter is passed.
+        if backend is None and rpc_backend_options is not None:
+            for candidate_backend in BackendType:
+                if isinstance(
+                    rpc_backend_options,
+                    type(
+                        backend_registry.construct_rpc_backend_options(
+                            candidate_backend
+                        )
+                    ),
+                ):
+                    backend = candidate_backend
+                    break
+            else:
+                raise TypeError(
+                    f"Could not infer backend for options {rpc_backend_options}"
+                )
+            if backend != BackendType.TENSORPIPE:
+                logger.warning(
+                    f"RPC was initialized with no explicit backend but with options "
+                    f"corresponding to {backend}, hence that backend will be used "
+                    f"instead of the default {BackendType.TENSORPIPE}. To silence this "
+                    f"warning pass `backend={backend}` explicitly."
+                )
+
+        if backend is None:
+            backend = BackendType.TENSORPIPE
+
+        if rpc_backend_options is None:
             # default construct a set of RPC backend options.
             rpc_backend_options = backend_registry.construct_rpc_backend_options(
                 backend

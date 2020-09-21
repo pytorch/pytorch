@@ -1,6 +1,7 @@
 import concurrent.futures
 import contextlib
 import json
+import logging
 import sys
 from threading import Lock
 import time
@@ -3283,6 +3284,29 @@ class RpcTest(RpcAgentTestFixture):
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+        )
+
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+        self.assertIn(
+            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
+            "\n".join(cm.output)
+        )
+
+        self.assertIsInstance(
+            rpc.api._get_current_rpc_agent(),
+            torch.distributed.rpc.ProcessGroupAgent,
+        )
+
     @skip_if_lt_x_gpu(2)
     @dist_init
     def test_cuda(self):
@@ -3876,6 +3900,24 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(
+            rpc.api._get_current_rpc_agent(),
+            torch.distributed.rpc.TensorPipeAgent,
+        )
 
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
