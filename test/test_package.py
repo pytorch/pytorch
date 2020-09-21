@@ -4,6 +4,7 @@ from torch.package import PackageExporter, PackageImporter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
+from sys import version_info
 
 try:
     from torchvision.models import resnet18
@@ -122,10 +123,11 @@ b = resources.load_binary('main', 'main_binary')
         hi.import_module('package_a.subpackage')
         package_a_im = hi.import_module('package_a')
 
-        self.assertIs(module_a, module_a_im)        
+        self.assertIs(module_a, module_a_im)
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    @skipIf(version_info.major < 3 or version_info.minor < 7, 'mock uses __getattr__ a 3.7 feature')
     def test_mock(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
@@ -142,6 +144,7 @@ b = resources.load_binary('main', 'main_binary')
         with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
             r()
 
+    @skipIf(version_info.major < 3 or version_info.minor < 7, 'mock uses __getattr__ a 3.7 feature')
     def test_custom_requires(self):
         filename = self.temp()
 
@@ -171,7 +174,7 @@ b = resources.load_binary('main', 'main_binary')
         # create a package that will save it along with its code
         with PackageExporter(f1, verbose=False) as e:
             # put the pickled resnet in the package, by default
-            # this will also save all the code files references by 
+            # this will also save all the code files references by
             # the objects in the pickle
             e.save_pickle('model', 'model.pkl', resnet)
 
@@ -191,10 +194,10 @@ b = resources.load_binary('main', 'main_binary')
         # if we are doing transfer learning we might want to re-save
         # things that were loaded from a package
         with PackageExporter(f2, verbose=False) as e:
-            # We need to tell the exporter about any modules that 
+            # We need to tell the exporter about any modules that
             # came from imported packages so that it can resolve
             # class names like torchvision.models.resnet.ResNet
-            # to their source code. 
+            # to their source code.
 
             e.importers.insert(0, i.import_module)
 
@@ -203,10 +206,10 @@ b = resources.load_binary('main', 'main_binary')
             # it is searched in order until the first success and
             # that module is taken to be what torchvision.models.resnet
             # should be in this code package. In the case of name collisions,
-            # such as trying to save a ResNet from two different packages, 
+            # such as trying to save a ResNet from two different packages,
             # we take the first thing found in the path, so only ResNet objects from
-            # one importer will work. This avoids a bunch of name mangling in 
-            # the source code. If you need to actually mix ResNet objects, 
+            # one importer will work. This avoids a bunch of name mangling in
+            # the source code. If you need to actually mix ResNet objects,
             # we suggest reconstructing the model objects using code from a single package
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
@@ -226,7 +229,7 @@ b = resources.load_binary('main', 'main_binary')
             r4 = iz.load_pickle('model', 'model.pkl')
             self.assertTrue(torch.allclose(r4(input), ref))
 
-    @skipIfNoTorchVision    
+    @skipIfNoTorchVision
     def test_model_save(self):
 
         # This example shows how you might package a model
@@ -234,11 +237,11 @@ b = resources.load_binary('main', 'main_binary')
         # how they want to save it but the 'server' can always
         # use the same API to load the package.
 
-        # The convension is for each model to provide a 
+        # The convension is for each model to provide a
         # 'model' package with a 'load' function that actual
         # reads the model out of the archive.
 
-        # How the load function is implemented is up to the 
+        # How the load function is implemented is up to the
         # the packager.
 
         # get our normal torchvision resnet
@@ -252,7 +255,7 @@ b = resources.load_binary('main', 'main_binary')
         with PackageExporter(f1, verbose=False) as e:
             e.save_pickle('model', 'pickled', resnet)
             # note that this source is the same for all models in this approach
-            # so it can be made part of an API that just takes the model and 
+            # so it can be made part of an API that just takes the model and
             # packages it with this source.
             src = """\
 import resources # gives you access to the importer from within the package
