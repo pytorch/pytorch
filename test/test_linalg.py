@@ -24,11 +24,11 @@ class TestLinalg(TestCase):
     def test_outer(self, device, dtype):
         def run_test_case(a, b):
             if dtype == torch.bfloat16:
-                a_np= a.to(torch.double).cpu().numpy()
-                b_np= b.to(torch.double).cpu().numpy()
+                a_np = a.to(torch.double).cpu().numpy()
+                b_np = b.to(torch.double).cpu().numpy()
             else:
-                a_np= a.cpu().numpy()
-                b_np= b.cpu().numpy()
+                a_np = a.cpu().numpy()
+                b_np = b.cpu().numpy()
             expected = np.outer(a_np, b_np)
 
             self.assertEqual(torch.outer(a, b), expected)
@@ -105,7 +105,7 @@ class TestLinalg(TestCase):
         run_test_case(m_scalar, a, b)
 
     @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
-                     torch.testing.get_all_dtypes()))
+                               torch.testing.get_all_dtypes()))
     def test_outer_type_promotion(self, device, dtypes):
         a = torch.randn(5).to(device=device, dtype=dtypes[0])
         b = torch.randn(5).to(device=device, dtype=dtypes[1])

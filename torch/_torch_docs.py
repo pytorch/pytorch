@@ -517,7 +517,8 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 .. warning::
     This function is deprecated and may be removed in a future release.
-    It can be implemented using :func:`torch.outer` as ``alpha * torch.outer(vec1, vec2) + beta * input`` when :attr:`beta` is not zero,
+    It can be implemented using :func:`torch.outer` as
+    ``alpha * torch.outer(vec1, vec2) + beta * input`` when :attr:`beta` is not zero,
     and as ``alpha * torch.outer(vec1, vec2)`` when :attr:`beta` is zero."
 
 Args:
