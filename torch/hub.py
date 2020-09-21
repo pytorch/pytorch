@@ -355,13 +355,14 @@ def load(repo_or_dir, model, *args, **kwargs):
         >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
     """
     source = kwargs.pop('source', 'github').lower()
+    force_reload = kwargs.pop('force_reload', False)
+    verbose = kwargs.pop('verbose', True)
+
     if source not in ('github', 'local'):
         raise ValueError(
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        force_reload = kwargs.pop('force_reload', False)
-        verbose = kwargs.pop('verbose', True)
         repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
