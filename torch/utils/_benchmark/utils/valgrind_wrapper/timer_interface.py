@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import DefaultDict, Dict, List, Optional, Tuple
+from typing import DefaultDict, Dict, Optional, Tuple
 
 import torch
 from torch.utils.cpp_extension import load_inline
