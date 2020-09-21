@@ -6333,58 +6333,66 @@ class TestTorchDeviceType(TestCase):
         np.logical_not(a.cpu().numpy(), out=out_np)
         self.assertEqual(out_np, out.to('cpu'))
 
-    def _test_logical(self, device, op, a_, b_, expected_res_):
-        for dtype in torch.testing.get_all_dtypes():
-            expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
-            a = torch.tensor(a_, dtype=dtype, device=device)
-            for other_dtype in torch.testing.get_all_dtypes():
-                b = torch.tensor(b_, dtype=other_dtype, device=device)
+    def _test_logical(self, device, dtypes, op, a_, b_, expected_res_):
+        expected_res = torch.tensor(expected_res_, dtype=dtypes[0], device=device)
+        a = torch.tensor(a_, dtype=dtypes[0], device=device)
+        b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-                # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
-                # CUDA as long as the two tensors are promoted to a supported type.
-                # TODO: Remove this once logical operators are improved to take care of bfloat16.
-                if self.device_type == 'cuda' and torch.bfloat16 in (dtype, other_dtype):
-                    if torch.promote_types(dtype, other_dtype) == torch.bfloat16:
-                        with self.assertRaises(RuntimeError):
-                            getattr(a, op)(b)
-                        continue
-
-                if dtype.is_complex or other_dtype.is_complex:
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
-
-                # new tensor
-                self.assertEqual(expected_res.bool(), getattr(a, op)(b))
-                # out
-                c = torch.empty(0, dtype=torch.bool, device=device)
-                getattr(torch, op)(a, b, out=c)
-                self.assertEqual(expected_res.bool(), c.bool())
-
-            # in-place
-            b = torch.tensor(b_, dtype=dtype, device=device)
-            # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-            if self.device_type == 'cuda' and dtype == torch.bfloat16:
+        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
+        # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
+        # CUDA as long as the two tensors are promoted to a supported type.
+        # TODO: Remove this once logical operators are improved to take care of bfloat16.
+        if self.device_type == 'cuda' and torch.bfloat16 in dtypes:
+            if torch.promote_types(dtypes[0], dtypes[1]) == torch.bfloat16:
                 with self.assertRaises(RuntimeError):
-                    getattr(a, op + '_')(b)
-                continue
+                    getattr(a, op)(b)
+                return
 
-            if dtype.is_complex:
-                with self.assertRaises(RuntimeError):
-                    getattr(a, op + '_')(b)
-                continue
-            getattr(a, op + '_')(b)
-            self.assertEqual(expected_res, a)
+        if dtypes[0].is_complex or dtypes[1].is_complex:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op)(b)
+            return
 
-    def test_logical_xor(self, device):
-        self._test_logical(device, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
+        # new tensor
+        self.assertEqual(expected_res.bool(), getattr(a, op)(b))
+        # out
+        c = torch.empty(0, dtype=torch.bool, device=device)
+        getattr(torch, op)(a, b, out=c)
+        self.assertEqual(expected_res.bool(), c)
 
-    def test_logical_and(self, device):
-        self._test_logical(device, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
+        # in-place
+        # TODO: remove when different dtypes as operands are supported
+        if dtypes[0] != dtypes[1]:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
 
-    def test_logical_or(self, device):
-        self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
+        # TODO: remove when logical ops support bfloat16 on CUDA.
+        if self.device_type == 'cuda' and dtypes[0] == torch.bfloat16:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
+
+        # TODO: remove when complex ops are supported
+        if dtypes[0].is_complex:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
+
+        getattr(a, op + '_')(b)
+        self.assertEqual(expected_res, a)
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_xor(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_and(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_or(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
     # Tests clamp and its alias, clip
     def test_clamp(self, device):
