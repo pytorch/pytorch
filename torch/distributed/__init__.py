@@ -28,5 +28,10 @@ if is_available():
     from torch._C._distributed_c10d import (
         FileStore,
         TCPStore,
-        _GradBucket
+        _GradBucket,
+        Reducer,
+        _register_comm_hook,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
     )

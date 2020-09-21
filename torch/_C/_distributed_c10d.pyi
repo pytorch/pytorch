@@ -1,6 +1,7 @@
 from torch import Tensor
+from torch.nn import Parameter
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import timedelta
 
 # distributed/c10d/init.cpp
@@ -187,3 +188,26 @@ class ProcessGroupGloo(ProcessGroup):
         size: int,
         timeout: timedelta,
     ): ...
+def _compute_bucket_assignment_by_size(
+    tensors: List[Tensor],
+    bucket_size: int,
+    expect_sparse_gradient: List[bool],
+    tensor_indices: List[int]) -> List[List[int]]: ...
+def _broadcast_coalesced(
+    process_group: ProcessGroup,
+    tensors: List[Tensor],
+    buffer_size: int,
+    rank: int,
+): ...
+class Reducer:
+    def __init__(
+        self,
+        replicas: List[List[Parameter]],
+        bucket_indices: List[List[int]],
+        process_group: ProcessGroup,
+        expect_sparse_gradients: List[List[bool]],
+        bucket_bytes_cap: int,
+        find_unused_parameters: bool,
+    ): ...
+def _register_comm_hook(reducer: Reducer, state: Any, comm_hook: Any): ...
+_DEFAULT_FIRST_BUCKET_BYTES: int
