@@ -320,7 +320,6 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
 } // namespace
 
-
 TEST(CustomClassTest, TorchbindIValueAPI) {
   script::Module m("m");
 

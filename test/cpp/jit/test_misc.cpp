@@ -2194,6 +2194,5 @@ void testIValueKWargs() {
   ASSERT_EQ(result.toInt(), 19);
 }
 
-
 } // namespace jit
 } // namespace torch
