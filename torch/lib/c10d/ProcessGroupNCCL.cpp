@@ -1509,7 +1509,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support recv Anysource");
+  throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
