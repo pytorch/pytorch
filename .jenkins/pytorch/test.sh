@@ -361,7 +361,7 @@ test_vec256() {
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
     done
     popd
     assert_git_not_dirty
