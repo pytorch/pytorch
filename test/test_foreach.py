@@ -403,7 +403,7 @@ class TestForeach(TestCase):
             scalars = [True, True, True]
 
             if dtype == torch.bool:
-                if self.device_type=='cuda':
+                if self.device_type == 'cuda':
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                         foreach_bin_op(tensors, scalars)
 
