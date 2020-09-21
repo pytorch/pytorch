@@ -1300,6 +1300,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_rpc_profiling_async_function(self):
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
+            initialize_pg(self.init_method, self.rank, self.world_size)
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
@@ -1308,6 +1309,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_rpc_profiling_async_function_single_threaded(self):
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
+            initialize_pg(self.init_method, self.rank, self.world_size)
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
