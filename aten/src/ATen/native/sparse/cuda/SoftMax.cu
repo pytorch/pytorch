@@ -571,7 +571,7 @@ Tensor softmax_sparse_cuda(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
+  std::tie(input, output) = softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
@@ -587,7 +587,7 @@ Tensor log_softmax_sparse_cuda(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
+  std::tie(input, output) = softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
@@ -605,7 +605,7 @@ Tensor softmax_backward_sparse_cuda(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_input_preprocessing(
+      softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
@@ -624,7 +624,7 @@ Tensor log_softmax_backward_sparse_cuda(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_input_preprocessing(
+      softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
