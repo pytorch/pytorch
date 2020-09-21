@@ -243,11 +243,8 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
-<<<<<<< HEAD
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
-=======
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
->>>>>>> 481036557677fcbad957d4cd4926e64ffc569d6b
 
 } // namespace native
 } // namespace at
