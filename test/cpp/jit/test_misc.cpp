@@ -2231,9 +2231,8 @@ void testProfilerDisableInCallback() {
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
 
-  // Similar to above test, but verifies correctness in the case where continuation
-  // runs on the main thread.
-  // Enable profiler
+  // Similar to above test, but verifies correctness in the case where
+  // continuation runs on the main thread.
   torch::autograd::profiler::enableProfiler(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
