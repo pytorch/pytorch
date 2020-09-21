@@ -58,6 +58,30 @@ void Polynomial::sort() {
       });
 }
 
+void MaxTerm::uniquefy() {
+  std::sort(
+      variables_.begin(), variables_.end(), [&](const Expr* a, const Expr* b) {
+        return hasher_.hash(a) < hasher_.hash(b);
+      });
+  auto it = std::unique(
+      variables_.begin(), variables_.end(), [&](const Expr* a, const Expr* b) {
+        return hasher_.hash(a) == hasher_.hash(b);
+      });
+  variables_.resize(std::distance(variables_.begin(), it));
+}
+
+void MinTerm::uniquefy() {
+  std::sort(
+      variables_.begin(), variables_.end(), [&](const Expr* a, const Expr* b) {
+        return hasher_.hash(a) < hasher_.hash(b);
+      });
+  auto it = std::unique(
+      variables_.begin(), variables_.end(), [&](const Expr* a, const Expr* b) {
+        return hasher_.hash(a) == hasher_.hash(b);
+      });
+  variables_.resize(std::distance(variables_.begin(), it));
+}
+
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
 template <class Op>
 const Expr* combineMultilane(const Expr* lhs, const Expr* rhs) {
@@ -971,6 +995,150 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
   return new Div(lhs_new, rhs_new);
 }
 
+namespace {
+
+// Combines two MinTerm / MaxTerm expressions into one.
+// The first type on the template refers to the op, as in Min or Max and the
+// second type refers to the corresponding term, as in MinTerm or MaxTerm.
+template <class Op, class OpTerm>
+const Expr* combineMinMaxTerms(
+    const Expr* lhs,
+    const Expr* rhs,
+    bool propagate_nans,
+    HashProvider& hasher) {
+  auto combine_scalars = [&](const Expr* c1, const Expr* c2) -> const Expr* {
+    if (c1 && c2) {
+      return evaluateOp(new Op(c1, c2, propagate_nans));
+    }
+    if (c1) {
+      return c1;
+    }
+    return c2;
+  };
+
+  auto combine_opterms = [&](const OpTerm* m1, const OpTerm* m2) {
+    const Expr* scalar = combine_scalars(m1->scalar(), m2->scalar());
+    std::vector<const Expr*> variables;
+    for (auto v : m1->variables()) {
+      variables.push_back(v);
+    }
+    for (auto v : m2->variables()) {
+      variables.push_back(v);
+    }
+    return new OpTerm(hasher, scalar, propagate_nans, std::move(variables));
+  };
+
+  auto add_expr_to_opterm = [&](const Expr* expr, const OpTerm* opterm) {
+    const Expr* scalar = nullptr;
+    std::vector<const Expr*> variables;
+    if (opterm) {
+      scalar = opterm->scalar();
+      variables = opterm->variables();
+    }
+    if (expr->isConstant()) {
+      scalar = combine_scalars(scalar, expr);
+    } else {
+      variables.push_back(expr);
+    }
+    return new OpTerm(hasher, scalar, propagate_nans, std::move(variables));
+  };
+
+  const OpTerm* lhs_opterm = dynamic_cast<const OpTerm*>(lhs);
+  const OpTerm* rhs_opterm = dynamic_cast<const OpTerm*>(rhs);
+  if (lhs_opterm && lhs_opterm->propagate_nans() != propagate_nans) {
+    return new Op(lhs, rhs, propagate_nans);
+  }
+  if (rhs_opterm && rhs_opterm->propagate_nans() != propagate_nans) {
+    return new Op(lhs, rhs, propagate_nans);
+  }
+
+  if (lhs_opterm && rhs_opterm) {
+    return combine_opterms(lhs_opterm, rhs_opterm);
+  } else if (lhs_opterm) {
+    return add_expr_to_opterm(rhs, lhs_opterm);
+  } else if (rhs_opterm) {
+    return add_expr_to_opterm(lhs, rhs_opterm);
+  }
+  return add_expr_to_opterm(rhs, add_expr_to_opterm(lhs, nullptr));
+}
+
+// Returns true if op is one of the 2 operands in opterm and also returns
+// the other op of opterm in other_op.
+template <class OpTerm>
+bool isOperandInMinMaxTerm(
+    const OpTerm* opterm,
+    const Expr* op,
+    HashProvider& hasher,
+    const Expr** other_op) {
+  if (opterm->variables().size() != 2) {
+    return false;
+  }
+  auto lhs = opterm->variables()[0];
+  auto rhs = opterm->variables()[1];
+  auto op_hash = hasher.hash(op);
+  if (hasher.hash(lhs) == op_hash) {
+    *other_op = rhs;
+    return true;
+  } else if (hasher.hash(rhs) == op_hash) {
+    *other_op = lhs;
+    return true;
+  }
+  return false;
+};
+
+// Simplifies the nested min-max pattern like:
+//   * Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+//   * Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+// This function is called while processing the outer Min / Max ops.
+// At that point the inner Min / Max ops would have been converted to
+// MinTerm / MaxTerm as appropriate. So, this function checks for those
+// term expressions in the given lhs and rhs.
+//
+// The first type of the template must be the term type corresponding to the
+// outer op (e.g. MaxTerm) and the second type of the template must be the term
+// type corresponding to the expected inner op (e.g. MinTerm).
+template <class OpTerm, class OtherOpTerm>
+bool simplifyNestedMinMax(
+    const Expr* lhs,
+    const Expr* rhs,
+    bool propagate_nans,
+    HashProvider& hasher,
+    const Expr** new_op) {
+  auto lhs_opterm = dynamic_cast<const OtherOpTerm*>(lhs);
+  auto rhs_opterm = dynamic_cast<const OtherOpTerm*>(rhs);
+  if (lhs_opterm && rhs_opterm &&
+      lhs_opterm->propagate_nans() == propagate_nans &&
+      rhs_opterm->propagate_nans() == propagate_nans) {
+    if (!lhs_opterm->scalar() && !rhs_opterm->scalar()) {
+      if (lhs_opterm->variables().size() == 2 &&
+          rhs_opterm->variables().size() == 2) {
+        auto rhs_v1 = rhs_opterm->variables()[0];
+        auto rhs_v2 = rhs_opterm->variables()[1];
+        const Expr* new_op_lhs;
+        if (isOperandInMinMaxTerm<OtherOpTerm>(
+                lhs_opterm, rhs_v1, hasher, &new_op_lhs)) {
+          auto inner_op =
+              new OpTerm(hasher, nullptr, propagate_nans, new_op_lhs, rhs_v2);
+          *new_op = new OtherOpTerm(
+              hasher, nullptr, propagate_nans, rhs_v1, inner_op);
+          return true;
+        }
+        if (isOperandInMinMaxTerm<OtherOpTerm>(
+                lhs_opterm, rhs_v2, hasher, &new_op_lhs)) {
+          auto inner_op =
+              new OpTerm(hasher, nullptr, propagate_nans, new_op_lhs, rhs_v1);
+          *new_op = new OtherOpTerm(
+              hasher, nullptr, propagate_nans, rhs_v2, inner_op);
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+} // namespace
+
 const Expr* PolynomialTransformer::mutate(const Max* v) {
   const Expr* lhs_new = v->lhs()->accept_mutator(this);
   const Expr* rhs_new = v->rhs()->accept_mutator(this);
@@ -980,17 +1148,25 @@ const Expr* PolynomialTransformer::mutate(const Max* v) {
     return evaluateOp(new Max(lhs_new, rhs_new, v->propagate_nans()));
   }
 
+  // If diff is constant, return the appropriate operand.
   const Expr* diff = new Sub(lhs_new, rhs_new);
   diff = diff->accept_mutator(this);
-  if (!diff->isConstant()) {
-    return new Max(lhs_new, rhs_new, v->propagate_nans());
+  if (diff->isConstant()) {
+    if (immediateAs<int>(diff) > 0) {
+      return lhs_new;
+    }
+    return rhs_new;
   }
 
-  if (immediateAs<int>(diff) > 0) {
-    return lhs_new;
+  // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+  const Expr* new_op;
+  if (simplifyNestedMinMax<MaxTerm, MinTerm>(
+          lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
+    return new_op;
   }
 
-  return rhs_new;
+  return combineMinMaxTerms<Max, MaxTerm>(
+      lhs_new, rhs_new, v->propagate_nans(), hasher_);
 }
 
 const Expr* PolynomialTransformer::mutate(const Min* v) {
@@ -1002,17 +1178,25 @@ const Expr* PolynomialTransformer::mutate(const Min* v) {
     return evaluateOp(new Min(lhs_new, rhs_new, v->propagate_nans()));
   }
 
+  // If diff is constant, return the appropriate operand.
   const Expr* diff = new Sub(lhs_new, rhs_new);
   diff = diff->accept_mutator(this);
-  if (!diff->isConstant()) {
-    return new Min(lhs_new, rhs_new, v->propagate_nans());
+  if (diff->isConstant()) {
+    if (immediateAs<int>(diff) < 0) {
+      return lhs_new;
+    }
+    return rhs_new;
   }
 
-  if (immediateAs<int>(diff) < 0) {
-    return lhs_new;
+  // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+  const Expr* new_op;
+  if (simplifyNestedMinMax<MinTerm, MaxTerm>(
+          lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
+    return new_op;
   }
 
-  return rhs_new;
+  return combineMinMaxTerms<Min, MinTerm>(
+      lhs_new, rhs_new, v->propagate_nans(), hasher_);
 }
 
 const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
@@ -1161,6 +1345,24 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
+Stmt* handleForCondReordering(const For* loop, Cond* cond) {
+  if (cond->false_stmt()) {
+    return nullptr;
+  }
+
+  auto condition_vars = VarFinder::find(cond->condition());
+  for (auto* v : condition_vars) {
+    // If the condition depends on a Var that is modified in the loop body, it
+    // may not be safe to reorder.
+    if (ModifiesVarChecker::check(loop, v)) {
+      return nullptr;
+    }
+  }
+
+  For* new_f = loop->cloneWithNewBody(Stmt::clone(cond->true_stmt()));
+  return cond->cloneWithNewBody(new_f);
+}
+
 Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -1194,6 +1396,15 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
     if (block->nstmts() == 0) {
       return new Block({});
     }
+
+    if (block->nstmts() == 1) {
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
+    }
   }
 
   if (var == var_new && start == start_new && stop == stop_new &&
@@ -1208,6 +1419,7 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
 
 Stmt* IRSimplifierBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
+  // Flatten sub-blocks:
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt_new == nullptr) {
@@ -1558,6 +1770,50 @@ const Expr* TermExpander::mutate(const Polynomial* v) {
   return lastNode;
 }
 
+const Expr* TermExpander::mutate(const MaxTerm* v) {
+  const auto& variables = v->variables();
+  if (variables.empty()) {
+    if (!v->scalar()) {
+      // This case should never happen because MaxTerm will be created only
+      // on valid Max expressions.
+      throw std::logic_error("empty maxterm op");
+    }
+    return v->scalar();
+  }
+  const Expr* max;
+  if (v->scalar()) {
+    max = new Max(variables[0], v->scalar(), v->propagate_nans());
+  } else {
+    max = variables[0];
+  }
+  for (size_t i = 1; i < variables.size(); i++) {
+    max = new Max(max, variables[i], v->propagate_nans());
+  }
+  return max->accept_mutator(this);
+}
+
+const Expr* TermExpander::mutate(const MinTerm* v) {
+  const auto& variables = v->variables();
+  if (variables.empty()) {
+    if (!v->scalar()) {
+      // This case should never happen because MinTerm will be created only
+      // on valid Min expressions.
+      throw std::logic_error("empty minterm op");
+    }
+    return v->scalar();
+  }
+  const Expr* min;
+  if (v->scalar()) {
+    min = new Min(variables[0], v->scalar(), v->propagate_nans());
+  } else {
+    min = variables[0];
+  }
+  for (size_t i = 1; i < variables.size(); i++) {
+    min = new Min(min, variables[i], v->propagate_nans());
+  }
+  return min->accept_mutator(this);
+}
+
 // Expands RoundOff(x, y) => Term(1, Div(x, y), y), which will later be expanded
 // to Mul(Div(x, y), y).
 const Expr* TermExpander::mutate(const RoundOff* v) {
@@ -1614,6 +1870,139 @@ Stmt* TermExpander::mutate(const Free* v) {
   }
 
   return new Free(buffer_var_new);
+}
+
+// Combines adjactent Cond nodes with identical conditions.
+Block* TermExpander::fuseConditions(Block* v) {
+  std::vector<Stmt*> stmts;
+  bool did_anything = false;
+  Cond* prev_cond = nullptr;
+
+  for (auto* s : *v) {
+    Cond* cond = dynamic_cast<Cond*>(s);
+    if (!cond) {
+      prev_cond = nullptr;
+      stmts.push_back(s);
+      continue;
+    }
+
+    // If the previous statement is a Cond and the conditions are identical,
+    // then we fuse.
+    if (!prev_cond ||
+        hasher_.hash(prev_cond->condition()) !=
+            hasher_.hash(cond->condition())) {
+      prev_cond = cond;
+      stmts.push_back(s);
+      continue;
+    }
+    // Fuse the two Conds by appending the bodies of the second Cond to the
+    // first.
+    Block* true_block = new Block({});
+    Block* false_block = new Block({});
+
+    if (prev_cond->true_stmt()) {
+      true_block->splice(true_block->end(), prev_cond->true_stmt());
+    }
+
+    if (cond->true_stmt()) {
+      true_block->splice(true_block->end(), cond->true_stmt());
+    }
+
+    if (prev_cond->false_stmt()) {
+      false_block->splice(false_block->end(), prev_cond->false_stmt());
+    }
+
+    if (cond->false_stmt()) {
+      false_block->splice(false_block->end(), cond->false_stmt());
+    }
+
+    // avoid unflattening this Cond if we can.
+    if (true_block->empty()) {
+      true_block = nullptr;
+    }
+
+    if (false_block->empty()) {
+      false_block = nullptr;
+    }
+
+    prev_cond = prev_cond->cloneWithNewBodies(true_block, false_block);
+
+    // erase, which shortens the list.
+    stmts.pop_back();
+    stmts.push_back(prev_cond);
+    did_anything = true;
+  }
+
+  if (!did_anything) {
+    return v;
+  }
+
+  // clean up parents.
+  for (auto* s : stmts) {
+    if (s->get_parent() == v) {
+      v->remove_stmt(s);
+    }
+  }
+
+  return new Block(stmts);
+}
+
+Stmt* TermExpander::fuseSyncThreads(Block* block) {
+  // only really first if highest level Block.
+  bool first = block->get_parent() == nullptr;
+  SyncThreads* last = nullptr;
+  std::vector<Stmt*> stmts;
+  bool did_anything = false;
+
+  for (auto* s : *block) {
+    SyncThreads* sync = dynamic_cast<SyncThreads*>(s);
+    if (!sync) {
+      first = false;
+      last = nullptr;
+      stmts.push_back(s);
+      continue;
+    }
+
+    if (first || last) {
+      did_anything = true;
+      continue;
+    }
+
+    last = sync;
+    first = false;
+    stmts.push_back(s);
+  }
+
+  if (last) {
+    stmts.pop_back();
+    did_anything = true;
+  }
+
+  if (!did_anything) {
+    return block;
+  }
+
+  // clean up parents.
+  for (auto* s : stmts) {
+    if (s->get_parent() == block) {
+      block->remove_stmt(s);
+    }
+  }
+
+  return new Block({stmts});
+}
+
+Stmt* TermExpander::mutate(const Block* v) {
+  Stmt* new_stmt = IRSimplifierBase::mutate(v);
+  Block* new_block = dynamic_cast<Block*>(new_stmt);
+  if (!new_block) {
+    return new_stmt;
+  }
+
+  // fuseConditions will return the original block if it cannot fuse.
+  new_block = fuseConditions(new_block);
+  /// fuseSyncThreads too.
+  return fuseSyncThreads(new_block);
 }
 
 bool exprEquals(const Expr* A, const Expr* B) {

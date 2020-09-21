@@ -241,12 +241,3 @@ class TestRemoveMutation(JitTestCase):
 
         self.run_pass('remove_mutation', mod_script.forward.graph)
         FileCheck().check("aten::add_").run(test_multiple_uses.graph)
-
-
-        @torch.jit.script
-        def bad_merge(x):
-            y = [x]
-            x.add_(2)
-            return torch.cat(y)
-
-        print(bad_merge.graph)
