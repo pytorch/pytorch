@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 from multiprocessing import Manager
 import os
@@ -162,10 +161,10 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
-        indices = [range(rank + 1)]
+        indices = torch.reshape(torch.arange(rank + 1), (1, rank + 1))
         shape = [world_size] + [2 for _ in range(dense_dims)]
         for _ in range(sparse_dims - 1):
-            indices.append([0] * (rank + 1))
+            indices = torch.cat((indices, torch.zeros(1, rank + 1)))
             shape.append(world_size)
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
