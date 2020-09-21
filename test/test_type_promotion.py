@@ -256,7 +256,7 @@ class TestTypePromotion(TestCase):
         # supported dtype
         dtypes1 = torch.testing.get_all_math_dtypes('cuda')
         dtypes2 = torch.testing.get_all_math_dtypes(device)
-        ops = [torch.add, torch.sub, torch.mul, torch.true_divide, torch.rsub]
+        ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
@@ -590,58 +590,61 @@ class TestTypePromotion(TestCase):
 
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     @float_double_default_dtype
-    def test_true_divide(self, device, dtype):
-        dividend = (torch.randn(5, device=device) * 100).to(dtype)
-        divisor = torch.arange(1, 6, device=device).to(dtype)
+    def test_div_promotion(self, device, dtype):
+        for op in (torch.div, torch.true_divide):
+            dividend = (torch.randn(5, device=device) * 100).to(dtype)
+            divisor = torch.arange(1, 6, device=device).to(dtype)
 
-        # Tests tensor/tensor division
-        casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
-        self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
+            # Tests tensor/tensor division
+            casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
+            self.assertEqual(casting_result, op(dividend, divisor))
 
-        # Tests tensor/scalar division
-        casting_result = dividend.to(torch.get_default_dtype()) / 2
-        self.assertEqual(casting_result, torch.true_divide(dividend, 2.))
+            # Tests tensor/scalar division
+            casting_result = dividend.to(torch.get_default_dtype()) / 2
+            self.assertEqual(casting_result, op(dividend, 2.))
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double,
             torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_true_divide_out(self, device, dtype):
-        dividend = (torch.randn(5, device=device) * 100).to(dtype)
-        divisor = torch.arange(1, 6, device=device).to(dtype)
+    def test_div_promotion_out(self, device, dtype):
+        for op in (torch.div, torch.true_divide):
+            dividend = (torch.randn(5, device=device) * 100).to(dtype)
+            divisor = torch.arange(1, 6, device=device).to(dtype)
 
-        # Tests that requests for an integer quotient fail
-        if not dtype.is_floating_point:
-            integral_quotient = torch.empty(5, device=device, dtype=dtype)
-            with self.assertRaises(RuntimeError):
-                torch.true_divide(dividend, divisor, out=integral_quotient)
-            with self.assertRaises(RuntimeError):
-                torch.true_divide(dividend, 2, out=integral_quotient)
-        else:
-            # Tests that requests for a floating quotient succeed
-            floating_quotient = torch.empty(5, device=device, dtype=dtype)
-            div_result = dividend / divisor
-            self.assertEqual(div_result,
-                             torch.true_divide(dividend, divisor, out=floating_quotient))
-            self.assertEqual(dividend / 2,
-                             torch.true_divide(dividend, 2, out=floating_quotient))
+            # Tests that requests for an integer quotient fail
+            if not dtype.is_floating_point:
+                integral_quotient = torch.empty(5, device=device, dtype=dtype)
+                with self.assertRaises(RuntimeError):
+                    op(dividend, divisor, out=integral_quotient)
+                with self.assertRaises(RuntimeError):
+                    op(dividend, 2, out=integral_quotient)
+            else:
+                # Tests that requests for a floating quotient succeed
+                floating_quotient = torch.empty(5, device=device, dtype=dtype)
+                div_result = dividend / divisor
+                self.assertEqual(div_result,
+                                 op(dividend, divisor, out=floating_quotient))
+                self.assertEqual(dividend / 2,
+                                 op(dividend, 2, out=floating_quotient))
 
     @dtypes(torch.float, torch.double,
             torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_true_divide_inplace(self, device, dtype):
-        dividend = (torch.randn(5, device=device) * 100).to(dtype)
-        divisor = torch.arange(1, 6, device=device).to(dtype)
+    def test_div_promotion_inplace(self, device, dtype):
+        for op in (torch.Tensor.div_, torch.Tensor.true_divide_):
+            dividend = (torch.randn(5, device=device) * 100).to(dtype)
+            divisor = torch.arange(1, 6, device=device).to(dtype)
 
-        # Tests that requests for an integer quotient fail
-        if not dtype.is_floating_point:
-            with self.assertRaises(RuntimeError):
-                dividend.true_divide_(divisor)
-            with self.assertRaises(RuntimeError):
-                dividend.true_divide_(2)
-        else:
-            # Tests that requests for a floating quotient succeed
-            div_result = dividend.clone().div_(divisor)
-            self.assertEqual(div_result, dividend.clone().true_divide_(divisor))
-            self.assertEqual(dividend.clone().div_(2), dividend.clone().true_divide_(2))
+            # Tests that requests for an integer quotient fail
+            if not dtype.is_floating_point:
+                with self.assertRaises(RuntimeError):
+                    op(dividend, divisor)
+                with self.assertRaises(RuntimeError):
+                    op(dividend, 2)
+            else:
+                # Tests that requests for a floating quotient succeed
+                div_result = dividend.clone().div_(divisor)
+                self.assertEqual(div_result, op(dividend.clone(), divisor))
+                self.assertEqual(dividend.clone().div_(2), op(dividend.clone(), 2))
 
     def _test_sparse_op_input_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
@@ -777,29 +780,13 @@ class TestTypePromotion(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     @float_double_default_dtype
-    def test_sparse_true_divide(self, device, dtype):
-        dividend = torch.randn(5, device=device).to(dtype)
-        divisor = 2
-        dividend_sparse = dividend.to_sparse()
-        casting_result = dividend.to(torch.get_default_dtype()) / 2
-        self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
-
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
-    def test_integer_div_deprecated(self, device, dtype):
-        a = torch.tensor(1, device=device, dtype=dtype)
-        b = torch.tensor(1, device=device, dtype=dtype)
-        o = torch.empty(1, device=device, dtype=dtype)
-
-        # Tests div (including /) deprecation
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
-            c = a / b
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
-            c = torch.div(a, b)
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
-            torch.div(a, b, out=o)
-        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
-            a.div_(b)
+    def test_sparse_div_promotion(self, device, dtype):
+        for op in (torch.div, torch.true_divide):
+            dividend = torch.randn(5, device=device).to(dtype)
+            divisor = 2
+            dividend_sparse = dividend.to_sparse()
+            casting_result = dividend.to(torch.get_default_dtype()) / 2
+            self.assertEqual(casting_result, op(dividend_sparse, 2).to_dense())
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)

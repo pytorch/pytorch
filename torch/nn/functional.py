@@ -1,6 +1,4 @@
 r"""Functional interface"""
-from __future__ import division
-
 import warnings
 import math
 
@@ -22,6 +20,8 @@ conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
@@ -58,6 +58,8 @@ conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 
 Applies a 2D convolution over an input image composed of several input
 planes.
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
@@ -97,6 +99,8 @@ conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 3D convolution over an input image composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
@@ -132,6 +136,8 @@ conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
@@ -171,6 +177,8 @@ conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
@@ -212,6 +220,8 @@ conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
@@ -1662,6 +1672,8 @@ def linear(input, weight, bias=None):
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     Shape:
 
         - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
@@ -2597,15 +2609,9 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
                       stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = _smooth_l1_loss(input, target)
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-    return ret
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
