@@ -271,7 +271,7 @@ def _check_group_backend(group_list, backend_name):
     """
     Helper to check that all groups in ``group_list`` use the same backend.
     """
-    if isinstance(group_list, list) or \
+    if not isinstance(group_list, list) or \
        not all(backend_name == get_backend(group) for group in group_list):
         raise RuntimeError("All groups need to use the same backend.")
 
@@ -810,11 +810,12 @@ def batch_isend_irecv(op_list,
         isend/irecv on the remote end.
         tensor_list (list[Tensor]): list of send or recv tensors.
         peer_list (list[int]): list of peer ranks to send to or receive from.
-        group_list (list[ProcessGroup], Optional): list of groups to operator on.
+        group_list (list[ProcessGroup], Optional): list of groups to operator on. All
+        groups in ``group_list`` should use the same backend.
         tag_list (list[int], Optional): list of tags to match send with recv.
 
     Returns:
-        a list of distributed request objects returned by calling the corresponding
+        A list of distributed request objects returned by calling the corresponding
         op in the op_list.
 
     Examples:
