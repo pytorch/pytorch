@@ -3966,7 +3966,6 @@ criterion_tests = [
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
-        check_gradgrad=False,
         check_bfloat16=TEST_WITH_ROCM,
     ),
     dict(
@@ -3978,7 +3977,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
-        check_gradgrad=False,
         check_bfloat16=TEST_WITH_ROCM,
     ),
     dict(
@@ -4328,7 +4326,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
-        check_gradgrad=False,
         check_bfloat16=TEST_WITH_ROCM,
     ),
     dict(
