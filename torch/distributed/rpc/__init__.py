@@ -49,6 +49,7 @@ if is_available():
             _transports: Optional[List],
             _channels: Optional[List]
         ): ...
+
     def init_rpc(
         name,
         # Not sure how to annotate dynamic attribute of a type
