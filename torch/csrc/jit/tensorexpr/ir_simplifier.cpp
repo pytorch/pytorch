@@ -1345,6 +1345,24 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
+Stmt* handleForCondReordering(const For* loop, Cond* cond) {
+  if (cond->false_stmt()) {
+    return nullptr;
+  }
+
+  auto condition_vars = VarFinder::find(cond->condition());
+  for (auto* v : condition_vars) {
+    // If the condition depends on a Var that is modified in the loop body, it
+    // may not be safe to reorder.
+    if (ModifiesVarChecker::check(loop, v)) {
+      return nullptr;
+    }
+  }
+
+  For* new_f = loop->cloneWithNewBody(Stmt::clone(cond->true_stmt()));
+  return cond->cloneWithNewBody(new_f);
+}
+
 Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -1378,6 +1396,15 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
     if (block->nstmts() == 0) {
       return new Block({});
     }
+
+    if (block->nstmts() == 1) {
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
+    }
   }
 
   if (var == var_new && start == start_new && stop == stop_new &&
@@ -1392,6 +1419,7 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
 
 Stmt* IRSimplifierBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
+  // Flatten sub-blocks:
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt_new == nullptr) {
@@ -1842,6 +1870,93 @@ Stmt* TermExpander::mutate(const Free* v) {
   }
 
   return new Free(buffer_var_new);
+}
+
+// Combines adjactent Cond nodes with identical conditions.
+Block* TermExpander::fuseConditions(Block* v) {
+  std::vector<Stmt*> stmts;
+  bool did_anything = false;
+  Cond* prev_cond = nullptr;
+
+  for (auto* s : *v) {
+    Cond* cond = dynamic_cast<Cond*>(s);
+    if (!cond) {
+      prev_cond = nullptr;
+      stmts.push_back(s);
+      continue;
+    }
+
+    // If the previous statement is a Cond and the conditions are identical,
+    // then we fuse.
+    if (!prev_cond ||
+        hasher_.hash(prev_cond->condition()) !=
+            hasher_.hash(cond->condition())) {
+      prev_cond = cond;
+      stmts.push_back(s);
+      continue;
+    }
+    // Fuse the two Conds by appending the bodies of the second Cond to the
+    // first.
+    Block* true_block = new Block({});
+    Block* false_block = new Block({});
+
+    if (prev_cond->true_stmt()) {
+      true_block->splice(true_block->end(), prev_cond->true_stmt());
+    }
+
+    if (cond->true_stmt()) {
+      true_block->splice(true_block->end(), cond->true_stmt());
+    }
+
+    if (prev_cond->false_stmt()) {
+      false_block->splice(false_block->end(), prev_cond->false_stmt());
+    }
+
+    if (cond->false_stmt()) {
+      false_block->splice(false_block->end(), cond->false_stmt());
+    }
+
+    // avoid unflattening this Cond if we can.
+    if (true_block->empty()) {
+      true_block = nullptr;
+    }
+
+    if (false_block->empty()) {
+      false_block = nullptr;
+    }
+
+    prev_cond = prev_cond->cloneWithNewBodies(true_block, false_block);
+
+    // erase, which shortens the list.
+    stmts.pop_back();
+    stmts.push_back(prev_cond);
+
+    did_anything = true;
+  }
+
+  if (!did_anything) {
+    return v;
+  }
+
+  // clean up parents.
+  for (auto* s : stmts) {
+    if (s->get_parent() == v) {
+      v->remove_stmt(s);
+    }
+  }
+
+  return new Block(stmts);
+}
+
+Stmt* TermExpander::mutate(const Block* v) {
+  Stmt* new_stmt = IRSimplifierBase::mutate(v);
+  Block* new_block = dynamic_cast<Block*>(new_stmt);
+  if (!new_block) {
+    return new_stmt;
+  }
+
+  // fuseConditions will return the original block if it cannot fuse.
+  return fuseConditions(new_block);
 }
 
 bool exprEquals(const Expr* A, const Expr* B) {
