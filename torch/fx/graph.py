@@ -80,7 +80,7 @@ class Graph:
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None) -> Node:
-        assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
+        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
@@ -93,8 +93,8 @@ class Graph:
     def placeholder(self, name: str) -> Node:
         return self.create_node('placeholder', name)
 
-    def get_param(self, name: str) -> Node:
-        return self.create_node('get_param', name)
+    def get_attr(self, name: str) -> Node:
+        return self.create_node('get_attr', name)
 
     def call_module(self,
                     module_name: str,
@@ -203,7 +203,7 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
                 continue
-            elif node.op == 'get_param':
+            elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
@@ -237,7 +237,7 @@ class Graph:
                 assert isinstance(n.target, str)
                 placeholder_names.append(n.target)
                 return None
-            elif n.op == 'get_param':
+            elif n.op == 'get_attr':
                 return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
@@ -287,7 +287,7 @@ class Graph:
 
         # Check targets are legit
         for node in self.nodes:
-            if node.op in ['get_param', 'call_module']:
+            if node.op in ['get_attr', 'call_module']:
                 target_atoms = node.target.split('.')
                 m_itr = root
                 for i, atom in enumerate(target_atoms):
