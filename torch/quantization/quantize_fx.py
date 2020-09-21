@@ -116,33 +116,33 @@ def quantize_static_fx(model, qconfig_dict, run_fn, run_args, inplace=False, deb
     Args:
         `model`: input float TorchScript model
         `qconfig_dict`: qconfig_dict is a dictionary with the following configurations:
-    qconfig_dict = {
-    # optional, global config
-    "": qconfig?,
+        qconfig_dict = {
+        # optional, global config
+        "": qconfig?,
 
-    # optional, used for module and function types
-    # could also be split into module_types and function_types if we prefer
-    "object_type": [
-      (torch.nn.Conv2d, qconfig?),
-      (torch.nn.functional.add, qconfig?),
-      ...,
-    ],
+        # optional, used for module and function types
+        # could also be split into module_types and function_types if we prefer
+        "object_type": [
+          (torch.nn.Conv2d, qconfig?),
+          (torch.nn.functional.add, qconfig?),
+          ...,
+         ],
 
-    # optional, used for module names
-    "module_name": [
-      ("foo.bar", qconfig?)
-      ...,
-    ],
+        # optional, used for module names
+        "module_name": [
+          ("foo.bar", qconfig?)
+          ...,
+        ],
 
-    # optional, matched in order, first match takes precedence
-    "module_name_regex": [
-      ("foo.*bar.*conv[0-9]+", qconfig?)
-      ...,
-    ]
-    # priority (in increasing order): global, object_type, module_name_regex, module_name
-    # qconfig == None means fusion and quantization should be skipped for anything
-    # matching the rule
-    }
+        # optional, matched in order, first match takes precedence
+        "module_name_regex": [
+          ("foo.*bar.*conv[0-9]+", qconfig?)
+          ...,
+        ]
+        # priority (in increasing order): global, object_type, module_name_regex, module_name
+        # qconfig == None means fusion and quantization should be skipped for anything
+        # matching the rule
+        }
         `run_fn`: a calibration function for calibrating the prepared model
         `run_args`: positional arguments for `run_fn`
         `inplace`: carry out model transformations in-place, the original module is
