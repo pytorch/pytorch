@@ -139,7 +139,9 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort', 'searchsorted',
-    'bucketize'
+    'bucketize',
+    # Functions that return booleans are not differentiable
+    'isnan', 'isposinf', 'isneginf', 'isinf'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

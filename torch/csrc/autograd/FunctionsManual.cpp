@@ -2636,9 +2636,8 @@ bool any_variable_defined(variable_list& variables) {
 
 at::Tensor nan_to_num_backward(const at::Tensor& grad, const at::Tensor& self) {
   auto nan_mask = at::isnan(self);
-  auto pos_inf_mask = at::isposinf(self);
-  auto neg_inf_mask = at::isneginf(self);
-  auto mask = ~(nan_mask | pos_inf_mask | neg_inf_mask);
+  auto inf_mask = at::isinf(self);
+  auto mask = ~(nan_mask | inf_mask);
   return grad * mask;
 }
 
