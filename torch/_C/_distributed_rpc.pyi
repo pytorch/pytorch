@@ -22,15 +22,6 @@ class _TensorPipeRpcBackendOptionsBase:
         init_method: str,
         device_maps: Dict[str, Dict[int, int]]): ...
     def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
-class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
-    def __init__(
-        self,
-        rpc_timeout: timedelta,
-        init_method: str,
-        num_worker_threads: int,
-        _transports: Optional[List],
-        _channels: Optional[List]
-    ): ...
 class ProcessGroupAgent:
     def __init__(
         self,
@@ -47,7 +38,7 @@ class TensorPipeAgent:
         worker_id: int,
         world_size: int,
         pg: ProcessGroup,
-        opts: TensorPipeRpcBackendOptions,
+        opts: _TensorPipeRpcBackendOptionsBase,
     ): ...
 class ProcessGroupRpcBackendOptions:
     def __init__(

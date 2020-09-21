@@ -4,7 +4,7 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 import threading
-from typing import Iterator, Tuple
+from typing import Iterator, Tuple, Optional, List
 
 
 _init_counter = 0
@@ -20,7 +20,6 @@ if is_available() and not torch._C._rpc_init():
 
 
 
-
 if is_available():
     from . import api, backend_registry, functions
     from torch._C._distributed_rpc import (
@@ -30,9 +29,9 @@ if is_available():
         _set_profiler_node_id,
         _is_current_rpc_agent_set,
         RpcBackendOptions,
+        _TensorPipeRpcBackendOptionsBase
     )  # noqa: F401
     from .api import *  # noqa: F401
-    from torch._C._distributed_rpc import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
@@ -41,7 +40,15 @@ if is_available():
 
     import numbers
 
-
+    class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
+        def __init__(
+            self,
+            rpc_timeout: timedelta,
+            init_method: str,
+            num_worker_threads: int,
+            _transports: Optional[List],
+            _channels: Optional[List]
+        ): ...
     def init_rpc(
         name,
         # Not sure how to annotate dynamic attribute of a type
