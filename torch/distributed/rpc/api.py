@@ -25,6 +25,7 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
+    _set_rpc_timeout,
 )
 
 from .internal import (
@@ -34,7 +35,7 @@ from .internal import (
     _build_rpc_profiling_key,
 )
 
-from .constants import UNSET_RPC_TIMEOUT
+from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,7 @@ def shutdown(graceful=True):
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.shutdown()
     """
+    _set_rpc_timeout(DEFAULT_SHUTDOWN_TIMEOUT)
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
