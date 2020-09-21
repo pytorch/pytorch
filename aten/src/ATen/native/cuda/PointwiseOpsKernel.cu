@@ -10,22 +10,18 @@ namespace at { namespace native {
 
 void addcmul_cuda_kernel(TensorIterator& iter, Scalar value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "addcmul_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "addcmul_cuda", [&] {
-      auto alpha = value.to<scalar_t>();
-      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * b * c;
-      });
+    auto alpha = value.to<scalar_t>();
+    gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+      return a + alpha * b * c;
     });
   });
 }
 
 void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "addcdiv_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "addcdiv_cuda", [&] {
-      auto alpha = value.to<scalar_t>();
-      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * (b / c);
-      });
+    auto alpha = value.to<scalar_t>();
+    gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+      return a + alpha * (b / c);
     });
   });
 }
