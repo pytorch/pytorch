@@ -15583,7 +15583,7 @@ def add_autograd_test(
 
     # Disable complex tests
     # TODO: Add complex support for jit
-    if 'complex' in variant_name:
+    if 'complex' in variant_name or name in ['view_as_complex', 'complex']:
         return
 
     # Skips aliases, which are tested in test_op_aliases.py
