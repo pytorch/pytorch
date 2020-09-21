@@ -34,6 +34,7 @@ from .utils import (
     quantize_node,
 )
 
+from collections import OrderedDict
 import copy
 import re
 
@@ -123,14 +124,33 @@ def assert_and_get_unique_device(module):
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 
+def is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize))
 
-def preprocess_qconfig_dict(qconfig_dict):
-    """ Split the original qconfig_dict to
-    a flattened dict (global, object_type and module_name) and
-    a list of tuples of regex and qconfig (module_name_regex)
-    since order is important for regex matching (there might be conflicts and we
-    will take the first match)
-    and is not important for other qconfig types.
+def get_flattened_qconfig_dict(qconfig_dict):
+    """ flatten the global, object_type and module_name qconfig
+    to the same qconfig_dict so that it can be used by
+    propagate_qconfig_ function.
+    "module_name_regex" is ignored for now since it's not supported
+    in propagate_qconfig_, but it can be fixed later.
+
+    For example:
+    Input: {
+      "": qconfig,
+      "object_type": [
+        (torch.add, qconfig)
+      ],
+      "module_name": [
+        ("conv", qconfig)
+      ]
+    }
+
+    Output: {
+      "": qconfig,
+      torch.add: qconfig,
+      "conv": qconfig
+    }
     """
     flattened = dict()
     if '' in qconfig_dict:
@@ -143,8 +163,18 @@ def preprocess_qconfig_dict(qconfig_dict):
 
     flatten_key('object_type')
     flatten_key('module_name')
-    module_name_regex_qconfig_list = qconfig_dict.get('module_name_regex', None)
-    return flattened, module_name_regex_qconfig_list
+    return flattened
+
+def convert_dict_to_ordered_dict(qconfig_dict):
+    """ Convert dict in qconfig_dict to ordered dict
+    """
+    # convert a qconfig list for a type to OrderedDict
+    def _convert_to_ordered_dict(key, qconfig_dict):
+        qconfig_dict[key] = OrderedDict(qconfig_dict.get(key, []))
+
+    _convert_to_ordered_dict('object_type', qconfig_dict)
+    _convert_to_ordered_dict('module_name_regex', qconfig_dict)
+    _convert_to_ordered_dict('module_name', qconfig_dict)
 
 
 # A dictionary for querying the weight index for a given op
@@ -195,25 +225,23 @@ class Quantizer:
     def _generate_qconfig_map(self,
                               root,
                               input_graph,
-                              flattened_qconfig_dict,
-                              module_name_regex_qconfig_list):
-        global_qconfig = flattened_qconfig_dict.get('', None)
+                              qconfig_dict):
+        global_qconfig = qconfig_dict.get('', None)
 
         def get_module_type_qconfig(
                 module_type, fallback_qconfig=global_qconfig):
-            return flattened_qconfig_dict.get(module_type, fallback_qconfig)
+            return qconfig_dict['object_type'].get(module_type, fallback_qconfig)
 
         def get_function_qconfig(
                 function, fallback_qconfig=global_qconfig):
-            return flattened_qconfig_dict.get(function, fallback_qconfig)
+            return qconfig_dict['object_type'].get(function, fallback_qconfig)
 
         def get_module_name_regex_qconfig(
                 module_name, fallback_qconfig=global_qconfig):
-            if module_name_regex_qconfig_list is not None:
-                for regex_pattern, qconfig in module_name_regex_qconfig_list:
-                    if re.match(regex_pattern, module_name):
-                        # first match wins
-                        return qconfig
+            for regex_pattern, qconfig in qconfig_dict['module_name_regex'].items():
+                if re.match(regex_pattern, module_name):
+                    # first match wins
+                    return qconfig
             return fallback_qconfig
 
         def get_module_name_qconfig(
@@ -221,8 +249,8 @@ class Quantizer:
             if module_name == '':
                 # module name qconfig not found
                 return fallback_qconfig
-            if module_name in flattened_qconfig_dict:
-                return flattened_qconfig_dict[module_name]
+            if module_name in qconfig_dict['module_name']:
+                return qconfig_dict['module_name'][module_name]
             else:
                 parent, _ = _parent_name(module_name)
                 return get_module_name_qconfig(parent, fallback_qconfig)
@@ -241,7 +269,7 @@ class Quantizer:
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
-            if node.op == 'get_param':
+            if node.op == 'get_attr':
                 module_name, _ = _parent_name(node.target)
                 self.qconfig_map[node.name] = get_qconfig(module_name)
             elif node.op == 'call_function':
@@ -271,8 +299,7 @@ class Quantizer:
         else:
             self.patterns = get_quant_patterns()
 
-        flattened_qconfig_dict, module_name_regex_qconfig_list = \
-            preprocess_qconfig_dict(qconfig_dict)
+        flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
@@ -280,9 +307,9 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
 
+        convert_dict_to_ordered_dict(qconfig_dict)
         # map from node name to qconfig, used in _find_matches
-        self._generate_qconfig_map(
-            model, model.graph, flattened_qconfig_dict, module_name_regex_qconfig_list)
+        self._generate_qconfig_map(model, model.graph, qconfig_dict)
 
         # match the patterns that will get quantized
         matches = self._find_matches(model.graph, self.modules, self.patterns)
@@ -305,7 +332,7 @@ class Quantizer:
             if node.name in observed_node_names_set:
                 continue
 
-            get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
+            prefix = node.name + '_activation_post_process_'
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
@@ -313,6 +340,7 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
                 def insert_observer(node, observer, device):
+                    get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                     observer_name = get_new_observer_name(model)
                     setattr(model, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
@@ -353,6 +381,7 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
             if node.name not in observed_node_names_set and node.name in quants:
+                get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                 observer_name = get_new_observer_name(model)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
@@ -542,7 +571,7 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module':
-                if node.target.split('.')[-1].startswith('activation_post_process_'):
+                if is_activation_post_process(self.modules[node.target]):
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
                     if observer_module.dtype == torch.float16:
@@ -576,7 +605,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
-               node.target.split('.')[-1].startswith('activation_post_process_'):
+               is_activation_post_process(self.modules[node.target]):
                 # remove activation post process
                 env[node.name] = env[node.args[0].name]
             else:
@@ -584,8 +613,8 @@ class Quantizer:
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
         to_be_removed = []
-        for name, _ in model.named_modules():
-            if name.split('.')[-1].startswith('activation_post_process_'):
+        for name, module in model.named_modules():
+            if is_activation_post_process(module):
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
@@ -631,7 +660,7 @@ class Quantizer:
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
                 env[node.name] = folded_graph.create_node(
-                    'get_param', packed_weight_name, (), {})
+                    'get_attr', packed_weight_name, (), {})
             elif prepack_node is not None:
                 # remove the foled node
                 continue

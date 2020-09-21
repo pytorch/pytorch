@@ -123,8 +123,8 @@ def quantize_static_fx(model, qconfig_dict, run_fn, run_args, inplace=False, deb
     # optional, used for module and function types
     # could also be split into module_types and function_types if we prefer
     "object_type": [
-      (nn.Conv2d, qconfig?),
-      (F.add, qconfig?),
+      (torch.nn.Conv2d, qconfig?),
+      (torch.nn.functional.add, qconfig?),
       ...,
     ],
 
