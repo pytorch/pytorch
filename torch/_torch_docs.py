@@ -3468,7 +3468,7 @@ Args:
     {input}
     bins (int or 1D Tensor): If int, defines the number of bins. If Tensor,
         defines a monotonically increasing sequence of bin edges, allowing
-        for non-uniform bins. Default: 10
+        for non-uniform bins. Default: 10.
     range (tuple of floats, optional): Defines the lower and upper ends of the
         range if bins is an integer.
     weights (Tensor, optional): Weight for each value in the input tensor.
@@ -3479,7 +3479,7 @@ Args:
         function over the range is 1.
 
 Returns:
-    A (Tensor, Tensor) tuple of the histogram represented as a Tensor, and the bin edges
+    A (Tensor, Tensor) tuple of the histogram represented as a Tensor and the bin edges
 
 Example::
 
