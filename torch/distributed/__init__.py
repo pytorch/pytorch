@@ -34,4 +34,5 @@ if is_available():
         _DEFAULT_FIRST_BUCKET_BYTES,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
+        _test_python_store,
     )
