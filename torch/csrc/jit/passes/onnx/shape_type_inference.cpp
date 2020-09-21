@@ -235,7 +235,8 @@ void ConvertGraphToONNXProto(
     std::shared_ptr<Graph> graph,
     onnx::ModelProto& model_proto,
     int opset_version) {
-  std::shared_ptr<onnx::ModelProto> s_model_proto = std::make_shared<onnx::ModelProto>(model_proto);
+  std::shared_ptr<onnx::ModelProto> s_model_proto =
+      std::make_shared<onnx::ModelProto>(model_proto);
   RawDataExportMap export_map;
   std::tie(s_model_proto, export_map) = export_onnx(
       graph,
