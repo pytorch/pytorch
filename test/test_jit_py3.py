@@ -628,6 +628,11 @@ class TestScriptPy3(JitTestCase):
             def ignored_attr(self):
                 return sum([self.a])
 
+            @property
+            @jit.ignore
+            def ignored_attr_2(self):
+                return sum([self.a])
+
             @attr.setter
             def attr(self, a: int):
                 if a > 0:
@@ -657,6 +662,9 @@ class TestScriptPy3(JitTestCase):
 
         with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
             scripted_mod.ignored_attr
+
+        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+            scripted_mod.ignored_attr_2
 
     def test_export_opnames_interface(self):
         global OneTwoModule
