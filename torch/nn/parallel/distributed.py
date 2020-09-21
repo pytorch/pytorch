@@ -3,6 +3,7 @@ import copy
 import itertools
 import os
 import inspect
+import logging
 
 import torch
 
@@ -424,7 +425,21 @@ class DistributedDataParallel(Module):
         self._ddp_init_helper()
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
-        module_states = list(self.module.state_dict().values())
+        if not self.parameters_to_ignore:
+            # Broadcast state dict if no parameters to ignore, otherwise filter out
+            # ignored parameters before broadcasting.
+            module_states = list(self.module.state_dict().values())
+        else:
+            module_states = []
+            # Have to use data ptrs since direct "is" comparison on the tensors
+            # won't work.
+            params_to_ignore_data_ptrs = set(
+                t.data_ptr() for t in self.parameters_to_ignore
+            )
+            for tensor in self.module.state_dict().values():
+                if tensor.data_ptr() not in params_to_ignore_data_ptrs:
+                    module_states.append(tensor)
+
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
                 module_states,
@@ -493,13 +508,10 @@ class DistributedDataParallel(Module):
         self.modules_params = [list(parameters(m)) for m in self._module_copies]
         self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
 
-        # Build tuple of (module, parameter) for all parameters that require grads.
         def _should_ignore_param(p):
-            for ignore in self.parameters_to_ignore:
-                if p is ignore:
-                    return True
-            return False
+            return any(p is ignore for ignore in self.parameters_to_ignore)
 
+        # Build tuple of (module, parameter) for all parameters that require grads.
         modules_and_parameters = [
             [
                 (module, parameter)
@@ -618,6 +630,15 @@ class DistributedDataParallel(Module):
             self.reducer._set_forward_pass_work_handle(
                 work, ones, self.ddp_join_divide_by_initial_world_size
             )
+
+        # Calling _rebuild_buckets before forward compuation,
+        # It may allocate new buckets before deallocating old buckets
+        # inside _rebuild_buckets. To save peak memory usage,
+        # call _rebuild_buckets before the peak memory usage increases
+        # during forward computation.
+        # This should be called only once during whole training period.
+        if self.reducer._rebuild_buckets():
+            logging.info("Reducer buckets have been rebuilt in this iteration.")
 
         if self.require_forward_param_sync:
             self._sync_params()
@@ -841,7 +862,6 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                buckets_rebuilt = False
                 # Schedules allreduce to match fwd pass allreduce in non-joined procs
                 while not all_procs_joined:
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
@@ -851,6 +871,8 @@ class DistributedDataParallel(Module):
                         # Some DDP process still needs to be joined.
                         if is_last_joiner:
                             is_last_joiner = False
+                        # It will rebuild buckets only once during training period
+                        self.reducer._rebuild_buckets()
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
@@ -876,11 +898,8 @@ class DistributedDataParallel(Module):
                         # Check if we need to allreduce locally unused params.
                         if self.find_unused_parameters:
                             self._match_unused_params_allreduce()
-                        # If buckets not rebuilt, will push original bucket
-                        # indices to simulate a rebuild.
-                        if not buckets_rebuilt and not self.find_unused_parameters:
-                            self.reducer._push_all_rebuilt_params()
-                            buckets_rebuilt = self.reducer._rebuild_buckets()
+                        # It will push rebuilt params only once during training period
+                        self.reducer._push_all_rebuilt_params()
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
