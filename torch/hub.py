@@ -335,10 +335,12 @@ def load(repo_or_dir, model, *args, **kwargs):
         source (string, optional): ``'github'`` | ``'local'``. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is ``'github'``.
         force_reload (bool, optional): whether to force a fresh download of
-            the github repo unconditionally. Default is ``False``.
+            the github repo unconditionally. Does not have any effect if
+            ``source = 'local'``. Default is ``False``.
         verbose (bool, optional): If ``False``, mute messages about hitting
             local caches. Note that the message about first download cannot be
-            muted. Default is ``True``.
+            muted. Does not have any effect if ``source = 'local'``.
+            Default is ``True``.
         **kwargs (optional): the corresponding kwargs for callable
             :attr:`model`.
 
