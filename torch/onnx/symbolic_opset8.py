@@ -276,5 +276,5 @@ def repeat(g, self, repeats):
         sizes = self.type().sizes()
         diff_dims = repeat_size_len - len(sizes)
         if diff_dims > 0:
-            self = sym_opset9.view(g, self, g.op("Constant", value_t=[[1] * diff_dims + sizes]))
+            self = sym_opset9.view(g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes)))
     return g.op("Tile", self, repeats)
