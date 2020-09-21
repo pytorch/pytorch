@@ -5280,7 +5280,7 @@ Example::
 
 add_docstr(torch.nan_to_num,
            r"""
-nan_to_num(input, nan=0.0, pos_inf=None, neg_inf=None, *, out=None) -> Tensor
+nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
 
 Replace NaN with zero and infinity with large finite numbers (default behaviour)
 or with the numbers defined by the user using the nan, posinf and/or neginf keywords.
@@ -5295,10 +5295,10 @@ Args:
     {input}
     nan (float or optional): Value to be used to fill NaN values.
     If no value is passed then NaN values will be replaced with 0.0.
-    pos_inf (float or optional): Value to be used to fill positive infinity values.
+    posinf (float or optional): Value to be used to fill positive infinity values.
     If no value is passed then positive infinity values will be replaced by the largest
     finite floating point values representable by x.dtype.
-    neg_inf (float or optional): Value to be used to fill negative infinity values.
+    neginf (float or optional): Value to be used to fill negative infinity values.
     If no value is passed then negative infinity values will be replaced by the lowest
     finite floating point values representable by x.dtype.
 
@@ -5312,7 +5312,7 @@ Example::
     tensor([ 0.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
     >>> torch.nan_to_num(x, nan=2.0)
     tensor([ 2.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
-    >>> torch.nan_to_num(x, nan=2.0, pos_inf=1.0)
+    >>> torch.nan_to_num(x, nan=2.0, posinf=1.0)
     tensor([ 2.0000e+00,  1.0000e+00, -3.4028e+38,  3.1400e+00])
 
 """.format(**common_args))
