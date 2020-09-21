@@ -226,12 +226,6 @@ class AbstractTestCases:
             s = torch.tensor(7)
             self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
             self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
-            self.assertRaises(RuntimeError, lambda: torch.outer(v, s))
-            self.assertRaises(RuntimeError, lambda: torch.outer(s, v))
-            self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
-            self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
-            self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
-            self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
         @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
         def test_mvlgamma(self):
@@ -13810,19 +13804,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,)))
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,), test_out=True))
 
-        # outer, ger, addr
-        self.assertEqual((0, 0), fn(torch.outer, (0,), (0,)).shape)
-        self.assertEqual((5, 0), fn(torch.outer, (5,), (0,)).shape)
-        self.assertEqual((0, 4), fn(torch.outer, (0,), (4,)).shape)
-
-        self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
-        self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
-        self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
-
-        self.assertEqual((0, 0), fn(torch.addr, (0, 0), (0,), (0,)).shape)
-        self.assertEqual((5, 0), fn(torch.addr, (5, 0), (5,), (0,)).shape)
-        self.assertEqual((0, 4), fn(torch.addr, (0, 4), (0,), (4,)).shape)
-
         # bmm, baddbmm
         self.assertEqual((0, 0, 0), fn(torch.bmm, (0, 0, 0), (0, 0, 0)).shape)
         self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
@@ -16318,86 +16299,6 @@ torch.lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | ortho
 scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @precisionOverride({torch.bfloat16: 1e-1})
-    @dtypes(*(torch.testing.get_all_dtypes()))
-    def test_outer(self, device, dtype):
-        if dtype == torch.bfloat16:
-            v1_np = np.random.randn(100).astype(np.float64)
-            v2_np = np.random.randn(100).astype(np.float64)
-        else:
-            v1_np = np.random.randn(100).astype(torch_to_numpy_dtype_dict[dtype])
-            v2_np = np.random.randn(100).astype(torch_to_numpy_dtype_dict[dtype])
-        np_res = np.outer(v1_np, v2_np)
-
-        vec1 = torch.from_numpy(v1_np).to(device=device, dtype=dtype)
-        vec2 = torch.from_numpy(v2_np).to(device=device, dtype=dtype)
-        out = torch.empty(vec1.size(0), vec2.size(0), dtype=dtype, device=device)
-
-        torch_res = torch.outer(vec1, vec2)
-        self.assertEqual(np_res, torch_res)
-        torch.outer(vec1, vec2, out=out)
-        self.assertEqual(np_res, out)
-
-        # Tests 0-strided
-        if dtype == torch.bfloat16:
-            v0_np = np.array(v1_np[0]).repeat(100).astype(np.float64)
-        else:
-            v0_np = np.array(v1_np[0]).repeat(100).astype(torch_to_numpy_dtype_dict[dtype])
-        np_res = np.outer(v0_np, v2_np)
-        vec0 = torch.tensor([v1_np[0]], device=device, dtype=dtype).expand(100)
-
-        torch_res = torch.outer(vec0, vec2)
-        self.assertEqual(np_res, torch_res)
-        torch.outer(vec0, vec2, out=out)
-        self.assertEqual(np_res, out)
-
-    @slowTest
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float, torch.double)
-    def test_ger(self, device, dtype):
-        def run_test(v0, v1):
-            res0 = torch.ger(v0, v1)
-            res1 = torch.zeros(100, 100, dtype=dtype, device=device)
-            for i in range(100):
-                for j in range(100):
-                    res1[i, j] = v0[i] * v1[j]
-            self.assertEqual(res0, res1)
-
-        v0 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        run_test(v0, v1)
-
-        # Tests 0-strided
-        v0 = torch.randn(1, dtype=torch.float, device=device).expand(100).to(dtype=dtype)
-        v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        run_test(v0, v1)
-
-    @slowTest
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float, torch.double)
-    def test_addr(self, device, dtype):
-        def run_test(m, v1, v2, m_transform=lambda x: x):
-            m = m_transform(m.clone())
-            ref = m.clone()
-            torch.addr(m, v1, v2, out=m)
-            for i in range(m.size(0)):
-                for j in range(m.size(1)):
-                    ref[i, j] += v1[i] * v2[j]
-            self.assertEqual(m, ref)
-
-        for h, w in [(100, 110), (1, 20), (200, 2)]:
-            m = torch.randn(h, w, dtype=torch.float, device=device).to(dtype=dtype)
-            v1 = torch.randn(h, dtype=torch.float, device=device).to(dtype=dtype)
-            v2 = torch.randn(w, dtype=torch.float, device=device).to(dtype=dtype)
-            run_test(m, v1, v2)
-            # test transpose
-            run_test(m, v2, v1, lambda x: x.transpose(0, 1))
-            # test 0 strided
-            v1 = torch.randn(1, dtype=torch.float, device=device).expand(h).to(dtype=dtype)
-            run_test(m, v1, v2)
-            run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
@@ -19905,16 +19806,6 @@ tensor_op_tests = [
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
-    ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
-    ('addr', 'scalar', _medium_2d,
-        lambda t, d: [_number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
-    ('addr', 'two_scalars', _medium_2d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
     ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
