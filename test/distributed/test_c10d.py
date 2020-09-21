@@ -2945,8 +2945,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
 
-        optimizer_withload = optim.SGD(ddp_withload.parameters(), lr=0.001)
-        optimizer_withoutload = optim.SGD(ddp_withoutload.parameters(), lr=0.001)
+        optimizer_withload = torch.optim.SGD(ddp_withload.parameters(), lr=0.001)
+        optimizer_withoutload = torch.optim.SGD(ddp_withoutload.parameters(), lr=0.001)
 
         input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
