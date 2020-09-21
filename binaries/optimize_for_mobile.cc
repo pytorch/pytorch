@@ -68,8 +68,7 @@ int main(int argc, char** argv) {
   if (FLAGS_backend == "" || FLAGS_backend == "cpu") {
     optimized_module = torch::jit::optimizeForMobile(module);
   } else if (FLAGS_backend == "vulkan") {
-    std::vector<std::string> empty_preserved_methods;
-    optimized_module = torch::jit::vulkanOptimizeForMobile(module, empty_preserved_methods);
+    optimized_module = torch::jit::vulkanOptimizeForMobile(module);
   } else {
     CAFFE_ENFORCE(false, "Unknown backend: " + FLAGS_backend);
   }
