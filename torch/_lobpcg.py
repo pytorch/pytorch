@@ -310,6 +310,17 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         grads = [None] * 14
 
         A, B, D, U, largest = ctx.saved_tensors
+        if A.is_sparse or (B is not None and B.is_sparse and B.requires_grad):
+            raise ValueError(
+                'lobpcg.backward does not support sparse input yet.'
+                'Note that lobpcg.forward does though.'
+            )
+        if A.dtype in (torch.complex64, torch.complex128) or \
+           B is not None and B.dtype in (torch.complex64, torch.complex128):
+            raise ValueError(
+                'lobcpg.backward does not support complex input yet.'
+                'Note that lobcpg.forward does though.'
+            )
 
         if largest is None:
             largest = True
