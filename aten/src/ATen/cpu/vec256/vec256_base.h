@@ -729,6 +729,14 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 
 #endif
 
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator~(const Vec256<T>& a) {
+  Vec256<T> ones;  // All bits are 1
+  memset((T*) ones, 0xFF, 32);
+  return a ^ ones;
+}
+
+
 template <typename T>
 inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
   a = a + b;
