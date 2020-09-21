@@ -55,7 +55,7 @@ Load::Load(
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  if (buf->base_handle()->dtype() != kHandle) {
+  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
     throw malformed_input(
         "Load base handle dtype must be Handle", buf->base_handle());
   }
@@ -102,7 +102,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  if (buf->base_handle()->dtype() != kHandle) {
+  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
     throw malformed_input("Store base handle must be Handle");
   }
   /*

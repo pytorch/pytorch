@@ -3,7 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
-#include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/opt/custom/freeze_quantization_params.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"

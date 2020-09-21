@@ -919,13 +919,17 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6 3.5)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+  endif()
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.6)
+    message(FATAL_ERROR
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.5 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1478,7 +1482,7 @@ if(NOT INTERN_BUILD_MOBILE)
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     # skip unwanted includes from windows.h
     add_definitions(-DWIN32_LEAN_AND_MEAN)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1497,7 +1501,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   list(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
-  list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
   if(CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
   endif()

@@ -15,7 +15,6 @@ import traceback
 import warnings
 import threading
 from typing import List, Optional, Tuple, Union
-from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
@@ -129,7 +128,7 @@ def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
     this explicitly if you are interacting with PyTorch via
     its C API, as Python bindings for CUDA functionality will not
-    be until this initialization takes place.  Ordinary users
+    be available until this initialization takes place.  Ordinary users
     should not need this, as all of PyTorch's CUDA methods
     automatically initialize CUDA state on-demand.
 
@@ -180,9 +179,9 @@ def _lazy_init():
                 try:
                     queued_call()
                 except Exception as e:
-                    msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                           "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-                    raise_from(DeferredCudaCallError(msg), e)
+                    msg = (f"CUDA call failed lazily at initialization with error: {str(e)}\n\n"
+                           f"CUDA call was originally invoked at:\n\n{orig_traceback}")
+                    raise DeferredCudaCallError(msg) from e
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True

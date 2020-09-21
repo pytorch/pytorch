@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys
 import os
 import re
@@ -571,6 +570,18 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
@@ -598,6 +609,23 @@ class TestBenchmarkUtils(TestCase):
         )
         median = timer.blocked_autorange(min_run_time=0.1).median
         self.assertIsInstance(median, float)
+
+    def test_adaptive_timer(self):
+        # Validate both on different sizes validate against blocked_autorange
+        # This looks for relative differences btetween orders of magnitude to
+        # provide a stable/portable test which is somewhat informative.
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(torch.ones((10,10)))",
+        )
+        small = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
+        timer = benchmark_utils.Timer(
+            stmt="torch.sum(torch.ones((500,500)))",
+        )
+        medium = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
+        blocked_medium = timer.blocked_autorange(min_run_time=0.1)
+        self.assertLess(small.median, medium.median)
+        # This acts as a control to compare to a different way to measure the same value.
+        self.assertLess(small.median, blocked_medium.median)
 
     def test_compare(self):
         compare = benchmark_utils.Compare([

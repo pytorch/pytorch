@@ -24,7 +24,7 @@ from hypothesis import given, settings
 
 
 class TestInt8GenQuantParamsOperator(hu.HypothesisTestCase):
-    @settings(max_examples=50)
+    @settings(max_examples=20, deadline=None)
     @given(
         n=st.integers(10, 100),
         m=st.integers(1, 128),
