@@ -3125,6 +3125,34 @@ class TestQuantizeJit(QuantizationTestCase):
             self.assertEqual(model_quantized(self.img_data_2d[0][0]), result_eager)
 
     @override_qengines
+    def test_conv_transpose(self):
+        r"""Compare the result of quantizing conv_transpose layer in
+        eager mode and graph mode
+        """
+        if qengine_is_qnnpack():  # Currently only qnnpack is supported
+            # eager mode
+            annotated_conv_model = AnnotatedConvModel(
+                torch.backends.quantized.engine, transposed=True).eval()
+            conv_model = ConvModel(transposed=True).eval()
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+            model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+            qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+            model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
+            model_script = torch.jit.script(conv_model)
+            result_eager = model_eager(self.img_data_2d[0][0])
+            for model_under_test in [model_traced, model_script]:
+                model_quantized = quantize_jit(
+                    model_under_test,
+                    qconfig_dict,
+                    test_only_eval_fn,
+                    [self.img_data_2d],
+                    inplace=False)
+                self.assertEqual(model_quantized(self.img_data_2d[0][0]),
+                                 result_eager)
+
+    @override_qengines
     def test_conv_bn(self):
         r"""Compare the result of quantizing conv + bn layer in
         eager mode and graph mode

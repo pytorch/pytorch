@@ -32,6 +32,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv1d",
     "conv2d",
     "conv3d",
+    "conv_transpose1d",
+    "conv_transpose2d",
     "linear",
     "hardswish",
     "hardswish_",
@@ -272,6 +274,8 @@ bool isWeight(Value* v) {
       AtenFuncArgs({{"conv1d", 1},
                     {"conv2d", 1},
                     {"conv3d", 1},
+                    {"conv_transpose1d", 1},
+                    {"conv_transpose2d", 1},
                     {"linear", 1},
                     {"embedding_bag", 0}}),
       // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
@@ -285,7 +289,9 @@ bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
       AtenFuncArgs(
-          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
+          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2},
+           {"conv_transpose1d", 2}, {"conv_transpose2d", 2},
+           {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
@@ -723,6 +729,20 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+bool is_conv_transpose1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.ConvTranspose1d");
+}
+
+bool is_conv_transpose2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.ConvTranspose2d");
 }
 
 bool is_batchnorm2d_module(
