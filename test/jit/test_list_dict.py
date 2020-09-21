@@ -1,7 +1,7 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
 from collections import OrderedDict
 
@@ -1132,17 +1132,28 @@ class TestList(JitTestCase):
             5, dtype=torch.double).cuda(),))
 
     def test_no_element_type_annotation(self):
-        def fn(x):
+        def fn_with_comment(x):
             # type: (torch.Tensor) -> List
             a: List = x.tolist()
             return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            cu = torch.jit.CompilationUnit()
-            cu.define(dedent(inspect.getsource(fn)))
+        def annotated_fn(x: torch.Tensor) -> List:
+            a: List = x.tolist()
+            return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            torch.jit.script(fn)
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(annotated_fn)
 
 
 class TestDict(JitTestCase):
@@ -1514,3 +1525,31 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
+
+    def test_type_annotation_missing_contained_type(self):
+        """
+        Test that the use of a Dict type annotation without contained
+        key and value types produces an error.
+        """
+        # This function uses a type comment.
+        def fn_with_comment(input):
+            # type: (Dict) -> Any
+            return input
+
+        # This function uses Python3 style type annotations.
+        def annotated_fn(input: Dict) -> Any:
+            return input
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            m = torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            m = torch.jit.script(annotated_fn)

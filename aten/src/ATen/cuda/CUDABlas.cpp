@@ -556,6 +556,43 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
+// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+#ifdef CUDART_VERSION
+
+template <>
+void getrfBatched<double>(
+    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getrfBatched<float>(
+    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getriBatched<double>(
+    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+}
+
+template <>
+void getriBatched<float>(
+    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+}
+
+#endif // CUDART_VERSION
+
 } // namespace blas
 } // namespace cuda
 } // namespace at
