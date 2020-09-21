@@ -10,7 +10,7 @@ namespace {
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},     {aten::absolute_, aten::abs_},
     {aten::clip, aten::clamp},       {aten::clip_, aten::clamp_},
-    {aten::linalg_det, aten::det},   {aten::outer, aten::ger},
+    {aten::linalg_det, aten::det},   {aten::ger, aten::outer},
     {aten::arccos, aten::acos},      {aten::arccos_, aten::acos_},
     {aten::arcsin, aten::asin},      {aten::arcsin_, aten::asin_},
     {aten::arctan, aten::atan},      {aten::arctan_, aten::atan_},
