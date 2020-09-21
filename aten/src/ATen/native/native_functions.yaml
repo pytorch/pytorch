@@ -231,7 +231,10 @@
 # To add an alias do the following:
 #
 # 1) Copy the original functions native_functions.yaml entry, but replace the
-#      original function's name with their own.
+#      original function's name with their own and delete any dispatch
+#      keys for the aliases. Specifying a dispatch key will prevent
+#      autograd from recording the operations the alias performs, which
+#      will stop it from "inheriting" the original operation's autograd behavior.
 # 2) Implement the corresponding functions and have them redispatch to the
 #      original function.
 # 3) Add entries for the alias (and original function, if needed) to
@@ -1241,6 +1244,44 @@
   use_c10_dispatcher: full
   variants: method
 
+# divide, alias for div
+- func: divide.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+  # true_divide, an alias for div
+- func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
 - func: dot(Tensor self, Tensor tensor) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1369,7 +1410,7 @@
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
-    QuantizedCPU: empty_per_channel_affine_quantized_cpu
+    QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1428,6 +1469,16 @@
   variants: function, method
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: exp2(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: exp2_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: expm1(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1646,6 +1697,15 @@
 - func: hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 
+- func: kaiser_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
+- func: kaiser_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
+- func: kaiser_window.beta(int window_length, bool periodic, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: full
+
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
 
@@ -1675,6 +1735,10 @@
   variants: function, method
 
 - func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
   use_c10_dispatcher: full
   variants: function
   dispatch:
@@ -2306,6 +2370,25 @@
   variants: function, method
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+# multiply, alias for mul
+- func: multiply.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: multiply_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: multiply.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: multiply_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
 
@@ -3016,11 +3099,11 @@
 # missing the `pad_mode` and `center` arguments, which are taken care of at
 # `torch.functional.py`. They shall be moved here once we have mapping between
 # Python strings and C++ Enum in codegen.
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 
-- func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool onesided=True, int? length=None) -> Tensor
+- func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 
@@ -3257,33 +3340,6 @@
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
-
-- func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    CPU, CUDA: true_divide
-    SparseCPU, SparseCUDA: true_divide_sparse
-
-- func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: method
-  dispatch:
-    CPU, CUDA: true_divide_
-    SparseCPU, SparseCUDA: true_divide_sparse_
-
-- func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: true_divide_out
-    SparseCPU, SparseCUDA: true_divide_out_sparse_zerodim
-
-- func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: method
 
 - func: trunc(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3632,18 +3688,6 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-
-- func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: pow_out
-    SparseCPU, SparseCUDA: pow_out_sparse_scalar
-
-- func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    CPU, CUDA: pow
-    SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -4112,19 +4156,19 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_scales
+    QuantizedCPU, QuantizedCUDA: q_per_channel_scales
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_zero_points
+    QuantizedCPU, QuantizedCUDA: q_per_channel_zero_points
 
 - func: q_per_channel_axis(Tensor self) -> int
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_axis
+    QuantizedCPU, QuantizedCUDA: q_per_channel_axis
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4530,13 +4574,13 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: scatter_cpu_reduce_
+    CPU, CUDA: scatter_reduce_
 
 - func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: scatter_cpu_scalar_reduce_
+    CPU, CUDA: scatter_scalar_reduce_
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -5782,6 +5826,18 @@
   use_c10_dispatcher: full
   variants: method, function
 
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: legacy::cpu::_th_sort_out
@@ -5882,6 +5938,18 @@
   use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: pow
+
+- func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: pow_out
+    SparseCPU, SparseCUDA: pow_out_sparse_scalar
+
+- func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: pow
+    SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -7689,7 +7757,32 @@
 
 # torch.fft.fft
 # NOTE: NOT an alias for torch.fft, which has different semantics
-- func: fft_fft(Tensor self) -> Tensor
+- func: fft_fft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ifft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_rfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_irfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_hfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
   variants: function

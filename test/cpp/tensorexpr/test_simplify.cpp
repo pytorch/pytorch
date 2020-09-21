@@ -46,6 +46,31 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->name_hint(), name);          \
   }
 
+#define IS_BINOP_W_VARS(T, node, name, v1, v2) \
+  const T* name = nullptr;                     \
+  {                                            \
+    name = dynamic_cast<const T*>(node);       \
+    ASSERT_NE(nullptr, name);                  \
+    IS_VAR_WITH_NAME(name->lhs(), v1);         \
+    IS_VAR_WITH_NAME(name->rhs(), v2);         \
+  }
+
+#define IS_BINOP_W_CONST(T, node, name, v, c) \
+  const T* name = nullptr;                    \
+  {                                           \
+    name = dynamic_cast<const T*>(node);      \
+    ASSERT_NE(nullptr, name);                 \
+    IS_VAR_WITH_NAME(name->lhs(), v);         \
+    IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
+  }
+
+#define IS_RAND(node)                                    \
+  {                                                      \
+    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
+    ASSERT_NE(nullptr, node_);                           \
+    ASSERT_EQ(node_->op_type(), kRand);                  \
+  }
+
 void testConstantFoldSimple() {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -164,6 +189,14 @@ void testConstantFoldIntrinsics() {
   SimpleIRExprEval ref(fn);
 
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
+}
+
+void testConstantFoldCastToBool() {
+  KernelScope kernel_scope;
+  ExprHandle f = Cast::make(kBool, IntImm::make(0));
+  ExprHandle newF = IRSimplifier::simplify(f);
+  SimpleIRExprEval eval(newF);
+  ASSERT_EQ(eval.value<bool>(), false);
 }
 
 void testConstantFoldWithVar() {
@@ -387,6 +420,26 @@ void testHashEquivalence() {
   // Intrinsics sanity check.
   ExprHandle f5 = Intrinsics::make(kSin, x) * Intrinsics::make(kCos, x);
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
+}
+
+void testHashEquivalenceRand() {
+  KernelScope kernel_scope;
+  ExprHandle f =
+      Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
+
+  const Add* root = f.AsNode<Add>();
+  ASSERT_NE(root, nullptr);
+
+  HashProvider hasher;
+  auto hash_f = hasher.hash(f.node());
+  auto hash_l = hasher.hash(root->lhs());
+  auto hash_r = hasher.hash(root->rhs());
+
+  // Root not equal to either branch.
+  ASSERT_NE(hash_f, hash_l);
+  ASSERT_NE(hash_f, hash_r);
+  // and branches are NOT equal.
+  ASSERT_NE(hash_l, hash_r);
 }
 
 void testHashEquivalenceAfterFolding() {
@@ -1398,6 +1451,612 @@ void testSimplifySymbolicMinMax() {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE(Max, simplified.node());
+  }
+}
+
+void testSimplifyNestedMax() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+
+  {
+    // Max(x + y, x + y) => x + y
+    ExprHandle body = Max::make(x + y, x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+  }
+
+  {
+    // Max(x + y, Max(x + y, z)) => Max(y + x, z)
+    ExprHandle body = Max::make(x + y, Max::make(x + y, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(x + y, Max(z, x + y)) => Max(y + x, z)
+    ExprHandle body = Max::make(x + y, Max::make(z, x + y, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x + y, z), x + y) => Max(y + x, z)
+    ExprHandle body = Max::make(Max::make(x + y, z, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(z, x + y), x + y) => Max(y + x, z)
+    ExprHandle body = Max::make(Max::make(z, x + y, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Add, max->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(max->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x, y), x) => Max(Max(x, y), x)
+    // Nested Max ops with different propagate_nans should not be simplified.
+    ExprHandle body = Max::make(Max::make(x, y, true), x, false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Max, max->lhs(), max1, "x", "y");
+    ASSERT_TRUE(max1->propagate_nans());
+    IS_VAR_WITH_NAME(max->rhs(), "x");
+    ASSERT_FALSE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(x, y, true), Min::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(x, y), Min(z, x)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(x, y, true), Min::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(x, z)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(z, x)) => Min(x, Max(y, z))
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_VAR_WITH_NAME(min->lhs(), "x");
+    IS_BINOP_W_VARS(Max, min->rhs(), max, "y", "z");
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Min(y, x), Min(z, x)) => Max(Min(x, z), Min(x, y))
+    // When all the ops in the pattern do not have the same propagate_nans,
+    // it should not be simplified.
+    ExprHandle body =
+        Max::make(Min::make(y, x, true), Min::make(z, x, false), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_BINOP_W_VARS(Min, max->lhs(), min1, "x", "z");
+    ASSERT_FALSE(min1->propagate_nans());
+    IS_BINOP_W_VARS(Min, max->rhs(), min2, "x", "y");
+    ASSERT_TRUE(min2->propagate_nans());
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(5, Max(x, 8)) => Max(x, 8)
+    ExprHandle body = Max::make(5, Max::make(x, 8, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(8, Max(x, 5)) => Max(x, 8)
+    ExprHandle body = Max::make(8, Max::make(x, 5, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Max(x, 8), 5) => Max(x, 8)
+    ExprHandle body = Max::make(Max::make(x, 8, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(Max(x, 5), 8) => Max(x, 8)
+    ExprHandle body = Max::make(Max::make(x, 5, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Max, simplified.node(), max, "x", 8);
+    ASSERT_TRUE(max->propagate_nans());
+  }
+
+  {
+    // Max(5, Max(x, Max(y, Max(z, 8)))) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        5, Max::make(x, Max::make(y, Max::make(z, 8, true), true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(8, Max(Max(y, Max(z, 5)), x)) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        8, Max::make(Max::make(y, Max::make(z, 5, true), true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(5, Max(Max(Max(z, 8), y), x)) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        5, Max::make(Max::make(Max::make(z, 8, true), y, true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(x, Max(y, Max(5, z))), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(x, Max::make(y, Max::make(5, z, true), true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(y, Max(8, z)), x), 5) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(y, Max::make(z, 8, true), true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(Max(5, z), y), x), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(Max::make(z, 5, true), y, true), x, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(Max(z, 5), y), x), 8) => Max(Max(x, Max(Max(z, 5), y)), 8)
+    // Do not simplify when all the Max ops do not have the same
+    // propagate_nans.
+    ExprHandle body = Max::make(
+        Max::make(Max::make(Max::make(z, 5, true), y, false), x, true),
+        8,
+        false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_VAR_WITH_NAME(max2->lhs(), "x");
+    IS_NODE_WITH_NAME(Max, max2->rhs(), max3);
+    IS_BINOP_W_CONST(Max, max3->lhs(), max4, "z", 5);
+    ASSERT_TRUE(max4->propagate_nans());
+    IS_VAR_WITH_NAME(max3->rhs(), "y");
+    ASSERT_FALSE(max3->propagate_nans());
+    ASSERT_TRUE(max2->propagate_nans());
+    IS_IMM_WITH_VAL(Int, max1->rhs(), 8);
+    ASSERT_FALSE(max1->propagate_nans());
+  }
+
+  {
+    // Max(8, Max(Max(x, 5), Max(y, z))) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        8, Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+
+  {
+    // Max(Max(Max(x, 5), Max(y, z)), 8) => Max(Max(Max(x, 8), y), z)
+    ExprHandle body = Max::make(
+        Max::make(Max::make(x, 5, true), Max::make(y, z, true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max1);
+    IS_NODE_WITH_NAME(Max, max1->lhs(), max2);
+    IS_BINOP_W_CONST(Max, max2->lhs(), max3, "x", 8);
+    ASSERT_TRUE(max3->propagate_nans());
+    IS_VAR_WITH_NAME(max2->rhs(), "y");
+    IS_VAR_WITH_NAME(max1->rhs(), "z");
+  }
+}
+
+void testSimplifyNestedMin() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+
+  {
+    // Min(x + y, x + y) => x + y
+    ExprHandle body = Min::make(x + y, x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_VARS(Add, simplified.node(), add, "y", "x");
+  }
+
+  {
+    // Min(x + y, Min(x + y, z)) => Min(y + x, z)
+    ExprHandle body = Min::make(x + y, Min::make(x + y, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(x + y, Min(z, x + y)) => Min(y + x, z)
+    ExprHandle body = Min::make(x + y, Min::make(z, x + y, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x + y, z), x + y) => Min(y + x, z)
+    ExprHandle body = Min::make(Min::make(x + y, z, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(z, x + y), x + y) => Min(y + x, z)
+    ExprHandle body = Min::make(Min::make(z, x + y, true), x + y, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Add, min->lhs(), add, "y", "x");
+    IS_VAR_WITH_NAME(min->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x, y), x) => Min(Min(x, y), x)
+    // Nested Min ops with different propagate_nans should not be simplified.
+    ExprHandle body = Min::make(Min::make(x, y, true), x, false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_BINOP_W_VARS(Min, min1->lhs(), min2, "x", "y");
+    ASSERT_TRUE(min2->propagate_nans());
+    IS_VAR_WITH_NAME(min1->rhs(), "x");
+    ASSERT_FALSE(min1->propagate_nans());
+  }
+
+  {
+    // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(x, y, true), Max::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(x, y), Max(z, x)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(x, y, true), Max::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(x, z)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(x, z, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(z, x)) => Max(x, Min(y, z))
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(z, x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Max, simplified.node(), max);
+    IS_VAR_WITH_NAME(max->lhs(), "x");
+    IS_BINOP_W_VARS(Min, max->rhs(), min, "y", "z");
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Max(y, x), Max(z, x)) => Min(Max(x, z), Max(x, y))
+    // When all the ops in the pattern do not have the same propagate_nans,
+    // it should not be simplified.
+    ExprHandle body =
+        Min::make(Max::make(y, x, true), Max::make(z, x, false), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min);
+    IS_BINOP_W_VARS(Max, min->lhs(), max1, "x", "z");
+    ASSERT_FALSE(max1->propagate_nans());
+    IS_BINOP_W_VARS(Max, min->rhs(), max2, "x", "y");
+    ASSERT_TRUE(max2->propagate_nans());
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(5, Min(x, 8)) => Min(x, 8)
+    ExprHandle body = Min::make(5, Min::make(x, 8, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(8, Min(x, 5)) => Min(x, 8)
+    ExprHandle body = Min::make(8, Min::make(x, 5, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Min(x, 8), 5) => Min(x, 8)
+    ExprHandle body = Min::make(Min::make(x, 8, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(Min(x, 5), 8) => Min(x, 8)
+    ExprHandle body = Min::make(Min::make(x, 5, true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_BINOP_W_CONST(Min, simplified.node(), min, "x", 5);
+    ASSERT_TRUE(min->propagate_nans());
+  }
+
+  {
+    // Min(5, Min(x, Min(y, Min(z, 8)))) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(x, Min::make(y, Min::make(z, 8, true), true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(5, Min(Min(y, Min(z, 8)), x)) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(5, Min(Min(Min(z, 8), y), x)) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        5, Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(x, Min(y, Min(8, z))), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(x, Min::make(y, Min::make(8, z, true), true), true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(y, Min(8, z)), x), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(y, Min::make(z, 8, true), true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(Min(8, z), y), x), 5) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(Min::make(z, 8, true), y, true), x, true), 5, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(Min(z, 5), y), x), 8) => Min(Min(x, Min(Min(z, 5), y)), 8)
+    // Do not simplify when all the Min ops do not have the same
+    // propagate_nans.
+    ExprHandle body = Min::make(
+        Min::make(Min::make(Min::make(z, 5, true), y, false), x, true),
+        8,
+        false);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_VAR_WITH_NAME(min2->lhs(), "x");
+    IS_NODE_WITH_NAME(Min, min2->rhs(), min3);
+    IS_BINOP_W_CONST(Min, min3->lhs(), min4, "z", 5);
+    ASSERT_TRUE(min4->propagate_nans());
+    IS_VAR_WITH_NAME(min3->rhs(), "y");
+    ASSERT_FALSE(min3->propagate_nans());
+    ASSERT_TRUE(min2->propagate_nans());
+    IS_IMM_WITH_VAL(Int, min1->rhs(), 8);
+    ASSERT_FALSE(min1->propagate_nans());
+  }
+
+  {
+    // Min(8, Min(Min(x, 5), Min(y, z))) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        8, Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
+  }
+
+  {
+    // Min(Min(Min(x, 5), Min(y, z)), 8) => Min(Min(Min(x, 5), y), z)
+    ExprHandle body = Min::make(
+        Min::make(Min::make(x, 5, true), Min::make(y, z, true), true), 8, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Min, simplified.node(), min1);
+    IS_NODE_WITH_NAME(Min, min1->lhs(), min2);
+    IS_BINOP_W_CONST(Min, min2->lhs(), min3, "x", 5);
+    ASSERT_TRUE(min3->propagate_nans());
+    IS_VAR_WITH_NAME(min2->rhs(), "y");
+    IS_VAR_WITH_NAME(min1->rhs(), "z");
   }
 }
 
@@ -2542,6 +3201,663 @@ void testSimplifyEliminateZeroLengthAlloc() {
     Stmt* simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
+  }
+}
+
+void testDontSimplifyRand() {
+  KernelScope kernel_scope;
+
+  {
+    // rand() + rand() = rand() + rand() NOT 2 * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) + Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_RAND(add->lhs());
+    IS_RAND(add->rhs());
+  }
+
+  {
+    // rand() - rand() = rand() - rand() NOT 0.
+    ExprHandle body =
+        Intrinsics::make(kRand, kFloat) - Intrinsics::make(kRand, kFloat);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_RAND(sub->lhs());
+    IS_RAND(sub->rhs());
+  }
+
+  {
+    // rand() * rand() = rand() * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) * Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_RAND(mul->lhs());
+    IS_RAND(mul->rhs());
+  }
+}
+
+void testSimplifyReorderForCond() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {4}, kInt));
+  Buffer b(BufHandle("B", {1}, kInt));
+  Buffer c(BufHandle("C", {4}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  {
+    // for ( if ( ... ) ) => if ( for ( ... ) ).
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Can't reorder if condition is dependent on the loop var.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Can't reorder if condition is dependent on a var that is modified inside
+    // the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition based on buffer not referenced in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(b, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition based on buffer read only in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition depends on Let in the loop. Cannot reorder.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Block::make(
+            {Let::make(j, 3),
+             Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                 nullptr)}));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Let, loop->body()->front(), let);
+    IS_NODE_WITH_NAME(Cond, loop->body()->back(), cond);
+  }
+
+  {
+    // Multi level Ifs where all conditions are distinct. Move BOTH Cond
+    // statements outside the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(Cond, true_block->front(), cond2);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_block2);
+    IS_NODE_WITH_NAME(For, true_block2->front(), loop);
+  }
+
+  {
+    // Multi level Ifs where the inner condition does depend on a loop var,
+    // reorder only the first Cond.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+    IS_NODE_WITH_NAME(Block, loop->body(), loop_body);
+    IS_NODE_WITH_NAME(Cond, loop_body->front(), cond2);
+  }
+
+  {
+    // Don't reorder if there's an else block of the Cond.
+    // We could, but is it much better?
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            Store::make(c, {0}, 0, mask)));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition uses distinct region of Tensor.
+    // We could reorder here wih better analysis, but we don't. Included for
+    // completeness.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {1}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+}
+
+void testSimplifyFuseConditions() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {2}, kInt));
+  Buffer b(BufHandle("B", {2}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  {
+    // Can fuse since the conditions are identical.
+    // if (A) { X }; if (A) { Y }; => if (A) { X; Y }
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, conditions are not identical in lhs (i != j).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+  {
+    // Can't fuse, conditions are not identical in rhs (10 != 11).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 11, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, conditions are not identical in operation (LT vs GT).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kGT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, CompareSelect results are different.
+    // Actually we totally could if we normalized CompareSelect results, but
+    // TODO for later.
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i,
+                                     10,
+                                     new IntImm(1),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     j,
+                                     10,
+                                     new IntImm(2),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse with false stmt only.
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(a, {0}, i, mask)),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(a, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->false_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->true_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse with both true and false stmt.
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             Store::make(b, {0}, i, mask)),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             Store::make(b, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 2);
+  }
+
+  {
+    // Can fuse with mismatched true / false stmt existing
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(b, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 1);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 1);
+  }
+
+  {
+    // Can fuse partial block contents, ie when there are non fused stmts before
+    // and after.
+    // before:
+    // if (j < 10) { A[0] = j; }
+    // if (i < 10) { A[0] = i; }
+    // if (i < 10) { A[1] = i; }
+    // if (i < 11) { A[1] = j; }
+    //
+    // after:
+    //
+    // if (j < 10) { A[0] = j; }
+    // if (i < 10) {
+    //   A[0] = i;
+    //   A[1] = i;
+    // }
+    // if (i < 11) { A[1] = j; }
+
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 11, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+
+    auto it = block->begin();
+    it++;
+    IS_NODE_WITH_NAME(Cond, *it, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse longer sequences of identical conditions.
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 4);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse through a non condition.
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Store::make(b, {1}, i + j, mask),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt2->nstmts(), 2);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+
+    auto it = block->begin();
+    it++;
+    IS_NODE_WITH_NAME(Store, *it, middle);
+  }
+
+  {
+    // Can fuse if the conditions simplify to the same thing.
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(87) % ExprHandle(11),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(300) / ExprHandle(30),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse non-CompareSelects.
+    // if (i) { X } if (i) { Y } => if (i) { X; Y }
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(i, Store::make(a, {1}, i, mask), nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Sanity check wont fuse different non-CompareSelects.
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(j, Store::make(a, {1}, i, mask), nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+  }
+
+  {
+    // Sanity check constant condition elimination still occurs when merging is
+    // possible.
+    auto body =
+        Block::make({Cond::make(1, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(1, Store::make(a, {1}, i, mask), nullptr)});
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Store, block->front(), store1);
+    IS_NODE_WITH_NAME(Store, block->back(), store2);
+  }
+
+  {
+    // Sanity check for-cond reordering occurs after fusing.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Block::make(
+            {Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(a, {1}, Load::make(b, {0}, mask), mask),
+                 nullptr),
+             Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(a, {2}, Load::make(b, {0}, mask), mask),
+                 nullptr)}));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
   }
 }
 

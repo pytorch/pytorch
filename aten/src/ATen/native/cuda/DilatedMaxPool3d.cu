@@ -468,6 +468,7 @@ Tensor& max_pool3d_with_indices_backward_out_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_out_cuda");
   max_pool3d_with_indices_backward_out_cuda_template(
@@ -493,6 +494,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
