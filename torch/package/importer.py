@@ -4,7 +4,7 @@ import importlib
 from torch.serialization import _load
 import pickle
 import torch
-import _compat_pickle
+import _compat_pickle  # type: ignore
 import types
 import os.path
 
