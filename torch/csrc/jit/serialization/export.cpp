@@ -849,7 +849,12 @@ std::string pretty_print_onnx(
   return prettyPrint(graph_encoder.get_model_proto());
 }
 
-std::tuple<::ONNX_NAMESPACE::ModelProto, RawDataExportMap> _export_onnx(
+// export_raw_ir will export IR ops without turning them into ONNX ops.
+// The output will use the ONNX protobuf format, but the ops will not
+// conform to the ONNX op specification. Thus, the output will not
+// be interpretable by a ONNX-compatible framework. However, PyTorch or
+// libtorch will be able to import the IR and play it back.
+std::tuple<std::shared_ptr<::ONNX_NAMESPACE::ModelProto>, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
@@ -883,47 +888,16 @@ std::tuple<::ONNX_NAMESPACE::ModelProto, RawDataExportMap> _export_onnx(
       "Exporting model exceed maximum protobuf size of 2GB. "
       "Please call torch.onnx.export with use_external_data_format=True.");
   GRAPH_UPDATE("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
+  std::shared_ptr<onnx::ModelProto> model_proto = std::make_shared<onnx::ModelProto>(graph_encoder.get_model_proto());
   return std::make_tuple(
-      graph_encoder.get_model_proto(), graph_encoder.get_raw_data_export_map());
+      model_proto, graph_encoder.get_raw_data_export_map());
 }
 
-// export_raw_ir will export IR ops without turning them into ONNX ops.
-// The output will use the ONNX protobuf format, but the ops will not
-// conform to the ONNX op specification. Thus, the output will not
-// be interpretable by a ONNX-compatible framework. However, PyTorch or
-// libtorch will be able to import the IR and play it back.
-std::tuple<std::string, RawDataExportMap> export_onnx(
-    const std::shared_ptr<Graph>& graph,
-    const std::map<std::string, at::Tensor>& initializers,
-    int64_t onnx_opset_version,
-    const std::unordered_map<
-        std::string,
-        std::unordered_map<std::int64_t, std::string>>& dynamic_axes,
-    bool defer_weight_export,
-    ::torch::onnx::OperatorExportTypes operator_export_type,
-    bool strip_doc_string,
-    bool keep_initializers_as_inputs,
-    const std::map<std::string, int>& custom_opsets,
-    bool add_node_names,
-    bool use_external_data_format,
-    const std::string& onnx_file_path) {
-  onnx::ModelProto model_proto;
-  RawDataExportMap export_map;
-  std::tie(model_proto, export_map) = _export_onnx(
-      graph,
-      initializers,
-      onnx_opset_version,
-      dynamic_axes,
-      defer_weight_export,
-      operator_export_type,
-      strip_doc_string,
-      keep_initializers_as_inputs,
-      custom_opsets,
-      add_node_names,
-      use_external_data_format,
-      onnx_file_path);
-  return std::make_tuple(model_proto.SerializeAsString(), export_map);
+std::string serialize_model_proto_to_string(
+  const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto){
+      return model_proto->SerializeAsString();
 }
+
 
 void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
