@@ -382,7 +382,7 @@ class TensorExprFuser {
       }
     }
 
-    return std::make_pair(++n->reverseIterator(), false);
+    return std::make_pair(++fusion_group->reverseIterator(), false);
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
