@@ -25,6 +25,8 @@ static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::less_equal, aten::le},    {aten::less_equal_, aten::le_},
     {aten::less, aten::lt},          {aten::less_, aten::lt_},
     {aten::not_equal, aten::ne},     {aten::not_equal_, aten::ne_},
+    {aten::divide, aten::div},       {aten::divide_, aten::div_},
+    {aten::multiply, aten::mul},     {aten::multiply_, aten::mul_},
     {aten::true_divide, aten::div},  {aten::true_divide_, aten::div_},
 };
 

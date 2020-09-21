@@ -96,12 +96,18 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_symmetric``
     """
 
+    # Note: the version is shared by all observer types
+    #
     # Version 1/None
     #   self
     #
-    # Version 2
+    # Version 2 (base class only, does not include child class buffers)
     #   self
     #   |--- eps : Tensor
+    #
+    # Version 3
+    #   for HistogramObserver only, changed the shape of uninitialized
+    #   min_val and max_val buffers from torch.Size([0]) to torch.Size([])
     _version = 2
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -629,6 +635,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
@@ -739,8 +746,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+        self.register_buffer('min_val', torch.tensor(float('inf')))
+        self.register_buffer('max_val', torch.tensor(float('-inf')))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -917,10 +924,9 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        same_values = False
-        if min_val.numel() > 0 and max_val.numel() > 0:
-            same_values = min_val.item() == max_val.item()
-        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
+        same_values = min_val.item() == max_val.item()
+        is_uninitialized = min_val == float('inf') and max_val == float('-inf')
+        if is_uninitialized or same_values:
             min_val, max_val = torch._aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
@@ -958,7 +964,9 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        if self.min_val.numel() == 0 or self.max_val.numel() == 0:
+        is_uninitialized = (self.min_val == float('inf') and
+                            self.max_val == float('-inf'))
+        if is_uninitialized:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
@@ -980,6 +988,18 @@ class HistogramObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+
+        if version is None or version < 3:
+            # if min_val and max_val are not initialized, update their shape
+            # to account for the differences between v2 and v3
+            min_val_name, max_val_name = prefix + 'min_val', prefix + 'max_val'
+            if min_val_name in state_dict:
+                if state_dict[min_val_name].shape == torch.Size([0]):
+                    state_dict[min_val_name] = torch.tensor(float('inf'))
+            if max_val_name in state_dict:
+                if state_dict[max_val_name].shape == torch.Size([0]):
+                    state_dict[max_val_name] = torch.tensor(float('-inf'))
 
         local_state = ['min_val', 'max_val']
         for name in local_state:
