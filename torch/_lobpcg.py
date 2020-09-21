@@ -383,6 +383,9 @@ def lobpcg(A,                   # type: Tensor
       not recommended but there exist cases where the usage of the
       basic method may be preferred.
 
+    .. warning:: The backward method does not support sparse and complex inputs.
+      It works only when `B` is not provided (i.e. `B == None`).
+
     Arguments:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
