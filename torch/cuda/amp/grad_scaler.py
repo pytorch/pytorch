@@ -183,7 +183,9 @@ class GradScaler(object):
         # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
         # There could be hundreds of grads, so we'd like to iterate through them just once.
         # However, we don't know their devices or dtypes in advance.
-        per_device_and_dtype_grads = defaultdict(defaultdict(list))
+
+        # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         for group in optimizer.param_groups:
             for param in group["params"]:
                 if param.grad is not None:

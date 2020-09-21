@@ -72,8 +72,9 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
 } // anonymous namespace
 
 
-// Multiplies each Tensor in scaled_grads by inv_scale in-place.
-// If any element of any Tensor in scaled_grads is inf or NaN, sets found_inf to 1.0.
+// Multiplies each tensor in scaled_grads by inv_scale in-place.
+// If any element of any tensor in scaled_grads is inf or NaN, sets found_inf to 1.0.
+// Uses multi tensor apply (MTA) to process all MTA-safe tensors.
 //
 // Args:
 // scaled_grads:  A TensorList of scaled gradient tensors.  May contain infs or NaNs.
