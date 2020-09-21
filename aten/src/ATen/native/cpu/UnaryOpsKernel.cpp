@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
@@ -347,6 +348,16 @@ static void trigamma_kernel(TensorIterator& iter) {
   });
 }
 
+static void exp2_kernel(TensorIterator& iter) {
+  // Supports only floating types as std::exp2 doesn't have
+  // complex overloads.
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "exp2", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::exp2(a); });
+  });
+}
+
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel(iter);
@@ -392,6 +403,15 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
+  });
+}
+
+static void kaiser_window_kernel(TensorIterator& iter, int64_t window_length, double beta){
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
+    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+    cpu_kernel(iter, [=](scalar_t a){
+        return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+    });
   });
 }
 
@@ -611,6 +631,7 @@ REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
 REGISTER_DISPATCH(imag_stub, &imag_kernel);
 REGISTER_DISPATCH(conj_stub, &conj_kernel);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
@@ -629,6 +650,7 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
 
 
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)

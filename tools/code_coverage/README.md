@@ -21,6 +21,7 @@ It’s an integrated tool. You can use this tool to run and generate both file-l
 * *Final report:*
     * File-Level: The coverage percentage for each file you are interested in
     * Line-Level: The coverage details for each line in each file you are interested in
+    * Html-Report (only for `gcc`): The beautiful HTML report supported by `lcov`, combine file-level report and line-lever report into a graphical view.
 * *More complex but flexible options:*
     * Use different stages like *--run, --export, --summary* to achieve more flexible functionality
 
@@ -50,7 +51,7 @@ Great, you are ready to run the code coverage tool for the first time! Start fro
 ```
 python oss_coverage.py --run-only=atest
 ```
-This command will run `atest` binary in `build/bin/` folder and generate reoports over the entire *Pytorch* folder. But you may only be interested in the `aten` folder, in this case, try:
+This command will run `atest` binary in `build/bin/` folder and generate reoports over the entire *Pytorch* folder. You can find the reports in `profile/summary`. But you may only be interested in the `aten` folder, in this case, try:
 ```
 python oss_coverage.py --run-only=atest --interested-only=aten
 ```
@@ -65,6 +66,7 @@ python oss_coverage.py --run-only=atest c10_logging_test --interested-only aten/
 ```
 That it is! With these two simple options, you can customize many different functionality according to your need.
 By default, the tool will run all tests in `build/bin` folder (by running all executable binaries in it) and `test/` folder (by running `run_test.py`), and then collect coverage over the entire *Pytorch* folder. If this is what you want, try:
+*(Note: It's not recommended to run default all tests in clang, because it will take too much space)*
 ```bash
 python oss_coverage.py
 ```
