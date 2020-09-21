@@ -21,6 +21,7 @@ if is_available():
         _release_context,
         get_gradients,
         _is_valid_context,
+        backward,
     )
 
 class context(object):
