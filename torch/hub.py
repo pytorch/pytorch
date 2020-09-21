@@ -327,7 +327,7 @@ def load(repo_or_dir, model, *args, **kwargs):
 
     Args:
         repo_or_dir (string): repo name (``repo_owner/repo_name[:tag_name]``),
-            ``source = 'github'``, or a path to a local directory, if
+            if ``source = 'github'``; or a path to a local directory, if
             ``source = 'local'``.
         model (string): the name of a callable (entrypoint) defined in the
             repo/dir's ``hubconf.py``.
