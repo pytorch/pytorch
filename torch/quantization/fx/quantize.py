@@ -126,6 +126,12 @@ def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
             isinstance(module, torch.quantization.FakeQuantize))
 
+def is_submodule_of_fake_quant(name, module, named_modules):
+    parent_name = name.rsplit('.', 1)
+    if len(parent_name) > 1:
+        return is_activation_post_process(named_modules[parent_name[0]])
+    return False
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -509,9 +515,10 @@ class Quantizer:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
+        module_dict = dict(model.named_modules())
         to_be_removed = []
         for name, module in model.named_modules():
-            if is_activation_post_process(module) and 'activation_post_process_' in name.split('.')[-1]:
+            if is_activation_post_process(module) and not is_submodule_of_fake_quant(name, module, module_dict):
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
