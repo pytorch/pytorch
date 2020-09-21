@@ -67,7 +67,7 @@ class OpInfo(object):
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
-            assert isinstance(dtype_list, _dispatch_dtypes)
+            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
 
@@ -154,7 +154,6 @@ class UnaryUfuncInfo(OpInfo):
       - they typically have method and inplace variants
       - they typically support the out kwarg
       - they typically have NumPy or SciPy references
-
     See NumPy's universal function documentation
     (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
     about the concept of ufuncs.
@@ -374,6 +373,11 @@ op_db = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
+    UnaryUfuncInfo('exp2',
+                   ref=np.exp2,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None)
 ]
 
 # Common operator groupings
@@ -517,6 +521,9 @@ def method_tests():
         ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('mul', (S, S, S), (3.14,), 'constant', (True,)),
         ('mul', (), (3.14,), 'scalar_constant', (True,)),
+        # TODO(@anjali411): enable these tests
+        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
+        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -527,9 +534,18 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
+        ('true_divide', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
+        ('true_divide', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar', (True,)),
+        ('true_divide', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
+        ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -594,6 +610,8 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
+        ('exp2', (S, S, S), NO_ARGS, '', (False,)),
+        ('exp2', (), NO_ARGS, 'scalar', (False,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
         ('expm1', (), NO_ARGS, 'scalar', (True,)),
         ('erf', torch.rand(S, S, S), NO_ARGS, '', (True,)),
@@ -610,12 +628,13 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
+        # ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
@@ -628,6 +647,12 @@ def method_tests():
         ('sinh', (), NO_ARGS, 'scalar', (True,)),
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
+        ('conj', (S, S, S), NO_ARGS),
+        ('real', (S, S, S), NO_ARGS, 'complex'),
+        ('imag', (S, S, S), NO_ARGS, 'complex'),
+        ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
+        ('view_as_complex', (S, S, 2), NO_ARGS),
+        ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
@@ -644,7 +669,8 @@ def method_tests():
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
+        # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
+        # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
@@ -656,8 +682,9 @@ def method_tests():
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
-        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
+        # ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
+        # ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
@@ -755,6 +782,16 @@ def method_tests():
         ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
         # END TODO
+        ('quantile', (S, S, S), (0.5,)),
+        ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('quantile', (), (0.5,), 'scalar'),
+        ('nanquantile', (S, S, S), (0.5,)),
+        ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -1617,6 +1654,11 @@ def exclude_tensor_method(name, test_name):
         'test_std_mean_dim_1d',
         'test_std_mean_dim',
         'test_std_mean',
+        'test_view_as_complex',
+        'test_view_as_real_complex',
+        'test_real_complex',
+        'test_imag_complex',
+        'test_complex'
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
@@ -1634,5 +1676,7 @@ def exclude_tensor_method(name, test_name):
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
+        return True
+    if 'fft.' in name:
         return True
     return False

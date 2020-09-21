@@ -594,6 +594,14 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
     }
   }
 
+  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+      : ExprNodeBase(kInt),
+        lhs_(lhs),
+        rhs_(rhs),
+        ret_val1_(new IntImm(1)),
+        ret_val2_(new IntImm(0)),
+        compare_op_(cmp_op) {}
+
  private:
   const Expr* lhs_;
   const Expr* rhs_;
@@ -802,6 +810,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 

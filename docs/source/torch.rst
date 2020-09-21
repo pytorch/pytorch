@@ -280,11 +280,13 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
     erfinv
     exp
+    exp2
     expm1
     fix
     floor
@@ -308,6 +310,7 @@ Pointwise Ops
     hypot
     i0
     mul
+    multiply
     mvlgamma
     nan_to_num
     neg
@@ -356,6 +359,7 @@ Reduction Ops
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -415,6 +419,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
@@ -531,3 +536,4 @@ Utilities
     promote_types
     set_deterministic
     is_deterministic
+    vmap
