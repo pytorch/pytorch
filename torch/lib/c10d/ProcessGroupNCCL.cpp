@@ -108,7 +108,9 @@ std::string getKeyFromDevices(const std::vector<at::Device>& devices) {
 }
 
 std::string getKeySendRecv(int myRank, int peer) {
-  std::string sendRecvPair = std::to_string(myRank) + "->" + std::to_string(peer);
+  int lowRank = myRank < peer ? myRank : peer;
+  int highRank = myRank < peer ? peer : myRank;
+  std::string sendRecvPair = std::to_string(lowRank) + ":" + std::to_string(highRank);
   return sendRecvPair;
 }
 
@@ -725,7 +727,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::string& devicesKey,
     const std::vector<at::Device>& devices,
     NCCLCommType commType,
-    int myNewRank) {
+    int p2pRank) {
   // Sanity check
   if (devicesKey.empty()) {
     throw std::runtime_error(
@@ -753,7 +755,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   ncclUniqueId ncclID;
 
   // For point-to-point communication, lower rank of the two will get unique id.
-  if (rank_ == 0 || (commType != NCCLCommType::COLL && myNewRank == 0)) {
+  if (rank_ == 0 || (commType != NCCLCommType::COLL && p2pRank == 0)) {
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID));
   }
 
@@ -798,7 +800,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // For point-to-point operation, there are only 2 processes involved so
     // the GPU rank is either 0 or 1.
       numRanks = 2;
-      rank = myNewRank;
+      rank = p2pRank;
     }
     // Get the device index
     int deviceIndex = devices[i].index();
@@ -1059,8 +1061,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     PostProcess post) {
   const auto devices = getDeviceList(tensors);
   const auto key = getKeySendRecv(rank_, peer);
-  int myNewRank = rank_ < peer ? 0 : 1;
-  auto& ncclComms = getNCCLComm(key, devices, commType, myNewRank);
+  int p2pRank = rank_ < peer ? 0 : 1;
+  auto& ncclComms = getNCCLComm(key, devices, commType, p2pRank);
 
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
@@ -1099,9 +1101,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       // For point-to-point communication, NCCL ranks can only
       // be 0 or 1.
-      int newTargetRank = 1 - myNewRank;
+      int p2pTargetRank = 1 - p2pRank;
       C10D_NCCL_CHECK(
-          fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream, newTargetRank));
+          fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank));
     }
   }
 
@@ -1480,6 +1482,22 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     const AllToAllOptions& /* unused */) {
   throw std::runtime_error(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports recv for NCCL lib version >= 2.7.0");
 }
 #endif
 

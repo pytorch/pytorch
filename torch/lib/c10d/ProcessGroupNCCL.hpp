@@ -422,6 +422,20 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override;
+
+  static void groupStart();
+
+  static void groupEnd();
+
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -433,23 +447,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
-      int dstRank,
-      int tag) override;
-
-  std::shared_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors,
-      int srcRank,
-      int tag) override;
-
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  static void groupStart();
-
-  static void groupEnd();
 
   static const int64_t kProcessGroupNCCLOpTimeoutMillis;
 
@@ -463,7 +463,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::string& devicesKey,
       const std::vector<at::Device>& devices,
       NCCLCommType commType = NCCLCommType::COLL,
-      int myNewRank = 0);
+      int p2pRank = 0);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
@@ -575,7 +575,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // For point-to-point operations:
   // The key is a string of my current rank and the peer process rank.
   // e.g. If process 1 and process 2 are involved in a point-to-point communication,
-  // the key will be "1->2" on process 1 and "2->1" on process 2.
+  // the key will be "1:2" on both processes.
   // Note: this is for the scenario where there is only 1 GPU per process.
   // When it comes to multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>

@@ -623,6 +623,7 @@ class DistributedTest:
                     self.assertEqual(output_tensor, expected_tensor)
 
             self._barrier()
+
         # SEND RECV
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
         def test_send_recv(self):
