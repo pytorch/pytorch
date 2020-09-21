@@ -4281,7 +4281,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             z = x + y
             event = torch.cuda.Event()
-
+            event.record(s1)
         event.wait(s0)
         return z
 
@@ -4310,8 +4310,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
                 TensorPipeAgentRpcTest._slow_add_on_user_stream,
                 args=(x, x)
             )
-            print(ret)
-            print (2 * x)
             self.assertEqual(ret, 2 * x)
 
     def _test_stream_multi_async(self, dst):
@@ -4332,7 +4330,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
 
     @skip_if_lt_x_gpu(2)
-    def  test_custom_stream_x(self):
+    def  test_custom_stream(self):
         self._test_custom_stream(self._test_stream_sync)
 
     @skip_if_lt_x_gpu(2)
