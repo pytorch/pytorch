@@ -1,7 +1,6 @@
 from functools import reduce
 from operator import mul, itemgetter
 import collections
-import typing
 
 import torch
 import numpy as np
@@ -1605,9 +1604,9 @@ EXCLUDE_FUNCTIONAL = {
     'reshape',
     'where'  # argument order
 }
-EXCLUDE_GRADCHECK: Dict[str, Any]  = {
+EXCLUDE_GRADCHECK: Dict[str, Any] = {
 }
-EXCLUDE_GRADGRADCHECK: Dict[str, Any]  = {
+EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,
