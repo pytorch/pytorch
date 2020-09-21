@@ -90,7 +90,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda110 -c pytorch
   fi
 
-  conda_install -c conda-forge valgrind
+  conda_install valgrind -c conda-forge
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
