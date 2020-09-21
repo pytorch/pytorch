@@ -15,6 +15,11 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 
+TEST_MAGMA = TEST_CUDA
+if TEST_CUDA:
+    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    TEST_MAGMA = torch.cuda.has_magma
+
 if TEST_NUMBA:
     import numba.cuda
     TEST_NUMBA_CUDA = numba.cuda.is_available()
@@ -135,3 +140,10 @@ def with_tf32_off(f):
             return f(*args, **kwargs)
 
     return wrapped
+
+
+def _get_torch_cuda_version():
+    if torch.version.cuda is None:
+        return [0, 0]
+    cuda_version = str(torch.version.cuda)
+    return [int(x) for x in cuda_version.split(".")]

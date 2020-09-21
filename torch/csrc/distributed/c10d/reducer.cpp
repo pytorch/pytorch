@@ -440,7 +440,7 @@ std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
 
 void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!should_rebuild_buckets()) {
+  if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
   }
   const auto replica_count = replicas_.size();
@@ -624,18 +624,10 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     const c10::Stream currentStream =
         guard.getStream(replica.contents.device());
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::unique_lock<std::mutex> lock(this->mutex_);
+      std::lock_guard<std::mutex> lock(this->mutex_);
       // Run callback with the current stream
       c10::OptionalStreamGuard currentStreamGuard{currentStream};
       this->finalize_backward();
-      // Rebuild bucket if this is the first time to rebuild
-      if (!rebuilt_params_.empty()) {
-        // Unlock since rebuild_buckets() acquires the lock.
-        lock.unlock();
-        rebuild_buckets();
-      } else {
-        lock.unlock();
-      }
     });
   }
 }
