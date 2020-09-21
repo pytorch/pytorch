@@ -143,9 +143,17 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 }
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  Tensor result = at::empty({0}, self.options());
-  at::addr_out(result, self, vec1, vec2, beta, alpha);
-  return result;
+  TORCH_WARN(
+    "torch.addr is deprecated and will be removed in a future PyTorch release. "
+    "This function can be implemented using torch.ger as "
+    "alpha * torch.outer(vec1, vec2) + beta * input when beta is not zero, "
+    "alpha * torch.outer(vec1, vec2) when beta is zero.");
+
+  Tensor outer_result = at::outer(vec1, vec2) * alpha;
+  if (beta.to<double>() == 0.0) {
+    return outer_result;
+  }
+  return outer_result + (self * beta);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -153,62 +161,32 @@ Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta,
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
+  auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
+  // Validates safe casting
+  const auto result_dtype = addr_result.scalar_type();
+  TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
+              "result type ", result_dtype,
+              " can't be cast to the desired output type ", result.scalar_type());
 
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr_out");
-    result.resize_as_(self_);
-    result.copy_(self_);
-  } else {
-    self_ = self;
-  }
-
-  TORCH_CHECK(self_.dim() == 2,
-              "2D tensor expected, got ", self_.dim(), "D tensor for input");
-  TORCH_CHECK(self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
-              "size mismatch",
-              ", input: ", self_.sizes(),
-              ", v1: ", vec1.sizes(),
-              ", v2: ", vec2.sizes());
-
-  // If beta is 0, self would be ignored
-  // and `nan` and `inf` in it would not be propagated
-  if (beta.to<double>() == 0.0) {
-    result.zero_();
-  } else if (beta.to<double>() != 1.0) {
-    result.mul_(beta);
-  }
-
-  // addr is implemented as a composite op through torch.outer
-  at::add_out(result,
-              result,
-              at::outer(vec1, vec2),
-              alpha);
+  at::native::resize_output(result, addr_result.sizes().vec());
+  result.copy_(addr_result);
   return result;
-}
-
-Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
-  TORCH_WARN("torch.ger is deprecated and may be removed, "
-             "please use torch.outer instead.");
-  return at::outer_out(result, self, vec2);
 }
 
 // torch.ger, alias for torch.outer
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  TORCH_WARN("torch.ger is deprecated and will be removed in a future PyTorch release. "
+             "Use torch.outer instead.");
+  return at::outer_out(result, self, vec2);
+}
+
 Tensor ger(const Tensor& self, const Tensor& vec2) {
-  Tensor result = at::empty({0}, self.options());
-  at::ger_out(result, self, vec2);
-  return result;
+  return self.outer(vec2);
 }
 
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "outer");
   check_1d(vec2, "vec2", "outer");
-
-  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
-    result.resize_({ self.size(0), vec2.size(0) });
-  }
 
   // torch.outer is implemented as a composite op using reshape and mul
   at::mul_out(result, self.reshape({self.size(0), 1}), vec2);
@@ -216,9 +194,10 @@ Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
 }
 
 Tensor outer(const Tensor& self, const Tensor& vec2) {
-  Tensor result = at::empty({0}, self.options());
-  at::outer_out(result, self, vec2);
-  return result;
+  check_1d(self, "self", "outer");
+  check_1d(vec2, "vec2", "outer");
+
+  return self.reshape({self.size(0), 1}) * vec2;
 }
 
 static void addmm_impl_cpu_(
