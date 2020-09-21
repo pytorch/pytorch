@@ -5935,7 +5935,7 @@ class TestAutogradFunctional(TestCase):
 class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
-        for f in [torch.min, torch.max, torch.median]:
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
             y = f(x)
             y.backward()

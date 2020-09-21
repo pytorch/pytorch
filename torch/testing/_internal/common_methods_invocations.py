@@ -796,10 +796,14 @@ def method_tests():
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
         ('median', (), NO_ARGS, 'scalar'),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('median', (), (0,), 'scalar_dim', (), [0], [expectedFailureCUDA]),
-        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0], [expectedFailureCUDA]),
-        # END TODO
+        ('median', (), (0,), 'scalar_dim', (), [0]),
+        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
+        ('nanmedian', (S, S, S), NO_ARGS),
+        ('nanmedian', (S, S, S), (1,), 'dim', (), [0]),
+        ('nanmedian', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
+        ('nanmedian', (), NO_ARGS, 'scalar'),
+        ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
+        ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('mode', (S, S, S), NO_ARGS),
         ('mode', (S, S, S), (1,), 'dim', (), [0]),
         ('mode', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),

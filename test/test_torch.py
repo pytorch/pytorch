@@ -1096,42 +1096,7 @@ class AbstractTestCases:
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-            self.assertRaises(TypeError, lambda: q.topk(4, True))
-
-        def test_median(self):
-            for size in (155, 156):
-                x = torch.rand(size, size)
-                x0 = x.clone()
-
-                nelem = x.nelement()
-                res1val = torch.median(x)
-                res2val, _ = torch.sort(x.view(nelem))
-                ind = int(math.floor((nelem + 1) / 2) - 1)
-
-                self.assertEqual(res2val[ind], res1val, atol=0, rtol=0)
-
-                res1val, res1ind = torch.median(x, dim=1, keepdim=False)
-                res2val, res2ind = torch.sort(x)
-                ind = int(math.floor((size + 1) / 2) - 1)
-
-                self.assertEqual(res2val.select(1, ind), res1val, atol=0, rtol=0)
-                self.assertEqual(res2val.select(1, ind), res1val, atol=0, rtol=0)
-
-                # Test use of result tensor
-                res2val = torch.Tensor()
-                res2ind = torch.LongTensor()
-                torch.median(x, dim=-1, keepdim=False, out=(res2val, res2ind))
-                self.assertEqual(res2val, res1val, atol=0, rtol=0)
-                self.assertEqual(res2ind, res1ind, atol=0, rtol=0)
-
-                # Test non-default dim
-                res1val, res1ind = torch.median(x, 0, keepdim=False)
-                res2val, res2ind = torch.sort(x, 0)
-                self.assertEqual(res1val, res2val[ind], atol=0, rtol=0)
-                self.assertEqual(res1ind, res2ind[ind], atol=0, rtol=0)
-
-                # input unchanged
-                self.assertEqual(x, x0, atol=0, rtol=0)
+            self.assertRaises(TypeError, lambda: q.topk(4, True))        
 
         def test_mode(self):
             x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
@@ -4654,6 +4619,7 @@ def add_neg_dim_tests():
         ('cummin', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('nanmedian', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('norm', (10, 20), lambda: [2, DIM_ARG], [METHOD, FUNCTIONAL]),
         ('prod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -9283,7 +9249,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x[:, :2].argmax().item(), 2)
 
         dim_red_fns = [
-            "mean", "median", "mode", "norm", "prod",
+            "mean", "median", "nanmedian", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min", "amax", "amin"]
 
         def normfn_attr(t, dim, keepdim=False, out=None):
@@ -9323,19 +9289,8 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(dims, device=device)
             test_multidim(x, singleton_dim)
 
-            # check reducing median with NaNs
-            # If the element in the median is a NaN, there can be issues
-            # when comparining with other nan elements
-            if fn_name == 'median':
-                y = torch.full((1, 3), np.nan, dtype=torch.float64, device=device)
-                y[:, :1] = 1.1
-                values, indices = fn_tuple(y, dim=1)
-                expected_values = torch.tensor([nan], dtype=torch.float64, device=device)
-                self.assertEqual(values, expected_values)
-                self.assertTrue(torch.isnan(y.flatten()[indices[0]]))
-
             # check reducing with output kwargs
-            if fn_name in ['median', 'mode', 'max', 'min']:
+            if fn_name in ['median', 'nanmedian', 'mode', 'max', 'min']:
                 y = torch.randn(5, 3, device=device)
                 values = torch.randn(5, 3, device=device)
                 indices = torch.zeros(5, 3, device=device).long() - 1
@@ -10393,6 +10348,38 @@ class TestTorchDeviceType(TestCase):
                             (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
             run_test(tensor_dims, some)
+
+    def _test_median(self, device, dtype, inputs):
+        for a, op in product(inputs, [torch.median, torch.nanmedian]):
+            t = torch.tensor(a, device=device, dtype=dtype)
+            sorted_vals, _ = t.flatten().sort()
+            num_nan = t.isnan().sum().item()
+            k = int((t.numel() - num_nan - 1) / 2)
+            if op == torch.median and num_nan > 0:
+                k = t.numel() - 1
+            self.assertEqual(op(t), sorted_vals[k], atol=0, rtol=0)
+            for dim in range(t.ndim):
+                res_vals, res_inds = op(t, dim, keepdim=True)
+                sorted_vals, sorted_inds = t.sort(dim)
+                num_nan = t.isnan().sum(dim, keepdim=True)
+                k = ((t.size(dim) - num_nan - 1) / 2).type(torch.long)
+                if op == torch.median:
+                    k.masked_fill_(num_nan > 0, t.size(dim) - 1)
+                self.assertEqual(res_vals, sorted_vals.gather(dim, k), atol=0, rtol=0)
+                self.assertEqual(res_vals, t.gather(dim, res_inds), atol=0, rtol=0)
+
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    def test_median_float(self, device, dtype):
+        inputs = [1, np.nan, [1], [np.nan], [2, 1], [np.nan, 1], [np.nan, np.nan],
+                  [[np.nan, 1], [2, np.nan]], torch.rand(155, 155), torch.randint(10, (156, 156)).type(dtype)]
+        inputs[-1].masked_fill_(inputs[-1] == 0, np.nan)
+        self._test_median(device, dtype, inputs)
+
+    @dtypes(torch.int, torch.long)
+    def test_median_int(self, device, dtype):
+        inputs = [1, [1], torch.rand(155, 155), torch.rand(156, 156)]
+        self._test_median(device, dtype, inputs)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
@@ -13215,7 +13202,7 @@ class TestTorchDeviceType(TestCase):
             ('argmin', torch.argmin, None),
             ('mode', torch.mode, None),
             ('median', torch.median, None),
-
+            ('nanmedian', torch.nanmedian, None),
             ('prod', torch.prod, 1.),
             ('sum', torch.sum, 0.),
             ('norm', torch.norm, 0.),

@@ -1218,6 +1218,7 @@ class TestNamedTensor(TestCase):
             Case(torch.mode, False, False, True, True, values_and_indices),
             Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
             Case(torch.median, True, False, True, True, values_and_indices),
+            Case(torch.nanmedian, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):

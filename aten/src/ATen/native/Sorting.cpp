@@ -16,10 +16,7 @@ DEFINE_DISPATCH(topk_stub);
 
 namespace {
 
-// maybe these days, one should define a random access iterator and use
-// std::sort...
 /* Note from TH:
-
    I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
    http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
@@ -34,7 +31,6 @@ namespace {
 
    Julien, November 12th 2013
 */
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
@@ -271,7 +267,123 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   return std::forward_as_tuple(values, indices);
 }
 
+std::tuple<Tensor&, Tensor&> median_out_impl(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    bool ignore_nan) {
+  NoNamesGuard guard;
+
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK(self.numel() > 0, "median() input tensor cannot be empty");
+  checkDeviceType("median", {values, indices}, self.device().type());
+  checkScalarType("median", {indices, "indices", 1}, kLong);
+  checkSameType("median", {values, "values", 0}, {self, "self", 2});
+
+  std::vector<int64_t> out_shape = self.sizes().vec();
+  if (self.dim() > 0) {
+    if (keepdim) {
+      out_shape[dim] = 1;
+    } else {
+      out_shape.erase(out_shape.begin() + dim);
+    }
+  }
+
+  resize_output(values, out_shape);
+  resize_output(indices, out_shape);
+
+  Tensor vals = keepdim ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim ? indices : indices.unsqueeze(dim);
+
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median_out", [&] {
+    dim_apply({self, vals, inds}, dim, [ignore_nan](int64_t it, TensorList tl) {
+      Tensor in = tl[0].contiguous();
+      scalar_t* ip = in.data_ptr<scalar_t>();
+      int64_t size = in.numel();
+
+      if (!ignore_nan) {
+        scalar_t* nanp = std::find_if(ip, ip + size, _isnan<scalar_t>);
+        if (nanp != ip + size) {
+          *tl[1].data_ptr<scalar_t>() = *nanp;
+          *tl[2].data_ptr<int64_t>() = nanp - ip;
+          return;
+        }
+      }
+
+      std::vector<int64_t> idx(size);
+      auto first = idx.begin();
+      auto last = idx.end();
+      std::iota(first, last, 0);
+
+      auto nth = first;
+      if (!ignore_nan) {
+        nth += (size - 1) / 2;
+        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j);
+        });
+      } else {
+        int64_t num_nan = std::count_if(ip, ip + size, _isnan<scalar_t>);
+        nth += (size - num_nan - 1) / 2;
+        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j) ||
+              (_isnan(ip[j]) && !_isnan(ip[i]));
+        });
+      }
+
+      *tl[1].data_ptr<scalar_t>() = ip[*nth];
+      *tl[2].data_ptr<int64_t>() = *nth;
+    });
+  });
+
+  guard.reset();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+
+  return std::forward_as_tuple(values, indices);
+}
+
+Tensor median_impl(const Tensor& self, bool ignore_nan) {
+  NoNamesGuard guard;
+
+  int64_t size = self.numel();
+  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+
+  Tensor in = self.clone();
+  Tensor out = at::empty({}, self.options());
+
+  AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_cpu", [&] {
+    scalar_t* op = out.data_ptr<scalar_t>();
+    scalar_t* first = in.data_ptr<scalar_t>();
+    scalar_t* last = first + size;
+
+    if (!ignore_nan && std::any_of(first, last, _isnan<scalar_t>)) {
+      *op = std::numeric_limits<scalar_t>::quiet_NaN();
+      return;
+    }
+
+    scalar_t* median = first;
+    if (!ignore_nan) {
+      median += (size - 1) / 2;
+      std::nth_element(first, median, last);
+    } else {
+      int64_t num_nan = std::count_if(first, last, _isnan<scalar_t>);
+      median += (size - num_nan - 1) / 2;
+      std::nth_element(first, median, last, [](scalar_t a, scalar_t b) {
+        return a < b || (_isnan(b) && !_isnan(a));
+      });
+    }
+
+    *op = *median;
+  });
+
+  return out;
+}
+
 } // namespace
+
+// MARK : quantile
 
 Tensor& quantile_out(
     Tensor& out,
@@ -367,6 +479,8 @@ Tensor nanquantile(
       self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
 }
 
+// MARK : kthvalue
+
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -401,8 +515,7 @@ std::tuple<Tensor, Tensor> kthvalue(
     bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::make_tuple(values, indices);
+  return at::kthvalue_out(values, indices, self, k, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> kthvalue(
@@ -412,6 +525,8 @@ std::tuple<Tensor, Tensor> kthvalue(
     bool keepdim) {
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
+
+// MARK : topk
 
 std::tuple<Tensor&, Tensor&> topk_out_cpu(
     Tensor& values,
@@ -450,43 +565,16 @@ std::tuple<Tensor, Tensor> topk(
   return std::make_tuple(values, indices);
 }
 
-// this does not reduce to median with dim because we don't want to copy twice
-Tensor median_cpu(const Tensor& self) {
-  NoNamesGuard guard;
-  TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
-  if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone(at::MemoryFormat::Contiguous);
-  }
-  auto tmp_values = self.clone(at::MemoryFormat::Contiguous).view(-1);
-  auto result = at::empty({1}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
-    // note, quick_select is 0 based while kthvalue is not
-    int64_t k = (tmp_values.size(0) - 1) / 2;
-    auto val_accessor = tmp_values.accessor<scalar_t, 1>();
-    quick_select_template(
-        val_accessor,
-        k,
-        [](scalar_t x, scalar_t y) -> bool {
-          return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
-        },
-        [&](int64_t i, int64_t j) {
-          std::swap(val_accessor[i], val_accessor[j]);
-        });
-    result.fill_(tmp_values[k]);
-  });
-  return result.view({});
-}
+// MARK : median
 
-std::tuple<Tensor&, Tensor&> median_out(
+std::tuple<Tensor&, Tensor&> median_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  // note: kthvalue counts from 1..n
-  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
-  at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::forward_as_tuple(values, indices);
+  return median_out_impl(
+      values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
 
 std::tuple<Tensor&, Tensor&> median_out(
@@ -514,6 +602,51 @@ std::tuple<Tensor, Tensor> median(
     Dimname dim,
     bool keepdim) {
   return at::median(self, dimname_to_position(self, dim), keepdim);
+}
+
+Tensor median_cpu(const Tensor& self) {
+  return median_impl(self, /*ignore_nan=*/false);
+}
+
+std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  return median_out_impl(
+      values, indices, self, dim, keepdim, /*ignore_nan=*/true);
+}
+
+std::tuple<Tensor&, Tensor&> nanmedian_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::nanmedian_out(
+      values, indices, self, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> nanmedian(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::nanmedian_out(values, indices, self, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> nanmedian(
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::nanmedian(self, dimname_to_position(self, dim), keepdim);
+}
+
+Tensor nanmedian_cpu(const Tensor& self) {
+  return median_impl(self, /*ignore_nan=*/true);
 }
 
 } // namespace native

@@ -4604,7 +4604,6 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
     Do not expect the same result when run on CPU and GPU in general.
     For the same reason do not expect the gradients to be deterministic.
 
-
 Args:
     {input}
     {dim}
@@ -4623,6 +4622,53 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
+""".format(**single_dim_common))
+
+add_docstr(torch.nanmedian,
+           r"""
+nanmedian(input) -> Tensor
+
+This is a variant of :func:`torch.median` that "ignores" ``NaN`` values,
+computing the median as if ``NaN`` values in :attr:`input` did not exist.
+If all values are ``NaN`` then the median will be ``NaN``. See the 
+documentation for :func:`torch.median`.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.tensor([1, float('nan'), 3, 2])
+    >>> a.median()
+    tensor(nan)
+    >>> a.nanmedian()
+    tensor(2.)
+
+.. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+
+This is a variant of :func:`torch.median` that "ignores" ``NaN`` values,
+computing the median as if ``NaN`` values in :attr:`input` did not exist.
+If all values in a reduced row are ``NaN`` then the median for that reduction
+will be ``NaN``. See the documentation for :func:`torch.median`.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
+
+Example::
+
+    >>> a = torch.tensor([[2, 3, 1], [float('nan'), 1, float('nan')]])
+    >>> a
+    tensor([[2., 3., 1.],
+            [nan, 1., nan]])
+    >>> a.median(0)
+    torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
+    >>> a.nanmedian(0)
+    torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
 """.format(**single_dim_common))
 
 add_docstr(torch.quantile,

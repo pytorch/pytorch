@@ -436,6 +436,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
+   .. automethod:: nanmedian
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm

@@ -466,6 +466,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                         return_indices=False, ceil_mode=False: -1),
         torch.mean: lambda input, dim=None: -1,
         torch.median: lambda input, dim=None: -1,
+        torch.nanmedian: lambda input, dim=None: -1,
         torch.meshgrid: lambda *tensors, **kwargs: -1,
         torch.min: lambda input, out=None: -1,
         torch.minimum: lambda input, other, out=None: -1,

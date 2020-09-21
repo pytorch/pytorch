@@ -2206,6 +2206,13 @@ median(dim=None, keepdim=False) -> (Tensor, LongTensor)
 See :func:`torch.median`
 """)
 
+add_docstr_all('nanmedian',
+               r"""
+nanmedian(dim=None, keepdim=False) -> (Tensor, LongTensor)
+
+See :func:`torch.nanmedian`
+""")
+
 add_docstr_all('min',
                r"""
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
