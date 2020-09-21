@@ -7,7 +7,7 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 import copy
@@ -17,7 +17,8 @@ import numpy as np
 
 
 class TestLearningRate(serial.SerializedTestCase):
-    @serial.given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)
+    @settings(deadline=None, max_examples=50)
     def test_alter_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
         active_period = int(np.random.randint(low=1, high=1e3, size=1))
@@ -119,6 +120,7 @@ class TestLearningRate(serial.SerializedTestCase):
     @given(
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10)
     def test_gate_learningrate(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
         num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
@@ -151,6 +153,7 @@ class TestLearningRate(serial.SerializedTestCase):
         min_num_iter=st.integers(min_value=10, max_value=20),
         max_num_iter=st.integers(min_value=50, max_value=100),
     )
+    @settings(max_examples=2, deadline=None)
     def test_composite_learning_rate_op(self, gc, min_num_iter, max_num_iter):
         np.random.seed(65535)
         # Generate the iteration numbers for sub policy

@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
@@ -15,12 +15,13 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 class TestTile(serial.SerializedTestCase):
-    @serial.given(M=st.integers(min_value=1, max_value=10),
+    @given(M=st.integers(min_value=1, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            N=st.integers(min_value=1, max_value=10),
            tiles=st.integers(min_value=1, max_value=3),
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_tile(self, M, K, N, tiles, axis, gc, dc):
         X = np.random.rand(M, K, N).astype(np.float32)
 
@@ -86,6 +87,7 @@ class TestTile(serial.SerializedTestCase):
            tiles=st.integers(min_value=1, max_value=3),
            axis=st.integers(min_value=0, max_value=2),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_tilewinput(self, M, K, N, tiles, axis, gc, dc):
         X = np.random.rand(M, K, N).astype(np.float32)
 

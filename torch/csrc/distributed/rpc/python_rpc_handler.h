@@ -24,6 +24,11 @@ class PYBIND11_EXPORT PythonRpcHandler {
     py::object remote_;
   };
 
+  struct RRefTypeFunctions {
+    py::object onOwner_;
+    py::object onUser_;
+  };
+
   static PythonRpcHandler& getInstance();
 
   // Run a pickled Python UDF and return the result py::object
@@ -70,9 +75,15 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
 
+  // Return a set of Python functions for RRef helpers.
   const RRefProxyFunctions& getRRefProxyFunctions() const;
 
+  // Return a set of Python functions to retrieve the type of the object
+  // referenced by a given RRef.
+  const RRefTypeFunctions& getRRefTypeFunctions() const;
+
  private:
+  void init();
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
@@ -93,7 +104,11 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
 
+  // Python functions for RRef proxy
   RRefProxyFunctions rrefProxyFunctions_;
+
+  // Ref to 'torch.distributed.rpc.api._rref_typeof_on_'
+  RRefTypeFunctions rrefTypeFunctions_;
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
@@ -105,6 +120,12 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
+
+  // Indicates whether or not we have properly initialized the handler.
+  bool initialized_;
+
+  // Lock to protect initialization.
+  std::mutex init_lock_;
 };
 
 } // namespace rpc

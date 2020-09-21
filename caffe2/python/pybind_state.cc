@@ -29,6 +29,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/shape_info.h"
+#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -83,6 +84,14 @@ REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
 Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
+
+Workspace* GetWorkspaceByName(const std::string &name) {
+  if (gWorkspaces.count(name)) {
+    return gWorkspaces[name].get();
+  }
+  return nullptr;
+}
+
 
 class StringFetcher : public BlobFetcherBase {
  public:
@@ -360,10 +369,18 @@ class BackgroundPlan {
 };
 
 void addObjectMethods(py::module& m) {
-  py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
-    py::gil_scoped_release g;
-    CAFFE_ENFORCE(net->Run());
-  });
+  py::class_<NetBase>(m, "Net")
+      .def(
+          "run",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            CAFFE_ENFORCE(net->Run());
+          })
+      .def("cancel",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            net->Cancel();
+      });
 
   py::class_<ObserverBase<NetBase>>(m, "Observer")
       .def(
@@ -1820,6 +1837,17 @@ void addGlobalMethods(py::module& m) {
         new_proto.SerializeToString(&out);
         return py::bytes(out);
       });
+  m.def("fakeFp16FuseOps", [](const py::bytes& net_str) {
+    caffe2::NetDef netDef;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(
+            net_str.cast<std::string>(), &netDef),
+        "broken pred_net protobuf");
+    opt::fakeFp16FuseOps(&netDef);
+    std::string out_net;
+    netDef.SerializeToString(&out_net);
+    return py::bytes(out_net);
+  });
 
   // Transformations are exposed as functions here and wrapped
   // into a python interface in transformations.py

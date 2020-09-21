@@ -8,7 +8,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_CUDA_API void ShapeTypePropagate(std::shared_ptr<Graph>& graph);
+TORCH_CUDA_API void TypePropagate(std::shared_ptr<Graph>& graph);
 
 } // namespace cuda
 } // namespace fuser

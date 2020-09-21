@@ -3,7 +3,7 @@ import io
 import tempfile
 import unittest
 import sys
-from itertools import repeat, chain
+from itertools import repeat, chain, product
 import os
 import gc
 import threading
@@ -40,15 +40,13 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
-    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
                                 torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
-    TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
@@ -528,12 +526,18 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    def test_allow_tf32_get_set(self):
+    def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cudnn_allow_tf32_get_set(self):
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            self.assertFalse(torch.backends.cudnn.allow_tf32)
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            self.assertTrue(torch.backends.cudnn.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -2389,11 +2393,20 @@ t2.start()
                             "{} not found as an attribute on either Tensor or the requested module {}".format(
                             op, module))
 
+            # Accounts for ops that return tuples and other non-Tensors.
+            # For example, lstm_cell returns a tuple and equal returns bool.
+            def compare(first, second):
+                if isinstance(first, torch.Tensor):
+                    return torch.equal(first, second)
+                elif isinstance(first, container_abcs.Iterable):
+                    return all(compare(f, s) for f, s in zip(first, second))
+                else:
+                    return first == second
+
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
-                comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
-                    else (output == output_method)
+                comparison = compare(output, output_method)
                 self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
@@ -2407,8 +2420,7 @@ t2.start()
                 else:
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
-                comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
-                    else (output_to_compare == control)
+                comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
@@ -2599,6 +2611,87 @@ t2.start()
         with torch.cuda.amp.autocast(True):
             model()
             model_jit_script()
+
+    # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
+    # so they get a dedicated test.
+    # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_rnn(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            # seq, batch, features, hidden size
+            clses = ("RNN", "GRU", "LSTM")
+            T, B, F, H = 3, 4, 5, 6
+            dtypes = (torch.float16, torch.float32)
+            input_layouts = ("seq_first", "batch_first", "packed")
+
+            for (cls, num_layers, bias, input_layout, bidirectional, try_nonpreflattened_weights,
+                 input_dtype, hidden_dtype, weight_dtype) in \
+                    product(clses, (1, 2), (True, False), input_layouts, (True, False), (True, False),
+                            dtypes, dtypes, dtypes):
+                if input_layout == "seq_first":
+                    batch_first = False
+                    x = torch.randn((T, B, F), device="cuda", dtype=input_dtype)
+                elif input_layout == "batch_first":
+                    batch_first = True
+                    x = torch.randn((B, T, F), device="cuda", dtype=input_dtype)
+                elif input_layout == "packed":
+                    batch_first = False
+                    x = torch.randn((T, B, F), device="cuda", dtype=input_dtype)
+                    x = torch.nn.utils.rnn.pack_padded_sequence(torch.randn((T, B, F),
+                                                                            device="cuda", dtype=input_dtype),
+                                                                lengths=(3, 2, 1, 3),
+                                                                enforce_sorted=False)
+
+                rnn = getattr(torch.nn, cls)(F, H, num_layers=num_layers, bidirectional=bidirectional,
+                                             bias=bias, batch_first=batch_first).cuda().to(dtype=weight_dtype)
+
+                if try_nonpreflattened_weights:
+                    for p in rnn.parameters():
+                        with torch.no_grad():
+                            p.set_(p.clone())
+
+                h = torch.randn((num_layers * (2 if bidirectional else 1), B, H),
+                                device="cuda", dtype=hidden_dtype)
+                if cls == "LSTM":
+                    c = torch.randn((num_layers * (2 if bidirectional else 1), B, H),
+                                    device="cuda", dtype=hidden_dtype)
+                    h = (h, c)
+
+                with torch.cuda.amp.autocast():
+                    out, h_out = rnn(x, h)
+                out = out.data if input_layout == "packed" else out
+                self.assertEqual(out.dtype, torch.float16)
+                # Autocast wrapper requires at::_cudnn_rnn is autograd-exposed.  This check can't guarantee
+                # at::_cudnn_rnn is autograd-exposed, but if it fires, it indicates some funny business has
+                # occurred and we should double check that at::_cudnn_rnn remains autograd-exposed.
+                self.assertEqual(out.grad_fn.name(), "CudnnRnnBackward")
+                out.sum().backward()
+                grads = [p.grad.clone() for p in rnn.parameters()]
+
+                rnn.zero_grad()
+
+                if cls == "LSTM":
+                    out_control, h_out_control = rnn.to(dtype=torch.float16)(x.half(), (h[0].half(), h[1].half()))
+                else:
+                    out_control, h_out_control = rnn.to(dtype=torch.float16)(x.half(), h.half())
+                out_control = out_control.data if input_layout == "packed" else out_control
+                out_control.sum().backward()
+                grads_control = [p.grad.clone() for p in rnn.parameters()]
+
+                # Compares with default tolerances, even for FP16 execution.  Barring nondeterminism,
+                # autocast and control results should be bitwise identical.
+                self.assertEqual(out, out_control)
+
+                if cls == "LSTM":
+                    self.assertTrue(h_out[0].dtype is torch.float16 and h_out[1].dtype is torch.float16)
+                    self.assertEqual(h_out[0], h_out_control[0])
+                    self.assertEqual(h_out[1], h_out_control[1])
+                else:
+                    self.assertEqual(h_out.dtype, torch.float16)
+                    self.assertEqual(h_out, h_out_control)
+                for grad, grad_control in zip(grads, grads_control):
+                    self.assertEqual(grad.half(), grad_control)
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -2937,6 +3030,22 @@ class TestCudaComm(TestCase):
 
         gathered = torch.cuda.comm.gather(results)
         self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
+
+
+    def test_matmul_device_mismatch(self):
+        cpu = torch.rand((10, 10))
+        cuda = cpu.cuda()
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cpu @ cuda
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cuda @ cpu
+
+        for s, m1, m2 in product((cpu, cuda), repeat=3):
+            if s.device == m1.device == m2.device:
+                torch.addmm(s, m1, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                    torch.addmm(s, m1, m2)
 
 
 if __name__ == '__main__':

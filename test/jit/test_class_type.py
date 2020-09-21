@@ -1,4 +1,3 @@
-from __future__ import division
 import io
 import os
 import sys
@@ -84,21 +83,6 @@ class TestClassType(JitTestCase):
             return foo.foo
 
         self.assertEqual(fn(1), 3)
-
-    def test_staticmethod(self):
-        class X(object):
-            def __init__(self, x):
-                # type: (int) -> None
-                self.x = x
-
-            @staticmethod
-            def identity(x):
-                return x
-
-        def fn(x, y):
-            return X.identity(x)
-
-        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
 
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
@@ -399,6 +383,14 @@ class TestClassType(JitTestCase):
             return li[0].getVal(), li_sorted[0].getVal()
 
         self.assertEqual(test_sorted_copies(), (3, 1))
+
+        @torch.jit.script
+        def test_nested_inside_tuple():
+            li = [(1, Foo(12)), (1, Foo(11))]
+            li.sort()
+            return [(li[0][0], li[0][1].getVal()), (li[1][0], li[1][1].getVal())]
+
+        self.assertEqual(test_nested_inside_tuple(), [(1, 11), (1, 12)])
 
         with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
@@ -1027,3 +1019,143 @@ class TestClassType(JitTestCase):
             new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
             y.my_list = new_list
             return y
+
+    def test_staticmethod(self):
+        """
+        Test static methods on class types.
+        """
+        global ClassWithStaticMethod
+
+        @torch.jit.script
+        class ClassWithStaticMethod:
+            def __init__(self, a: int, b: int):
+                self.a: int = a
+                self.b: int = b
+
+            def get_a(self):
+                return self.a
+
+            def get_b(self):
+                return self.b
+
+            def __eq__(self, other: 'ClassWithStaticMethod'):
+                return self.a == other.a and self.b == other.b
+
+            # staticmethod that calls constructor.
+            @staticmethod
+            def create(args: List['ClassWithStaticMethod']) -> 'ClassWithStaticMethod':
+                return ClassWithStaticMethod(args[0].a, args[0].b)
+
+            # staticmethod that calls another staticmethod.
+            @staticmethod
+            def create_from(a: int, b: int) -> 'ClassWithStaticMethod':
+                a = ClassWithStaticMethod(a, b)
+                return ClassWithStaticMethod.create([a])
+
+        # Script function that calls staticmethod.
+        def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
+            return ClassWithStaticMethod.create_from(a, b)
+
+        self.checkScript(test_function, (1, 2))
+
+    def test_properties(self):
+        """
+        Test that a scripted class can make use of the @property decorator.
+        """
+        def free_function(x: int) -> int:
+            return x + 1
+
+        @torch.jit.script
+        class Properties(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a - 1
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value + 3
+
+        @torch.jit.script
+        class NoSetter(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return free_function(self.a)
+
+        @torch.jit.script
+        class MethodThatUsesProperty(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a - 2
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value + 4
+
+            def forward(self):
+                return self.attr
+
+        class ModuleWithProperties(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.props = Properties(a)
+
+            def forward(self, a: int, b: int, c: int, d: int):
+                self.props.attr = a
+                props = Properties(b)
+                no_setter = NoSetter(c)
+                method_uses_property = MethodThatUsesProperty(a + b)
+
+                props.attr = c
+                method_uses_property.attr = d
+
+                return self.props.attr + no_setter.attr + method_uses_property.forward()
+
+        self.checkModule(ModuleWithProperties(5), (5, 6, 7, 8,))
+
+    def test_custom_delete(self):
+        """
+        Test that del can be called on an instance of a class that
+        overrides __delitem__.
+        """
+        class Example(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+            def __delitem__(self, key: str):
+                del self._data[key]
+
+        def fn() -> bool:
+            example = Example()
+            del example["1"]
+            return example.check("1")
+
+        self.checkScript(fn, ())
+
+        # Test the case in which the class does not have __delitem__ defined.
+        class NoDelItem(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+        def fn() -> bool:
+            example = NoDelItem()
+            key = "1"
+            del example[key]
+            return example.check(key)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
+            self.checkScript(fn, ())

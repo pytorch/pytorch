@@ -25,6 +25,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -42,15 +43,22 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
-    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
+};
+
+std::vector<std::string> _static_weight_only_quant_aten_funcs = {
+    "embedding_bag",
+};
+std::vector<std::string> _static_weight_only_quant_call_funcs = {
+    "embedding_bag",
 };
 
 // These are the prim::CallFunctions that doesn't require observation and
@@ -259,10 +267,16 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs(
-          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
+      // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
+      // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
+      AtenFuncArgs({{"conv1d", 1},
+                    {"conv2d", 1},
+                    {"conv3d", 1},
+                    {"linear", 1},
+                    {"embedding_bag", 0}}),
       // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
-      // %offsets.1, %7, %8, %9, %10, %9, %per_sample_weights.1, %13)
+      // %offsets.1, %max_norm, %norm_type, %scale_grad_by_freq, %mode, %sparse,
+      // %per_sample_weights.1, %include_last_offset)
       CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
@@ -273,6 +287,14 @@ bool isBiasOfConvOrLinear(Value* v) {
       AtenFuncArgs(
           {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  return result;
+}
+
+bool isEmbeddingBagNonInput(Value* v) {
+  bool result = matchArgPattern(
+      v,
+      AtenFuncArgs({{"embedding_bag", 2}, {"embedding_bag", 6}}),
+      CallFuncArgs({}));
   return result;
 }
 
@@ -454,6 +476,13 @@ bool userDefinedCallFunction(Node* n) {
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
+bool isWeightOnlyStaticQuantOp(Node* n) {
+  return isFunctionNode(
+      n,
+      _static_weight_only_quant_call_funcs,
+      _static_weight_only_quant_aten_funcs);
+}
+
 bool nodeQuantizable(Node* n, QuantType quant_type) {
   bool is_dynamic = quant_type == QuantType::DYNAMIC;
   return isFunctionNode(
@@ -530,8 +559,10 @@ bool hitGraphInput(Value* value) {
 // Get the module access path for a Value representing a module instance
 // by tracing back the GetAttr nodes and recording all the attribute
 // names along the way.
-// For example, the module access path will be ['sub', 'basic_block', 'conv1']
-// for `self.sub.basic_block.conv1`
+// Assuming 'self.sub.basic_block.conv1',
+// Input1: Value instance of conv1
+// Input2: Value instance of self
+// Output: ['sub', 'basic_block', 'conv1']
 std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   std::vector<std::string> path;
   // Iterator to traverse back the GetAttr calls
@@ -555,6 +586,10 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   return path;
 }
 
+// Assuming self.foo.bar.conv1,
+// Input1: Module instance of self
+// Input2: ['foo', 'bar', 'conv1']
+// Output: Module instance of conv1
 Module findChildModule(
     const Module& module,
     const std::vector<std::string>& path) {
@@ -609,13 +644,16 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
+std::string removeTorchMangle(const std::string& orig_name) {
+  static std::regex mangle_re("\\.___torch_mangle_\\d+");
+  auto qualified_name = std::regex_replace(orig_name, mangle_re, "");
+  return qualified_name;
+}
+
 c10::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-    return qualified_name;
+    return removeTorchMangle(type->name()->qualifiedName());
   }
   return c10::nullopt;
 }

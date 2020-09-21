@@ -8,13 +8,14 @@ from caffe2.python.cnn import CNNModelHelper
 from caffe2.python.crf_predict import crf_update_predictions
 from caffe2.python.test_util import TestCase
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 import numpy as np
 
 
 class TestCrfDecode(TestCase):
 
     @given(num_tags=st.integers(2, 4), num_words=st.integers(2, 15))
+    @settings(deadline=2000)
     def test_crf_viterbi(self, num_tags, num_words):
         model = CNNModelHelper(name='external')
         predictions = np.random.randn(num_words, num_tags).astype(np.float32)

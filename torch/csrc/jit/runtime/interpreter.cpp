@@ -318,6 +318,7 @@ struct CanEmitInline {
         // instruction stack
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
+        v->node()->kind() != prim::TensorExprGroup &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -701,6 +702,22 @@ struct CodeImpl {
     return r;
   }
 
+  void emitTypeCheck(Node* node) {
+    auto num_inputs = node->inputs().size();
+
+    // Check that TypeCheck has at least one input.
+    TORCH_INTERNAL_ASSERT(
+        num_inputs && num_inputs + 1 == node->outputs().size());
+    emitLoadInputs(node->inputs());
+
+    // Emit the expected type.
+    size_t types_start = type_table_.size();
+    for (size_t i = 0; i < num_inputs; i++) {
+      emitType(node->outputs()[i]->type());
+    }
+    insertInstruction(TYPECHECK, types_start, num_inputs);
+  }
+
   size_t emitGuard(Node* node) {
     // unoptimized graph is at index 0
     // guarded input is at index 1
@@ -738,7 +755,14 @@ struct CodeImpl {
   void emitProfile(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(PROFILE_OP, profile_function_table_.size());
-    profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
+    if (node->cast<ProfileOp>()) {
+      profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
+    } else if (node->cast<ProfileOptionalOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileOptionalOp>()->getCallback());
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
   }
 
   void emitGetAttr(Node* node) {
@@ -880,9 +904,13 @@ struct CodeImpl {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
         break;
+      case prim::TypeCheck:
+        emitTypeCheck(node);
+        break;
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
@@ -1345,6 +1373,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
             break;
           }
+          case TYPECHECK: {
+            int num_inputs = inst.N, i = 0;
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
+            // Check every input's shape against profiled (expected) shape.
+            for (i = 0; i < num_inputs; i++) {
+              auto& input = peek(stack, i, num_inputs);
+              auto t = input.toTensor();
+              const TypePtr& expected = af.types[inst.X + i];
+              auto expected_type = expected->cast<TensorType>();
+              if (t.defined() &&
+                  (!frames.back().symbols2dims.bindSymbolicShapes(
+                       t.sizes(), expected_type->symbolic_sizes()) ||
+                   !expected_type->matchTensor(t))) {
+                push(stack, false);
+                break;
+              }
+            }
+            if (i == num_inputs) {
+              push(stack, true);
+            }
+            ++af.pc;
+            break;
+          }
           case GUARD: {
             if (!stack.back().isTensor()) {
               // stack.back() is an Uninitialized IValue and this is a guard
@@ -1520,7 +1571,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     formatStackTrace(ss);
     ss << "RuntimeError: " << msg << "\n";
     if (future_) {
-      future_->setError(Future::FutureError(ss.str()));
+      future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
       throw JITException(ss.str());
     } else {

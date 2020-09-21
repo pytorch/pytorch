@@ -1,3 +1,4 @@
+import collections
 import warnings
 
 import torch._six
@@ -42,15 +43,23 @@ def init_rank(num_ranks, uid, rank):
     return torch._C._nccl_init_rank(num_ranks, uid, rank)
 
 
+def _check_sequence_type(inputs):
+    if not isinstance(inputs, collections.Container) or isinstance(inputs, torch.Tensor):
+        raise TypeError("Inputs should be a collection of tensors")
+
+
 def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
+    _check_sequence_type(inputs)
     if outputs is None:
         outputs = inputs
+    _check_sequence_type(outputs)
     torch._C._nccl_all_reduce(inputs, outputs, op, streams, comms)
 
 
 # `output` used to be `outputs`, taking in a list of tensors. So we have two
 # arguments for BC reasons.
 def reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None, *, outputs=None):
+    _check_sequence_type(inputs)
     if outputs is not None:
         if output is not None:
             raise ValueError(
@@ -74,12 +83,17 @@ def reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None, *, out
 
 
 def broadcast(inputs, root=0, streams=None, comms=None):
+    _check_sequence_type(inputs)
     torch._C._nccl_broadcast(inputs, root, streams, comms)
 
 
 def all_gather(inputs, outputs, streams=None, comms=None):
+    _check_sequence_type(inputs)
+    _check_sequence_type(outputs)
     torch._C._nccl_all_gather(inputs, outputs, streams, comms)
 
 
 def reduce_scatter(inputs, outputs, op=SUM, streams=None, comms=None):
+    _check_sequence_type(inputs)
+    _check_sequence_type(outputs)
     torch._C._nccl_reduce_scatter(inputs, outputs, op, streams, comms)

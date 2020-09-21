@@ -50,8 +50,6 @@ if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
-      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
-      ${JIT_TEST_SRCS}
       )
 endif()
 
@@ -86,6 +84,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
+
+set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
@@ -146,6 +146,12 @@ if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       )
+    if(USE_STATIC_CUDNN)
+        set_source_files_properties(
+          ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+          PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
+        )
+    endif()
 endif()
 
 if(USE_NUMPY)
@@ -167,6 +173,7 @@ if(USE_DISTRIBUTED)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
       if(USE_TENSORPIPE)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+        list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
       endif()
     endif()
 endif()
@@ -175,7 +182,6 @@ if(USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${NCCL_INCLUDE_DIRS})
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
@@ -264,6 +270,8 @@ target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
+target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
+
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
@@ -274,3 +282,25 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Generate torch/version.py from the appropriate CMake cache variables.
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+  set(TORCH_VERSION_DEBUG 1)
+else()
+  set(TORCH_VERSION_DEBUG 0)
+endif()
+
+add_custom_command(
+  OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND
+    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
+      --is_debug=${TORCH_VERSION_DEBUG}
+      --cuda_version=${CUDA_VERSION}
+      --hip_version=${HIP_VERSION}
+  WORKING_DIRECTORY ${TORCH_ROOT}
+)
+add_custom_target(
+  gen_torch_version ALL
+  DEPENDS ${TORCH_SRC_DIR}/version.py
+)
+add_dependencies(torch_python gen_torch_version)
