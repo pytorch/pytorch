@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
+    requires_nccl_version,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -198,13 +199,13 @@ def _lock():
             lf.close()
 
 
-def _build_tensor(size, value=None, dtype=torch.float, rank=None, cuda=False, rank_to_GPU=None):
+def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
         value = size
-    if cuda:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(rank_to_GPU[rank][0])
-    else:
+    if device_id is None:
         return torch.empty(size, size, size, dtype=dtype).fill_(value)
+    else:
+        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None):
@@ -576,22 +577,23 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
-        @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
-        def test_batch_send_recv_nccl(self):
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_nccl(self):
             self._barrier()
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
 
             send_recv_op_list = []
             send_recv_tensor_list = []
             peer_list = []
-            expected_tensor_list = []
 
             for src in range(0, dist.get_world_size()):
                 if src == rank:
                     continue
-                send_tensor = _build_tensor(1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
-                recv_tensor = _build_tensor(1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                send_tensor = _build_tensor(rank + 1, device_id=device_id)
+                recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
                 send_recv_op_list.extend([dist.irecv, dist.isend])
                 send_recv_tensor_list.extend([recv_tensor, send_tensor])
                 peer_list.extend([src, src])
@@ -599,14 +601,89 @@ class DistributedTest:
             reqs = dist.batch_isend_irecv(send_recv_op_list, send_recv_tensor_list, peer_list)
             for req in reqs:
                 req.wait()
+
             self._barrier()
 
+        # NCCL Batch SEND RECV Tensor Error
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_tensor_err(self):
+            self._barrier()
+            rank = dist.get_rank()
+            if rank == 0:
+                rank_to_GPU = self._init_multigpu_helper()
+                device_id = rank_to_GPU[rank][0]
+                with self.assertRaisesRegex(
+                    RuntimeError, "Tensors must be CUDA and dense"
+                ):
+                    send_tensor = _build_tensor(rank + 1)
+                    req = dist.batch_isend_irecv([dist.isend], [send_tensor], [1])
+                    req.wait()
+
+        # NCCL Batch SEND RECV Op Error
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_op_err(self):
+            self._barrier()
+            rank = dist.get_rank()
+            if rank == 0:
+                rank_to_GPU = self._init_multigpu_helper()
+                device_id = rank_to_GPU[rank][0]
+                with self.assertRaisesRegex(
+                    RuntimeError, "^Invalid function."
+                ):
+                    send_tensor = _build_tensor(rank + 1, device_id=device_id)
+                    req = dist.batch_isend_irecv([dist.broadcast], [send_tensor], [1])
+                    req.wait()
+
+        # NCCL Batch SEND RECV peer_list Length Error
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_peer_list_err(self):
+            self._barrier()
+            rank = dist.get_rank()
+            if rank == 0:
+                rank_to_GPU = self._init_multigpu_helper()
+                device_id = rank_to_GPU[rank][0]
+                with self.assertRaisesRegex(
+                    RuntimeError, "^Expected parameters to be the same length"
+                ):
+                    send_tensor = _build_tensor(rank + 1)
+                    req = dist.batch_isend_irecv([dist.isend], [send_tensor], [1, 1])
+                    req.wait()
+
+        # NCCL Batch SEND RECV Mixed Backend Error
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_mixed_backend_err(self):
+            self._barrier()
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            group_gloo = dist.new_group(ranks=[0, 1], backend="gloo")
+            group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
+            if rank == 0:
+                with self.assertRaisesRegex(
+                    RuntimeError, "All groups need to use the same backend"
+                ):
+                    send_tensor = _build_tensor(rank + 1)
+                    req = dist.batch_isend_irecv(
+                        [dist.isend, dist.isend],
+                        [send_tensor, send_tensor],
+                        [1, 1],
+                        group_list=[group_gloo, group_nccl])
+                    req.wait()
+
+        # NCCL SEND RECV
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl(self):
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
-            tensor = _build_tensor(rank + 1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+            device_id = rank_to_GPU[rank][0]
+
+            tensor = _build_tensor(rank + 1, device_id=device_id)
 
             for src in range(0, dist.get_world_size()):
                 if src == rank:
@@ -617,8 +694,8 @@ class DistributedTest:
                         dist.send(tensor, dst)
                 else:
                     # Recv mode
-                    expected_tensor = _build_tensor(src + 1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
-                    output_tensor = _build_tensor(src + 1, value=-1, rank=rank, cuda=True, rank_to_GPU=rank_to_GPU)
+                    expected_tensor = _build_tensor(src + 1)
+                    output_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
                     dist.recv(output_tensor, src)
                     self.assertEqual(output_tensor, expected_tensor)
 
