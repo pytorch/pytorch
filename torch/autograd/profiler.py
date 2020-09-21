@@ -735,7 +735,7 @@ class FunctionEvent(FormattedTimesMixin):
             is_remote=True, sequence_nr=-1):
         self.id: int = id
         self.node_id: int = node_id
-        self.name: str= name
+        self.name: str = name
         self.cpu_interval: Interval = Interval(cpu_start, cpu_end)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
