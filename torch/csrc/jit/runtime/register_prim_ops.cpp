@@ -604,7 +604,7 @@ RegisterOperators reg(
            IValue iv = pop(stack);
            auto elems = iv.toTensorList();
            auto output_list = c10::impl::GenericList(elems.elementType());
-           for (auto elem: elems.vec()) {
+           for (const auto& elem: elems.vec()) {
              output_list.emplace_back(at::dequantize(elem));
            }
            push(stack, std::move(output_list));
