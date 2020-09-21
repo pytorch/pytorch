@@ -126,13 +126,14 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
     n_graph->registerOutput(output);
   }
 
-  // TODO: Some ops have conversion happen at Peephole pass.
-  //       The conversion here is incomplete for these ops.
-  //       e.g: ListConstruct, ListUnpack, etc.
-  onnx::ModelProto model_proto;
+  void ConvertGraphToONNXProto(
+    std::shared_ptr<Graph> graph,
+    onnx::ModelProto& model_proto,
+    int opset_version) {
+  std::string model_str;
   RawDataExportMap export_map;
-  std::tie(model_proto, export_map) = _export_onnx(
-      n_graph,
+  std::tie(model_str, export_map) = export_onnx(
+      graph,
       {},
       opset_version,
       {},
@@ -144,6 +145,11 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
       true,
       false,
       std::string());
+  model_proto.ParseFromString(model_str);
+  for (int i = 0; i < model_proto.graph().output_size(); ++i) {
+    model_proto.mutable_graph()->mutable_output(i)->clear_type();
+  }
+}
 
   // infer shape
   onnx::shape_inference::InferShapes(model_proto);
