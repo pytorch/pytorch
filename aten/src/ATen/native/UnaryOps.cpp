@@ -163,7 +163,7 @@ Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
 Tensor& abs_(Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "Inplace abs is not supported for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
   return unary_op_impl_(self, at::abs_out);
 }
 

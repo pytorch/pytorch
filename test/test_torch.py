@@ -4782,6 +4782,10 @@ class TestTorchDeviceType(TestCase):
                 if fn_name == 'abs':
                     torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
                     np_fn(a, out=a)
+                    if dtype.is_complex:
+                        with self.assertRaisesRegex(RuntimeError, "In-place abs is not supported for complex tensors."):
+                            torch_inplace_method(t)
+                        return
                     torch_inplace_method(t)
                     self.assertEqual(torch.from_numpy(a), t.cpu())
 
@@ -12666,7 +12670,7 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm            
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
