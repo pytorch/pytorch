@@ -172,20 +172,25 @@ def preprocess(
     # Preprocessing statistics.
     stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": []}
 
+    final_result = {}
     for filepath in all_files:
         result = preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
 
         # Show what happened
         if show_progress:
             print(
-                filepath, "->",
-                get_hip_file_path(filepath, is_pytorch_extension), result)
+                result["orig_path"], "->",
+                result["hipified_path"], result["status"])
+
+        final_result[filepath]=result
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
     # Show detailed summary
     if show_detailed:
         compute_stats(stats)
+
+    return final_result
 
 
 def compute_stats(stats):
@@ -733,9 +738,9 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
     if do_write:
         with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
             fout.write(output_source)
-        return "ok"
+        return {"orig_path": fin_path, "hipified_path": fout_path, "status": "ok"}
     else:
-        return "skipped"
+        return {"orig_path": fin_path, "hipified_path": fout_path, "status": "skipped"}
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:
@@ -865,7 +870,7 @@ def hipify(
     all_files += [f for f in extra_files if f not in all_files_set]
 
     # Start Preprocessor
-    preprocess(
+    return preprocess(
         output_directory,
         all_files,
         show_detailed=show_detailed,
