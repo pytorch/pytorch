@@ -74,9 +74,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # DO NOT install typing if installing python-3.8, since its part of python-3.8 core packages
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 dataclasses valgrind
+    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 dataclasses
   else
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi typing future six dataclasses valgrind
+    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi typing future six dataclasses
   fi
   if [[ "$CUDA_VERSION" == 9.2* ]]; then
     conda_install magma-cuda92 -c pytorch
@@ -89,6 +89,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   elif [[ "$CUDA_VERSION" == 11.0* ]]; then
     conda_install magma-cuda110 -c pytorch
   fi
+
+  conda_install -c conda-forge valgrind
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
