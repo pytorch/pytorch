@@ -298,12 +298,15 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
-      ${CUDA_curand_LIBRARY})
+      ${CUDA_curand_LIBRARY}
+      ${CUDA_cusolver_LIBRARY}
+      )
   endif()
 
   if(CAFFE2_USE_CUDNN)
