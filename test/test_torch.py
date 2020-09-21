@@ -12653,7 +12653,7 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm            
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
@@ -16826,6 +16826,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                  torch.tensor([2.1, 3.1], dtype=dtype, device=device),
                                  atol=0.01, rtol=0)
                 self.assertEqual(method(a1, a2), op(a1, a2))
+
+    @dtypes(torch.bfloat16, torch.float)
+    def test_true_divide_out(self, device, dtype):
+        a1 = torch.tensor([4.2, 6.2], dtype=dtype, device=device)
+        a2 = torch.tensor([2., 2.], dtype=dtype, device=device)
+        res = torch.empty_like(a1)
+        self.assertEqual(torch.true_divide(a1, a2, out=res),
+                         torch.tensor([2.1, 3.1], dtype=dtype, device=device),
+                         atol=0.01, rtol=0)
 
     @onlyCUDA
     @dtypes(torch.half)
