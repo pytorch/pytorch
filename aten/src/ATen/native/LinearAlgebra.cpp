@@ -144,8 +144,8 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   TORCH_WARN(
-    "torch.addr is deprecated and will be removed in a future PyTorch release. "
-    "This function can be implemented using torch.ger as "
+    "torch.addr is deprecated and may be removed in a future PyTorch release. "
+    "This function can be implemented using torch.outer as "
     "alpha * torch.outer(vec1, vec2) + beta * input when beta is not zero, "
     "alpha * torch.outer(vec1, vec2) when beta is zero.");
 
