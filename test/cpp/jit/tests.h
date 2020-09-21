@@ -32,15 +32,8 @@ namespace jit {
   _(RegisterFusionCachesKernel)                   \
   _(SchemaParser)                                 \
   _(TopologicalIndex)                             \
-  _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
   _(SubgraphUtilsVmap)                            \
-  _(AliasAnalysis)                                \
-  _(ContainerAliasing)                            \
-  _(AliasRegistration)                            \
-  _(WriteTracking)                                \
-  _(Wildcards)                                    \
-  _(MemoryDAG)                                    \
   _(IRParser)                                     \
   _(ConstantPooling)                              \
   _(CleanUpPasses)                                \
