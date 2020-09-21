@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <tensorpipe/core/message.h>
-#include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/torch.h>
 
 #include <memory>
