@@ -1960,7 +1960,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     should be created in the same order in all processes.
 
     Arguments:
-        ranks (list[int]): List of ranks of group members.
+        ranks (list[int]): List of ranks of group members. If ``None``, will be
+            set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
