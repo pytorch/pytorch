@@ -55,7 +55,7 @@ class ProcessGroup {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
-    virtual std::vector<at::Tensor> result() const;
+    virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the

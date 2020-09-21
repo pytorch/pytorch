@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Iterable
 import numpy as np
 import torch
 
@@ -248,7 +249,8 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
 The resulting tensors is in float32 format.
 
 Args:
-    spatial_dim: Spatial Dim for feature maps.
+    spatial_dim: Spatial Dim for feature maps. If given as an iterable, randomly
+                 picks one from the pool to make it the spatial dimension
     batch_size_range: Range to generate `batch_size`.
                       Must be tuple of `(min, max)`.
     input_channels_per_group_range:
@@ -295,7 +297,8 @@ def tensor_conv(
     draw, spatial_dim=2, batch_size_range=(1, 4),
     input_channels_per_group_range=(3, 7),
     output_channels_per_group_range=(3, 7), feature_map_range=(6, 12),
-    kernel_range=(3, 7), max_groups=1, elements=None, qparams=None
+    kernel_range=(3, 7), max_groups=1, can_be_transposed=False,
+    elements=None, qparams=None
 ):
 
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
@@ -308,6 +311,9 @@ def tensor_conv(
     input_channels = input_channels_per_group * groups
     output_channels = output_channels_per_group * groups
 
+    if isinstance(spatial_dim, Iterable):
+        spatial_dim = draw(st.sampled_from(spatial_dim))
+
     feature_map_shape = []
     for i in range(spatial_dim):
         feature_map_shape.append(draw(st.integers(*feature_map_range)))
@@ -315,6 +321,15 @@ def tensor_conv(
     kernels = []
     for i in range(spatial_dim):
         kernels.append(draw(st.integers(*kernel_range)))
+
+    tr = False
+    weight_shape = (output_channels, input_channels_per_group) + tuple(kernels)
+    bias_shape = output_channels
+    if can_be_transposed:
+        tr = draw(st.booleans())
+        if tr:
+            weight_shape = (input_channels, output_channels_per_group) + tuple(kernels)
+            bias_shape = output_channels
 
     # Resolve the tensors
     if qparams is not None:
@@ -326,13 +341,12 @@ def tensor_conv(
     X = draw(tensor(shapes=(
         (batch_size, input_channels) + tuple(feature_map_shape),),
         elements=elements, qparams=qparams[0]))
-    W = draw(tensor(shapes=(
-        (output_channels, input_channels_per_group) + tuple(kernels),),
-        elements=elements, qparams=qparams[1]))
-    b = draw(tensor(shapes=(output_channels,), elements=elements,
+    W = draw(tensor(shapes=(weight_shape,), elements=elements,
+                    qparams=qparams[1]))
+    b = draw(tensor(shapes=(bias_shape,), elements=elements,
                     qparams=qparams[2]))
 
-    return X, W, b, groups
+    return X, W, b, groups, tr
 
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user

@@ -113,6 +113,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.full,
         torch.hamming_window,
         torch.hann_window,
+        torch.kaiser_window,
         torch.linspace,
         torch.logspace,
         torch.mkldnn_adaptive_avg_pool2d,
@@ -137,7 +138,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.zeros,
         torch.nn.functional.assert_int_or_pair,
         torch.nn.functional.boolean_dispatch,
-        torch.nn.functional.division,
         torch.nn.functional.upsample,
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
@@ -321,6 +321,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, out=None: -1,
+        torch.divide: lambda input, other, out=None: -1,
         torch.dot: lambda mat1, mat2: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
@@ -339,6 +340,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.erfc: lambda input, out=None: -1,
         torch.erfinv: lambda input, out=None: -1,
         torch.exp: lambda input, out=None: -1,
+        torch.exp2: lambda input, out=None: -1,
         torch.expm1: lambda input, out=None: -1,
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
@@ -368,7 +370,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
         torch.gcd: lambda input, other, out=None: -1,
         torch.ge: lambda input, other, out=None: -1,
+        torch.greater_equal: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
+        torch.i0: lambda input, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
@@ -378,6 +382,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gru: lambda input, hx, params, has_biases, num_layers, gropout, train, bidirectional, batch_first: -1,
         torch.gru_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.gt: lambda input, other, out=None: -1,
+        torch.greater: lambda input, other, out=None: -1,
         torch.hardshrink: lambda input, lambd=0.5: -1,
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction='mean': -1,
@@ -411,12 +416,13 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.isclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.isnan: lambda input: -1,
         torch.istft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
-                      normalized=False, onesided=True, length=None: -1),
+                      normalized=False, onesided=True, length=None, return_complex=False: -1),
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.le: lambda input, other, out=None: -1,
+        torch.less_equal: lambda input, other, out=None: -1,
         torch.lerp: lambda input, end, weight, out=None: -1,
         torch.lgamma: lambda input, out=None: -1,
         torch.lobpcg: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None,
@@ -440,6 +446,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.lstm_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.lstsq: lambda input, A, out=None: -1,
         torch.lt: lambda input, other, out=None: -1,
+        torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
         torch.lu_solve: lambda input, LU_data, LU_pivots, out=None: -1,
         torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,
@@ -475,6 +482,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.movedim: lambda input, source, destination: -1,
         torch.mul: lambda input, other, out=None: -1,
+        torch.multiply: lambda input, other, out=None: -1,
         torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
         torch.mv: lambda input, vec, out=None: -1,
         torch.mvlgamma: lambda input, p: -1,
@@ -486,6 +494,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.native_norm: lambda input, p=2: -1,
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.ne: lambda input, other, out=None: -1,
+        torch.not_equal: lambda input, other, out=None: -1,
         torch.neg: lambda input, out=None: -1,
         torch.negative: lambda input, out=None: -1,
         torch.nextafter: lambda input, other, out=None: -1,
@@ -642,6 +651,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
+        torch.nanquantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
@@ -710,7 +720,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.std: lambda input, dim=None: -1,
         torch.std_mean: lambda input, dim=None: -1,
         torch.stft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
-                     pad_mode='reflect', normalized=False, onesided=True: -1),
+                     pad_mode='reflect', normalized=False, onesided=True, return_complex=None: -1),
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
         torch.sum: lambda input, dim=None: -1,
@@ -1159,3 +1169,12 @@ def is_tensor_method_or_property(func: Callable) -> bool:
        of ``torch.Tensor``.
     """
     return func in get_tensor_methods() or func.__name__ == "__get__"
+
+def is_tensor_like(inp):
+    """
+    Returns ``True`` if the passed-in input is a tensor-like.
+
+    Currently, this occurs whenever there's a ``__torch_function__``
+    attribute on the input.
+    """
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")

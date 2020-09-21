@@ -391,6 +391,9 @@ public:
     }
     return ret;
   }
+  Vec256<T> i0() const {
+    return map(calc_i0);
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a

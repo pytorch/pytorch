@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 import os
 
@@ -16,6 +11,7 @@ import itertools
 import numpy as np
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+    torch._C._jit_set_texpr_fuser_enabled(False)
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
 
