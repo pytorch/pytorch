@@ -73,6 +73,11 @@ def _get_script_class(name):
     return _script_classes[name]
 
 
+def _clear_script_classes():
+    global _script_classes
+    _script_classes.clear()
+
+
 # Caching: we currently cache compilation of free functions and overloaded functions.
 # To cache free functions we hold a weak ref to the function object and
 # map to the compiled fn's qualified name.

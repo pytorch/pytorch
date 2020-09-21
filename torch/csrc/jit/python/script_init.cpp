@@ -104,20 +104,27 @@ struct PythonResolver : public Resolver {
       return script_class.class_type_.type_;
     }
 
-    py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
+    auto unwrapped = py::module::import("inspect").attr("unwrap")(obj);
+    py::bool_ isClass = py::module::import("inspect").attr("isclass")(unwrapped);
+
     if (!py::cast<bool>(isClass)) {
       return nullptr;
     }
 
-    if (isNamedTupleClass(obj)) {
-      return registerNamedTuple(obj, loc);
+    if (isNamedTupleClass(unwrapped)) {
+      return registerNamedTuple(unwrapped, loc);
     }
 
     auto qualifiedName = c10::QualifiedName(
         py::cast<std::string>(py::module::import("torch._jit_internal")
-                                  .attr("_qualified_name")(obj)));
+                                  .attr("_qualified_name")(unwrapped)));
 
-    return get_python_cu()->get_type(qualifiedName);
+    auto pyClass = py::module::import("torch.jit._state").attr("_get_script_class")(qualifiedName.qualifiedName());
+    if(!pyClass.is_none()) {
+      return get_python_cu()->get_type(qualifiedName);
+    }
+
+    return nullptr;
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)

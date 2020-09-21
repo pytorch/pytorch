@@ -18,7 +18,7 @@ from typing import Any, Dict
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, _compile_and_register_class
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
@@ -56,12 +56,6 @@ else:
 def _is_new_style_class(cls):
     if hasattr(cls, "__class__"):
         return "__dict__" in dir(cls) or hasattr(cls, "__slots__")
-
-
-def _compile_and_register_class(obj, rcb, qualified_name):
-    ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_class_compile(qualified_name, ast, rcb)
-    torch.jit._state._add_script_class(obj, qualified_name)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -281,6 +275,98 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             setattr(self._c, attr, value)
+
+        # Delegate calls to magic methods like __len__ to the C++ module backing the
+        # RecursiveScriptClass.
+        def forward_magic_method(self, method_name, *args, **kwargs):
+            self_method = self.__getattr__(method_name)
+            if getattr(self_method, "__func__", None) == getattr(
+                RecursiveScriptClass, method_name
+            ):
+                raise NotImplementedError()
+            return self_method(*args, **kwargs)
+
+        def __iter__(self):
+            return self.forward_magic_method("__iter__")
+
+        def __getitem__(self, idx):
+            return self.forward_magic_method("__getitem__", idx)
+
+        def __len__(self):
+            return self.forward_magic_method("__len__")
+
+        def __neg__(self):
+            return self.forward_magic_method("__neg__")
+
+        def __mul__(self, other):
+            return self.forward_magic_method("__mul__", other)
+
+        def __contains__(self, key):
+            return self.forward_magic_method("__contains__", key)
+
+        def __add__(self, other):
+            return self.forward_magic_method("__add__", other)
+
+        def __sub__(self, other):
+            return self.forward_magic_method("__sub__", other)
+
+        def __pow__(self, other):
+            return self.forward_magic_method("__pow__", other)
+
+        def __truediv__(self, other):
+            return self.forward_magic_method("__truediv__", other)
+
+        def __mod__(self, other):
+            return self.forward_magic_method("__mod__", other)
+
+        def __ne__(self, other):  # noqa T484
+            return self.forward_magic_method("__ne__", other)
+
+        def __eq__(self, other):  # noqa T484
+            return self.forward_magic_method("__eq__", other)
+
+        def __lt__(self, other):
+            return self.forward_magic_method("__lt__", other)
+
+        def __gt__(self, other):
+            return self.forward_magic_method("__gt__", other)
+
+        def __le__(self, other):
+            return self.forward_magic_method("__le__", other)
+
+        def __ge__(self, other):
+            return self.forward_magic_method("__ge__", other)
+
+        def __and__(self, other):
+            return self.forward_magic_method("__and__", other)
+
+        def __or__(self, other):
+            return self.forward_magic_method("__or__", other)
+
+        def __xor__(self, other):
+            return self.forward_magic_method("__xor__", other)
+
+        def __getitem__(self, other):
+            return self.forward_magic_method("__getitem__", other)
+
+        def __setitem__(self, idx, val):
+            return self.forward_magic_method("__setitem__", idx, val)
+
+        def __call__(self, val):
+            return self.forward_magic_method("__call__", val)
+
+        def __int__(self):
+            return self.forward_magic_method("__int__")
+
+        def __float__(self):
+            return self.forward_magic_method("__float__")
+
+        def __bool__(self):
+            return self.forward_magic_method("__bool__")
+
+        def __str__(self):
+            return self.forward_magic_method("__str__")
+
 
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
@@ -920,6 +1006,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
 
+    if isinstance(obj, RecursiveScriptClass):
+        return obj
+
     if isinstance(obj, ScriptModule):
         return obj
 
@@ -927,7 +1016,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
-
 
     if inspect.isclass(obj):
         qualified_name = _qualified_name(obj)
@@ -953,7 +1041,13 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
-        return obj
+
+        @functools.wraps(obj)
+        def create_obj_and_script(*args, **kwargs):
+            instance = obj(*args, **kwargs)
+            return torch.jit._recursive.create_script_class(instance)
+
+        return create_obj_and_script
     elif inspect.isfunction(obj):
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb

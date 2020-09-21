@@ -1,5 +1,6 @@
 import inspect
 import torch
+import pdb
 import collections
 import textwrap
 import functools
@@ -7,9 +8,9 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
+from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
-from torch.jit._state import _python_cu
+from torch.jit._state import _python_cu, _add_script_class, _get_script_class
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
@@ -32,6 +33,12 @@ ignored_attributes = [
     "_load_state_dict_pre_hooks",
     "dump_patches",
 ]
+
+def _compile_and_register_class(obj, rcb, qualified_name):
+    if not _get_script_class(qualified_name):
+        ast = get_jit_class_def(obj, obj.__name__)
+        torch._C._jit_script_class_compile(qualified_name, ast, rcb)
+        _add_script_class(obj, qualified_name)
 
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
@@ -104,6 +111,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
             attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
+        elif isinstance(item, torch.jit.RecursiveScriptClass):
+            attr_type = torch._C._jit_try_infer_type(item._c)
         else:
             attr_type = torch._C._jit_try_infer_type(item)
         return attr_type
@@ -232,7 +241,19 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 value)
             continue
 
+        # Handle ScriptClass attributes
+        if isinstance(value, torch.jit.RecursiveScriptClass):
+            attr_type = infer_type(name, value)
+            concrete_type_builder.add_attribute(name, attr_type, False, False)
+            continue
+
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
+
+        # If the type of the value is a user-defined class type, script it before trying
+        # to infer the type.
+        if type(value).__module__ != "builtins":
+            torch.jit.script(type(value))
+
         attr_type = infer_type(name, value)
         if attr_type is not None:
             concrete_type_builder.add_attribute(name, attr_type, False, False)
@@ -327,6 +348,8 @@ def create_script_class(obj):
 
 def create_script_class_impl(obj):
     qualified_class_name = _jit_internal._qualified_name(type(obj))
+    rcb = _jit_internal.createResolutionCallbackForClassMethods(type(obj))
+    _compile_and_register_class(type(obj), rcb, qualified_class_name)
     class_ty = _python_cu.get_class(qualified_class_name)
     cpp_object = torch._C._create_object_with_type(class_ty)
     for name, value in obj.__dict__.items():
@@ -370,6 +393,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
+            if _get_script_class(attr_type):
+                orig_value = orig_value if isinstance(orig_value, torch.jit.RecursiveScriptClass) else create_script_class_impl(orig_value)
             cpp_module.setattr(name, orig_value)
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
@@ -558,6 +583,7 @@ def infer_methods_to_compile(nn_module):
     exported = []
     for name in dir(nn_module):
         item = getattr(nn_module, name, None)
+
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
             exported.append(name)
 

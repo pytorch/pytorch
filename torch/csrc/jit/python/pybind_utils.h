@@ -644,23 +644,29 @@ inline IValue toIValue(
         return inst._ivalue();
       }
 
+      throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " is not a TorchScript compatible type;"
+            " it must be scripted before being passed as a value for an argument of type ",
+           type->repr_str()));
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
-      const size_t numAttrs = classType->numAttributes();
-      auto cu = classType->compilation_unit();
-      auto userObj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(cu, classType), numAttrs);
+      // const size_t numAttrs = classType->numAttributes();
+      // auto cu = classType->compilation_unit();
+      // auto userObj = c10::ivalue::Object::create(
+      //     c10::StrongTypePtr(cu, classType), numAttrs);
 
-      // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
-        const auto& attrType = classType->getAttribute(slot);
-        const auto& attrName = classType->getAttributeName(slot);
+      // // 2. copy all the contained types
+      // for (size_t slot = 0; slot < numAttrs; slot++) {
+      //   const auto& attrType = classType->getAttribute(slot);
+      //   const auto& attrName = classType->getAttributeName(slot);
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
-      }
-      return userObj;
+      //   const auto& contained = py::getattr(obj, attrName.c_str());
+      //   userObj->setSlot(slot, toIValue(contained, attrType));
+      // }
+      // return userObj;
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
@@ -672,6 +678,9 @@ inline IValue toIValue(
       if (auto mod = as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
         res = mod.value()._ivalue();
+      } else if (auto object = as_object(py::cast<py::object>(obj))) {
+        classType = object.value().type();
+        res = object.value()._ivalue();
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
@@ -921,22 +930,6 @@ inline py::object toPyObject(IValue ivalue) {
 
     return py::module::import("torch.jit._recursive")
         .attr("wrap_cpp_class")(py::cast(Object(obj)));
-    // auto pyCu = get_python_cu();
-    // if (obj->name().find("__torch__.torch.classes") == 0) {
-    // }
-    // const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    // AT_ASSERT(classType);
-    // auto pyClass = getScriptedClassOrError(obj->name());
-    // auto pyObj = pyClass.attr("__new__")(pyClass);
-
-    // const auto numAttrs = classType->numAttributes();
-
-    // for (size_t slot = 0; slot < numAttrs; slot++) {
-    //   const auto& attrName = classType->getAttributeName(slot);
-    //   IValue v = obj->getSlot(slot);
-    //   py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
-    // }
-    // return pyObj;
   } else if (ivalue.isPyObject()) {
     // return borrowed reference to ensure it correctly incref the underlying
     // PyObject
