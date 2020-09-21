@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
-from typing import NamedTuple
 import contextlib
 import enum
 import logging
 import os
 import threading
-from torch.distributed.nn import RemoteModule
+from typing import NamedTuple
 
 import torch
+import torch.distributed as dist
+import torch.distributed.autograd as dist_autograd
+import torch.nn as nn
 from torch.distributed import rpc
+from torch.distributed.nn import RemoteModule
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     requires_gloo,
@@ -17,12 +20,10 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.dist_utils import dist_init
-import torch.distributed as dist
-import torch.distributed.autograd as dist_autograd
-import torch.nn as nn
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+
 
 NUM_EM_ROW = 2
 D_SPARSE = 3
@@ -79,16 +80,12 @@ def _call_method(method, rref, *args, **kwargs):
 
 def _remote_method(method, rref, *args, **kwargs):
     args_tup = tuple([method, rref] + list(args))
-    return rpc.rpc_sync(
-        rref.owner(), _call_method, args=args_tup, kwargs=kwargs
-    )
+    return rpc.rpc_sync(rref.owner(), _call_method, args=args_tup, kwargs=kwargs)
 
 
 def _remote_method_async(method, rref, *args, **kwargs):
     args_tup = tuple([method, rref] + list(args))
-    return rpc.rpc_async(
-        rref.owner(), _call_method, args=args_tup, kwargs=kwargs
-    )
+    return rpc.rpc_async(rref.owner(), _call_method, args=args_tup, kwargs=kwargs)
 
 
 class RemoteEM(nn.Module):
@@ -154,9 +151,7 @@ class HybridModel(nn.Module):
             )
             gLogger.info("Use DDP for the second local net.")
             self.fc2 = DistributedDataParallel(
-                self.fc2,
-                check_reduction=True,
-                process_group=process_group_for_ddp,
+                self.fc2, check_reduction=True, process_group=process_group_for_ddp
             )
 
         gLogger.info(
@@ -186,15 +181,17 @@ class Trainer:
         rank: int,
     ):
         self.rank = rank
-        self.trainer_group = dist.new_group(TRAINER_RANKS) if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE) else None
+        self.trainer_group = (
+            dist.new_group(TRAINER_RANKS)
+            if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE)
+            else None
+        )
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.trainer_group
-            if ddp_mode in (DdpMode.INSIDE,)
-            else None,
+            self.trainer_group if ddp_mode in (DdpMode.INSIDE,) else None,
         )
         self.ddp_params, self.non_ddp_params = (
             self.hybrid_module.ddp_params,
@@ -283,9 +280,7 @@ def get_training_examples():
         for x in (-1 * value, 1 * value):
             for y in (1 * value, -1 * value):
                 for z in (0, 1):
-                    training_examples.dense_features[idx, :] = torch.Tensor(
-                        (x, y)
-                    )
+                    training_examples.dense_features[idx, :] = torch.Tensor((x, y))
                     training_examples.sparse_features[idx] = z
                     training_examples.values[idx] = value
                     idx += 1
@@ -301,9 +296,7 @@ def get_training_examples():
             sparse_features=training_examples.sparse_features[
                 start : start + examples_per_trainer
             ],
-            values=training_examples.values[
-                start : start + examples_per_trainer
-            ],
+            values=training_examples.values[start : start + examples_per_trainer],
         )
         for start in range(0, n, examples_per_trainer)
     ]
@@ -311,13 +304,14 @@ def get_training_examples():
 
 shutdown_signal = threading.Condition()
 
+
 def set_shutdown_signal():
     global shutdown_signal
     with shutdown_signal:
         shutdown_signal.notify()
 
-class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
+class DdpUnderDistAutogradTest(RpcAgentTestFixture):
     @property
     def world_size(self) -> int:
         return WORLD_SIZE
@@ -336,7 +330,8 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
         global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
@@ -352,7 +347,8 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
 
         gLogger.info(f"Waiting for shutdown signal on trainer #{rank}...")
 
@@ -368,17 +364,18 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
         remote_net_rref = rpc.remote(
-            self.remote_worker_name(),
-            RemoteNet,
-            args=(D_DENSE + D_SPARSE, D_HID),
+            self.remote_worker_name(), RemoteNet, args=(D_DENSE + D_SPARSE, D_HID)
         )
         gLogger.info("Created remote rrefs on master")
-        self.do_test_on_master(ddp_mode, simulate_uneven_inputs, remote_em_rref, remote_net_rref)
+        self.do_test_on_master(
+            ddp_mode, simulate_uneven_inputs, remote_em_rref, remote_net_rref
+        )
 
     def do_test_on_master(
         self,
@@ -444,10 +441,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
         # Destroy process groups
         for idx, trainer_rref in enumerate(trainer_rrefs):
-            _remote_method_async(
-                Trainer.destroy_pg,
-                trainer_rref,
-            ).wait()
+            _remote_method_async(Trainer.destroy_pg, trainer_rref).wait()
 
         # Send shutdown signals.
         for rank in TRAINER_RANKS:
@@ -488,7 +482,6 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
 
 class DdpComparisonTest(RpcAgentTestFixture):
-
     @property
     def world_size(self) -> int:
         return NUM_TRAINERS
@@ -508,11 +501,10 @@ class DdpComparisonTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
-        net = nn.Linear(2, 3)
-        ddp_net = DistributedDataParallel(
-            net
+            rank=self.rank,
         )
+        net = nn.Linear(2, 3)
+        ddp_net = DistributedDataParallel(net)
 
         # Odd ranks join early if simulate_uneven_inputs.
         num_inputs = 1
@@ -522,9 +514,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         inputs_list = [torch.rand((3, 2)) for _ in range(num_inputs)]
 
         if simulate_uneven_inputs:
-            gLogger.info(
-                f"Rank {self.rank} training with {len(inputs_list)} inputs."
-            )
+            gLogger.info(f"Rank {self.rank} training with {len(inputs_list)} inputs.")
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
@@ -578,7 +568,8 @@ class DdpComparisonTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
 
         model = nn.EmbeddingBag(10, 3, sparse=True)
         ddp_model = DistributedDataParallel(model)
@@ -614,9 +605,12 @@ class DdpComparisonTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
 
-        remote_layer1 = RemoteModule("worker0", nn.Linear, args=(10, 5, False))
+        remote_layer1 = RemoteModule(
+            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 5, False)
+        )
         layer1 = nn.Linear(10, 5, False)
         # Start with the same parameters for remote and local
         layer1.weight = remote_layer1.module_rref.to_here().weight
@@ -640,8 +634,8 @@ class DdpComparisonTest(RpcAgentTestFixture):
                 rpc.rpc_sync(
                     "worker0",
                     DdpComparisonTest.get_remote_grads,
-                    args=(remote_layer1.module_rref, context_id)
-                )
+                    args=(remote_layer1.module_rref, context_id),
+                ),
             )
 
     @skip_if_lt_x_gpu(NUM_TRAINERS)
@@ -657,9 +651,12 @@ class DdpComparisonTest(RpcAgentTestFixture):
             backend="gloo",
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
-            rank=self.rank)
+            rank=self.rank,
+        )
 
-        remote_layer1 = RemoteModule("worker0", nn.Linear, args=(10, 7, False))
+        remote_layer1 = RemoteModule(
+            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 7, False)
+        )
         layer1 = nn.Linear(10, 7, False)
         # Start with the same parameters for remote and local
         layer1.weight = remote_layer1.module_rref.to_here().weight
@@ -667,7 +664,9 @@ class DdpComparisonTest(RpcAgentTestFixture):
         layer2 = nn.Linear(7, 5).cuda(self.rank)
         ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
 
-        remote_layer3 = RemoteModule("worker0", nn.Linear, args=(5, 3, False))
+        remote_layer3 = RemoteModule(
+            "worker0", device="cpu", module_cls=nn.Linear, args=(5, 3, False)
+        )
         layer3 = nn.Linear(5, 3, False)
         # Start with the same parameters for remote and local
         layer3.weight = remote_layer3.module_rref.to_here().weight
@@ -678,11 +677,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         # Run local case.
         inputs = torch.rand((10, 10))
         loss = ddp_layer4(
-            layer3(
-                ddp_layer2(
-                    layer1(inputs).cuda(self.rank)
-                ).cpu()
-            ).cuda(self.rank)
+            layer3(ddp_layer2(layer1(inputs).cuda(self.rank)).cpu()).cuda(self.rank)
         ).sum()
         loss.backward()
 
@@ -690,9 +685,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         with dist_autograd.context() as context_id:
             loss = ddp_layer4(
                 remote_layer3(
-                    ddp_layer2(
-                        remote_layer1(inputs).cuda(self.rank)
-                    ).cpu()
+                    ddp_layer2(remote_layer1(inputs).cuda(self.rank)).cpu()
                 ).cuda(self.rank)
             ).sum()
             dist_autograd.backward(context_id, [loss])
@@ -703,8 +696,8 @@ class DdpComparisonTest(RpcAgentTestFixture):
                 rpc.rpc_sync(
                     "worker0",
                     DdpComparisonTest.get_remote_grads,
-                    args=(remote_layer1.module_rref, context_id)
-                )
+                    args=(remote_layer1.module_rref, context_id),
+                ),
             )
             self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
             self.assertEqual(
@@ -712,7 +705,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
                 rpc.rpc_sync(
                     "worker0",
                     DdpComparisonTest.get_remote_grads,
-                    args=(remote_layer3.module_rref, context_id)
-                )
+                    args=(remote_layer3.module_rref, context_id),
+                ),
             )
             self.assertEqual(layer4.weight.grad, grads_dict[layer4.weight])

@@ -30,9 +30,7 @@ void std_var_kernel_impl<at::BFloat16>(TensorIterator& iter, bool unbiased, bool
 
 static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "std_cuda", [&] {
-      std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
-    });
+    std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
   });
 }
 
@@ -49,14 +47,12 @@ static void mean_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return mean_kernel_impl<at::Half, float, float>(iter);
   }
-  #ifdef __HIP_PLATFORM_HCC__
   else if(iter.dtype() == kBFloat16) {
     return mean_kernel_impl<at::BFloat16, float>(iter);
   } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return mean_kernel_impl<at::BFloat16, float, float>(iter);
   }
-  #endif
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "mean_cuda", [&]() {
     mean_kernel_impl<scalar_t>(iter);
   });
