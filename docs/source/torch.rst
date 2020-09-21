@@ -296,6 +296,7 @@ Pointwise Ops
     exp2
     expm1
     fix
+    float_power
     floor
     floor_divide
     fmod
@@ -328,7 +329,6 @@ Pointwise Ops
     nextafter
     polygamma
     pow
-    float_power
     rad2deg
     real
     reciprocal

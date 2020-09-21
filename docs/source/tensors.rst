@@ -322,6 +322,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fliplr
    .. automethod:: flipud
    .. automethod:: float
+   .. automethod:: float_power
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide
@@ -499,7 +500,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
-   .. automethod:: float_power
    .. automethod:: prod
    .. automethod:: put_
    .. automethod:: qr

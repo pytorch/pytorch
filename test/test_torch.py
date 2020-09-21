@@ -6205,8 +6205,8 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @dtypes(*list(product(torch.testing.get_all_dtypes(),
-                          torch.testing.get_all_dtypes())))
+    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False),
+                          torch.testing.get_all_dtypes(include_bool=False))))
     def test_float_power(self, device, dtypes):
         base_dtype = dtypes[0]
         exp_dtype = dtypes[1]
