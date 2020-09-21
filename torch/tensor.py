@@ -9,6 +9,7 @@ import weakref
 from torch._C import _add_docstr
 from numbers import Number
 import functools
+from typing import Optional
 
 
 def _wrap_type_error_to_not_implemented(f):
@@ -394,8 +395,10 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
-             center=True, pad_mode='reflect', normalized=False, onesided=True):
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
         r"""See :func:`torch.stft`
 
         .. warning::
@@ -408,23 +411,27 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
                 win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided
+                onesided=onesided, return_complex=return_complex
             )
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
-                          pad_mode, normalized, onesided)
+                          pad_mode, normalized, onesided, return_complex=return_complex)
 
-    def istft(self, n_fft, hop_length=None, win_length=None, window=None,
-              center=True, normalized=False, onesided=True, length=None):
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(
                 Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
-                window=window, center=center, normalized=normalized, onesided=onesided, length=None
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
             )
         return torch.istft(self, n_fft, hop_length, win_length, window, center,
-                           normalized, onesided, length)
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         relevant_args = (self,)
