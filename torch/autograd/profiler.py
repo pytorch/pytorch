@@ -1117,6 +1117,7 @@ def parse_nvprof_trace(path):
     for row in conn.execute(marker_query):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
+                            node_id=row['node_id'],
                             name=strings[row['name']],
                             cpu_start=row['start_time'],
                             cpu_end=row['end_time'],

@@ -140,7 +140,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
                     indices = x_indices[i].tolist() + list(x_idx)
                     d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                     update_jacobians(x_value, x_idx, d_tensor, d_idx)
-        elif x_tensor.layout == torch._mkldnn:
+        elif x_tensor.layout == torch._mkldnn:  # type: ignore
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
             if len(input) != 1:
@@ -166,7 +166,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
     if output.is_sparse:
         raise ValueError('Sparse output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
-    if output.layout == torch._mkldnn:
+    if output.layout == torch._mkldnn:  # type: ignore
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
     diff_input_list = list(iter_tensors(input, True))
@@ -306,13 +306,13 @@ def gradcheck(
             content = inp._values() if inp.is_sparse else inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
-            if content.layout is not torch._mkldnn and \
-               not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
-                raise RuntimeError(
-                    'The {}th input has a dimension with stride 0. gradcheck only '
-                    'supports inputs that are non-overlapping to be able to '
-                    'compute the numerical gradients correctly. You should call '
-                    '.contiguous on the input before passing it to gradcheck.')
+            if content.layout is not torch._mkldnn:  # type: ignore
+                if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
+                    raise RuntimeError(
+                        'The {}th input has a dimension with stride 0. gradcheck only '
+                        'supports inputs that are non-overlapping to be able to '
+                        'compute the numerical gradients correctly. You should call '
+                        '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
             inp.retain_grad()
     if not any_input_requiring_grad:

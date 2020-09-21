@@ -380,16 +380,16 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients: Any) -> Any:
+    def backward(self, *gradients: Any) -> Any:  # type: ignore
         nested_gradients = _unflatten(gradients, self._nested_output)
-        result = self.backward_extended(*nested_gradients)
+        result = self.backward_extended(*nested_gradients)  # type: ignore
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args: Any) -> Any:
+    def forward(self, *args: Any) -> Any:  # type: ignore
         nested_tensors = _map_tensor_data(self._nested_input)
-        result = self.forward_extended(*nested_tensors)
+        result = self.forward_extended(*nested_tensors)  # type: ignore
         del self._nested_input
         self._nested_output = result
         return tuple(_iter_tensors(result))
