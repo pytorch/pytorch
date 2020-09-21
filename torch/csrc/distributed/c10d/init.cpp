@@ -650,7 +650,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupGloo::Options>())
+           ::c10d::ProcessGroupGloo::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -681,7 +682,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
