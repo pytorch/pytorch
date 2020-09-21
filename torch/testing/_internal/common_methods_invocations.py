@@ -1661,4 +1661,6 @@ def exclude_tensor_method(name, test_name):
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
         return True
+    if 'fft.' in name:
+        return True
     return False

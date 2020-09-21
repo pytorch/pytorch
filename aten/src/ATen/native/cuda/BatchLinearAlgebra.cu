@@ -8,12 +8,18 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
 #include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
 #include <magma.h>
 #include <magma_types.h>
+
+const bool use_magma_ = true;
+#else
+const bool use_magma_ = false;
+
 #endif
 
 namespace at {
@@ -713,7 +719,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 #endif
 }
 
-Tensor _inverse_helper_cuda(const Tensor& self) {
+Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
     std::vector<int64_t> infos(batchCount(self), 0);
@@ -731,6 +737,18 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
     singleCheckErrors(info, "inverse_cuda");
   }
   return self_inv_working_copy;
+}
+
+Tensor _inverse_helper_cuda(const Tensor& self) {
+#ifdef USE_CUSOLVER
+  if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
+    return _inverse_helper_cuda_lib(self);    // cusolver or cublas
+  } else {
+    return _inverse_helper_cuda_legacy(self); // magma-cuda
+  }
+#else
+  return _inverse_helper_cuda_legacy(self); // magma-cuda
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
