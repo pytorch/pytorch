@@ -2956,7 +2956,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # zero out parameters and reload them from the state dict
         checkpoint_path = self.file_name + "_model_checkpoint"
-        if rank == 0:
+        if self.rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
         dist.barrier()
         for p in ddp_withload.parameters():
