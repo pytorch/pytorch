@@ -1749,7 +1749,7 @@ t2.start()
         gnan = g.clone()
         gnan[2, 2] = float('nan')
 
-        # Tries combinations of
+        # Tries selected combinations of
         #  - contiguous grads
         #  - g.clone().t() which is not contiguous but still non overlapping and dense
         #  - variants of g.clone()[:, :5] which are not non overlapping and dense
@@ -1829,8 +1829,8 @@ t2.start()
         growth_interval = 2
         scale = torch.full((1,), 4.0, dtype=dtype, device=device)
         growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
 
-        found_inf.zero_()
         # Simulates 2 consecutive unskipped iterations
         scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
@@ -1924,7 +1924,7 @@ t2.start()
         d[dev0b] = "0b"
         self.assertTrue(len(d) == 1)
         self.assertTrue(d[dev0a] == "0b")
-        d[a.device] = "t"
+        d[t.device] = "t"
         self.assertTrue(len(d) == 1)
         self.assertTrue(d[dev0a] == "t")
 
