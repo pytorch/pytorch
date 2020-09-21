@@ -11,7 +11,7 @@ from . import _linalg_utils as _utils
 from .overrides import has_torch_function, handle_torch_function
 
 
-__all__ = ['lobpcg', 'lobpcg2']
+__all__ = ['lobpcg']
 
 def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
     # compute F, such that F_ij = (d_j - d_i)^{-1} for i != j, F_ii = 0
@@ -289,7 +289,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         if B is not None:
             B = B.contiguous() if (not B.is_sparse) else B
 
-        D, U = lobpcg(
+        D, U = _lobpcg(
             A, k, B, X,
             n, iK, niter, tol, largest, method, tracker,
             ortho_iparams, ortho_fparams, ortho_bparams
@@ -318,8 +318,8 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         if A.dtype in (torch.complex64, torch.complex128) or \
            B is not None and B.dtype in (torch.complex64, torch.complex128):
             raise ValueError(
-                'lobcpg.backward does not support complex input yet.'
-                'Note that lobcpg.forward does though.'
+                'lobpcg.backward does not support complex input yet.'
+                'Note that lobpcg.forward does though.'
             )
 
         if largest is None:
@@ -336,38 +336,6 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         # B has index 2
         grads[2] = B_grad
         return tuple(grads)
-
-
-def lobpcg2(A,                   # type: Tensor
-            k=None,              # type: Optional[int]
-            B=None,              # type: Optional[Tensor]
-            X=None,              # type: Optional[Tensor]
-            n=None,              # type: Optional[int]
-            iK=None,             # type: Optional[Tensor]
-            niter=None,          # type: Optional[int]
-            tol=None,            # type: Optional[float]
-            largest=None,        # type: Optional[bool]
-            method=None,         # type: Optional[str]
-            tracker=None,        # type: Optional[None]
-            ortho_iparams=None,  # type: Optional[Dict[str, int]]
-            ortho_fparams=None,  # type: Optional[Dict[str, float]]
-            ortho_bparams=None,  # type: Optional[Dict[str, bool]]
-            ):
-    # type: (...) -> Tuple[Tensor, Tensor]
-
-    # While it is expected that `A` is symmetric,
-    # the `A_grad` might be not. Therefore we perform the trick below,
-    # so that `A_grad` becomes symmetric.
-    # The symmetrization is important for first-order optimization methods,
-    # so that (A - alpha * A_grad) is still a symmetric matrix.
-    # Same holds for `B`.
-    A_sym = (A + A.transpose(-2, -1)) / 2
-    B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
-
-    return LOBPCGAutogradFunction.apply(
-        A_sym, k, B_sym, X, n, iK, niter, tol, largest,
-        method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
-    )
 
 
 def lobpcg(A,                   # type: Tensor
@@ -520,11 +488,43 @@ def lobpcg(A,                   # type: Tensor
 
     """
 
+    # While it is expected that `A` is symmetric,
+    # the `A_grad` might be not. Therefore we perform the trick below,
+    # so that `A_grad` becomes symmetric.
+    # The symmetrization is important for first-order optimization methods,
+    # so that (A - alpha * A_grad) is still a symmetric matrix.
+    # Same holds for `B`.
+    A_sym = (A + A.transpose(-2, -1)) / 2
+    B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+
+    return LOBPCGAutogradFunction.apply(
+        A_sym, k, B_sym, X, n, iK, niter, tol, largest,
+        method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
+    )
+
+
+def _lobpcg(A,                   # type: Tensor
+            k=None,              # type: Optional[int]
+            B=None,              # type: Optional[Tensor]
+            X=None,              # type: Optional[Tensor]
+            n=None,              # type: Optional[int]
+            iK=None,             # type: Optional[Tensor]
+            niter=None,          # type: Optional[int]
+            tol=None,            # type: Optional[float]
+            largest=None,        # type: Optional[bool]
+            method=None,         # type: Optional[str]
+            tracker=None,        # type: Optional[None]
+            ortho_iparams=None,  # type: Optional[Dict[str, int]]
+            ortho_fparams=None,  # type: Optional[Dict[str, float]]
+            ortho_bparams=None,  # type: Optional[Dict[str, bool]]
+            ):
+    # type: (...) -> Tuple[Tensor, Tensor]
+
     if not torch.jit.is_scripting():
         tensor_ops = (A, B, X, iK)
         if (not set(map(type, tensor_ops)).issubset((torch.Tensor, type(None))) and has_torch_function(tensor_ops)):
             return handle_torch_function(
-                lobpcg, tensor_ops, A, k=k,
+                _lobpcg, tensor_ops, A, k=k,
                 B=B, X=X, n=n, iK=iK, niter=niter, tol=tol,
                 largest=largest, method=method, tracker=tracker,
                 ortho_iparams=ortho_iparams,

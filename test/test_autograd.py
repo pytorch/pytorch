@@ -2555,7 +2555,7 @@ class TestAutograd(TestCase):
             if A.dim() > 2:
                 X = X.expand(X_shape)
 
-            D, U = torch.lobpcg2(A=A, k=k, B=B, X=X)
+            D, U = torch.lobpcg(A=A, k=k, B=B, X=X)
 
             # LOBPCG uses a random initial eigenspace approximation
             # if parameter `X` is not provided.
