@@ -7743,59 +7743,69 @@ class TestTorchDeviceType(TestCase):
         for upper, batchsize in product([True, False], [262144, 524288]):
             cholesky_test_helper(2, batchsize, device, upper)
 
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import \
+            (random_symmetric_pd_matrix,
+             random_fullrank_matrix_distinct_singular_value)
 
         def cholesky_test_helper(n, batch_dims, upper):
             # This is a workaround while there is no support for complex random_symmetric_pd_matrix
             if dtype.is_complex:
                 real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_symmetric_pd_matrix(n, *batch_dims, dtype=real_dtype, device=device)
-                A_imag = random_symmetric_pd_matrix(n, *batch_dims, dtype=real_dtype, device=device)
+                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
                 A = A_real + 1j * A_imag
-                A = 0.5 * (A + A.transpose(-2, -1).conj())
+                # There is no support for complex batched matmul yet
+                matmul_list = []
+                for mat in A.contiguous().view(-1, n, n):
+                    matmul_list.append(mat @ mat.t().conj())
+                A = torch.stack(matmul_list).view(*batch_dims, n, n)
             else:
                 A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper), atol=1e-4, rtol=0)
+            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
 
         for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
             cholesky_test_helper(3, batchsize, upper)
 
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import \
+            (random_symmetric_pd_matrix,
+             random_fullrank_matrix_distinct_singular_value)
 
         # This is a workaround while there is no support for complex random_symmetric_pd_matrix
         if dtype.is_complex:
             real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-            A_real = random_symmetric_pd_matrix(10, dtype=real_dtype, device=device)
-            A_imag = random_symmetric_pd_matrix(10, dtype=real_dtype, device=device)
+            A_real = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
+            A_imag = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
             A = A_real + 1j * A_imag
-            A = 0.5 * (A + A.t().conj())
+            A = A @ A.t().conj()
         else:
             A = random_symmetric_pd_matrix(10, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
         B = torch.mm(C, C.t().conj())
-        self.assertEqual(A, B, atol=1e-5, rtol=0)
+        self.assertEqual(A, B, atol=1e-14, rtol=0)
 
         # test Upper Triangular
         U = torch.cholesky(A, True)
         B = torch.mm(U.t().conj(), U)
-        self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t().conj())
-        self.assertEqual(A, B, atol=1e-5, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
