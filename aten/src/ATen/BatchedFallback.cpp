@@ -51,15 +51,15 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
-              "Batching rule not implemented for ", schema, "; ",
+              "Batching rule not implemented for ", schema.operator_name(), "; ",
               "the fallback path doesn't work on in-place or view ops.");
   TORCH_CHECK(areAllReturnsTensors(schema) && !areAnyArgumentsTensorList(schema),
-              "Batching rule not implemented for ", schema, ". ",
+              "Batching rule not implemented for ", schema.operator_name(), ". ",
               "We could not generate a fallback.");
   TORCH_CHECK(num_returns >= 1,
-              "Batching rule not implemented for ", schema, ". ",
+              "Batching rule not implemented for ", schema.operator_name(), ". ",
               "The fallback path does not support operations with no returns.");
-  TORCH_WARN("Batching rule not implemented for ", schema, " falling back "
+  TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
              "to slow (for loop and stack) implementation");
 
   const auto num_arguments = schema.arguments().size();
@@ -123,12 +123,14 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
-      if (arg_idx != *batched_tensor_inputs_pos_iter) {
+      if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
+          || arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
       }
       // argument is a BatchedTensor
+      TORCH_INTERNAL_ASSERT(input_physical_views_iter != input_physical_views.end());
       const auto& physical_view_for_argument = *input_physical_views_iter;
       torch::jit::push(stack, physical_view_for_argument.tensor().index(index));
       batched_tensor_inputs_pos_iter++;

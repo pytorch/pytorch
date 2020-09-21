@@ -1,11 +1,11 @@
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/cuda/device_set.h>
 #include <ATen/core/functional.h>
-#include <torch/csrc/utils/hash.h>
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 
 #include <THC/THC.h>
 
@@ -158,7 +158,7 @@ struct NcclCommList {
 
 using device_list = std::vector<int>;
 // accesses to this object have to be guarded by THC's CudaFreeMutex
-static std::unordered_map<device_list, NcclCommList, torch::hash<device_list>>
+static std::unordered_map<device_list, NcclCommList, c10::hash<device_list>>
     _communicators;
 
 ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {

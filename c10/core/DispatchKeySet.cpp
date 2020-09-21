@@ -2,16 +2,18 @@
 
 namespace c10 {
 
-static DispatchKeySet autograd_dispatch_keys{
-  DispatchKey::Autograd,
-  DispatchKey::AutogradXLA,
-  DispatchKey::PrivateUse1_PreAutograd,
-  DispatchKey::PrivateUse2_PreAutograd,
-  DispatchKey::PrivateUse3_PreAutograd,
-};
+DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  switch (t) {
+    case DispatchKey::Autograd:
+      return autograd_dispatch_keyset;
+   default:
+     return DispatchKeySet(t);
+  }
+}
 
-DispatchKeySet AutogradDispatchKeys() {
-  return autograd_dispatch_keys;
+bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
+  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
 }
 
 std::string toString(DispatchKeySet ts) {
