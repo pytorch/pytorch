@@ -205,10 +205,13 @@ class AliasDb {
       const Value* element,
       const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
-  void giveFreshAlias(const Value* value);
+  void giveFreshAlias(
+      const Value* value,
+      bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
   c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) const;
+  bool functionalNonEscapingListUse(const Use& use) const;
 
   bool isContainerType(const TypePtr& type) const;
 

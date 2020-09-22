@@ -1350,7 +1350,8 @@ void initJitScriptBindings(PyObject* module) {
           auto def_name = (*defs_it).name().name();
           // If the method is not in the defaults map, assume there are
           // no default arguments for it.
-          if (defaults.find(def_name) == defaults.end()) {
+          auto default_it = defaults.find(def_name);
+          if (default_it == defaults.end()) {
             continue;
           }
 
@@ -1361,7 +1362,7 @@ void initJitScriptBindings(PyObject* module) {
               defs_it->range(),
               method.getSchema(),
               at::nullopt,
-              defaults.find(def_name)->second));
+              default_it->second));
           ++defs_it;
         }
       });

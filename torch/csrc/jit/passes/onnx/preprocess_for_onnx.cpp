@@ -104,10 +104,65 @@ static void FuseWithListUnpack(Block* b) {
   }
 }
 
+// Replace aten::add with onnx::Concat
+// when inputs to the add node are two int lists
+//
+// before the pass:
+// graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
+//  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
+//  %2 : None = prim::Constant()
+//  %3 : int[] = aten::size(%x.1)
+//  %l1.1 : int[] = aten::list(%3
+//  %5 : int[] = aten::size(%y.1)
+//  %l2.1 : int[] = aten::list(%5)
+//  %7 : int[] = aten::add(%l1.1, %l2.1)
+//  %8 : Tensor = aten::new_zeros(%x.1, %7, %2, %2, %2, %2)
+//  return (%8)
+//
+// after the pass:
+// graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
+//  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
+//  %2 : None = prim::Constant()
+//  %3 : int[] = aten::size(%x.1)
+//  %l1.1 : int[] = aten::list(%3)
+//  %5 : int[] = aten::size(%y.1)
+//  %l2.1 : int[] = aten::list(%5)
+//  %9 : Tensor = onnx::Concat[axis=0](%l1.1, %l2.1)
+//  %8 : Tensor = aten::new_zeros(%x.1, %9, %2, %2, %2, %2)
+//  return (%8)
+static void ReplaceAddWithConcat(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      ReplaceAddWithConcat(child_block);
+    }
+    if (it->kind() == aten::add) {
+      if (!it->input(0)->type()->cast<ListType>() ||
+          !it->input(1)->type()->cast<ListType>()) {
+        continue;
+      }
+
+      TypePtr elem = it->input(0)->type()->cast<ListType>()->getElementType();
+      if (elem->cast<IntType>()) {
+        Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
+        concat_node->i_(attr::axis, 0);
+        concat_node->insertBefore(*it);
+        concat_node->addInput(it->input(0));
+        concat_node->addInput(it->input(1));
+        concat_node->outputs()[0]->setType(
+            TensorType::fromNumberType(std::move(elem)));
+        it->replaceAllUsesWith(concat_node);
+        it->removeAllInputs();
+        it.destroyCurrent();
+      }
+    }
+  }
+}
+
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   FuseWithListUnpack(graph->block());
+  ReplaceAddWithConcat(graph->block());
 }
 
 } // namespace jit
