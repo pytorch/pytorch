@@ -83,7 +83,7 @@ Tensor pow(Scalar base, const Tensor& exp) {
 
 Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
   auto dtype = (at::isComplexType(base.scalar_type()) || at::isComplexType(exp.scalar_type())) ?
-               at::kComplexDouble : at::kDouble;
+                at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
               "output type ", result.scalar_type(), "is not the desired output type ", dtype);
 

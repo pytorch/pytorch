@@ -6343,7 +6343,7 @@ add_docstr(torch.float_power,
 float_power(input, exponent, *, out=None) -> Tensor
 
 Takes the power of each element in :attr:`input` with :attr:`exponent` and
-returns a tensor with the result.
+returns a tensor in float64 with the result.
 
 :attr:`exponent` can be either a single ``float`` number or a `Tensor`
 with the same number of elements as :attr:`input`.
@@ -6379,7 +6379,7 @@ Example::
     >>> a
     tensor([6, 4, 7, 1])
     >>> torch.float_power(a, 2)
-    tensor([36., 16., 49.,  1.])
+    tensor([36., 16., 49.,  1.], dtype=torch.float64)
 
     >>> a = torch.arange(1, 5)
     >>> a
@@ -6388,12 +6388,12 @@ Example::
     >>> exp
     tensor([ 1,  2,  3,  4])
     >>> torch.float_power(a, exp)
-    tensor([   1.,    4.,   27.,  256.])
+    tensor([   1.,    4.,   27.,  256.], dtype=torch.float64)
 
 .. function:: float_power(self, exponent, *, out=None) -> Tensor
 
 :attr:`self` is a scalar ``float`` value, and :attr:`exponent` is a tensor.
-The returned tensor :attr:`out` is of the same shape as :attr:`exponent`
+The returned tensor :attr:`out`is of type float64 and has the same shape as :attr:`exponent`
 
 The operation applied is:
 
@@ -6415,9 +6415,11 @@ Keyword args:
 Example::
 
     >>> exp = torch.arange(1, 5)
+    >>> exp
+    tensor([ 1,  2,  3,  4])
     >>> base = 2
     >>> torch.float_power(base, exp)
-    tensor([  2.,   4.,   8.,  16.])
+    tensor([  2.,   4.,   8.,  16.], dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.prod,
