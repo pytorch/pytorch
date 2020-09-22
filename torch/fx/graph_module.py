@@ -56,7 +56,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
     # we shouldn't trace into any of the submodules, they were not
     # because they were not traced in the original GraphModule
     class KeepModules(Tracer):
-        def is_leaf_module(self, _: torch.nn.Module) -> bool:
+        def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
     return KeepModules().trace(CodeOnlyModule(body))
@@ -124,13 +124,13 @@ class GraphModule(torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:
-                if node.op in ['get_param', 'call_module']:
+                if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     _copy_attr(root, self, node.target)
         elif isinstance(root, dict):
             targets_to_copy = []
             for node in graph.nodes:
-                if node.op in ['get_param', 'call_module']:
+                if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     if node.target not in root:
                         raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
