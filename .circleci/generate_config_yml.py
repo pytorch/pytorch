@@ -83,21 +83,21 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
-        pytorch_build_definitions.get_workflow_jobs,
+        # cimodel.data.simple.docker_definitions.get_workflow_jobs,
+        # pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_definitions.get_workflow_jobs,
+        # cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
-        cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.ge_config_tests.get_workflow_jobs,
-        cimodel.data.simple.bazel_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
+        # cimodel.data.simple.mobile_definitions.get_workflow_jobs,
+        # cimodel.data.simple.ge_config_tests.get_workflow_jobs,
+        # cimodel.data.simple.bazel_definitions.get_workflow_jobs,
+        # cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
-        cimodel.data.simple.nightly_android.get_workflow_jobs,
-        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
-        windows_build_definitions.get_windows_workflows,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
+        # cimodel.data.simple.nightly_android.get_workflow_jobs,
+        # cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
+        # windows_build_definitions.get_windows_workflows,
+        # binary_build_definitions.get_post_upload_jobs,
+        # binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
