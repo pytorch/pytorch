@@ -334,7 +334,7 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     return concrete_type
 
-def create_script_module(nn_module, stubs_fn, share_types=True, reuse_stubs_fn=False):
+def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
 
@@ -349,9 +349,9 @@ def create_script_module(nn_module, stubs_fn, share_types=True, reuse_stubs_fn=F
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
-    return create_script_module_impl(nn_module, concrete_type, stubs_fn, reuse_stubs_fn=reuse_stubs_fn)
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn, reuse_stubs_fn=False):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
@@ -385,8 +385,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn, reuse_stubs_fn
                 scripted = orig_value
             else:
                 # if not reuse_stubs_fn, we will use the default recursive rule to compile the submodule
-                submod_stubs_fn = stubs_fn if reuse_stubs_fn else infer_methods_to_compile
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, submod_stubs_fn, reuse_stubs_fn=reuse_stubs_fn)
+                # submod_stubs_fn = stubs_fn if reuse_stubs_fn else infer_methods_to_compile
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
 
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted

@@ -552,8 +552,7 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False,
-            reuse_stubs_fn=True
+            share_types=False
         )
     else:
         if _module_class is None:
