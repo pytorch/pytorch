@@ -300,7 +300,7 @@ def _get_default_store():
         raise RuntimeError("Default process group has not been initialized, "
                            "please make sure to call init_process_group.")
     assert _default_pg is not None
-    default_store = _pg_map[_default_pg]
+    _, default_store = _pg_map[_default_pg]
     return default_store
 
 
