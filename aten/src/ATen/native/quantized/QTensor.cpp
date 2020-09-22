@@ -252,8 +252,8 @@ float calculate_quant_loss(
   int i = 0;
 
 // TODO add FBGEMM kernel
-//#ifdef USE_FBGEMM
-//#endif
+// #ifdef USE_FBGEMM
+// #endif
 
   // remainder loop
   for (; i < numel; i++) {
@@ -269,7 +269,7 @@ float calculate_quant_loss(
   Helper function to find the best min/max for a tensor to calculate qparams.
   It uses a greedy approach to nudge the min and max and calculate the l2 norm
   and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
-  Returns the range of the tensor, (xmax-xmin) and xmin value
+  Returns the optimized xmax and xmin value of the tensor.
 */
 std::tuple<double, double> choose_qparams_optimized(
     const at::Tensor& input_tensor,
@@ -284,7 +284,6 @@ std::tuple<double, double> choose_qparams_optimized(
   xmax = (float) xmax;
   float stepsize = (xmax - xmin) / n_bins;
   int min_bins = n_bins * (1.0 - (float) ratio);
-  std::cout << "Input tensor " << input_tensor << std::endl;
   const float* input = input_tensor.contiguous().data_ptr<float>();
   std::vector<float> q_input(numel);
 
@@ -319,8 +318,6 @@ std::tuple<double, double> choose_qparams_optimized(
     }
   }
 
-  // Calculate scale and bias
-  std::cout << "Found xmax xmin " << xmax << " " << xmin << std::endl;
   return std::make_tuple((float) xmax, (float) xmin);
 }
 } // namespace native
