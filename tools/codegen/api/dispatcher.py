@@ -114,3 +114,10 @@ def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) ->
     else:
         process_tensoroptions = None
     return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args], process_tensoroptions=process_tensoroptions)
+
+def dispatcherarguments_exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
+    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        process_tensoroptions = 'scatter'
+    else:
+        process_tensoroptions = None
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args], process_tensoroptions=process_tensoroptions)

@@ -70,7 +70,7 @@ class CAFFE2_API Tensor final {
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
             Storage::create_legacy(device),
-            c10::computeDispatchKey(typeMetaToScalarType(get_default_dtype()), at::kStrided, device),
+            c10::computeDispatchKey(c10::nullopt, at::kStrided, device),
             TypeMeta())) {}
 
   /**
