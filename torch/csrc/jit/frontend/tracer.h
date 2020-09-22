@@ -262,6 +262,10 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<std::string>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
 TORCH_API void addInputs(Node* n, const char* name, at::ScalarType value);

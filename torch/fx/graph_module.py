@@ -3,7 +3,7 @@ import torch.overrides
 import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
-from copy import deepcopy
+import copy
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -56,7 +56,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
     # we shouldn't trace into any of the submodules, they were not
     # because they were not traced in the original GraphModule
     class KeepModules(Tracer):
-        def is_leaf_module(self, _: torch.nn.Module) -> bool:
+        def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
     return KeepModules().trace(CodeOnlyModule(body))
@@ -124,13 +124,13 @@ class GraphModule(torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:
-                if node.op in ['get_param', 'call_module']:
+                if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     _copy_attr(root, self, node.target)
         elif isinstance(root, dict):
             targets_to_copy = []
             for node in graph.nodes:
-                if node.op in ['get_param', 'call_module']:
+                if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     if node.target not in root:
                         raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
@@ -170,10 +170,12 @@ def forward(self, {', '.join(free_variables)}):
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
-        the_copy = self.__new__(type(self))
-        the_copy.__dict__ = deepcopy(self.__dict__, memo)
-        return the_copy
+        fake_mod = torch.nn.Module()
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
+        return GraphModule(fake_mod, self.graph)
 
+    def __copy__(self):
+        return GraphModule(self, self.graph)
 
     def __str__(self) -> str:
         orig_str = super().__str__()

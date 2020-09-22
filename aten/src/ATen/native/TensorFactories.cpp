@@ -860,6 +860,9 @@ Tensor zeros_like(
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
+    TORCH_CHECK(
+        !(optional_memory_format.has_value()),
+        "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());

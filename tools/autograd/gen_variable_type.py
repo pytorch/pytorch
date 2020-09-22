@@ -499,6 +499,8 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
+    gather_tensor_options = "TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)"
+
     def dispatch_trace_input(arg_spec):
         name, value, simple_type, nullable = arg_spec
         # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
