@@ -384,8 +384,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             elif isinstance(orig_value, torch.jit.ScriptModule):
                 scripted = orig_value
             else:
-                # if not reuse_stubs_fn, we will use the default recursive rule to compile the submodule
-                # submod_stubs_fn = stubs_fn if reuse_stubs_fn else infer_methods_to_compile
+                # always reuse the provided stubs_fn to infer the methods to compile
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
 
             cpp_module.setattr(name, scripted)
