@@ -55,15 +55,15 @@ class Tracer(TracerBase):
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
-                    return self.create_node('get_attr', n, (), {})
+                    return self.create_node('get_param', n, (), {})
             raise NameError('parameter is not a member of this module')
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
         # for any constant Tensor values we encounter, first search for if they
         # are an attribute of some module in the module hierarchy. If so, emit
-        # a get_attr to retrieve that tensor. Otherwise, we'll store away the
+        # a get_param to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
-        # retrieve it with a get_attr.
+        # retrieve it with a get_param.
         if isinstance(a, torch.Tensor):
             # TODO: slow
             def search_for_tensor(m : torch.nn.Module) -> Optional[List[str]]:
@@ -96,7 +96,7 @@ class Tracer(TracerBase):
                     i += 1
                 setattr(self.root, qualname, a)
 
-            return self.create_node('get_attr', qualname, (), {})
+            return self.create_node('get_param', qualname, (), {})
         return super().create_arg(a)
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
