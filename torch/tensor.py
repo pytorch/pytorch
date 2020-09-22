@@ -845,7 +845,7 @@ class Tensor(torch._C._TensorBase):
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, namedshape)
+            return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, sizes)
 
         if not sizes:
             raise RuntimeError("unflatten: sizes must be non-empty")

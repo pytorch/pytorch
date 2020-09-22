@@ -183,7 +183,7 @@ class Quantizer:
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
-            if node.op == 'get_attr':
+            if node.op == 'get_param':
                 parent, _ = _parent_name(node.target)
                 self.qconfig_map[node.name] = get_qconfig(self.modules[parent])
             elif node.op == 'call_function':
@@ -577,7 +577,7 @@ class Quantizer:
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
                 env[node.name] = folded_graph.create_node(
-                    'get_attr', packed_weight_name, (), {})
+                    'get_param', packed_weight_name, (), {})
             elif prepack_node is not None:
                 # remove the foled node
                 continue
@@ -643,10 +643,11 @@ class Quantizer:
         # add custom module instances to the match result
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_custom_module_class(type(self.modules[node.target])) or \
-                is_observed_custom_module(self.modules[node.target])):
+               (is_custom_module_class(type(self.modules[node.target])) or
+                    is_observed_custom_module(self.modules[node.target])):
                 custom_module_qconfig = self.qconfig_map[node.name]
-                match_map[node.name] = (node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+                match_map[node.name] = (
+                    node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
         return match_map
 

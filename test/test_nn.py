@@ -2646,6 +2646,19 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
             m = torch.nn.utils.weight_norm(m)
 
+    def test_parameterlistdict_setting_attributes(self):
+        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterList is not supported"):
+            torch.nn.utils.weight_norm(mod, "0")
+
+        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterDict is not supported"):
+            torch.nn.utils.weight_norm(mod, "b")
+
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))

@@ -336,7 +336,7 @@ class TestFX(JitTestCase):
                 placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.create_node('get_attr', 'interpreter')
+            interpreter_node = graph.create_node('get_param', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -567,7 +567,7 @@ class TestFX(JitTestCase):
         g = Graph()
         a = g.placeholder('a')
         b = g.call_module('linear', (a,))
-        c = g.get_attr('bias')
+        c = g.get_param('bias')
         d = g.call_method('add', (b, c))
         e = g.call_function(torch.sin, (d,))
         g.output(e)
@@ -584,7 +584,7 @@ class TestFX(JitTestCase):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
         b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
+        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
 
