@@ -232,5 +232,95 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
+float calculate_quant_loss(
+    const float* input,
+    int numel,
+    float xmin,
+    float xmax,
+    float* q_input,
+    int bit_rate) {
+  xmin = static_cast<at::Half>(xmin);
+  float data_range = xmax - xmin;
+  float qmax = (1 << bit_rate) - 1;
+  float scale = data_range == 0
+      ? 1.0
+      : static_cast<float>(static_cast<at::Half>(data_range / qmax));
+  float inverse_scale = 1.0f / scale;
+
+  float norm = 0.0f;
+  constexpr int VLEN = 8;
+  int i = 0;
+
+// TODO add FBGEMM kernel
+//#ifdef USE_FBGEMM
+//#endif
+
+  // remainder loop
+  for (; i < numel; i++) {
+    q_input[i] = std::max(
+        0.0f, std::min<float>(nearbyint((input[i] - xmin) * inverse_scale), qmax));
+    q_input[i] = q_input[i] * scale + xmin;
+    norm += (input[i] - q_input[i]) * (input[i] - q_input[i]);
+  }
+  return std::sqrt(norm);
+}
+
+/*
+  Helper function to find the best min/max for a tensor to calculate qparams.
+  It uses a greedy approach to nudge the min and max and calculate the l2 norm
+  and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
+  Returns the range of the tensor, (xmax-xmin) and xmin value
+*/
+std::tuple<double, double> choose_qparams_optimized(
+    const at::Tensor& input_tensor,
+    int64_t numel,
+    const int64_t n_bins,
+    const double ratio,
+    double xmin,
+    double xmax,
+    int64_t bit_rate) {
+
+  float stepsize = (xmax - xmin) / n_bins;
+  int min_bins = n_bins * (1 - ratio);
+  std::cout << "Input tensor " << input_tensor << std::endl;
+  const float* input = input_tensor.contiguous().data_ptr<float>();
+  std::vector<float> q_input(numel);
+
+  float loss =
+      calculate_quant_loss(input, numel, xmin, xmax, q_input.data(), bit_rate);
+  float best_loss = loss;
+
+  float cur_min = xmin;
+  float cur_max = xmax;
+  float cur_loss = loss;
+
+  float thr = min_bins * stepsize;
+  while (cur_min + thr < cur_max) {
+    // move left
+    float loss1 = calculate_quant_loss(
+        input, numel, cur_min + stepsize, cur_max, q_input.data(), bit_rate);
+    // move right
+    float loss2 = calculate_quant_loss(
+        input, numel, cur_min, cur_max - stepsize, q_input.data(), bit_rate);
+    if (cur_loss < loss1 && cur_loss < loss2 && cur_loss < best_loss) {
+      // found a local optima
+      best_loss = cur_loss;
+      xmin = cur_min;
+      xmax = cur_max;
+    }
+    if (loss1 < loss2) {
+      cur_min = cur_min + stepsize;
+      cur_loss = loss1;
+    } else {
+      cur_max = cur_max - stepsize;
+      cur_loss = loss2;
+    }
+  }
+
+  // Calculate scale and bias
+  std::cout << "Found xmax xmin " << xmax << " " << xmin << std::endl;
+  float range = xmax - xmin;
+  return std::make_tuple(range, xmin);
+}
 } // namespace native
 } // namespace at

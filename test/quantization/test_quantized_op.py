@@ -119,7 +119,6 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
-
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -2759,7 +2758,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             workspace.FeedBlob("weights", weights)
             workspace.RunOperatorOnce(
                 core.CreateOperator(
-                    conversion_op, ["weights"], ["quantized_weights"]
+                    conversion_op, ["weights"], ["quantized_weights"], engine="GREEDY"
                 )
             )
             emb_q = workspace.FetchBlob("quantized_weights")
@@ -2779,6 +2778,8 @@ class TestQuantizedEmbeddingOps(TestCase):
         w_packed_c2, w_unpacked_c2 = get_c2_weights(weights)
 
         # Compare packed weights against C2.
+        print("PT weights ", w_packed)
+        print("C2", w_packed_c2)
         np.testing.assert_equal(w_packed.numpy(), w_packed_c2.numpy())
         # Compare unpacked weights against C2
         np.testing.assert_equal(w_unpacked.numpy(), w_unpacked_c2.numpy())
@@ -2793,9 +2794,11 @@ class TestQuantizedEmbeddingOps(TestCase):
         self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=8)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
-    @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
-    def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim):
+    #@given(num_embeddings=st.integers(10, 100),
+    #       embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
+    def test_embedding_bag_4bit_unpack(self):#, num_embeddings, embedding_dim):
+        num_embeddings = 4
+        embedding_dim = 8
         pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 

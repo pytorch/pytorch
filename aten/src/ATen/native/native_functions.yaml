@@ -4234,6 +4234,10 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: choose_qparams_optimized(Tensor input, int n, int n_bins, float ratio, float xmin, float xmax, int bit_rate) -> (float, float)
+  use_c10_dispatcher: full
+  variants: function
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
