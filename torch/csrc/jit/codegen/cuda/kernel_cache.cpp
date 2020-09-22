@@ -250,27 +250,26 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs,
     size_t unique_id) {
   FUSER_PERF_SCOPE("runFusionWithInputs");
+  LaunchParams launch_params;
   if (code_to_fe_lookup_.count(unique_id) == 0) {
     // enter when we get a new input set. We need to search for compatible
     // entries in cached `FusionExecutor` or compile new one as needed.
 
     // caching strategy is different for pw-fusion and reduction-fusion.
     if (has_reduction_) {
-      // SETUP AND CHECK HEURISTIC ON ORIG FUSION
-
-      // copy the fusion, since each FusionExecutor needs to manipulate the
-      // fusion in order to generate kernel.
+      // Grab the fusion to analyze for heuristics
       FusionGuard fg(fusion_.get());
 
       TensorView* reduction_tv = nullptr;
       // Use dependency check to find the reduction tv as it returns used values
       // instead of exprs.
 
-      // Heavy weight call
+      // The call is relatively heavy weight, consider caching
       auto used_vals = DependencyCheck::getAllValsBetween(
           {fusion_->inputs().begin(), fusion_->inputs().end()},
           fusion_->outputs());
 
+      // Find the reduction tensor view, make sure there's only one
       for (auto val : used_vals) {
         if (val->getValType().value() == ValType::TensorView) {
           auto tv = val->as<TensorView>();
@@ -287,19 +286,15 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
           reduction_tv != nullptr,
           "Could not find the reduction tensor view in the fusion.");
 
-      // Heavy weight call
-      auto outputsOfReduction =
-          DependencyCheck::getAllOutputsOf({reduction_tv});
-
-      auto tv_entries = ir_utils::filterByType<TensorView>(outputsOfReduction);
-
-      std::vector<TensorView*> tvOutputsOfReduction(
-          tv_entries.begin(), tv_entries.end());
-
+      // Generate the reduction parameters
       auto reduction_params =
           getReductionHeuristics(fusion_.get(), inputs, reduction_tv);
+
       TORCH_INTERNAL_ASSERT(
-          reduction_params, "get reduction heuristics failed");
+          reduction_params.has_value(),
+          "Error getting reduction heuristics for scheduling.");
+
+      launch_params = reduction_params.value().lparams;
 
       auto fusion_executor =
           &red_fusion_executor_cache_[reduction_params.value()];
@@ -356,7 +351,9 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
       }
       // record new short cut to `FusionExecutor`
       code_to_fe_lookup_[unique_id] = fusion_executor;
+
     } else {
+      // Handle pointwise operations
       if (!pw_fusion_executor_cache_) {
         pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
         CompileOptions options;
@@ -372,7 +369,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   }
 
   return code_to_fe_lookup_[unique_id]->runFusion(
-      inputs, LaunchParams(), unique_id);
+      inputs, launch_params, unique_id);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(
