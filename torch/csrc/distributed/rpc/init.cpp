@@ -36,7 +36,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
-    return nullptr;
+    throw python_error();
   }
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));

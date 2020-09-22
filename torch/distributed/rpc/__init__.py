@@ -4,8 +4,6 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 import threading
-from typing import Iterator, Tuple, Optional, List
-
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
@@ -13,7 +11,6 @@ _init_counter_lock = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
-
 
 if is_available() and not torch._C._rpc_init():
     raise RuntimeError("Failed to initialize torch.distributed.rpc")
@@ -50,7 +47,6 @@ if is_available():
 
     def init_rpc(
         name,
-        # Not sure how to annotate dynamic attribute of a type
         backend=BackendType.TENSORPIPE,  # type: ignore
         rank=-1,
         world_size=None,
@@ -140,7 +136,6 @@ if is_available():
 
 
     def _init_rpc_backend(
-        # Not sure how to annotate dynamic attribute of a type
         backend=backend_registry.BackendType.TENSORPIPE,  # type: ignore
         store=None,
         name=None,

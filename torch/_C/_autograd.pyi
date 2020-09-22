@@ -1,4 +1,4 @@
-from typing import List, Callable, Any
+from typing import List
 from enum import Enum
 
 # Defined in tools/autograd/init.cpp

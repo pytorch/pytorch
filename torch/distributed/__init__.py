@@ -1,6 +1,5 @@
 
 import torch
-import datetime
 
 def is_available():
     """

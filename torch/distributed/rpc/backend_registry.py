@@ -227,7 +227,7 @@ def _tensorpipe_check_device_maps(agent, device_maps):
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from. import TensorPipeRpcBackendOptions
+    from . import TensorPipeRpcBackendOptions
     from torch._C._distributed_rpc import TensorPipeAgent
 
     if not isinstance(store, dist.Store):

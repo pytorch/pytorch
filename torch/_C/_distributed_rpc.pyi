@@ -1,4 +1,4 @@
-from typing import Iterator, Tuple, Dict, Optional, List, Any, overload, Callable, Type, Generic, TypeVar
+from typing import Tuple, Dict, Optional, List, Any, overload
 from datetime import timedelta
 import torch
 from ._autograd import ProfilerConfig, ProfilerState
