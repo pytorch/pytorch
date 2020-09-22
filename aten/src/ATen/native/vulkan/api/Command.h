@@ -1,10 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Adapter.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/hash.h>
 
 namespace at {
 namespace native {
@@ -38,82 +35,22 @@ struct Command final {
   // Pool
   //
 
-  struct Pool final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      uint32_t queue_family_index;
-    };
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(const GPU& gpu);
-
-      typedef Pool::Descriptor Descriptor;
-      typedef VK_DELETER(CommandPool) Deleter;
-      typedef Handle<VkCommandPool, Deleter> Handle;
-
-      struct Hasher {
-        size_t operator()(const Descriptor& descriptor) const;
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    /*
-      Object
-    */
-
-    class Object final {
-     public:
-      Object(VkDevice device, VkCommandPool command_pool);
-
-      Buffer allocate();
-      void purge();
-
-     private:
-      VkDevice device_;
-      VkCommandPool command_pool_;
-    } primary /* [thread_count] */;
-
+  class Pool final {
+   public:
     explicit Pool(const GPU& gpu);
-  } pool;
+
+    Buffer buffer();
+    void purge();
+
+   private:
+    VkDevice device_;
+    Handle<VkCommandPool, VK_DELETER(CommandPool)> command_pool_;
+  } pool /* [thread_count] */;
 
   explicit Command(const GPU& gpu)
     : pool(gpu) {
   }
 };
-
-//
-// Impl
-//
-
-inline bool operator==(
-    const Command::Pool::Descriptor& _1,
-    const Command::Pool::Descriptor& _2) {
-  return _1.queue_family_index == _2.queue_family_index;
-}
-
-inline size_t Command::Pool::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(descriptor.queue_family_index);
-}
 
 } // namespace api
 } // namespace vulkan

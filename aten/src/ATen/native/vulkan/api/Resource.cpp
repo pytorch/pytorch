@@ -83,6 +83,13 @@ void release_image(const Resource::Image& image) {
       image.memory.allocation);
 }
 
+void release_fence(Resource::Fence& fence) {
+  if (fence) {
+    fence.wait();
+    vkDestroyFence(fence.device, fence.handle, nullptr);
+  }
+}
+
 } // namespace
 
 void* map(const Resource::Memory& memory) {
@@ -177,6 +184,24 @@ Resource::Image::Sampler::Factory::operator()(
   };
 }
 
+void Resource::Fence::wait(
+    const uint64_t timeout_nanoseconds) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      handle,
+      "Invalid Vulkan fence!");
+
+  VK_CHECK(vkWaitForFences(
+      device,
+      1u,
+      &handle,
+      VK_TRUE,
+      timeout_nanoseconds));
+}
+
 Resource::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     allocator_(
@@ -185,12 +210,15 @@ Resource::Pool::Pool(const GPU& gpu)
           gpu.adapter->handle,
           device_),
         vmaDestroyAllocator),
-    sampler_(gpu) {
-  buffers_.reserve(Configuration::kReserve);
-  images_.reserve(Configuration::kReserve);
+    image_{
+      .sampler = Image::Sampler{gpu},
+    } {
+  buffer_.pool.reserve(Configuration::kReserve);
+  image_.pool.reserve(Configuration::kReserve);
+  fence_.pool.reserve(Configuration::kReserve);
 }
 
-Resource::Buffer Resource::Pool::allocate(
+Resource::Buffer Resource::Pool::buffer(
     const Buffer::Descriptor& descriptor) {
   const VkBufferCreateInfo buffer_create_info{
     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -221,7 +249,7 @@ Resource::Buffer Resource::Pool::allocate(
   TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
   TORCH_CHECK(allocation, "Invalid VMA allocation!");
 
-  buffers_.emplace_back(
+  buffer_.pool.emplace_back(
       Buffer{
         Buffer::Object{
           buffer,
@@ -236,10 +264,10 @@ Resource::Buffer Resource::Pool::allocate(
       },
       &release_buffer);
 
-  return buffers_.back().get();
+  return buffer_.pool.back().get();
 }
 
-Resource::Image Resource::Pool::allocate(
+Resource::Image Resource::Pool::image(
     const Image::Descriptor& descriptor) {
   const VkImageCreateInfo image_create_info{
     VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -310,13 +338,13 @@ Resource::Image Resource::Pool::allocate(
       view,
       "Invalid Vulkan image view!");
 
-  images_.emplace_back(
+  image_.pool.emplace_back(
       Image{
         Image::Object{
           image,
           VK_IMAGE_LAYOUT_UNDEFINED,
           view,
-          sampler_.cache.retrieve(descriptor.sampler),
+          image_.sampler.cache.retrieve(descriptor.sampler),
         },
         Memory{
           allocator_.get(),
@@ -326,12 +354,69 @@ Resource::Image Resource::Pool::allocate(
       },
       &release_image);
 
-  return images_.back().get();
+  return image_.pool.back().get();
+}
+
+Resource::Fence Resource::Pool::fence() {
+  if (fence_.free.empty()) {
+    const VkFenceCreateInfo fence_create_info{
+      VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      nullptr,
+      0u,
+    };
+
+    VkFence fence{};
+    VK_CHECK(vkCreateFence(
+        device_,
+        &fence_create_info,
+        nullptr,
+        &fence));
+
+    TORCH_CHECK(
+        fence,
+        "Invalid Vulkan fence!");
+
+    fence_.pool.emplace_back(
+        Fence{
+          device_,
+          fence,
+        },
+        &release_fence);
+
+    fence_.free.push_back(fence);
+  }
+
+  const VkFence fence = fence_.free.back();
+  fence_.free.pop_back();
+  fence_.in_use.push_back(fence);
+
+  return Fence{
+    device_,
+    fence,
+  };
 }
 
 void Resource::Pool::purge() {
-  images_.clear();
-  buffers_.clear();
+  VK_CHECK(vkWaitForFences(
+      device_,
+      fence_.in_use.size(),
+      fence_.in_use.data(),
+      VK_TRUE,
+      UINT64_MAX));
+
+  VK_CHECK(vkResetFences(
+      device_,
+      fence_.in_use.size(),
+      fence_.in_use.data()));
+
+  fence_.free.insert(
+      fence_.free.end(),
+      std::make_move_iterator(fence_.in_use.begin()),
+      std::make_move_iterator(fence_.in_use.end()));
+
+  fence_.free.clear();
+  image_.pool.clear();
+  buffer_.pool.clear();
 }
 
 } // namespace api

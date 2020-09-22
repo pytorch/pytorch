@@ -188,6 +188,18 @@ struct Resource final {
   };
 
   //
+  // Fence
+  //
+
+  struct Fence {
+    VkDevice device;
+    VkFence handle;
+
+    operator bool() const;
+    void wait(uint64_t timeout_nanoseconds = UINT64_MAX);
+  };
+
+  //
   // Pool
   //
 
@@ -195,8 +207,9 @@ struct Resource final {
    public:
     explicit Pool(const GPU& gpu);
 
-    Buffer allocate(const Buffer::Descriptor& descriptor);
-    Image allocate(const Image::Descriptor& descriptor);
+    Buffer buffer(const Buffer::Descriptor& descriptor);
+    Image image(const Image::Descriptor& descriptor);
+    Fence fence();
     void purge();
 
    private:
@@ -206,9 +219,21 @@ struct Resource final {
 
     VkDevice device_;
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
-    std::vector<Handle<Buffer, void(*)(const Buffer&)>> buffers_;
-    std::vector<Handle<Image, void(*)(const Image&)>> images_;
-    Image::Sampler sampler_;
+
+    struct {
+      std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
+    } buffer_;
+
+    struct {
+      std::vector<Handle<Image, void(*)(const Image&)>> pool;
+      Image::Sampler sampler;
+    } image_;
+
+    struct {
+      std::vector<Handle<Fence, void(*)(Fence&)>> pool;
+      std::vector<VkFence> free;
+      std::vector<VkFence> in_use;
+    } fence_;
   } pool;
 
   explicit Resource(const GPU& gpu)
@@ -293,6 +318,11 @@ inline Resource::Image::Object::operator bool() const {
 
 inline Resource::Image::operator bool() const {
   return object;
+}
+
+inline Resource::Fence::operator bool() const {
+  return (VK_NULL_HANDLE != device) &&
+         (VK_NULL_HANDLE != handle);
 }
 
 } // namespace api

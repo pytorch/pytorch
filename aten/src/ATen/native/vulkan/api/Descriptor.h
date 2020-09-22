@@ -2,7 +2,6 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
 
 namespace at {
 namespace native {
@@ -72,103 +71,24 @@ struct Descriptor final {
   // Pool
   //
 
-  struct Pool final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      uint32_t capacity;
-      c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
-    };
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(const GPU& gpu);
-
-      typedef Pool::Descriptor Descriptor;
-      typedef VK_DELETER(DescriptorPool) Deleter;
-      typedef Handle<VkDescriptorPool, Deleter> Handle;
-
-      struct Hasher {
-        size_t operator()(const Descriptor& descriptor) const;
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    /*
-      Object
-    */
-
-    class Object final {
-     public:
-      Object(VkDevice device, VkDescriptorPool descriptor_pool);
-
-      Set allocate(VkDescriptorSetLayout descriptor_set_layout);
-      void purge();
-
-     private:
-      VkDevice device_;
-      VkDescriptorPool descriptor_pool_;
-    } primary /* [thread_count] */;
-
+  class Pool final {
+   public:
     explicit Pool(const GPU& gpu);
-  } pool;
+
+    Set allocate(VkDescriptorSetLayout descriptor_set_layout);
+    void purge();
+
+   private:
+    VkDevice device_;
+    Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
+  } pool /* [thread_count] */;
 
   explicit Descriptor(const GPU& gpu)
     : pool(gpu) {
   }
 };
 
-//
-// Impl
-//
-
-inline bool operator==(
-    const Descriptor::Pool::Descriptor& _1,
-    const Descriptor::Pool::Descriptor& _2) {
-  return (_1.capacity == _2.capacity) &&
-         (_1.sizes == _2.sizes);
-}
-
-inline size_t Descriptor::Pool::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  size_t hash = c10::get_hash(descriptor.capacity);
-
-  for (const VkDescriptorPoolSize& descriptor_pool_size : descriptor.sizes) {
-    hash = c10::hash_combine(
-        hash,
-        c10::get_hash(
-            descriptor_pool_size.type,
-            descriptor_pool_size.descriptorCount));
-  }
-
-  return hash;
-}
-
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
-inline bool operator==(
-    const VkDescriptorPoolSize& _1,
-    const VkDescriptorPoolSize& _2) {
-  return (_1.type == _2.type) &&
-         (_1.descriptorCount == _2.descriptorCount);
-}

@@ -17,6 +17,12 @@ namespace aten {
 using at::native::vulkan::detail::VulkanTensor;
 using VulkanTensorImpl = VulkanOpaqueTensorImpl<VulkanTensor>;
 
+namespace {
+int64_t normalize_dim(int64_t d, int64_t n) {
+  return (d % n + n) % n;
+}
+} // namespace
+
 Tensor new_with_vtensor_vulkan(
     VulkanTensor&& vt,
     const TensorOptions& options) {
@@ -255,8 +261,9 @@ Tensor reshape(at::Tensor const& input, IntArrayRef shape) {
 }
 
 Tensor cat(const TensorList tensors, int64_t dim) {
+  const auto norm_dim = normalize_dim(dim, 4);
   TORCH_INTERNAL_ASSERT(
-      dim == 0 || dim == 1,
+      norm_dim == 0 || norm_dim == 1,
       "Vulkan cat is implemented only for batch and channels dimensions");
   at::Tensor tensor = tensors[0];
   int64_t cat_dim_size = 0;
@@ -513,8 +520,16 @@ Tensor mean(
     const bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
-  TORCH_INTERNAL_ASSERT(
-      self.dim() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3);
+
+  // Mean is implemented only for HW dimensions of 4-d tensor
+  TORCH_INTERNAL_ASSERT(self.dim() == 4);
+  static const std::unordered_set<int64_t> expected_dims_set({2, 3});
+  std::unordered_set<int64_t> dims_set;
+  for (const auto& d : dim) {
+    dims_set.insert(normalize_dim(d, 4));
+  }
+  TORCH_INTERNAL_ASSERT(expected_dims_set == dims_set);
+
   const auto& x = vtensor_from_vulkan(self);
   const auto sizes = self.sizes();
   VulkanTensor output{std::vector<int64_t>{sizes[0], sizes[1]}};
@@ -525,14 +540,13 @@ Tensor mean(
 #ifndef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("slice.Tensor", TORCH_FN(slice));
-  m.impl("reshape", TORCH_FN(reshape));
-  m.impl("select.int", TORCH_FN(select));
-  m.impl("transpose.int", TORCH_FN(transpose));
-  m.impl("_cat", TORCH_FN(cat));
-  m.impl_UNBOXED("transpose_", transpose_);
-  m.impl("view", TORCH_FN(view));
-  m.impl("unsqueeze", TORCH_FN(unsqueeze));
+  m.impl("slice.Tensor", TORCH_FN(at::native::vulkan::aten::slice));
+  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
+  m.impl("select.int", TORCH_FN(at::native::vulkan::aten::select));
+  m.impl("transpose.int", TORCH_FN(at::native::vulkan::aten::transpose));
+  m.impl_UNBOXED("transpose_", at::native::vulkan::aten::transpose_);
+  m.impl("view", TORCH_FN(at::native::vulkan::aten::view));
+  m.impl("unsqueeze", TORCH_FN(at::native::vulkan::aten::unsqueeze));
   m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
@@ -546,12 +560,11 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       "_adaptive_avg_pool2d",
       TORCH_FN(at::native::vulkan::aten::adaptive_avg_pool2d));
-  m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
+  m.impl("avg_pool2d", TORCH_FN(at::native::vulkan::aten::avg_pool2d));
   m.impl("max_pool2d", TORCH_FN(at::native::vulkan::aten::max_pool2d));
-  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
+  m.impl("mul.Scalar", TORCH_FN(at::native::vulkan::aten::mul_scalar));
+  m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
   m.impl_UNBOXED(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
