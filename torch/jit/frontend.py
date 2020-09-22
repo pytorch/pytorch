@@ -326,7 +326,7 @@ def get_default_args_for_class(cls):
 
     # Get method defaults. Property defaults do not need to be considered
     # because setters cannot be invoked without a value.
-    defaults = {method[0]: get_default_args(method[1]) for method in methods}
+    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
 
     return defaults
 
