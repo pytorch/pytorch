@@ -305,8 +305,7 @@ std::string repro_from_args(const ConvolutionArgs& args) {
 
   std::ostringstream ss;
   ss << "You can try to repro this exception using the following code snippet. ";
-  ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n";
-  ss << "```python\n";
+  ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n\n";
   ss << "import torch\n";
   ss << "torch.backends.cuda.matmul.allow_tf32 = " << pybool(at::globalContext().allowTF32CuBLAS()) << "\n";
   ss << "torch.backends.cudnn.benchmark = " << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
@@ -323,8 +322,7 @@ std::string repro_from_args(const ConvolutionArgs& args) {
   ss << "net = net.cuda()." << partial_dtype << "()\n";
   ss << "out = net(data)\n";
   ss << "out.backward(torch.randn_like(out))\n";
-  ss << "torch.cuda.synchronize()\n";
-  ss << "```\n";
+  ss << "torch.cuda.synchronize()\n\n";
   
   return ss.str();
 }
