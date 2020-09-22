@@ -339,8 +339,8 @@ RegisterOperators reg(
              push(stack, b);
            } else {
              std::stringstream error_str;
-             error_str << "could not convert string "
-                       << "to float: '" << s->string() << "'";
+             error_str << "invalid literal for int() "
+                       << "with base 10: '" << s->string() << "'";
              throw std::runtime_error(error_str.str());
            }
          },
