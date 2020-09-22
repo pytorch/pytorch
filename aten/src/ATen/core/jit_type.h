@@ -265,7 +265,8 @@ struct SingleElementType : public Type {
  protected:
   SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
     if (!this->elem) {
-      throw std::runtime_error("Can not create Generic with None type");
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
     }
   }
 
