@@ -211,9 +211,38 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
+Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
+  if (self.is_complex()) {
+    auto abs = at::abs(self);
+    // C -> C
+    // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
+    return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
+  } else {
+    return at::zeros_like(grad, at::MemoryFormat::Preserve);
+  }
+}
+
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto result = grad * other.conj();
   if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  auto result = grad / other.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  auto result = -grad * ((self / other) / other).conj();
+  if (!other.is_complex() && result.is_complex()) {
     // R -> C
     result = at::real(result);
   }
