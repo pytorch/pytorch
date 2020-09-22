@@ -830,6 +830,25 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
+
+    hipified_sources = set()
+    if IS_HIP_EXTENSION:
+        build_dir = os.getcwd()
+        hipify_result = hipify_python.hipify(
+            project_directory=build_dir,
+            output_directory=build_dir,
+            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
+            extra_files=[os.path.abspath(s) for s in sources],
+            show_detailed=True,
+            is_pytorch_extension=True,
+        )
+
+        for source in sources:
+            s_rel = os.path.relpath(source, build_dir)
+            hipified_sources.add(hipify_result[s_rel]["hipified_path"] if s_rel in hipify_result else source)
+
+        sources = list(hipified_sources)
+
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
