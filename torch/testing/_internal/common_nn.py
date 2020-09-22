@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import expectedAlertNondetermini
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
     gradcheck, gradgradcheck
 from torch.autograd import Variable
+from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -3946,7 +3947,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3956,7 +3957,7 @@ criterion_tests = [
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3967,7 +3968,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3978,7 +3979,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3989,7 +3990,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='KLDivLoss',
@@ -4022,8 +4023,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
-        check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -4034,8 +4034,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
-        check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -4078,7 +4077,7 @@ criterion_tests = [
         desc="1d",
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -4088,7 +4087,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
@@ -4237,7 +4236,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4247,7 +4246,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d_alert_nondeterministic',
-        # check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=(not TEST_WITH_ROCM),
         test_cpu=False,
         decorator=expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', fn_has_device_arg=False)
     ),
@@ -4260,7 +4259,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4271,7 +4270,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4281,7 +4280,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='higher_dim',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4291,7 +4290,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
@@ -4363,7 +4362,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
         desc='scalar',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MSELoss',
@@ -4373,7 +4372,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_forward_only=True,
         desc='prec',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -4384,8 +4383,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
-        check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -4560,7 +4558,7 @@ class NNTestCase(TestCase):
             for i in input:
                 self._zero_grad_input(i)
 
-    def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
+    def _analytical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
         output_size = output.nelement()
 
@@ -4602,7 +4600,7 @@ class NNTestCase(TestCase):
 
         return res
 
-    def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
+    def _numerical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
         def fw(input):
             return self._forward(module, input).detach()
 
@@ -4614,7 +4612,7 @@ class NNTestCase(TestCase):
             res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
         return res
 
-    def check_jacobian(self, module, input, jacobian_input=True):
+    def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
@@ -4628,36 +4626,6 @@ class NNTestCase(TestCase):
                 max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
                 PRECISION
             )
-
-    def check_criterion_jacobian(self, criterion, input, target, extra_args):
-        eps = 1e-6
-        self._forward_criterion(criterion, input, target, extra_args=extra_args)
-        analytical_d_x = self._backward_criterion(criterion, input, target, extra_args=extra_args)
-        numerical_d_x = deepcopy(analytical_d_x)
-
-        input_t = iter_tensors(input)
-        numerical_t = iter_tensors(numerical_d_x)
-        for x, d_x in zip(input_t, numerical_t):
-            x = x.view(-1).data
-            d_x = d_x.view(-1).data
-            for i in range(x.nelement()):
-                original = x[i].item()
-                x[i] = original + eps
-                fx1 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                x[i] = original - eps
-                fx2 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
-                deriv = (fx1 - fx2) / (2. * eps)
-                d_x[i] = float(deriv)
-                x[i] = original
-
-        # TODO: check structure
-        analytical_t = list(iter_tensors(analytical_d_x))
-        numerical_t = list(iter_tensors(numerical_d_x))
-
-        self.assertLessEqual(
-            max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
 
 
 class TestBase(object):
@@ -4834,91 +4802,82 @@ class ModuleTest(TestBase):
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
-            cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
-            gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
-            cpu_param = test_case._get_parameters(cpu_module)
-            gpu_param = test_case._get_parameters(gpu_module)
-            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
-                gpu_p.data.copy_(cpu_p)
+        cpu_input = self._get_input()
+        type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
+        cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
+        gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
-            test_case._zero_grad_input(cpu_input_tuple)
-            test_case._zero_grad_input(gpu_input_tuple)
-            test_case._zero_grad_parameters(cpu_module)
-            test_case._zero_grad_parameters(gpu_module)
-            cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
-            gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        cpu_module = self.constructor(*self.constructor_args)
+        gpu_module = self.constructor(*self.constructor_args).float().cuda()
+        cpu_param = test_case._get_parameters(cpu_module)
+        gpu_param = test_case._get_parameters(gpu_module)
+        for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
+            gpu_p.data.copy_(cpu_p)
+
+        test_case._zero_grad_input(cpu_input_tuple)
+        test_case._zero_grad_input(gpu_input_tuple)
+        test_case._zero_grad_parameters(cpu_module)
+        test_case._zero_grad_parameters(gpu_module)
+        cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
+        gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+
+        # Run backwards on CPU and GPU and compare results
+        for _ in range(5):
+            cpu_gradOutput = cpu_output.clone().normal_()
+            gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+            cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
+            gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
-            # Run backwards on CPU and GPU and compare results
-            for _ in range(5):
-                cpu_gradOutput = cpu_output.clone().normal_()
-                gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
-                cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
-                gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
+        # Run double-backwards on CPU and GPU and compare results
+        if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
+            cpu_output = cpu_module(*cpu_input_tuple)
+            gpu_output = gpu_module(*gpu_input_tuple)
+
+            cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
+            gpu_gradOutput.requires_grad = True
+
+            cpu_gradInputs = torch.autograd.grad(
+                cpu_output,
+                cpu_input_tuple + tuple(cpu_module.parameters()),
+                cpu_gradOutput,
+                create_graph=True)
+            gpu_gradInputs = torch.autograd.grad(
+                gpu_output,
+                gpu_input_tuple + tuple(gpu_module.parameters()),
+                gpu_gradOutput,
+                create_graph=True)
+
+            for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                    test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
 
-            # Run double-backwards on CPU and GPU and compare results
-            if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
-                cpu_output = cpu_module(*cpu_input_tuple)
-                gpu_output = gpu_module(*gpu_input_tuple)
-
-                cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
-                gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
-                gpu_gradOutput.requires_grad = True
-
-                cpu_gradInputs = torch.autograd.grad(
-                    cpu_output,
-                    cpu_input_tuple + tuple(cpu_module.parameters()),
-                    cpu_gradOutput,
-                    create_graph=True)
-                gpu_gradInputs = torch.autograd.grad(
-                    gpu_output,
-                    gpu_input_tuple + tuple(gpu_module.parameters()),
-                    gpu_gradOutput,
-                    create_graph=True)
-
-                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0)
-
-                # We mix output into the second backwards computation so that
-                # torch.autograd.grad doesn't complain that some inputs
-                # are unreachable (which can happen if you differentiate
-                # only on the gradient.
-                cpu_gg = torch.autograd.grad(
-                    cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
-                    cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
-                    retain_graph=True)
-                gpu_gg = torch.autograd.grad(
-                    gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
-                    gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
-                    retain_graph=True)
+            # We mix output into the second backwards computation so that
+            # torch.autograd.grad doesn't complain that some inputs
+            # are unreachable (which can happen if you differentiate
+            # only on the gradient.
+            cpu_gg = torch.autograd.grad(
+                cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
+                cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
+                retain_graph=True)
+            gpu_gg = torch.autograd.grad(
+                gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
+                gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
+                retain_graph=True)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
+            for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
-                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
+                test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
-            self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
-        except NotImplementedError:
-            pass
-        # TODO: remove this after CUDA scatter_ is implemented
-        except AttributeError as e:
-            if len(e.args) == 1 and "'FloatTensor' object has no attribute 'scatter_'" in e.args[0]:
-                pass
-            else:
-                raise
-
+        self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 class InputVariableMixin(object):
     def _get_input(self):
@@ -4952,33 +4911,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         input_tuple = input if isinstance(input, tuple) else (input,)
         test_case.check_jacobian(module, input_tuple, self.jacobian_input)
         if self.check_gradgrad:
-            # this function creates a lambda function based on the number of tensors in the input
-            # eg. if input is (tensor1, tensor2), the generated lambda function will be:
-            #     lambda _0, _1, *args, **kw: test_case._forward(module, (_0, _1, ))
-            def get_lambda_func(inputs, test_case, module):
-                # we assume the inputs is always not empty
-                len_inputs = len(inputs)
-                if len_inputs == 1:
-                    return lambda _0, *args, **kw: test_case._forward(module, (_0, ))
-                if len_inputs == 2:
-                    return lambda _0, _1, *args, **kw: test_case._forward(module, (_0, _1, ))
-                # generate lambda function for case that length of input > 2
-                helper_str = "def _get_lambda_func(test_case, module):"
-                fn_str = "return lambda "
-                in_str = ""
-                for i in range(0, len(inputs)):
-                    in_str = in_str + "_" + str(i) + ", "
-                fn_str = fn_str + in_str + "*args, **kw: test_case._forward(module, (" + in_str + "))"
-                helper_str = helper_str + fn_str
-                # we have to do exec to define a function in order to pass test_case and module in
-                tmp_locals = {}
-                exec(helper_str, {}, tmp_locals)
-                return tmp_locals['_get_lambda_func'](test_case, module)
-
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
+            num_inputs = len(input_tuple)
             _assertGradAndGradgradChecks(
-                test_case, get_lambda_func(input_tuple, test_case, module), input_tuple + params)
+                test_case, lambda *args, **kw: test_case._forward(module, args[:num_inputs]), input_tuple + params)
 
         # check if module can be printed
         module.__repr__()
@@ -4987,28 +4924,29 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             # check if the inplace variant of the module gives the same result
             # as the out-of-place
 
+            # check_inplace doesn't support multiple input tensors, since we don't know
+            # which of the multiple tensor arguments is actually being operated in-place
+            assert len(input_tuple) == 1
+            input = input_tuple[0]
+
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
-            input_versions = tuple(t._version for t in input_tuple)
+            input_version = input._version
             with freeze_rng_state():
-                output = module(*input_tuple)
-            new_input_versions = tuple(t._version for t in input_tuple)
-            test_case.assertEqual(input_versions, new_input_versions)
+                output = module(input)
+            test_case.assertEqual(input._version, input_version)
 
-            input_ip = deepcopy(input_tuple)
-            input_ip_clone = tuple(t.clone() for t in input_ip)
+            input_ip = deepcopy(input)
+            input_ip_clone = input_ip.clone()
             with freeze_rng_state():
-                output_ip = module_ip(*input_ip_clone)
-            input_ip_clone_versions = tuple(t._version for t in input_ip_clone)
-            test_case.assertNotEqual(input_ip_clone_versions, input_versions)
+                output_ip = module_ip(input_ip_clone)
+            test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
-            for t in input_tuple:
-                t.grad.data.zero_()
+            input.grad.data.zero_()
             output.backward(grad)
             output_ip.backward(grad)
-            for t1, t2 in zip(input_tuple, input_ip):
-                test_case.assertEqual(t1.grad, t2.grad)
+            test_case.assertEqual(input.grad, input_ip.grad)
 
         if any(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_CUDA:
             # check that cuda() moves module parameters to correct GPU device,
@@ -5153,8 +5091,6 @@ class CriterionTest(InputVariableMixin, TestBase):
 
         if self.check_forward_only:
             return
-
-        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
 
         params = tuple(x for x in module.parameters())
         if not isinstance(input, tuple):

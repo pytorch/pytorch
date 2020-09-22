@@ -436,6 +436,7 @@ void CudaPrinter::visit(const Store* v) {
     os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   }
   os() << *v->value() << ";";
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
@@ -505,6 +506,9 @@ class PrioritizeLoad : public IRMutator {
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
     }
+    if (nested_let_) {
+      return IRMutator::mutate(v);
+    }
     if (thread_local_bufs_.count(v->base_handle()) > 0) {
       return IRMutator::mutate(v);
     }
@@ -563,6 +567,13 @@ class PrioritizeLoad : public IRMutator {
     nested_store_ = v;
     Stmt* s = IRMutator::mutate(v);
     nested_store_ = last;
+    return s;
+  }
+
+  Stmt* mutate(const Let* v) override {
+    nested_let_ = true;
+    Stmt* s = IRMutator::mutate(v);
+    nested_let_ = false;
     return s;
   }
 
@@ -631,8 +642,9 @@ class PrioritizeLoad : public IRMutator {
   //   v = false_v;
   // }
   // int v2 = v + 2;
-  int nested_if_then_else_ = 0;
+  int nested_if_then_else_{0};
   const Store* nested_store_{nullptr};
+  bool nested_let_{false};
   std::unordered_set<const Var*> thread_local_bufs_;
 };
 
@@ -703,13 +715,6 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
           IRSimplifier::simplify(new Max(old_reach, v->stop(), true));
     }
 
-    // If a thread dimension has changed, insert a syncThreads in the enclosing
-    // Block.
-    if (last_thread_dim_ && !exprEquals(last_thread_dim_, v->stop())) {
-      need_sync_ = true;
-    }
-    last_thread_dim_ = v->stop();
-
     const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   }
@@ -750,16 +755,6 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
       stmt_new = Stmt::clone(stmt_new);
     }
 
-    if (need_sync_) {
-      // sync is special, we never want to mask it and it is never part of
-      // another segment.
-      pushAndReset(false);
-      current.stmts().push_back(new SyncThreads());
-      pushAndReset(true);
-
-      need_sync_ = false;
-    }
-
     // Likewise, Allocate and Free should never be masked.
     if (dynamic_cast<Allocate*>(stmt) || dynamic_cast<Free*>(stmt)) {
       pushAndReset(false);
@@ -796,8 +791,8 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
   }
 
   std::vector<Stmt*> stmts;
-  int rsqi = 0;
   for (auto& segment : innerSegments) {
+    bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
       TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
@@ -812,6 +807,7 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
     auto& thread_extents = cuda_analysis_->gpu_thread_extents();
     for (size_t i = 0; i < gpu_thread_vars_.size(); ++i) {
       if (!exprEquals(current_thread_reach_[i], thread_extents[i])) {
+        need_sync = true;
         // Mask it against the current dimensions.
         inner = new Cond(
             new CompareSelect(
@@ -836,7 +832,13 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
       }
     }
 
+    if (need_sync) {
+      stmts.push_back(new SyncThreads());
+    }
     stmts.push_back(inner);
+    if (need_sync) {
+      stmts.push_back(new SyncThreads());
+    }
   }
 
   return new Block(stmts);
