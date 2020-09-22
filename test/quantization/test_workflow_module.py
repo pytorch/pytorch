@@ -448,6 +448,30 @@ class TestObserver(QuantizationTestCase):
                 model_device = next(iter(model_devices))
                 self.assertEqual(model_device, device_target)
 
+    def test_histogram_observer_consistent_buffer_shape(self):
+        """
+        Ensures that the buffer shapes do not change from uninitialized to
+        initialized states for HistogramObserver.
+        """
+        obs = HistogramObserver()
+        min_shape_before = obs.min_val.shape
+        max_shape_before = obs.max_val.shape
+        for _ in range(2):
+            obs(torch.randn(4, 4, 4, 4))
+        self.assertEqual(min_shape_before, obs.min_val.shape)
+        self.assertEqual(max_shape_before, obs.max_val.shape)
+
+    def test_histogram_observer_save_load_state_dict(self):
+        """
+        Smoke test on saving/loading state_dict
+        """
+        obs1 = HistogramObserver()
+        obs1(torch.randn(4, 4, 4, 4))
+        obs2 = HistogramObserver()
+        obs2.load_state_dict(obs1.state_dict())
+        self.assertEqual(obs2.min_val.shape, torch.Size([]))
+        self.assertEqual(obs2.max_val.shape, torch.Size([]))
+
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
