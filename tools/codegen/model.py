@@ -197,6 +197,8 @@ class NativeFunction:
                 "otherwise you will tickle a Python argument binding bug " \
                 "(which usually manifests itself as the result variable being undefined.)"
 
+SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
+
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
 # and most of the code generation we do is type directed (e.g., look at
@@ -345,6 +347,73 @@ class FunctionSchema:
         #     is difficult to actually check for and historically
         #     we only do this check in tools/
         return bool(self.out_arguments)
+
+    def kind(self) -> SchemaKind:
+        """
+        What kind of schema is this?  A functional schema is one
+        that returns a newly allocated output; an inplace schema
+        modifies the self argument inplace; an out schema writes
+        the result into an explicitly provided out argument.
+        """
+        is_inplace = self.name.name.inplace
+        is_out = bool(self.out_arguments)
+        assert not (is_inplace and is_out)
+        if is_inplace:
+            return SchemaKind.inplace
+        elif is_out:
+            return SchemaKind.out
+        else:
+            return SchemaKind.functional
+
+    # WARNING: This method is not currently tested in any meaningful way
+    def signature(self) -> 'FunctionSchema':
+        """
+        Certain schemas are 'related', in that they are simply
+        inplace/out/functional versions of the same function.  This method
+        factors these schemas into the "core" functional signature which
+        is equal across all versions.
+
+        Here is what normalization happens to the schema to convert
+        it to a signature:
+        - The overload name is stripped (name is retained, since
+          it expresses semantic content about what the function does)
+        - Inplace is set False
+        - Out arguments are stripped
+        - Mutability annotations are stripped  (this is sound
+          because you cannot overload on mutability annotation)
+
+        This function is based off of get_signature in
+        tools.autograd.load_derivatives
+        """
+        # dataclasses.replace could be used here, but it is less
+        # type safe so for now I've opted to type everything out
+        def strip_arg_annotation(a: Argument) -> Argument:
+            return Argument(
+                name=a.name,
+                type=a.type,
+                default=a.default,  # hmmm
+                annotation=None,
+            )
+        def strip_ret_annotation(r: Return) -> Return:
+            return Return(
+                name=r.name,
+                type=r.type,
+                annotation=None,
+            )
+        return FunctionSchema(
+            name=OperatorName(
+                name=BaseOperatorName(
+                    base=self.name.name.base,
+                    inplace=False,
+                    dunder_method=self.name.name.dunder_method,
+                ),
+                overload_name="",  # stripped
+            ),
+            arguments=tuple(map(strip_arg_annotation, self.arguments)),
+            kwarg_only_arguments=tuple(map(strip_arg_annotation, self.kwarg_only_arguments)),
+            out_arguments=(),  # stripped
+            returns=tuple(map(strip_ret_annotation, self.returns)),
+        )
 
     def __str__(self) -> str:
         all_arguments: List[str] = []
