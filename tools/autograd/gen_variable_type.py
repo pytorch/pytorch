@@ -517,16 +517,19 @@ def format_trace_inputs(declaration):
 
     if declaration['use_c10_dispatcher'] == 'full':
         trace_inputs = declaration['schema_order_arguments']
-        trace_input_spec = [(i['name'], i['name'], i['type'], i.get('is_nullable')) for i in trace_inputs]
     else:
         trace_inputs = declaration['arguments']
-        trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
 
     if is_out_overload(declaration):
         # *_out functions take the result as a first argument, but they are the
         # last argument in the JIT schema.
         out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
+
+    if declaration['use_c10_dispatcher'] == 'full':
+        trace_input_spec = [(i['name'], i['name'], i['type'], i.get('is_nullable')) for i in trace_inputs]
+    else:
+        trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
 
     trace_inputs = \
         '\n'.join(dispatch_trace_input(arg_spec) for arg_spec in trace_input_spec)
