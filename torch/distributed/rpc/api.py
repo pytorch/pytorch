@@ -228,6 +228,7 @@ def _wait_all_workers():
             f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
         )
 
+
 @_require_initialized
 def shutdown(graceful=True):
     r"""
