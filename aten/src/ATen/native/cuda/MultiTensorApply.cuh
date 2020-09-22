@@ -63,7 +63,7 @@ void multi_tensor_apply(
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-
+        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         TensorListScalarListMetadata<depth> tensorListMeta;
 
@@ -71,7 +71,7 @@ void multi_tensor_apply(
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
 
-            tensorListMeta.scalar_vals[t] = scalars[t];
+            tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t];
 
             tensorListMeta.sizes[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
@@ -122,7 +122,7 @@ void multi_tensor_apply(
     T callable,
     ArgTypes... args) {
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
-
+        const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
         TensorListMetadata<depth> tensorListMeta;
 
