@@ -264,3 +264,13 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# ROCm/HIP files
+*.hip
+*/hip/
+*/*/hip/
+*/*/*/hip/
+*/*/*/*/hip/
+*/*/*/*/*/hip/
+aten/src/THH/
+aten/src/THHUNN/
