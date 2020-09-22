@@ -84,6 +84,8 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("empty_strided", torch::CppFunction::makeFallthrough());
   m.impl("stride.int", torch::CppFunction::makeFallthrough());
   m.impl("stride.Dimname", torch::CppFunction::makeFallthrough());
+  m.impl("size.int", torch::CppFunction::makeFallthrough());
+  m.impl("size.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("is_complex", torch::CppFunction::makeFallthrough());
   m.impl("view_as_real_physical", torch::CppFunction::makeFallthrough());
   m.impl("view_as_real", torch::CppFunction::makeFallthrough());
