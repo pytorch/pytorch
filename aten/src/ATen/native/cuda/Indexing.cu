@@ -203,12 +203,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-      // NOTE: when floor division was corrected to no longer perform
-      //   C-style division for integers this use of it no longer worked
-      //   as intended and test_indexing.py failed. Instead of
-      //   trying to update this algorithm the current behavior was
-      //   preserved by changing this call to _c_style_div_.
-      linearIndex._c_style_div_(sliceSize);
+      linearIndex.floor_divide_(sliceSize);
       {
       sorted_indices.copy_(linearIndex);
       auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
