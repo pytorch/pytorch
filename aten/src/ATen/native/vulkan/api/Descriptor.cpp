@@ -6,44 +6,72 @@ namespace vulkan {
 namespace api {
 namespace {
 
-const Descriptor::Pool::Descriptor kPrimary{
-  1024u,
-  {
-    // Note: It is OK for the sum of descriptors per type, below, to exceed
-    // the max total figure above, but be concenious of memory consumption.
-    // Considering how the descriptor pool must be frequently purged anyway
-    // as a result of the impracticality of having enormous pools that
-    // persist through the execution of the program, there is diminishing
-    // return in increasing max counts.
+VkDescriptorPool create_descriptor_pool(
+    const VkDevice device) {
+  const struct {
+    uint32_t capacity;
+    c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
+  } descriptor {
+    1024u,
     {
-      /*
-        Buffers
-      */
+      // Note: It is OK for the sum of descriptors per type, below, to exceed
+      // the max total figure above, but be concenious of memory consumption.
+      // Considering how the descriptor pool must be frequently purged anyway
+      // as a result of the impracticality of having enormous pools that
+      // persist through the execution of the program, there is diminishing
+      // return in increasing max counts.
+      {
+        /*
+          Buffers
+        */
 
-      {
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        256u,
-      },
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        256u,
-      },
+        {
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          256u,
+        },
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          256u,
+        },
 
-      /*
-        Images
-      */
+        /*
+          Images
+        */
 
-      {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        256u,
-      },
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        256u,
+        {
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          256u,
+        },
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          256u,
+        },
       },
     },
-  },
-};
+  };
+
+  const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
+    VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+    nullptr,
+    0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT */
+    descriptor.capacity,
+    static_cast<uint32_t>(descriptor.sizes.size()),
+    descriptor.sizes.data(),
+  };
+
+  VkDescriptorPool descriptor_pool{};
+  VK_CHECK(vkCreateDescriptorPool(
+      device,
+      &descriptor_pool_create_info,
+      nullptr,
+      &descriptor_pool));
+
+  TORCH_CHECK(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
+
+  return descriptor_pool;
+}
 
 VkDescriptorSet allocate_descriptor_set(
     const VkDevice device,
@@ -99,46 +127,11 @@ Descriptor::Set::Set(
       "Invalid Vulkan descriptor set!");
 }
 
-Descriptor::Pool::Factory::Factory(const GPU& gpu)
-  : device_(gpu.device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-}
-
-typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
-    const Descriptor& descriptor) const {
-  const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-    nullptr,
-    0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT */
-    descriptor.capacity,
-    static_cast<uint32_t>(descriptor.sizes.size()),
-    descriptor.sizes.data(),
-  };
-
-  VkDescriptorPool descriptor_pool{};
-  VK_CHECK(vkCreateDescriptorPool(
-      device_,
-      &descriptor_pool_create_info,
-      nullptr,
-      &descriptor_pool));
-
-  TORCH_CHECK(
-      descriptor_pool,
-      "Invalid Vulkan descriptor pool!");
-
-  return Handle{
-    descriptor_pool,
-    Deleter(device_),
-  };
-}
-
-Descriptor::Pool::Object::Object(
-    const VkDevice device,
-    const VkDescriptorPool descriptor_pool)
-  : device_(device),
-    descriptor_pool_(descriptor_pool) {
+Descriptor::Pool::Pool(const GPU& gpu)
+  : device_(gpu.device),
+    descriptor_pool_(
+        create_descriptor_pool(gpu.device),
+        VK_DELETER(DescriptorPool)(device_)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -148,7 +141,7 @@ Descriptor::Pool::Object::Object(
       "Invalid Vulkan descriptor pool!");
 }
 
-Descriptor::Set Descriptor::Pool::Object::allocate(
+Descriptor::Set Descriptor::Pool::allocate(
     const VkDescriptorSetLayout descriptor_set_layout)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -157,17 +150,12 @@ Descriptor::Set Descriptor::Pool::Object::allocate(
 
   return Set(
       device_,
-      descriptor_pool_,
+      descriptor_pool_.get(),
       descriptor_set_layout);
 }
 
-void Descriptor::Pool::Object::purge() {
-  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_, 0u));
-}
-
-Descriptor::Pool::Pool(const GPU& gpu)
-  : cache(Factory(gpu)),
-    primary(gpu.device, cache.retrieve(kPrimary)) {
+void Descriptor::Pool::purge() {
+  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));
 }
 
 } // namespace api
