@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
+#include <ATen/core/ivalue.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -776,7 +777,6 @@ RegisterOperators reg2({
         "aten::sorted.str(str[](a) input) -> (str[])",
         listCopyAndSort<std::string>,
         aliasAnalysisFromSchema()),
-
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
@@ -1137,65 +1137,105 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 });
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
-  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+bool isSortableTupleType(
+    const TupleTypePtr& tuple_type,
+    std::stringstream& why_not) {
+  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
+    switch (ele_type->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::BoolType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+      case TypeKind::TensorType:
+        continue;
+      case TypeKind::TupleType:
+        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
+          return false;
+        }
+        continue;
+      case TypeKind::ClassType:
+        if (!c10::checkObjectSortSchema(
+                ele_type->expect<ClassType>(), why_not)) {
+          return false;
+        }
+        continue;
+      default:
+        why_not << "Contained elements in " << *tuple_type
+                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
+                << "a User Defined Class with __lt__ method defined or Tuples "
+                << "of aforementionted types can be sorted.";
+        return false;
+    }
+  }
+
+  return true;
 }
 
-Function* checkSortSchema(const c10::TypePtr& list_element_type) {
-  std::stringstream error_str;
-  if (auto class_type = list_element_type->cast<ClassType>()) {
-    if (auto method = class_type->findMethod("__lt__")) {
-      const auto& lt_schema = method->getSchema();
-      const auto& schema_args = lt_schema.arguments();
-      bool error =
-          (schema_args.size() != 2 ||
-           !simpleClassTypeArg(schema_args[0], class_type) ||
-           !simpleClassTypeArg(schema_args[1], class_type) ||
-           lt_schema.returns().size() != 1 ||
-           lt_schema.returns()[0].type() != BoolType::get());
-      if (!error) {
-        return method;
-      }
-    }
-    error_str << "To sort a list of " << class_type->repr_str()
-              << " it must define a "
-              << "__lt__ method with two inputs of type "
-              << class_type->repr_str() << " that "
-              << "returns a bool";
-  } else {
-    error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools, strs or "
-              << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->repr_str() << "\n";
+bool isSortableListOfObjectsOrTuples(
+    c10::List<IValue>& ivalues,
+    std::stringstream& why_not) {
+  if (ivalues.empty()) {
+    return true;
   }
-  throw std::runtime_error(error_str.str());
+
+  auto type = ivalues.get(0).type();
+  // We assume lists have homogenous types, use first element to determine
+  // best sorting methods. If in the future we need to support heterogenous
+  // types inside list, then sorting needs to have runtime sortable checks.
+  const size_t n = ivalues.size();
+  for (size_t i = 0; i < n; ++i) {
+    const IValue& v = ivalues.get(i);
+    auto curr_type = v.type();
+    if (*curr_type != *type) {
+      why_not << "Only values of same type can be compared. "
+              << "Found " << type->repr_str() << " and "
+              << curr_type->repr_str();
+      return false;
+    }
+  }
+
+  if (auto tuple_type = type->cast<TupleType>()) {
+    return isSortableTupleType(tuple_type, why_not);
+  }
+
+  if (auto class_type = type->cast<ClassType>()) {
+    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
+  }
+
+  // Basic types like tensors/ints/floats/bools/strs are not checked in this
+  // method because they should have been schema matched to specialized
+  // aten::sort kernels using listSort<T>.
+  why_not << "Only list of Tensors, ints, floats, bools, strs, "
+          << "a User Defined Class that defines the __lt__ compare method "
+          << "or Tuples of aforementioned types can be sorted, got list of "
+          << type->repr_str() << "\n";
+  return false;
 }
 
 template <bool has_reverse_arg, bool copy_return_list>
 void sort_op(Stack* stack) {
   bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
   auto g_list = pop(stack).toList();
+
   if (copy_return_list) {
     g_list = g_list.copy();
   }
-  Stack sort_stack;
-  Function* lt_func = nullptr;
-  std::sort(
-      g_list.begin(),
-      g_list.end(),
-      [reverse, &sort_stack, &lt_func](IValue a, IValue b) -> bool {
-        // "strict weak ordering" issue - see other sort
-        if (a.is(b)) {
-          return false;
-        }
-        if (!lt_func) {
-          lt_func = checkSortSchema(a.type());
-        }
-        sort_stack.push_back(a);
-        sort_stack.push_back(b);
-        lt_func->run(sort_stack);
-        return pop(sort_stack).toBool() != reverse;
-      });
+
+  if (!g_list.empty()) {
+    std::stringstream error_str;
+    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
+      throw std::runtime_error(error_str.str());
+    }
+
+    c10::IValueComparator comparator;
+    if (reverse) {
+      comparator = c10::getGreaterThanComparator(g_list.get(0));
+    } else {
+      comparator = c10::getLessThanComparator(g_list.get(0));
+    }
+    std::sort(g_list.begin(), g_list.end(), comparator);
+  }
+
   if (copy_return_list) {
     push(stack, g_list);
   }
