@@ -9570,7 +9570,7 @@ class TestNNDeviceType(NNTestCase):
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
@@ -11841,7 +11841,6 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_pooling_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
         self._test_bfloat16_ops(torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)

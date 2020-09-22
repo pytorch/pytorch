@@ -56,8 +56,7 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
   } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return OpFunctor<at::Half, float, float>{}(iter);
-  }
-  else if (iter.dtype() == kBFloat16) {
+  } else if (iter.dtype() == kBFloat16) {
     return OpFunctor<at::BFloat16, float>{}(iter);
   } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel

@@ -41,7 +41,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, _get_torch_cuda_version, TEST_MAGMA
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, \
+    _get_torch_cuda_version, TEST_MAGMA
+
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -56,6 +58,8 @@ if TEST_SCIPY:
     from scipy import signal
 
 SIZE = 100
+
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -6336,58 +6340,66 @@ class TestTorchDeviceType(TestCase):
         np.logical_not(a.cpu().numpy(), out=out_np)
         self.assertEqual(out_np, out.to('cpu'))
 
-    def _test_logical(self, device, op, a_, b_, expected_res_):
-        for dtype in torch.testing.get_all_dtypes():
-            expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
-            a = torch.tensor(a_, dtype=dtype, device=device)
-            for other_dtype in torch.testing.get_all_dtypes():
-                b = torch.tensor(b_, dtype=other_dtype, device=device)
+    def _test_logical(self, device, dtypes, op, a_, b_, expected_res_):
+        expected_res = torch.tensor(expected_res_, dtype=dtypes[0], device=device)
+        a = torch.tensor(a_, dtype=dtypes[0], device=device)
+        b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-                # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
-                # CUDA as long as the two tensors are promoted to a supported type.
-                # TODO: Remove this once logical operators are improved to take care of bfloat16.
-                if self.device_type == 'cuda' and torch.bfloat16 in (dtype, other_dtype):
-                    if torch.promote_types(dtype, other_dtype) == torch.bfloat16:
-                        with self.assertRaises(RuntimeError):
-                            getattr(a, op)(b)
-                        continue
-
-                if dtype.is_complex or other_dtype.is_complex:
-                    with self.assertRaises(RuntimeError):
-                        getattr(a, op)(b)
-                    continue
-
-                # new tensor
-                self.assertEqual(expected_res.bool(), getattr(a, op)(b))
-                # out
-                c = torch.empty(0, dtype=torch.bool, device=device)
-                getattr(torch, op)(a, b, out=c)
-                self.assertEqual(expected_res.bool(), c.bool())
-
-            # in-place
-            b = torch.tensor(b_, dtype=dtype, device=device)
-            # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-            if self.device_type == 'cuda' and dtype == torch.bfloat16:
+        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
+        # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
+        # CUDA as long as the two tensors are promoted to a supported type.
+        # TODO: Remove this once logical operators are improved to take care of bfloat16.
+        if self.device_type == 'cuda' and torch.bfloat16 in dtypes:
+            if torch.promote_types(dtypes[0], dtypes[1]) == torch.bfloat16:
                 with self.assertRaises(RuntimeError):
-                    getattr(a, op + '_')(b)
-                continue
+                    getattr(a, op)(b)
+                return
 
-            if dtype.is_complex:
-                with self.assertRaises(RuntimeError):
-                    getattr(a, op + '_')(b)
-                continue
-            getattr(a, op + '_')(b)
-            self.assertEqual(expected_res, a)
+        if dtypes[0].is_complex or dtypes[1].is_complex:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op)(b)
+            return
 
-    def test_logical_xor(self, device):
-        self._test_logical(device, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
+        # new tensor
+        self.assertEqual(expected_res.bool(), getattr(a, op)(b))
+        # out
+        c = torch.empty(0, dtype=torch.bool, device=device)
+        getattr(torch, op)(a, b, out=c)
+        self.assertEqual(expected_res.bool(), c)
 
-    def test_logical_and(self, device):
-        self._test_logical(device, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
+        # in-place
+        # TODO: remove when different dtypes as operands are supported
+        if dtypes[0] != dtypes[1]:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
 
-    def test_logical_or(self, device):
-        self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
+        # TODO: remove when logical ops support bfloat16 on CUDA.
+        if self.device_type == 'cuda' and dtypes[0] == torch.bfloat16:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
+
+        # TODO: remove when complex ops are supported
+        if dtypes[0].is_complex:
+            with self.assertRaises(RuntimeError):
+                getattr(a, op + '_')(b)
+            return
+
+        getattr(a, op + '_')(b)
+        self.assertEqual(expected_res, a)
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_xor(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_and(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
+
+    @dtypes(*product(torch.testing.get_all_dtypes(), torch.testing.get_all_dtypes()))
+    def test_logical_or(self, device, dtypes):
+        self._test_logical(device, dtypes, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
     # Tests clamp and its alias, clip
     def test_clamp(self, device):
@@ -16376,7 +16388,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmv(self, device, dtype):
@@ -16444,7 +16456,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmm(self, device, dtype):
@@ -19821,26 +19833,27 @@ tensor_op_tests = [
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
         1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
-    ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
+    ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM),
+        _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
     ('addmm', 'scalar', _medium_2d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
-    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types,
+    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
         True, [tf32_on_and_off(0.005)], 0, True),
     ('addmv', 'scalar', _medium_1d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4, 
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
@@ -20083,19 +20096,20 @@ tensor_op_tests = [
     ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
-    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
-    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
+    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, 
+        torch.testing.get_all_fp_dtypes() + _complex_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('erfinv', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
