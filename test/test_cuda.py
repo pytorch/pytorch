@@ -279,6 +279,14 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
+    def test_cudart_register(self):
+        t = torch.ones(20)
+        cudart = torch.cuda.cudart()
+        r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
+        self.assertEquals(r, 0)
+        r = cudart.cudaHostUnregister(t.data_ptr())
+        self.assertEquals(r, 0)
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
