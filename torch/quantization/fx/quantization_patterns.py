@@ -511,7 +511,7 @@ class TraceableCustomModuleHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         if quantizer.is_dynamic_quant:
-            convert = torch.qauntization.convert_dynamic_child_module_fx
+            convert = torch.quantization.convert_dynamic_child_module_fx
         else:
             convert = torch.quantization.convert_child_module_fx
         observed_custom_module = quantizer.modules[node.target]
