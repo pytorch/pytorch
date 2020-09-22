@@ -524,7 +524,7 @@ void RequestCallbackNoPython::processRpc(
               torch::autograd::profiler::ProfilerDisableOptions opts(
                   false, true);
               auto event_lists =
-                  torch::autograd::profiler::disableProfiler(std::move(opts));
+                  torch::autograd::profiler::disableProfiler(opts);
               if (wrappedRpcResponseFuture->hasError()) {
                 // Propagate error
                 // No need to propagate remote events in the case of an error.
