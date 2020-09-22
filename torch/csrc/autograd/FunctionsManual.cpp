@@ -211,6 +211,15 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
+Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  auto result = grad * other.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();
