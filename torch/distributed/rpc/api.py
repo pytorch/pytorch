@@ -197,17 +197,17 @@ def _all_gather(obj):
             )
             worker_name_to_response_future_dict[follower_name] = fut
 
-        failed_followers = []
+        errors = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                failed_followers.append(follower_name)
+                errors.append((follower_name, ex))
 
-        if failed_followers:
+        if errors:
             raise RuntimeError(
-                f"Followers {failed_followers} timed out in RPC _all_gather "
-                f"after {timeout} seconds."
+                f"Followers {[e[0] for e in errors]} timed out in _all_gather "
+                f"after {timeout} seconds. The first exception is {errors[0][1]}"
             )
 
     return states.gathered_objects
