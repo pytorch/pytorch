@@ -63,7 +63,7 @@ namespace caffe2 {
  */
 class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
- public:
+public:
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
@@ -83,9 +83,8 @@ class C10_API TypeIdentifier final
     return TypeIdentifier(c10::util::type_index{0});
   }
 
- private:
+private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
-  friend class TypeMeta; // TODO Is this friend an issue?
 };
 
 // Allow usage in std::map / std::set
@@ -122,7 +121,15 @@ struct TypeMetaData final {
   using PlacementDelete = void(void*, size_t);
   using Delete = void(void*);
 
-  TypeMetaData() = delete;
+  constexpr TypeMetaData() noexcept
+  : itemsize_(0),
+    new_(nullptr),
+    placementNew_(nullptr),
+    copy_(nullptr),
+    placementDelete_(nullptr),
+    delete_(nullptr),
+    id_(TypeIdentifier::uninitialized()),
+    name_("nullptr (uninitialized)") {}
 
   constexpr TypeMetaData(
       size_t itemsize,
@@ -133,14 +140,14 @@ struct TypeMetaData final {
       Delete* deleteFn,
       TypeIdentifier id,
       c10::string_view name) noexcept
-      : itemsize_(itemsize),
-        new_(newFn),
-        placementNew_(placementNew),
-        copy_(copy),
-        placementDelete_(placementDelete),
-        delete_(deleteFn),
-        id_(id),
-        name_(name) {}
+  : itemsize_(itemsize),
+    new_(newFn),
+    placementNew_(placementNew),
+    copy_(copy),
+    placementDelete_(placementDelete),
+    delete_(deleteFn),
+    id_(id),
+    name_(name) {}
 
   size_t itemsize_;
   New* new_;
@@ -452,7 +459,7 @@ private:
 #pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wundefined-var-template"
 #endif
-    return TypeMeta(_typeMetaDataInstance<T>());
+    return TypeMeta(_typeMetaData<T>());
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
 #endif
@@ -489,28 +496,22 @@ private:
     TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
   }
 
-  // preallocated TypeMetaData instances for ScalarType types
-  static const detail::TypeMetaData& scalarTypeMetaData(uint16_t index);
+  // hard limit number of registered types
+  static constexpr size_t MaxTypeIndex = UINT8_MAX;
 
-  // TypeMetaData instances for non-ScalarType types...
-  static std::vector<detail::TypeMetaData>& nonScalarTypeMetaDatas();
+  static std::atomic<uint16_t> nextTypeIndex;
 
-  // ...added through here
-  static std::mutex appendMutex_;
+  static detail::TypeMetaData* typeMetaDatas();
+
   template <class T>
-  static uint16_t addTypeMetaDataInstance() {
+  static uint16_t addTypeMetaData() {
+    const uint16_t index = nextTypeIndex++;
+    TORCH_CHECK(index <= MaxTypeIndex,
+      "Maximum number of CAFFE_KNOWN_TYPE declarations has been exceeded. ",
+      "Please report this issue.");
     auto typeId = TypeIdentifier::Get<T>();
     auto typeName = c10::util::get_fully_qualified_type_name<T>();
-    std::vector<detail::TypeMetaData>& instances = nonScalarTypeMetaDatas();
-    // concurrency situation:
-    // the static init for each _typeMetaDataInstance<T> is synchronized,
-    // so we don't need to worry about the same type being added twice.
-    // But different threads might be adding different Ts concurrently.
-    // So while we don't need to test for the presence of T before
-    // appending, we do need to serialize the appends themselves.
-    std::lock_guard<std::mutex> lock(appendMutex_);
-    uint16_t size = instances.size();
-    instances.emplace_back(
+    typeMetaDatas()[index] = detail::TypeMetaData{
       sizeof(T),
       detail::_PickNew<T>(),
       detail::_PickPlacementNew<T>(),
@@ -518,13 +519,13 @@ private:
       detail::_PickPlacementDelete<T>(),
       detail::_PickDelete<T>(),
       typeId,
-      typeName);
-    return size + NumScalarTypes;
+      typeName};
+    return index;
   }
 
   // specializations return indexes into typeMetaDataInstances()
   template <class T>
-  C10_API static uint16_t _typeMetaDataInstance() noexcept;
+  C10_API static uint16_t _typeMetaData() noexcept;
 
   //
   // TypeMeta just wraps this index
@@ -533,30 +534,27 @@ private:
   uint16_t index_;
 
   inline const detail::TypeMetaData& data() const {
-    if (C10_LIKELY(isScalarType())) {
-      return scalarTypeMetaData(index_);
-    }
-    return nonScalarTypeMetaDatas()[index_ - NumScalarTypes];
+    return typeMetaDatas()[index_];
   }
 };
 
-// specializations of TypeMeta::_typeMetaDataInstance for ScalarType types
+// specializations of TypeMeta::_typeMetaData for ScalarType types
 
 #define DEFINE_SCALAR_METADATA_INSTANCE(T, name) \
   template <>                                                               \
-  constexpr uint16_t TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+  constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept {     \
     return static_cast<uint16_t>(ScalarType::name); \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
 
 template <>
-constexpr uint16_t TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept {
+constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
   return static_cast<uint16_t>(ScalarType::Undefined);
 }
 
 inline TypeMeta::TypeMeta() noexcept
-  : index_(_typeMetaDataInstance<detail::_Uninitialized>()) {
+  : index_(_typeMetaData<detail::_Uninitialized>()) {
 }
 
 inline bool operator==(
@@ -601,11 +599,11 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define CAFFE_KNOWN_TYPE(T)                                                 \
-  template <>                                                               \
-  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaDataInstance<T>() noexcept {  \
-    static const uint16_t index = addTypeMetaDataInstance<T>();               \
-    return index;                                                           \
+#define CAFFE_KNOWN_TYPE(T)                                           \
+  template <>                                                         \
+  EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept {  \
+    static const uint16_t index = addTypeMetaData<T>();       \
+    return index;                                                     \
   }
 
 } // namespace caffe2

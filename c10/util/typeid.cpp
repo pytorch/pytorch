@@ -18,13 +18,16 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 }
 } // namespace detail
 
-//
-// TypeMetaData instances for ScalarType types.
-// TypeMeta values for T will contain T's index,
-// equal to the ScalarType enum value for T.
-//
-const detail::TypeMetaData& TypeMeta::scalarTypeMetaData(uint16_t index) {
-  static const detail::TypeMetaData instances[NumScalarTypes] = {
+[[noreturn]] void TypeMeta::error_unsupported_typemeta(caffe2::TypeMeta dtype) {
+  TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+}
+
+// see TypeMeta::addTypeMetaData
+std::atomic<uint16_t> TypeMeta::nextTypeIndex(NumScalarTypes);
+
+// fixed length array of TypeMetaData instances
+detail::TypeMetaData* TypeMeta::typeMetaDatas() {
+  static detail::TypeMetaData instances[MaxTypeIndex + 1] = {
 #define SCALAR_TYPE_META(T, name) \
     /* ScalarType::name */ \
     detail::TypeMetaData( \
@@ -38,32 +41,10 @@ const detail::TypeMetaData& TypeMeta::scalarTypeMetaData(uint16_t index) {
       c10::util::get_fully_qualified_type_name<T>()),
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
 #undef SCALAR_TYPE_META
-    // ScalarType::Undefined
-    detail::TypeMetaData(
-        0,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        TypeIdentifier::uninitialized(),
-        "nullptr (uninitialized)")
+    // The remainder of the array is padded with TypeMetaData blanks.
+    // The first of these is the entry for ScalarType::Undefined.
+    // The rest are consumed by CAFFE_KNOWN_TYPE entries.
   };
-  return instances[index];
-}
-
-// see TypeMeta::addTypeMetaDataInstance
-std::mutex TypeMeta::appendMutex_;
-
-//
-// TypeMetaData instances for non-ScalarType types.
-// Conceptually this is the second chunk of a single array of instances
-// that begins with the scalarTypeMetaDataInstances.
-// CAFFE_KNOWN_TYPE(T) adds a TypeMetaData entry for T to this vector,
-// and TypeMeta values for T will contain the entry's upshifted index.
-//
-std::vector<detail::TypeMetaData>& TypeMeta::nonScalarTypeMetaDatas() {
-  static std::vector<detail::TypeMetaData> instances;
   return instances;
 }
 
