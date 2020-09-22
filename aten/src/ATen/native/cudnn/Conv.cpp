@@ -318,8 +318,8 @@ std::string repro_from_args(const ConvolutionArgs& args) {
   ss <<   "padding=" << ArrayRef<int>(args.params.padding) << ", ";
   ss <<   "stride=" << ArrayRef<int>(args.params.stride) << ", ";
   ss <<   "dilation=" << ArrayRef<int>(args.params.dilation) << ", ";
-  ss <<   "groups=" << args.params.groups << ")" << to_channels_last << "\n";
-  ss << "net = net.cuda()." << partial_dtype << "()\n";
+  ss <<   "groups=" << args.params.groups << ")\n";
+  ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last << "\n";
   ss << "out = net(data)\n";
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
