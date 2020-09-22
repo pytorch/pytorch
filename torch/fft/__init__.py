@@ -394,7 +394,7 @@ Args:
         * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real IFFT orthonormal)
 
         Where ``n = prod(s)`` is the logical IFFT size.
-        Calling the forward transform (:func:`~torch.fft.fftn`) with the same
+        Calling the forward transform (:func:`~torch.fft.rfftn`) with the same
         normalization mode will apply an overall normalization of ``1/n`` between
         the two transforms. This is required to make :func:`~torch.fft.irfftn`
         the exact inverse.
@@ -411,12 +411,12 @@ Example:
     will not round-trip properly because the input is odd-length in the last
     dimension:
 
-    >>> torch.fft.irfft(T).size()
+    >>> torch.fft.irfftn(T).size()
     torch.Size([10, 10])
 
     So, it is recommended to always pass the signal shape :attr:`s`.
 
-    >>> roundtrip = torch.fft.irfft(T, t.size())
+    >>> roundtrip = torch.fft.irfftn(T, t.size())
     >>> roundtrip.size()
     torch.Size([10, 9])
     >>> torch.allclose(roundtrip, t)
