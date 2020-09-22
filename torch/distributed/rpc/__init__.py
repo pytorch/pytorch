@@ -30,6 +30,7 @@ if is_available():
         _is_current_rpc_agent_set,
         _rref_context_get_debug_info,
         _set_rpc_timeout,
+        _get_current_rpc_agent,
         get_rpc_timeout,
         enable_gil_profiling,
         RpcBackendOptions,
@@ -168,7 +169,6 @@ if is_available():
 
     @api._require_initialized
     def _get_debug_info():
-        from torch._C._distributed_rpc import _rref_context_get_debug_info
         info = _rref_context_get_debug_info()
         info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())

@@ -21,6 +21,9 @@ if is_available():
         _release_context,
         get_gradients,
         _is_valid_context,
+        _retrieve_context,
+        _current_context,
+        _get_max_id,
         backward,
     )
 
