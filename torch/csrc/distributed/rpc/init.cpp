@@ -27,7 +27,6 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -121,14 +120,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_metrics",
               &RpcAgent::getMetrics,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_get_timeout",
-              // intentionally not releasing GIL to avoid context switch
-              [](const RpcAgent& self) {
-                return self.getRpcTimeout().count() / float(kToMilliseconds);
-              }
-          );
+              py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "PyRRef", R"(
