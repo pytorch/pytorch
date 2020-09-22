@@ -17,6 +17,12 @@ namespace aten {
 using at::native::vulkan::detail::VulkanTensor;
 using VulkanTensorImpl = VulkanOpaqueTensorImpl<VulkanTensor>;
 
+namespace {
+int64_t normalize_dim(int64_t d, int64_t n) {
+  return (d % n + n) % n;
+}
+} // namespace
+
 Tensor new_with_vtensor_vulkan(
     VulkanTensor&& vt,
     const TensorOptions& options) {
@@ -255,8 +261,9 @@ Tensor reshape(at::Tensor const& input, IntArrayRef shape) {
 }
 
 Tensor cat(const TensorList tensors, int64_t dim) {
+  const auto norm_dim = normalize_dim(dim, 4);
   TORCH_INTERNAL_ASSERT(
-      dim == 0 || dim == 1,
+      norm_dim == 0 || norm_dim == 1,
       "Vulkan cat is implemented only for batch and channels dimensions");
   at::Tensor tensor = tensors[0];
   int64_t cat_dim_size = 0;
@@ -513,8 +520,16 @@ Tensor mean(
     const bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
-  TORCH_INTERNAL_ASSERT(
-      self.dim() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3);
+
+  // Mean is implemented only for HW dimensions of 4-d tensor
+  TORCH_INTERNAL_ASSERT(self.dim() == 4);
+  static const std::unordered_set<int64_t> expected_dims_set({2, 3});
+  std::unordered_set<int64_t> dims_set;
+  for (const auto& d : dim) {
+    dims_set.insert(normalize_dim(d, 4));
+  }
+  TORCH_INTERNAL_ASSERT(expected_dims_set == dims_set);
+
   const auto& x = vtensor_from_vulkan(self);
   const auto sizes = self.sizes();
   VulkanTensor output{std::vector<int64_t>{sizes[0], sizes[1]}};
