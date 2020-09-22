@@ -232,7 +232,7 @@ Allocator* getCPUAllocator() {
 
 // override_allow_tf32_flag = true
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
-// override_allow_tf32_flag = true
+// override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
 thread_local bool override_allow_tf32_flag = false;
 
