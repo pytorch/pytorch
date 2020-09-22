@@ -1029,7 +1029,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf.memory,
           &zero, args.idesc.desc(), grad_input.data_ptr()),
-        args, "Backward data algorithm: ", static_cast<int>(bwdDataAlgPerf.algo), "\n");
+        args,
+        "Additional pointer addresses: \n",
+        "    grad_output: ", grad_output.data_ptr(), "\n",
+        "    grad_input: ", grad_input.data_ptr(), "\n",
+        "Backward data algorithm: ", static_cast<int>(bwdDataAlgPerf.algo), "\n");
     }
   );
 }
@@ -1192,7 +1196,11 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace.data_ptr(), bwdFilterAlgPerf.memory,
           &zero, args.wdesc.desc(), grad_weight.data_ptr()),
-        args, "Backward filter algorithm: ", static_cast<int>(bwdFilterAlgPerf.algo), "\n");
+        args,
+        "Additional pointer addresses: \n",
+        "    grad_output: ", grad_output.data_ptr(), "\n",
+        "    grad_weight: ", grad_weight.data_ptr(), "\n",
+        "Backward filter algorithm: ", static_cast<int>(bwdFilterAlgPerf.algo), "\n");
     }
   );
 }
