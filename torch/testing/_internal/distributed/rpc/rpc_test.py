@@ -2406,6 +2406,24 @@ class RpcTest(RpcAgentTestFixture):
         # exit all workers non-gracefully.
         rpc.shutdown(graceful=False)
 
+    @dist_init
+    def test_deadlock(self):
+        # this test is copied from https://github.com/pytorch/pytorch/issues/45089
+        if self.rank == 1:
+            dst1 = worker_name((self.rank + 1) % self.world_size)
+            x = torch.ones(2)
+            y = torch.ones(2)
+            rpc.rpc_async(dst1, RpcTest._slow_add, args=(x, y), timeout=15).wait()
+
+        dist_initialized = dist.is_initialized()
+        if not dist_initialized:
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
     @dist_init(setup_rpc=False)
     def test_local_shutdown_with_rpc(self):
         # test that we can start RPC, send RPCs, and then run local shutdown.
