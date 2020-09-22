@@ -8054,7 +8054,6 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_CAFFE2)),
         ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_CAFFE2)),
         ("gloo/cuda", ("gloo/hip", API_CAFFE2)),
-        ("cuda_runtime_api.h", ("hip/hip_runtime_api.h", API_CAFFE2)),
     ]
 )
 
