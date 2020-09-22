@@ -5282,25 +5282,21 @@ add_docstr(torch.nan_to_num,
            r"""
 nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
 
-Replace NaN with zero and infinity with large finite numbers (default behaviour)
-or with the numbers defined by the user using the nan, posinf and/or neginf keywords.
-
-If x is inexact, NaN is replaced by zero or by the user defined value in nan keyword,
-infinity is replaced by the largest finite floating point values representable by x.dtype
-or by the user defined value in posinf keyword and -infinity is replaced by the most
-negative finite floating point values representable by x.dtype or by the user defined
-value in neginf keyword.
+Replaces ``NaN``, positive infinity, and negative infinity values in :attr:input
+with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
+By default, ``NaN``s are replaced with zero, positive infinity is replaced with the
+greatest finite value representable by :attr:`input`'s dtype, and negative infinity
+is replaced with the least finite value representable by :attr:`input`'s dtype.
 
 Args:
     {input}
-    nan (float or optional): Value to be used to fill NaN values.
-    If no value is passed then NaN values will be replaced with 0.0.
-    posinf (float or optional): Value to be used to fill positive infinity values.
-    If no value is passed then positive infinity values will be replaced by the largest
-    finite floating point values representable by x.dtype.
-    neginf (float or optional): Value to be used to fill negative infinity values.
-    If no value is passed then negative infinity values will be replaced by the lowest
-    finite floating point values representable by x.dtype.
+    nan (Number, optional): the value to replace ``NaN``s with. Default is zero.
+    posinf (Number, optional): if a Number, the value to replace positive infinity values with.
+    If None, positive infinity is replaced with the greatest finite value representable by :attr:`input`'s dtype.
+    Default is None.
+    neginf (Number, optional): if a Number, the value to replace negative infinity values with.
+    If None, negative infinity is replaced with the lowest finite value representable by :attr:`input`'s dtype.
+    Default is None.
 
 Keyword args:
     {out}
