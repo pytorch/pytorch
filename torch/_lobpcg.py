@@ -266,20 +266,20 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx,
-                A:             Tensor,
-                k:             Optional[int]=None,
-                B:             Optional[Tensor]=None,
-                X:             Optional[Tensor]=None,
-                n:             Optional[int]=None,
-                iK:            Optional[Tensor]=None,
-                niter:         Optional[int]=None,
-                tol:           Optional[float]=None,
-                largest:       Optional[bool]=None,
-                method:        Optional[str]=None,
-                tracker:       Optional[None]=None,
-                ortho_iparams: Optional[Dict[str, int]]=None,
-                ortho_fparams: Optional[Dict[str, float]]=None,
-                ortho_bparams: Optional[Dict[str, bool]]=None
+                A: Tensor,
+                k: Optional[int] = None,
+                B: Optional[Tensor] = None,
+                X: Optional[Tensor] = None,
+                n: Optional[int] = None,
+                iK: Optional[Tensor] = None,
+                niter: Optional[int] = None,
+                tol: Optional[float] = None,
+                largest: Optional[bool] = None,
+                method: Optional[str] = None,
+                tracker: Optional[None] = None,
+                ortho_iparams: Optional[Dict[str, int]] = None,
+                ortho_fparams: Optional[Dict[str, float]] = None,
+                ortho_bparams: Optional[Dict[str, bool]] = None
                 ) -> Tuple[Tensor, Tensor]:
 
         # makes sure that input is contiguous for efficiency.
@@ -338,20 +338,20 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         return tuple(grads)
 
 
-def lobpcg(A:             Tensor,
-           k:             Optional[int]=None,
-           B:             Optional[Tensor]=None,
-           X:             Optional[Tensor]=None,
-           n:             Optional[int]=None,
-           iK:            Optional[Tensor]=None,
-           niter:         Optional[int]=None,
-           tol:           Optional[float]=None,
-           largest:       Optional[bool]=None,
-           method:        Optional[str]=None,
-           tracker:       Optional[None]=None,
-           ortho_iparams: Optional[Dict[str, int]]=None,
-           ortho_fparams: Optional[Dict[str, float]]=None,
-           ortho_bparams: Optional[Dict[str, bool]]=None
+def lobpcg(A: Tensor,
+           k: Optional[int] = None,
+           B: Optional[Tensor] = None,
+           X: Optional[Tensor] = None,
+           n: Optional[int] = None,
+           iK: Optional[Tensor] = None,
+           niter: Optional[int] = None,
+           tol: Optional[float] = None,
+           largest: Optional[bool] = None,
+           method: Optional[str] = None,
+           tracker: Optional[None] = None,
+           ortho_iparams: Optional[Dict[str, int]] = None,
+           ortho_fparams: Optional[Dict[str, float]] = None,
+           ortho_bparams: Optional[Dict[str, bool]] = None
            ) -> Tuple[Tensor, Tensor]:
 
     """Find the k largest (or smallest) eigenvalues and the corresponding
@@ -534,20 +534,20 @@ def lobpcg(A:             Tensor,
             ortho_iparams, ortho_fparams, ortho_bparams
         )
 
-def _lobpcg(A:             Tensor,
-            k:             Optional[int]=None,
-            B:             Optional[Tensor]=None,
-            X:             Optional[Tensor]=None,
-            n:             Optional[int]=None,
-            iK:            Optional[Tensor]=None,
-            niter:         Optional[int]=None,
-            tol:           Optional[float]=None,
-            largest:       Optional[bool]=None,
-            method:        Optional[str]=None,
-            tracker:       Optional[None]=None,
-            ortho_iparams: Optional[Dict[str, int]]=None,
-            ortho_fparams: Optional[Dict[str, float]]=None,
-            ortho_bparams: Optional[Dict[str, bool]]=None
+def _lobpcg(A: Tensor,
+            k: Optional[int] = None,
+            B: Optional[Tensor] = None,
+            X: Optional[Tensor] = None,
+            n: Optional[int] = None,
+            iK: Optional[Tensor] = None,
+            niter: Optional[int] = None,
+            tol: Optional[float] = None,
+            largest: Optional[bool] = None,
+            method: Optional[str] = None,
+            tracker: Optional[None] = None,
+            ortho_iparams: Optional[Dict[str, int]] = None,
+            ortho_fparams: Optional[Dict[str, float]] = None,
+            ortho_bparams: Optional[Dict[str, bool]] = None
             ) -> Tuple[Tensor, Tensor]:
 
     # A must be square:
