@@ -1377,7 +1377,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         quant = convert_jit(prepared)
 
         # Prepare new model.
-        scripted = torch.jit.script(model)
         prep_2 = prepare_jit(scripted, {'' : torch.quantization.get_default_qconfig('fbgemm')})
         loaded_dict = torch.load(b)
         # load observer stats into new model
