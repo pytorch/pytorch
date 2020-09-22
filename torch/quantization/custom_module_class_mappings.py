@@ -1,7 +1,7 @@
 OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS = dict()
 
-def register_observed_custom_module_mapping(custom_module_class, observed_custom_module_class):
-    """ Register a mapping from `custom_module_class` to
+def register_observed_custom_module_mapping(float_custom_module_class, observed_custom_module_class):
+    """ Register a mapping from `float_custom_module_class` to
     `observed_custom_module_class`
     `observed_custom_module_class` will have a `from_float` classmethod,
     which will return an observed custom module instance given
@@ -11,24 +11,24 @@ def register_observed_custom_module_mapping(custom_module_class, observed_custom
     """
     assert hasattr(observed_custom_module_class, 'from_float'), 'from_float must be' + \
         ' defined in observed custom module class'
-    OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS[custom_module_class] = \
+    OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS[float_custom_module_class] = \
         observed_custom_module_class
 
-def get_observed_custom_module_class(custom_module_class):
+def get_observed_custom_module_class(float_custom_module_class):
     """ Get the corresponding observed module class for a given
-    custom module.
+    float custom module.
     """
     observed_custom_module_class = \
-        OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS.get(custom_module_class, None)
+        OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS.get(float_custom_module_class, None)
     assert observed_custom_module_class is not None, \
-        'Custom module class {}'.format(custom_module_class) + \
+        'Float Custom module class {}'.format(float_custom_module_class) + \
         ' does not have a corresponding observed module class'
     return observed_custom_module_class
 
 QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS = dict()
 
-def register_quantized_custom_module_mapping(custom_module_class, quantized_custom_module_class):
-    """ Register a mapping from `custom_module_class` to `quantized_custom_module_class`
+def register_quantized_custom_module_mapping(float_custom_module_class, quantized_custom_module_class):
+    """ Register a mapping from `float_custom_module_class` to `quantized_custom_module_class`
     A quantized custom module class should accept quantized input and
     return quantized output. (we can relax this condition in the
     future if there is a need)
@@ -40,17 +40,17 @@ def register_quantized_custom_module_mapping(custom_module_class, quantized_cust
     """
     assert hasattr(quantized_custom_module_class, 'from_observed'), 'from_observed' + \
         ' must be defined in quantized custom module class'
-    QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS[custom_module_class] = \
+    QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS[float_custom_module_class] = \
         quantized_custom_module_class
 
-def get_quantized_custom_module_class(custom_module_class):
+def get_quantized_custom_module_class(float_custom_module_class):
     """ Get the corresponding quantized module class for a given
-    custom module.
+    float custom module.
     """
     quantized_custom_module_class = \
-        QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS.get(custom_module_class, None)
+        QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS.get(float_custom_module_class, None)
     assert quantized_custom_module_class is not None, \
-        'Custom module class {}'.format(custom_module_class) + \
+        'Float Custom module class {}'.format(float_custom_module_class) + \
         ' does not have a corresponding quantized module class'
     return quantized_custom_module_class
 

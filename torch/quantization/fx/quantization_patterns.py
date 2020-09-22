@@ -510,8 +510,10 @@ class DefaultQuant(QuantizeHandler):
             quantizer.quantized_graph,
             node, quantizer.activation_post_process_map[node.name])
 
-class CustomModule(QuantizeHandler):
+class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
+        """ Convert a float custom module to quantized custom module
+        """
         assert node.op == 'call_module'
         observed_custom_module = quantizer.modules[node.target]
         if node.name in quantizer.activation_post_process_map:
@@ -523,7 +525,8 @@ class CustomModule(QuantizeHandler):
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)
         setattr(quantizer.modules[parent_name], name, quantized_custom_module)
-        # hardcoded the qunatized input to be [0], we can extend this
+        # hardcoded the qunatized input to be None (take whatever is in the environemnt),
+        # we can extend this
         # if there is a need, e.g. get the indexes of quantized inputs from some
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))

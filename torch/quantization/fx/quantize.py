@@ -128,6 +128,9 @@ def assert_and_get_unique_device(module):
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 
+def is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize))
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -180,7 +183,7 @@ class Quantizer:
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
-            if node.op == 'get_param':
+            if node.op == 'get_attr':
                 parent, _ = _parent_name(node.target)
                 self.qconfig_map[node.name] = get_qconfig(self.modules[parent])
             elif node.op == 'call_function':
@@ -213,13 +216,6 @@ class Quantizer:
         # match the patterns that will get quantized
         matches = self._find_matches(model.graph, self.modules, self.patterns)
 
-        # add custom module instances to the match result
-        for node in model.graph.nodes:
-            if node.op == 'call_module' and \
-               is_custom_module_class(type(self.modules[node.target])):
-                custom_module_qconfig = self.qconfig_map[node.name]
-                matches[node.name] = (node, [node], CustomModule(self, node), custom_module_qconfig)
-
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
         # initialize an DefaultQuant object for each
@@ -234,20 +230,11 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        def insert_observer(node, observer, device):
-            observer_name = get_new_observer_name(model)
-            setattr(model, observer_name, observer)
-            self.activation_post_process_map[node.name] = observer
-            env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-            observed_node_names_set.add(node.name)
-            if device:
-                getattr(model, observer_name).to(device)
-
         for node in model.graph.nodes:
             if node.name in observed_node_names_set:
                 continue
 
-            get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
+            prefix = node.name + '_activation_post_process_'
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
@@ -256,7 +243,17 @@ class Quantizer:
                 if qconfig is None:
                     continue
 
-                if isinstance(obj, CustomModule):
+                def insert_observer(node, observer, device):
+                    get_new_observer_name = get_new_attr_name_with_prefix(prefix)
+                    observer_name = get_new_observer_name(model)
+                    setattr(model, observer_name, observer)
+                    self.activation_post_process_map[node.name] = observer
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
+                    observed_node_names_set.add(node.name)
+                    if device:
+                        getattr(model, observer_name).to(device)
+
+                if isinstance(obj, CustomModuleQuantizeHandler):
                     custom_module = self.modules[node.target]
                     observed_custom_module_class = \
                         get_observed_custom_module_class(type(custom_module))
@@ -300,6 +297,7 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
             if node.name not in observed_node_names_set and node.name in quants:
+                get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                 observer_name = get_new_observer_name(model)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
@@ -376,13 +374,6 @@ class Quantizer:
         self.modules = dict(model.named_modules())
 
         matches = self._find_matches(model.graph, self.modules, self.patterns)
-
-        # add custom module instances to the match result
-        for node in model.graph.nodes:
-            if node.op == 'call_module' and \
-               is_observed_custom_module(self.modules[node.target]):
-                custom_module_qconfig = self.qconfig_map[node.name]
-                matches[node.name] = (node, [node], CustomModule(self, node), custom_module_qconfig)
 
         quants = self._find_quants(model.graph, matches)
         self.quantized_graph = Graph()
@@ -497,7 +488,7 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module':
-                if node.target.split('.')[-1].startswith('activation_post_process_'):
+                if is_activation_post_process(self.modules[node.target]):
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
                     if observer_module.dtype == torch.float16:
@@ -531,7 +522,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
-               node.target.split('.')[-1].startswith('activation_post_process_'):
+               is_activation_post_process(self.modules[node.target]):
                 # remove activation post process
                 env[node.name] = env[node.args[0].name]
             else:
@@ -539,8 +530,8 @@ class Quantizer:
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
         to_be_removed = []
-        for name, _ in model.named_modules():
-            if name.split('.')[-1].startswith('activation_post_process_'):
+        for name, module in model.named_modules():
+            if is_activation_post_process(module):
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
@@ -586,7 +577,7 @@ class Quantizer:
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
                 env[node.name] = folded_graph.create_node(
-                    'get_param', packed_weight_name, (), {})
+                    'get_attr', packed_weight_name, (), {})
             elif prepack_node is not None:
                 # remove the foled node
                 continue
@@ -648,6 +639,15 @@ class Quantizer:
                             all_matched.add(n.name)
                         # break after finding the first match
                         break
+
+        # add custom module instances to the match result
+        for node in graph.nodes:
+            if node.op == 'call_module' and \
+               (is_custom_module_class(type(self.modules[node.target])) or \
+                is_observed_custom_module(self.modules[node.target])):
+                custom_module_qconfig = self.qconfig_map[node.name]
+                match_map[node.name] = (node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+
         return match_map
 
     def _find_quants(self, graph, matches):

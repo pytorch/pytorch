@@ -132,7 +132,7 @@ inline Expr* evaluateOp(const Expr* v) {
     Type val = eval.value<Type>();                            \
     return getImmediateByType(v->dtype().scalar_type(), val); \
   }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
 #undef TYPE_CASE
     default:
       LOG(FATAL) << "Unsupported datatype: " << v->dtype();
@@ -407,6 +407,7 @@ class MinTerm : public ExprNode<MinTerm> {
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
   virtual ~IRSimplifierBase() {}
+
   Stmt* mutate(const Block* v) override;
 
   Stmt* mutate(const Cond* v) override;
@@ -566,6 +567,11 @@ class TORCH_API TermExpander : public IRSimplifierBase {
   Stmt* mutate(const Allocate* v) override;
 
   Stmt* mutate(const Free* v) override;
+
+  // Override to enable condition fusing.
+  Block* fuseConditions(Block* v);
+  Stmt* fuseSyncThreads(Block* block);
+  Stmt* mutate(const Block* v) override;
 };
 
 class TORCH_API IRSimplifier {
