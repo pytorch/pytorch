@@ -280,6 +280,7 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
@@ -309,6 +310,7 @@ Pointwise Ops
     hypot
     i0
     mul
+    multiply
     mvlgamma
     neg
     negative
@@ -356,6 +358,7 @@ Reduction Ops
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -532,3 +535,4 @@ Utilities
     promote_types
     set_deterministic
     is_deterministic
+    vmap

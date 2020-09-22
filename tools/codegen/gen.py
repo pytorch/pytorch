@@ -479,7 +479,7 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         if local.use_c10_dispatcher() is UseC10Dispatcher.full:
             returns_type = dispatcher_returns_type
             args = dispatcher_args
-            exprs = dispatcher.dispatcherarguments_exprs(dispatcher_args)
+            exprs = dispatcher.exprs(dispatcher_args)
             dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
         else:
             returns_type = legacy_dispatcher_returns_type

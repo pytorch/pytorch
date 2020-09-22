@@ -1082,6 +1082,10 @@ struct to_ir {
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      // Found an exit statement in this block. The remaining statements aren't
+      // reachable so we don't emit them.
+      if (exit_blocks.count(environment_stack->block()))
+        return;
     }
   }
 
@@ -2263,6 +2267,10 @@ struct to_ir {
             << "Sliced expression not yet supported for"
             << " subscripted assignment. "
             << "File a bug if you want this";
+      }
+      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+        throw ErrorReport(lhs) << sliceable->type()->repr_str()
+                               << " does not support subscripted assignment";
       }
 
       std::vector<NamedValue> args;
