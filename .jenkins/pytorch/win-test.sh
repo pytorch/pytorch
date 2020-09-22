@@ -1,5 +1,7 @@
 #!/bin/bash -ex
 
+netsh interface show interface
+
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
 
