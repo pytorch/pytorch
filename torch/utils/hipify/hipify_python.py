@@ -877,7 +877,10 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
-    all_files += [f for f in extra_files if f not in all_files_set]
+    for f in extra_files:
+        f_rel = os.path.relpath(f, output_directory)
+        if f_rel not in all_files_set:
+            all_files += f_rel
 
     # Start Preprocessor
     return preprocess(
