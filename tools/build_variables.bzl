@@ -91,11 +91,7 @@ core_sources_common = [
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
-jit_sources_common = [
-    "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
-]
-
-libtorch_sources_common = core_sources_common + jit_sources_common
+libtorch_sources_common = core_sources_common
 
 core_trainer_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
@@ -307,7 +303,7 @@ jit_sources_full = [
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]
 
-libtorch_core_jit_sources = sorted(jit_sources_common + jit_sources_full)
+libtorch_core_jit_sources = sorted(jit_sources_full)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 

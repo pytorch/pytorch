@@ -241,6 +241,59 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.Tensor(Tensor a) -> int"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.bool(bool a) -> int"),
+         [](Stack* stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, static_cast<int64_t>(b));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.float(float a) -> int"),
+         [](Stack* stack) {
+           double d;
+           pop(stack, d);
+           push(stack, static_cast<int64_t>(d));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.Scalar(Scalar a) -> int"),
+         [](Stack* stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isInt()) {
+             push(stack, std::move(scalar));
+           } else {
+             // toScalar() needed to avoid strict type check in IValue::toInt.
+             push(stack, static_cast<int64_t>(scalar.toScalar().toInt()));
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.str(str a) -> int"),
+         [](Stack* stack) {
+           auto s = pop(stack).toString();
+           std::string::size_type sz;
+           int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+           if (sz == s->string().size()) {
+             push(stack, val);
+           } else {
+             std::stringstream error_str;
+             error_str << "could not convert string "
+                       << "to int: '" << s->string() << "'";
+             throw std::runtime_error(error_str.str());
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Float.Tensor(Tensor a) -> float"),
          [](Stack* stack) {
            at::Tensor a;
