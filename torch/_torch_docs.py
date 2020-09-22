@@ -5282,9 +5282,9 @@ add_docstr(torch.nan_to_num,
            r"""
 nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
 
-Replaces ``NaN``, positive infinity, and negative infinity values in :attr:input
+Replaces :literal:`NaN`, positive infinity, and negative infinity values in :attr:input
 with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
-By default, ``NaN``s are replaced with zero, positive infinity is replaced with the
+By default, :literal:`NaN`s are replaced with zero, positive infinity is replaced with the
 greatest finite value representable by :attr:`input`'s dtype, and negative infinity
 is replaced with the least finite value representable by :attr:`input`'s dtype.
 
@@ -5292,11 +5292,11 @@ Args:
     {input}
     nan (Number, optional): the value to replace ``NaN``s with. Default is zero.
     posinf (Number, optional): if a Number, the value to replace positive infinity values with.
-    If None, positive infinity is replaced with the greatest finite value representable by :attr:`input`'s dtype.
-    Default is None.
+        If None, positive infinity is replaced with the greatest finite value representable by :attr:`input`'s dtype.
+        Default is None.
     neginf (Number, optional): if a Number, the value to replace negative infinity values with.
-    If None, negative infinity is replaced with the lowest finite value representable by :attr:`input`'s dtype.
-    Default is None.
+        If None, negative infinity is replaced with the lowest finite value representable by :attr:`input`'s dtype.
+        Default is None.
 
 Keyword args:
     {out}
