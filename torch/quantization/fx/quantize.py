@@ -127,10 +127,8 @@ def is_activation_post_process(module):
             isinstance(module, torch.quantization.FakeQuantize))
 
 def is_submodule_of_fake_quant(name, module, named_modules):
-    parent_name = name.rsplit('.', 1)
-    if len(parent_name) > 1:
-        return is_activation_post_process(named_modules[parent_name[0]])
-    return False
+    parent_name, _ = _parent_name(name)
+    return is_activation_post_process(named_modules[parent_name])
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
