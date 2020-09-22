@@ -93,6 +93,10 @@ private:
   std::vector<int64_t> v_value;
 };
 
+template <typename CharT>
+struct type_caster<c10::basic_string_view<CharT>, enable_if_t<is_std_char_type<CharT>::value>>
+    : string_caster<c10::basic_string_view<CharT>, true> {};
+
 // Pybind11 bindings for our optional type.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
