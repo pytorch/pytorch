@@ -399,14 +399,12 @@ def jacobian(func, inputs, create_graph=False, strict=False):
         >>> jacobian(exp_reducer, inputs)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
-
                 [[0.0000, 0.0000],
                  [2.4369, 2.3799]]])
 
         >>> jacobian(exp_reducer, inputs, create_graph=True)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
-
                 [[0.0000, 0.0000],
                  [2.4369, 2.3799]]], grad_fn=<ViewBackward>)
 
@@ -493,28 +491,20 @@ def hessian(func, inputs, create_graph=False, strict=False):
         >>> hessian(pow_reducer, inputs)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
-
                  [[0.0000, 4.8221],
                   [0.0000, 0.0000]]],
-
-
                 [[[0.0000, 0.0000],
                   [1.9456, 0.0000]],
-
                  [[0.0000, 0.0000],
                   [0.0000, 3.2550]]]])
 
         >>> hessian(pow_reducer, inputs, create_graph=True)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
-
                  [[0.0000, 4.8221],
                   [0.0000, 0.0000]]],
-
-
                 [[[0.0000, 0.0000],
                   [1.9456, 0.0000]],
-
                  [[0.0000, 0.0000],
                   [0.0000, 3.2550]]]], grad_fn=<ViewBackward>)
 

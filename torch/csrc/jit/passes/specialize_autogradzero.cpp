@@ -165,17 +165,17 @@ struct AutogradZeroSpecializer {
       return nullptr;
     }
 
-    Value* nonzero_values_list =
-        graph_
-            ->insertNode(graph_->createList(TensorType::get(), nonzero_values))
-            ->output();
-    checks.push_back(
-        graph_->insert(prim::AutogradAnyNonZero, {nonzero_values_list}));
+    Node *nonzero_check = graph_->insert(prim::AutogradAllNonZero, {})->node();
+    for (Value *v : nonzero_values) {
+      nonzero_check->addInput(v);
+    }
+    checks.push_back(nonzero_check->output());
 
-    Value* zero_values_list =
-        graph_->insertNode(graph_->createList(TensorType::get(), zero_values))
-            ->output();
-    checks.push_back(graph_->insert(prim::AutogradAllZero, {zero_values_list}));
+    Node *zero_check = graph_->insert(prim::AutogradAllZero, {})->node();
+    for (Value *v : zero_values) {
+      zero_check->addInput(v);
+    }
+    checks.push_back(zero_check->output());
 
     Value* bool_list =
         graph_->insertNode(graph_->createList(BoolType::get(), checks))
