@@ -94,8 +94,7 @@ namespace {
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
 // quantize and pack function once we support FP scale and FP zero_point
-template <bool OPTIMIZED_QPARAMS = false>
-Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
+Tensor qembeddingbag_byte_prepack(const Tensor& weight, bool optimized_qparams) {
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
@@ -140,7 +139,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
 
 Tensor _qembeddingbag_nbit_prepack_helper(
     const Tensor& weight,
-    int BIT_RATE,
+    int bit_width,
     bool optimized_qparams) {
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
@@ -149,14 +148,14 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 
   const auto weight_data = weight.data_ptr<float>();
   TORCH_CHECK(
-      BIT_RATE == 4 || BIT_RATE == 2,
-      "BIT_RATE must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
+      bit_width == 4 || bit_width == 2,
+      "bit_width must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
       "For 8bit, consider using 'embedding_bag_byte_prepack'.");
 
-  int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
+  int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "qembeddingbag_" + c10::to_string(BIT_RATE) +
+      "qembeddingbag_" + c10::to_string(bit_width) +
           "bit_prepack only works for the number of columns a multiple of " +
           c10::to_string(NUM_ELEM_PER_BYTE));
 
@@ -182,20 +181,20 @@ Tensor _qembeddingbag_nbit_prepack_helper(
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
 
-    float Xmin = *std::min_element(input_row, input_row + embedding_cols);
-    float Xmax = *std::max_element(input_row, input_row + embedding_cols);
-
-    float zp = Xmin;
+    float Xmin, Xmax;
     if (optimized_qparams) {
-      std::tie(Xmax, zp) = at::choose_qparams_optimized(
-          weight_contig[row], embedding_cols, 200, 0.16, Xmin, Xmax, BIT_RATE);
+      std::tie(Xmax, Xmin) = at::choose_qparams_optimized(
+          weight_contig[row], embedding_cols, 200, 0.16, bit_width);
+    } else {
+      Xmin = *std::min_element(input_row, input_row + embedding_cols);
+      Xmax = *std::max_element(input_row, input_row + embedding_cols);
     }
-    zp = static_cast<at::Half>(zp);
-    float range = Xmax - zp;
+    Xmin = static_cast<at::Half>(Xmin);
+    float range = Xmax - Xmin;
     // Set scale to 1.0f for the corner case of Xmax == Xmin .
     // Any non-zero scale would work because during quantization
     // (X - Xmin) / scale will be 0 for all X unless scale is 0.
-    at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
+    at::Half scale = range == 0 ? 1.0f : range / ((1 << bit_width) - 1);
     float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
     if (scale == 0 || std::isinf(inverse_scale)) {
       // Corner case handling when Xmax == Xmin
@@ -209,21 +208,21 @@ Tensor _qembeddingbag_nbit_prepack_helper(
         (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
 
     output_row_scale_zp[0] = scale;
-    output_row_scale_zp[1] = zp;
+    output_row_scale_zp[1] = Xmin;
 
     // Pack the weight values.
     for (int col = 0; col < embedding_cols; ++col) {
       float X = input_row[col];
       std::uint8_t quantized = std::max(
           0,
-          std::min<int>(lrintf((X - zp) * inverse_scale), (1 << BIT_RATE) - 1));
+          std::min<int>(lrintf((X - Xmin) * inverse_scale), (1 << bit_width) - 1));
       // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
       // and index 1 is packed in the upper 4-bits.
       if (col % NUM_ELEM_PER_BYTE == 0) {
         output_row[col / NUM_ELEM_PER_BYTE] = quantized;
       } else {
         output_row[col / NUM_ELEM_PER_BYTE] |=
-            (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
+            (quantized << ((col % NUM_ELEM_PER_BYTE) * bit_width));
       }
     } // embedding_cols
   } // embedding_rows
@@ -237,10 +236,9 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 // To later de-quantize values, the scale (range / 15) and zero_point
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
-template <bool OPTIMIZED_QPARAMS = false>
-Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
+Tensor qembeddingbag_4bit_prepack(const Tensor& weight, bool optimized_qparams) {
   return _qembeddingbag_nbit_prepack_helper(
-      weight, 4 /*BIT_RATE*/, OPTIMIZED_QPARAMS);
+      weight, 4 /*bit_width*/, optimized_qparams);
 }
 
 // Applies 2-bit row-wise quantization by determining the range
@@ -251,10 +249,9 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
 // TODO() - Add 2Bit Embedding Lookup operator.
-template <bool OPTIMIZED_QPARAMS = false>
-Tensor qembeddingbag_2bit_prepack(const Tensor& weight) {
+Tensor qembeddingbag_2bit_prepack(const Tensor& weight, bool optimized_qparams) {
   return _qembeddingbag_nbit_prepack_helper(
-      weight, 2 /*BIT_RATE*/, OPTIMIZED_QPARAMS);
+      weight, 2 /*bit_width*/, optimized_qparams);
 }
 
 class QEmbeddingPackWeights final {
@@ -265,9 +262,9 @@ class QEmbeddingPackWeights final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("embedding_bag_byte_prepack", TORCH_FN(qembeddingbag_byte_prepack<false>));
-  m.impl("embedding_bag_4bit_prepack", TORCH_FN(qembeddingbag_4bit_prepack<true>));
-  m.impl("embedding_bag_2bit_prepack", TORCH_FN(qembeddingbag_2bit_prepack<true>));
+  m.impl("embedding_bag_byte_prepack", TORCH_FN(qembeddingbag_byte_prepack));
+  m.impl("embedding_bag_4bit_prepack", TORCH_FN(qembeddingbag_4bit_prepack));
+  m.impl("embedding_bag_2bit_prepack", TORCH_FN(qembeddingbag_2bit_prepack));
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {

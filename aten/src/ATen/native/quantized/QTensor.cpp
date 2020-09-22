@@ -238,10 +238,10 @@ float calculate_quant_loss(
     float xmin,
     float xmax,
     float* q_input,
-    int bit_rate) {
+    int bit_width) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
-  float qmax = (1 << bit_rate) - 1;
+  float qmax = (1 << bit_width) - 1;
   float scale = data_range == 0
       ? 1.0
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
@@ -276,19 +276,19 @@ std::tuple<double, double> choose_qparams_optimized(
     int64_t numel,
     const int64_t n_bins,
     const double ratio,
-    double xmin,
-    double xmax,
-    int64_t bit_rate) {
+    int64_t bit_width) {
 
-  xmin = (float) xmin;
-  xmax = (float) xmax;
+  const float* input_row = input_tensor.data_ptr<float>();
+  float xmin = *std::min_element(input_row, input_row + numel);
+  float xmax = *std::max_element(input_row, input_row + numel);
+
   float stepsize = (xmax - xmin) / n_bins;
   int min_bins = n_bins * (1.0 - (float) ratio);
   const float* input = input_tensor.contiguous().data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =
-      calculate_quant_loss(input, numel, xmin, xmax, q_input.data(), bit_rate);
+      calculate_quant_loss(input, numel, xmin, xmax, q_input.data(), bit_width);
   float best_loss = loss;
 
   float cur_min = xmin;
@@ -299,10 +299,10 @@ std::tuple<double, double> choose_qparams_optimized(
   while (cur_min + thr < cur_max) {
     // move left
     float loss1 = calculate_quant_loss(
-        input, numel, cur_min + stepsize, cur_max, q_input.data(), bit_rate);
+        input, numel, cur_min + stepsize, cur_max, q_input.data(), bit_width);
     // move right
     float loss2 = calculate_quant_loss(
-        input, numel, cur_min, cur_max - stepsize, q_input.data(), bit_rate);
+        input, numel, cur_min, cur_max - stepsize, q_input.data(), bit_width);
     if (cur_loss < loss1 && cur_loss < loss2 && cur_loss < best_loss) {
       // found a local optima
       best_loss = cur_loss;

@@ -2721,7 +2721,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
-        w_packed = pack_fn(weights)
+        w_packed = pack_fn(weights, optimized_qparams=True)
         w_unpacked = unpack_fn(w_packed)
 
         if bit_rate == 8:
@@ -2778,9 +2778,9 @@ class TestQuantizedEmbeddingOps(TestCase):
         w_packed_c2, w_unpacked_c2 = get_c2_weights(weights)
 
         # Compare packed weights against C2.
-        np.testing.assert_equal(w_packed.numpy(), w_packed_c2.numpy())
+        np.testing.assert_allclose(w_packed.numpy(), w_packed_c2.numpy(), atol=1e-6, rtol=1e-6)
         # Compare unpacked weights against C2
-        np.testing.assert_equal(w_unpacked.numpy(), w_unpacked_c2.numpy())
+        np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
