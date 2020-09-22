@@ -559,8 +559,14 @@
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: asin_
+    SparseCPU, SparseCUDA: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: asin_out
+    SparseCPU, SparseCUDA: asin_out_sparse
 
 # arcsin, alias of asin
 - func: arcsin(Tensor self) -> Tensor
@@ -2722,8 +2728,14 @@
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: neg_
+    SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: neg_out
+    SparseCPU, SparseCUDA: neg_out_sparse
 
 # Alias for neg
 - func: negative(Tensor self) -> Tensor
@@ -5850,14 +5862,14 @@
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: legacy::cpu::_th_sort_out
+    CPU: sort_out_cpu
     CUDA: legacy::cuda::_th_sort_out
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_sort
+    CPU: sort_cpu
     CUDA: legacy::cuda::_th_sort
     QuantizedCPU: sort_quantized_cpu
 

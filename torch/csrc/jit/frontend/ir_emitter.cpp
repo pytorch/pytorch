@@ -2268,6 +2268,10 @@ struct to_ir {
             << " subscripted assignment. "
             << "File a bug if you want this";
       }
+      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+        throw ErrorReport(lhs) << sliceable->type()->repr_str()
+                               << " does not support subscripted assignment";
+      }
 
       std::vector<NamedValue> args;
       args.emplace_back(lhs.value().range(), "self", sliceable);
