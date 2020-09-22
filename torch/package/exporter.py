@@ -1,12 +1,11 @@
 import torch
 from torch.serialization import normalize_storage_type, location_tag, _should_read_directly
-from glob import glob
 import io
 import pickle
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import CustomImportPickler
-from ._importlib import _normalize_path, _zip_searchorder
+from ._importlib import _normalize_path
 import types
 import importlib
 from typing import List, Any, Callable, Dict
@@ -87,23 +86,26 @@ class PackageExporter:
         if path.is_dir():
             to_save = []  # list of tuples with arguments to save_source_string
             module_path = module_name.replace('.', '/')
-            for filename in glob(f'{file_or_directory}/**', recursive=True):
-                archivename = module_path + filename[len(file_or_directory):]
-                if '__pycache__' in filename:
-                    continue
-                if Path(filename).is_dir():
+            for filename in path.glob('**/*.py'):
+                relative_path = filename.relative_to(path).as_posix()
+                archivename = module_path + '/' + relative_path
+                if filename.is_dir():
                     self.provided[archivename] = True
                 else:
-                    for end, is_package in _zip_searchorder:
-                        if archivename.endswith(end):
-                            submodule_name = archivename[:-len(end)].replace('/', '.')
-                            self.provided[submodule_name] = True
-                            # we delay the call to save_source_string so that we record all the source files
-                            # being provided by this directory structure _before_ attempting to resolve the dependencies
-                            # on the source. This makes sure we don't try to copy over modules that will just get
-                            # overwritten by this directory blob
-                            to_save.append((submodule_name, _read_file(filename), is_package, dependencies, filename))
-                            break
+                    submodule_name = None
+                    if filename.name == '__init__.py':
+                        submodule_name = archivename[:-len('/__init__.py')].replace('/', '.')
+                        is_package = True
+                    else:
+                        submodule_name = archivename[:-len('.py')].replace('/', '.')
+                        is_package = False
+
+                    self.provided[submodule_name] = True
+                    # we delay the call to save_source_string so that we record all the source files
+                    # being provided by this directory structure _before_ attempting to resolve the dependencies
+                    # on the source. This makes sure we don't try to copy over modules that will just get
+                    # overwritten by this directory blob
+                    to_save.append((submodule_name, _read_file(filename), is_package, dependencies, str(filename)))
 
             for item in to_save:
                 self.save_source_string(*item)

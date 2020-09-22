@@ -1,4 +1,5 @@
-from unittest import TestCase, main, skipIf
+from unittest import main, skipIf
+from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
 from pathlib import Path
@@ -23,9 +24,13 @@ class PackagingTest(TestCase):
         self._temporary_files = []
 
     def temp(self):
-        t = NamedTemporaryFile(suffix='zip')
-        self._temporary_files.append(t)
-        return t.name
+        t = NamedTemporaryFile()
+        name = t.name
+        if IS_WINDOWS:
+            t.close()  # can't read an open file in windows
+        else:
+            self._temporary_files.append(t)
+        return name
 
     def tearDown(self):
         for t in self._temporary_files:
