@@ -7021,15 +7021,6 @@ workflows:
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_11_2_1_nightly_arm64_build
-      - binary_ios_upload:
-          build_environment: libtorch-ios-11.2.1-nightly-binary-build-upload
-          context: org-member
-          filters:
-            branches:
-              only: nightly
-          requires:
-            - pytorch_ios_11_2_1_nightly_x86_64_build
-            - pytorch_ios_11_2_1_nightly_arm64_build
       - pytorch_linux_build:
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
