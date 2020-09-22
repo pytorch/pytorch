@@ -183,7 +183,8 @@ def preprocess(
                 result["orig_path"], "->",
                 result["hipified_path"], result["status"])
 
-        final_result[filepath]=result
+        if result["hipified_path"] is not None:
+            final_result[filepath]=result
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
