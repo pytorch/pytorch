@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -268,7 +269,7 @@ TensorPipeAgent::TensorPipeAgent(
           WorkerInfo(std::move(selfName), selfId),
           std::move(cb),
           std::chrono::milliseconds(
-              (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
+              (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
       opts_(std::move(opts)),
       threadPool_(opts_.numWorkerThreads),
       context_(std::make_shared<tensorpipe::Context>(
@@ -680,7 +681,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
       ? getRpcTimeout()
       : std::chrono::milliseconds(
-            static_cast<int>(rpcTimeoutSeconds * kToMilliseconds));
+            static_cast<int>(rpcTimeoutSeconds * kSecToMsConversion));
 
   // We only add to the timeoutMap_ if the timeout is not 0. Per our
   // documentation, a user-provided timeout of 0 indicates the RPC should never
