@@ -46,7 +46,7 @@ class TestForeach(TestCase):
 
             # Add 1 to avoid division by 0
             if dtype != torch.bool and add_one:
-                torch.foreach_add_(tensors2, 1)
+                torch._foreach_add_(tensors2, 1)
 
             expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
