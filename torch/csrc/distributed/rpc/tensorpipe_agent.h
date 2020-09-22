@@ -16,6 +16,7 @@
 
 namespace tensorpipe {
 
+class CpuBuffer;
 class Context;
 class Error;
 class Listener;
@@ -30,7 +31,9 @@ class Context;
 } // namespace transport
 
 namespace channel {
+template <typename TBuffer>
 class Context;
+using CpuContext = Context<CpuBuffer>;
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -53,7 +56,7 @@ struct TransportRegistration {
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct ChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::Context> channel;
+  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
   int64_t priority;
 };
 
