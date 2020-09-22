@@ -507,7 +507,7 @@ class DefaultQuant(QuantizeHandler):
             quantizer.quantized_graph,
             node, quantizer.activation_post_process_map[node.name])
 
-class CustomModule(QuantizeHandler):
+class TraceableCustomModuleHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         if quantizer.is_dynamic_quant:
@@ -516,6 +516,7 @@ class CustomModule(QuantizeHandler):
             convert = torch.quantization.convert_child_module_fx
         observed_custom_module = quantizer.modules[node.target]
         quantized_custom_module = convert(observed_custom_module, debug=debug)
+        print('quantized:', quantized_custom_module)
         parent_name, name = _parent_name(node.target)
         setattr(quantizer.modules[parent_name], name, quantized_custom_module)
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
@@ -552,9 +553,16 @@ class DynamicLinear(QuantizeHandler):
                     'call_function', torch.nn.functional.linear, args, kwargs)
             else:
                 # linear args:
-                # (x, weight, bias)
-                # quantize weight
-                quantized_weight = load_arg(quantized=True)(self.linear_node.args[1])
+                # (x, observed_weight, bias)
+                # get observer for the weight
+                weight_observer = quantizer.activation_post_process_map[self.linear_node.args[1].args[0].name]
+
+                if weight_observer.dtype == torch.float16:
+                    linear_weight = load_arg(quantized=False)(self.linear_node.args[1])
+                    prepack_op = torch.ops.quantized.linear_prepack_fp16
+                else:
+                    linear_weight = load_arg(quantized=True)(self.linear_node.args[1])
+                    prepack_op = torch.ops.quantized.linear_prepack
                 bias = None
                 # all args after bias, including bias
                 other_args = load_arg(quantized=False)(self.linear_node.args[2:])
@@ -567,10 +575,10 @@ class DynamicLinear(QuantizeHandler):
                         'expect bias provided as a keyword argument when it is not a positional argument'
                     bias = kwargs['bias']
                     kwargs.pop('bias')
-                prepack_args = (quantized_weight, bias)
+                prepack_args = (linear_weight, bias)
                 # pack weight
                 packed_weight = quantizer.quantized_graph.create_node(
-                    'call_function', torch.ops.quantized.linear_prepack, prepack_args, {})
+                    'call_function', prepack_op, prepack_args, {})
                 # construct dynamic linear input
                 non_quantized_input = load_arg(quantized=False)(self.linear_node.args[0])
                 qdynamic_linear_args = (non_quantized_input, packed_weight)

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import warnings
 from abc import ABCMeta, abstractmethod
@@ -97,12 +96,18 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_symmetric``
     """
 
+    # Note: the version is shared by all observer types
+    #
     # Version 1/None
     #   self
     #
-    # Version 2
+    # Version 2 (base class only, does not include child class buffers)
     #   self
     #   |--- eps : Tensor
+    #
+    # Version 3
+    #   for HistogramObserver only, changed the shape of uninitialized
+    #   min_val and max_val buffers from torch.Size([0]) to torch.Size([])
     _version = 2
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -399,25 +404,6 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_val'] = self.min_val
-        destination[prefix + 'max_val'] = self.max_val
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-
-        local_state = ['min_val', 'max_val']
-        for name in local_state:
-            key = prefix + name
-            if key in state_dict:
-                val = state_dict[key]
-                setattr(self, name, val)
-            elif strict:
-                missing_keys.append(key)
-        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                          missing_keys, unexpected_keys, error_msgs)
-
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -614,17 +600,16 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         return self._forward(x_orig)
 
-    @torch.jit.ignore
     def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
+        new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        y = x.permute(new_axis_list)
         # Need to match dtype of min/max because the updates to buffers
         # are done in place and types need to match for comparisons
         y = y.to(self.min_vals.dtype)
@@ -648,19 +633,22 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_vals'] = self.min_vals
-        destination[prefix + 'max_vals'] = self.max_vals
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
             if key in state_dict:
                 val = state_dict[key]
-                setattr(self, name, val)
+                # Custom handling to allow loading min_vals or max_vals
+                # of size N into uninitialized buffers of size 0. The
+                # buffers are resized here, and the values are copied in
+                # the default state_dict loading code of the parent.
+                if name == 'min_vals':
+                    self.min_vals.resize_(val.shape)
+                else:
+                    self.max_vals.resize_(val.shape)
             elif strict:
                 missing_keys.append(key)
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -708,10 +696,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
+        new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals, max_vals = torch._aminmax(y, 1)
@@ -758,8 +746,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+        self.register_buffer('min_val', torch.tensor(float('inf')))
+        self.register_buffer('max_val', torch.tensor(float('-inf')))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -936,10 +924,9 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        same_values = False
-        if min_val.numel() > 0 and max_val.numel() > 0:
-            same_values = min_val.item() == max_val.item()
-        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
+        same_values = min_val.item() == max_val.item()
+        is_uninitialized = min_val == float('inf') and max_val == float('-inf')
+        if is_uninitialized or same_values:
             min_val, max_val = torch._aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
@@ -977,7 +964,9 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        if self.min_val.numel() == 0 or self.max_val.numel() == 0:
+        is_uninitialized = (self.min_val == float('inf') and
+                            self.max_val == float('-inf'))
+        if is_uninitialized:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
@@ -999,6 +988,18 @@ class HistogramObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+
+        if version is None or version < 3:
+            # if min_val and max_val are not initialized, update their shape
+            # to account for the differences between v2 and v3
+            min_val_name, max_val_name = prefix + 'min_val', prefix + 'max_val'
+            if min_val_name in state_dict:
+                if state_dict[min_val_name].shape == torch.Size([0]):
+                    state_dict[min_val_name] = torch.tensor(float('inf'))
+            if max_val_name in state_dict:
+                if state_dict[max_val_name].shape == torch.Size([0]):
+                    state_dict[max_val_name] = torch.tensor(float('-inf'))
 
         local_state = ['min_val', 'max_val']
         for name in local_state:

@@ -1,4 +1,3 @@
-from __future__ import division
 from builtins import round
 
 import itertools
@@ -19,9 +18,11 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines
+from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.quantization import PerChannelMinMaxObserver
 
 np_dtype = {
@@ -2564,7 +2565,6 @@ class TestQuantizedLinear(unittest.TestCase):
                      use_relu, use_multi_dim_input, use_channelwise):
         decimal_val = 4
         if torch.backends.quantized.engine == 'qnnpack':
-            use_multi_dim_input = False
             # QNNPACK supports uint8 in the kernels. In the op we shift the int8
             # weight values to uint8 to be on par with fbgemm. However, this causes
             # some rounding issues in rare cases. So, we relax the check to allow
@@ -2779,9 +2779,9 @@ class TestQuantizedEmbeddingOps(TestCase):
         w_packed_c2, w_unpacked_c2 = get_c2_weights(weights)
 
         # Compare packed weights against C2.
-        np.testing.assert_equal(w_packed.numpy(), w_packed_c2.numpy())
+        np.testing.assert_allclose(w_packed.numpy(), w_packed_c2.numpy(), atol=1e-6, rtol=1e-6)
         # Compare unpacked weights against C2
-        np.testing.assert_equal(w_unpacked.numpy(), w_unpacked_c2.numpy())
+        np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
@@ -2962,7 +2962,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
 
-class TestQuantizedConv(unittest.TestCase):
+class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
         (X_data, W_data, bias_data, groups, transposed) = inputs
@@ -3017,12 +3017,13 @@ class TestQuantizedConv(unittest.TestCase):
                 W_q.q_zero_point(), W_unpacked.q_zero_point())
 
     def _make_qconv_tensors(
-        self, batch_size,
-        input_channels_per_group, input_feature_map_shape,
+        self, batch_size, input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, dilations,
         X_scale, X_zero_point, W_scale, W_zero_point,
-        use_bias, use_channelwise
+        use_bias, use_channelwise, use_transpose
     ):
+        assert not (use_channelwise and use_transpose), \
+               "Cannot generate channelwise qconv_transpose_tensors "
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
@@ -3047,12 +3048,16 @@ class TestQuantizedConv(unittest.TestCase):
         # aten/src/ATen/native/quantized/cpu/qconv.cpp for more details.
         (W_value_min, W_value_max) = (-5, 5)
         # the operator expects them in the format
-        # (output_channels, input_channels/groups,
-        #  kernel_d, kernel_h, kernel_w)
+        # (output_channels, input_channels/groups, kernel_d, kernel_h, kernel_w)
+        # (input_channels, output_channels/groups, kernel_d, kernel_h, kernel_w)
+        if use_transpose:
+            output_shape = (input_channels, output_channels_per_group,)
+        else:
+            output_shape = (output_channels, input_channels_per_group,)
         W_init = torch.randint(
             W_value_min,
             W_value_max,
-            (output_channels, input_channels_per_group,) + kernels,
+            output_shape + kernels
         )
         b_init = torch.randint(0, 10, (output_channels,))
 
@@ -3093,21 +3098,24 @@ class TestQuantizedConv(unittest.TestCase):
     def _test_qconv_impl(
         self, qconv_fn, qconv_prepack_fn, conv_op, batch_size,
         input_channels_per_group, input_feature_map_shape,
-        output_channels_per_group, groups, kernels, strides, pads, dilations,
-        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-        use_bias, use_relu, use_channelwise
+        output_channels_per_group, groups, kernels, strides, pads, o_pads,
+        dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
-            W_zero_point, use_bias, use_channelwise)
+            W_zero_point, use_bias, use_channelwise, use_transpose)
         # Assign weights
+        W = W_q.dequantize()
+        X = X_q.dequantize()
         conv_op.weight = torch.nn.Parameter(W, requires_grad=False)
         conv_op.bias = torch.nn.Parameter(
             bias_float, requires_grad=False) if use_bias else None
         result_ref = conv_op(X)
         if use_relu:
+            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
 
@@ -3116,8 +3124,12 @@ class TestQuantizedConv(unittest.TestCase):
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)
 
-        W_prepack = qconv_prepack_fn(
-            W_q, bias_float, strides, pads, dilations, groups)
+        if use_transpose:
+            W_prepack = qconv_prepack_fn(
+                W_q, bias_float, strides, pads, o_pads, dilations, groups)
+        else:
+            W_prepack = qconv_prepack_fn(
+                W_q, bias_float, strides, pads, dilations, groups)
         Y_q = qconv_fn(
             X_q,
             W_prepack,
@@ -3137,7 +3149,13 @@ class TestQuantizedConv(unittest.TestCase):
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
         np.testing.assert_array_almost_equal(
-            result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
+            result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0,
+            err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
+            pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
+            groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}''')
+
+        # Return the quantized data for later reuse
+        return X_q, W_q, bias_float
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -3211,46 +3229,213 @@ class TestQuantizedConv(unittest.TestCase):
         self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
-            output_channels_per_group, groups, kernels, strides, pads,
+            output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise)
+            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
 
-    """Tests the correctness of the quantized::qconv_unpack op."""
-    @given(
-        inputs=hu.tensor_conv(
-            spatial_dim=2, batch_size_range=(1, 3),
-            input_channels_per_group_range=(1, 4),
-            output_channels_per_group_range=(1, 4), feature_map_range=(4, 8),
-            kernel_range=(1, 4), max_groups=4,
-            qparams=[hu.qparams(dtypes=torch.quint8,
-                                zero_point_min=0,
-                                zero_point_max=0),
-                     hu.qparams(dtypes=torch.qint8,
-                                zero_point_min=0,
-                                zero_point_max=0),
-                     hu.qparams(dtypes=torch.qint32,
-                                zero_point_min=0,
-                                zero_point_max=0)]),
-        stride_h=st.integers(1, 3), stride_w=st.integers(1, 3),
-        pad_h=st.integers(1, 2), pad_w=st.integers(1, 2),
-        o_pad_h=st.integers(1, 2), o_pad_w=st.integers(1, 2),
-        channelwise=st.booleans())
+    """Tests the correctness of quantized convolution op."""
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           o_pad=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans())
     @override_qengines
-    def test_qconv_unpack(self, inputs, stride_h, stride_w, pad_h, pad_w,
-                          o_pad_h, o_pad_w, channelwise):
-        transposed = inputs[-1]
-        if torch.backends.quantized.engine != 'qnnpack' and transposed:
-            # Only QNNPACK conv_transpose is supported for now...
-            return
-        if transposed:
-            qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
-            qconv_unpack = torch.ops.quantized.conv_transpose2d_unpack
-        else:
-            qconv_prepack = torch.ops.quantized.conv2d_prepack
-            qconv_unpack = torch.ops.quantized.conv2d_unpack
-        self._test_qconv_unpack_impl(
-            qconv_prepack, qconv_unpack, inputs, (stride_h, stride_w),
-            (pad_h, pad_w), (o_pad_h, o_pad_w), channelwise)
+    def test_qconv_transpose1d(
+            self,
+            batch_size,
+            input_channels_per_group,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel,
+            stride,
+            pad,
+            o_pad,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias):
+        if not qengine_is_qnnpack():
+            return  # Currently only the QNNPACK is supported
+        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+            return  # QNNPACK doesn't support these
+        assume(o_pad < stride or o_pad < dilation)
+
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel,)
+        strides = (stride,)
+        pads = (pad,)
+        o_pads = (o_pad,)
+        dilations = (dilation,)
+
+        qconv = torch.ops.quantized.conv_transpose1d
+        qconv_prepack = torch.ops.quantized.conv_transpose1d_prepack
+        conv_op = torch.nn.ConvTranspose1d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        X_q, W_q, bias_float = self._test_qconv_impl(
+            qconv, qconv_prepack, conv_op, batch_size,
+            input_channels_per_group, (width, ),
+            output_channels_per_group, groups, kernels, strides, pads, o_pads,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu=False,
+            use_channelwise=False, use_transpose=True)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.ConvTranspose1d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
+
+
+    """Tests the correctness of quantized convolution op."""
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           o_pad_h=st.integers(0, 2),
+           o_pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans())
+    @override_qengines
+    def test_qconv_transpose2d(
+            self,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            o_pad_h,
+            o_pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias):
+        if not qengine_is_qnnpack():
+            return  # Currently only QNNPACK is supported
+        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+            return  # QNNPACK doesn't support these
+        assume(o_pad_h < stride_h or o_pad_h < dilation)
+        assume(o_pad_w < stride_w or o_pad_w < dilation)
+
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        pads = (pad_h, pad_w)
+        o_pads = (o_pad_h, o_pad_w)
+        dilations = (dilation, dilation)
+
+        qconv = torch.ops.quantized.conv_transpose2d
+        qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
+        conv_op = torch.nn.ConvTranspose2d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        X_q, W_q, bias_float = self._test_qconv_impl(
+            qconv, qconv_prepack, conv_op, batch_size,
+            input_channels_per_group, (height, width),
+            output_channels_per_group, groups, kernels, strides, pads, o_pads,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu=False,
+            use_channelwise=False, use_transpose=True)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.ConvTranspose2d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
 
     @given(
         inputs=hu.tensor_conv(
@@ -3270,21 +3455,27 @@ class TestQuantizedConv(unittest.TestCase):
                                 zero_point_max=0)]),
         stride=st.integers(1, 3),
         pad=st.integers(1, 2),
-        channelwise=st.booleans(),
-        qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qconv1d_unpack(
-        self, inputs, stride, pad, channelwise, qengine
-    ):
+        o_pad=st.integers(1, 2),
+        channelwise=st.booleans())
+    @override_qengines
+    def test_qconv1d_unpack(self, inputs, stride, pad, o_pad, channelwise):
+        transposed = inputs[-1]
+        qengine = torch.backends.quantized.engine
         if qengine not in supported_qengines:
             return
         if qengine == 'qnnpack':
-            channelwise = False
-        with override_quantized_engine(qengine):
+            assume(not channelwise)  # QNNPACK doesn't support channelwise
+        else:
+            assume(not transposed)  # Only QNNPACK supports transposed conv
+        if transposed:
+            qconv_prepack = torch.ops.quantized.conv_transpose1d_prepack
+            qconv_unpack = torch.ops.quantized.conv_transpose1d_unpack
+        else:
             qconv_prepack = torch.ops.quantized.conv1d_prepack
             qconv_unpack = torch.ops.quantized.conv1d_unpack
-            self._test_qconv_unpack_impl(
-                qconv_prepack, qconv_unpack, inputs, [stride],
-                [pad], None, channelwise)
+        self._test_qconv_unpack_impl(
+            qconv_prepack, qconv_unpack, inputs, [stride],
+            [pad], [o_pad], channelwise)
 
     @given(
         inputs=hu.tensor_conv(
@@ -3388,10 +3579,9 @@ class TestQuantizedConv(unittest.TestCase):
         self._test_qconv_impl(
             qconv, qconv_prepack, true_conv1d, batch_size,
             input_channels_per_group, (length, ),
-            output_channels_per_group, groups, kernel, [stride], [pad],
+            output_channels_per_group, groups, kernel, [stride], [pad], None,
             [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise
-        )
+            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
@@ -3477,9 +3667,9 @@ class TestQuantizedConv(unittest.TestCase):
             self._test_qconv_impl(
                 qconv, qconv_prepack, conv_op, batch_size,
                 input_channels_per_group, (D, H, W), output_channels_per_group,
-                groups, kernels, strides, pads, dilations, X_scale,
+                groups, kernels, strides, pads, None, dilations, X_scale,
                 X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-                use_bias, use_relu, use_channelwise)
+                use_bias, use_relu, use_channelwise, use_transpose=False)
 
     """Tests the correctness of the quantized::qconv3d_unpack op."""
     @given(

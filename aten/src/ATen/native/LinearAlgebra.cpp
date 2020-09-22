@@ -1283,23 +1283,11 @@ Tensor frobenius_norm(const Tensor& self) {
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "frobenius norm not supported for complex tensors");
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  if (dim.size() == 1 || dim.size() == 0) {
-    return at::norm(self, 2, dim, keepdim);
-  }
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-  TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-  if (self.is_complex()){
-    return at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-  } else {
-    return at::sqrt(at::sum((self * self), dim_, keepdim));
-  }
+  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
+  //    strided tensor result, even if the input is sparse.
+  auto options = self.options().layout(c10::Layout::Strided);
+  Tensor result = at::empty({0}, options);
+  return at::native::frobenius_norm_out(result, self, dim, keepdim);
 }
 
 Tensor &frobenius_norm_out(
@@ -1313,17 +1301,25 @@ Tensor &frobenius_norm_out(
       "Expected at most 2 dimensions, but got ",
       dim.size(),
       " dimensions instead.");
+  Tensor result_;
   if (dim.size() == 1 || dim.size() == 0) {
-    return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
-  }
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-  TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-  if (self.is_complex()){
-    return at::sqrt_out(result, at::sum(at::real(self.conj() * self), dim_, keepdim));
+    result_ = at::norm(self, 2, dim, keepdim);
   } else {
-    return at::sqrt_out(result, at::sum((self * self), dim_, keepdim));
+    auto dim_ = dim.vec();
+    maybe_wrap_dims(dim_, self.dim());
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    if (self.is_complex()){
+      result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
+    } else {
+      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
+    }
   }
+  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
+  //    However, norm_out and sqrt_out do not support automatic differentiation.
+  //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
+  resize_output(result, result_.sizes());
+  result.copy_(result_);
+  return result;
 }
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
@@ -1331,15 +1327,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
-  // would end up throwing an error as a result if U and V aren't computed.
-  // Due to this, we have to compute U and V conditionally.
-  Tensor result = at::sum(std::get<1>(at::svd(self, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
-  if (keepdim) {
-    result.unsqueeze_(0);
-  }
-  return result;
+  return at::native::nuclear_norm(self, IntArrayRef({0, 1}), keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -1347,31 +1335,12 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  at::sum_out(result, std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/false)), 0, keepdim);
-  if (keepdim) {
-    result.unsqueeze_(0);
-  }
-  return result;
+  return at::native::nuclear_norm_out(result, self, IntArrayRef({0, 1}), keepdim);
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-
-  auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-  auto permutation_reverse = create_reverse_permutation(permutation);
-  Tensor p = self.permute(permutation);
-  // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
-  // would end up throwing an error as a result if U and V aren't computed.
-  // Due to this, we have to compute U and V conditionally.
-  Tensor result = at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
-  if (keepdim) {
-    result.unsqueeze_(-1);
-    result = result.permute(permutation_reverse);
-  }
-  return result;
+  Tensor result = at::empty({0}, self.options());
+  return at::native::nuclear_norm_out(result, self, dim, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
@@ -1380,15 +1349,18 @@ Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bo
   maybe_wrap_dims(dim_, self.dim());
 
   auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-  auto permutation_reverse = create_reverse_permutation(permutation);
-
   Tensor p = self.permute(permutation);
-  at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
+  // NOTE: U and V are computed only if gradmode is enabled, since the backward for nuclear
+  //       norm uses svd_backward, which requires them.
+  Tensor result_ = at::sum(std::get<1>(at::svd(p, /*some=*/true,
+                  /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
   if (keepdim) {
-    result.unsqueeze_(-1);
-    Tensor result_ = result.permute(permutation_reverse);
-    result.set_(result_);
+    result_.unsqueeze_(-1);
+    auto permutation_reverse = create_reverse_permutation(permutation);
+    result_ = result_.permute(permutation_reverse);
   }
+  resize_output(result, result_.sizes());
+  result.copy_(result_);
   return result;
 }
 

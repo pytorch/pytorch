@@ -1,13 +1,4 @@
 import torch
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from ..quantization_mappings import (
-    get_qat_module_mappings,
-)
-
 from torch.fx import (
     GraphModule,
     Proxy,
@@ -19,6 +10,17 @@ from torch.fx.graph import (
     Node,
     map_arg,
 )
+
+from torch.quantization import (
+    propagate_qconfig_,
+    convert,
+)
+
+from ..quantization_mappings import (
+    get_qat_module_mappings,
+)
+
+from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
@@ -123,6 +125,9 @@ def assert_and_get_unique_device(module):
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
 
+def is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize))
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -133,6 +138,7 @@ WEIGHT_INDEX_DICT = {
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
+    torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
 }
 
@@ -229,7 +235,9 @@ class Quantizer:
                 # add node to matched nodes
                 custom_module_qconfig = self.qconfig_map[node.name]
                 custom_module_nodes.append(node.name)
-                matches[node.name] = (node, [node], CustomModule(self, node), custom_module_qconfig)
+                matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
+
+        print('custom module nodes:', custom_module_nodes)
 
         # indexes for the inputs that needs to be observed
         observed_input_idxs = []
@@ -240,23 +248,25 @@ class Quantizer:
 
         get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
 
-        def insert_observer(node, observer, device):
-            observer_name = get_new_observer_name(model)
-            setattr(model, observer_name, observer)
-            self.activation_post_process_map[node.name] = observer
-            env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-            observed_node_names_set.add(node.name)
-            if device:
-                getattr(model, observer_name).to(device)
-
         for node in model.graph.nodes:
             if node.name in observed_node_names_set:
                 continue
 
+            prefix = node.name + '_activation_post_process_'
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
+                def insert_observer(node, observer, device):
+                    get_new_observer_name = get_new_attr_name_with_prefix(prefix)
+                    observer_name = get_new_observer_name(model)
+                    setattr(model, observer_name, observer)
+                    self.activation_post_process_map[node.name] = observer
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
+                    observed_node_names_set.add(node.name)
+                    if device:
+                        getattr(model, observer_name).to(device)
+
                 # index for input of custom module that needs to be observed in parent
                 child_module_input_idxs = None
                 if node.name in custom_module_nodes:
@@ -268,7 +278,11 @@ class Quantizer:
                     else:
                         prepare = torch.quantization.prepare_child_module_fx
                     observed_custom_module = prepare(traced_custom_module, {'': qconfig})
+                    observed_custom_module.qconfig = qconfig
                     observed_custom_module._is_custom_module = True
+                    print('observed custom module:', observed_custom_module)
+                    print('hasattr:', hasattr(observed_custom_module, '_is_custom_module'))
+                    print('id:', id(observed_custom_module))
                     child_module_input_idxs = observed_custom_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
@@ -296,7 +310,7 @@ class Quantizer:
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed_node_names_set:
                         observed_node_names_set.add(node.name)
-                elif isinstance(obj, CustomModule):
+                elif isinstance(obj, TraceableCustomModuleHandler):
                     assert node.op == 'call_module'
                     output_is_observed = self.modules[node.target]
                     if output_is_observed:
@@ -324,6 +338,7 @@ class Quantizer:
                     # in parent graph
                     observed_input_idxs.append(graph_inputs.index(node.name))
                     continue
+                get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                 observer_name = get_new_observer_name(model)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
@@ -395,8 +410,9 @@ class Quantizer:
 
     def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_child_module=False):
         self.restore_state(model)
-        if not inplace:
-            model = copy.deepcopy(model)
+        # TODO: uncomment after deepcopy is fixed
+        # if not inplace:
+        #     model = copy.deepcopy(model)
         self.is_dynamic_quant = is_dynamic_quant
         # run weight observers before inserting quant dequant nodes
         # for dynamic quantization
@@ -412,11 +428,16 @@ class Quantizer:
 
         # add custom modules to the match
         for node in model.graph.nodes:
+            if node.op == 'call_module':
+                print('modules:', self.modules[node.target])
+                print('id:', id(self.modules[node.target]))
+                print(hasattr(self.modules[node.target], '_is_custom_module'))
             if node.op == 'call_module' and \
                hasattr(self.modules[node.target], '_is_custom_module') and \
                self.modules[node.target]._is_custom_module:
                 custom_module_qconfig = self.qconfig_map[node.name]
-                matches[node.name] = (node, [node], CustomModule(self, node), custom_module_qconfig)
+                print('matched custom module:', node.name)
+                matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
 
         self.quantized_graph = Graph()
         env = {}
@@ -431,7 +452,8 @@ class Quantizer:
             if n.name not in env:
                 assert n.name in quant_env, \
                     'trying to load float node but did not find node:' + n.name + \
-                    ' in quantized environment:' + str(quant_env)
+                    ' in quantized or non quantized environment, env: ' + str(env) + \
+                    ' quant_env:' + str(quant_env)
                 env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
@@ -504,23 +526,28 @@ class Quantizer:
         for node in model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
-                result = obj.convert(self, node, load_arg)
-                if node.op == 'call_module' and is_custom_module(self.modules[node.target]):
-                    quantized = self.modules[node.target]._output_is_observed
-                else:
-                    quantized = True
-                # Need to get correct quantized/non-quantized state for the output of CopyNode
-                if isinstance(obj, CopyNode):
-                    assert node.op in [
-                        'call_module',
-                        'call_function',
-                        'call_method'], \
-                        'CopyNode of type ' + node.op + ' is not handled'
-                    quantized = is_quantized(node.args[0])
-
-                # output of dynamic quantization is not quantized
-                if self.is_dynamic_quant:
+                if qconfig is None:
+                    result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
+                else:
+                    result = obj.convert(self, node, load_arg)
+                    if node.op == 'call_module' and is_custom_module(self.modules[node.target]):
+                        quantized = self.modules[node.target]._output_is_observed
+                    else:
+                        quantized = True
+
+                    # Need to get correct quantized/non-quantized state for the output of CopyNode
+                    if isinstance(obj, CopyNode):
+                        assert node.op in [
+                            'call_module',
+                            'call_function',
+                            'call_method'], \
+                            'CopyNode of type ' + node.op + ' is not handled'
+                        quantized = is_quantized(node.args[0])
+
+                    # output of dynamic quantization is not quantized
+                    if self.is_dynamic_quant:
+                        quantized = False
 
                 if quantized:
                     quant_env[node.name] = result
@@ -532,9 +559,18 @@ class Quantizer:
 
             # handle activation post process calls
             if node.op == 'call_module':
-                if node.target.split('.')[-1].startswith('activation_post_process_'):
+                if is_activation_post_process(self.modules[node.target]):
                     observer_module = self.modules[node.target]
                     prev_node = node.args[0]
+                    if observer_module.dtype == torch.float16:
+                        # activations are not quantized for
+                        # fp16 dynamic quantization
+                        # copy the activaiton_post_process node here
+                        # since we may need it when we insert prepack
+                        # op for weight of linear, this will be removed
+                        # later in a separate pass
+                        env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+                        continue
                     if prev_node.name in quant_env:
                         # if previous node is already quantized, we'll just remove the activation_post_process
                         quant_env[node.name] = quant_env[prev_node.name]
@@ -545,6 +581,7 @@ class Quantizer:
                         root_module, self.quantized_graph,
                         load_non_quantized(node.args[0]), observer_module)
                     continue
+
             if is_child_module and node.op == 'placeholder' and \
                graph_inputs.index(node.name) in model._observed_input_idxs:
                 # the node is quantized in parent module
@@ -560,13 +597,30 @@ class Quantizer:
             graph_output = load_non_quantized(model.graph.result)
         self.quantized_graph.output(graph_output)
 
+        # remove activation post process
+        act_post_process_removed_graph = Graph()
+        env = {}
+
+        def load_arg(a):
+            return map_arg(a, lambda node: env[node.name])
+        for node in self.quantized_graph.nodes:
+            if node.op == 'call_module' and \
+               is_activation_post_process(self.modules[node.target]):
+                # remove activation post process
+                env[node.name] = env[node.args[0].name]
+            else:
+                env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
+        act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
+
         to_be_removed = []
-        for name, _ in model.named_modules():
-            if name.split('.')[-1].startswith('activation_post_process_'):
+        for name, module in model.named_modules():
+            if is_activation_post_process(module):
                 to_be_removed.append(name)
+        print('model:', model)
         for n in to_be_removed:
             delattr(model, n)
-        model = GraphModule(model, self.quantized_graph)
+        _remove_qconfig(model)
+        model = GraphModule(model, act_post_process_removed_graph)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the graph module
