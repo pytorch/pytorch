@@ -255,18 +255,17 @@ class FunctionSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
-    # NB: Sequence here is intentional, to make it read only
-    arguments: Sequence['Argument']
-    kwarg_only_arguments: Sequence['Argument']  # but not including out args
+    arguments: Tuple['Argument', ...]
+    kwarg_only_arguments: Tuple['Argument', ...]  # but not including out args
     # Unlike in the previous codegen, we have factored out 'out' arguments
     # in the canonical representation, removing them from kwarg
     # arguments.  This choice is justified by numerous downstream
     # transformations which treat out arguments specially; additionally,
     # you can see that canonicity is not violated!
-    out_arguments: Sequence['Argument']  # these are also kwarg-only
+    out_arguments: Tuple['Argument', ...]  # these are also kwarg-only
 
     # TODO: Need to handle collisions with argument names at some point
-    returns: Sequence['Return']
+    returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
         return itertools.chain(self.arguments, self.kwarg_only_arguments, self.out_arguments)
@@ -372,14 +371,14 @@ class FunctionSchema:
 class Annotation:
     # Typically only has one element.  Not actually a set so
     # we can conveniently assume it is canonically ordered
-    alias_set: Sequence[str]
+    alias_set: Tuple[str, ...]
     is_write: bool
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
         m = re.match(r'^([a-z])(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
-        alias_set = [m.group(1)]
+        alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
         r = Annotation(alias_set=alias_set, is_write=is_write)
         assert str(r) == ann, f'{r} != {ann}'
@@ -725,21 +724,18 @@ class OperatorName:
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
-def parse_returns(return_decl: str) -> Sequence[Return]:
+def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     """
     Input: '()'
     Output: []
     """
     if return_decl == '()':
-        return []
+        return ()
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
-    returns = []
-    for arg in return_decl.split(', '):
-        returns.append(Return.parse(arg))
-    return returns
+    return tuple(Return.parse(arg) for arg in return_decl.split(', '))
 
-def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], Sequence[Argument]]:
+def parse_arguments(args: str) -> Tuple[Tuple[Argument, ...], Tuple[Argument, ...], Tuple[Argument, ...]]:
     """
     Input: 'int x, int y, int z'
     Output: positional args, kwarg only args
@@ -774,4 +770,4 @@ def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], 
             assert arguments_acc is not out_arguments
         arguments_acc.append(parg)
 
-    return arguments, kwarg_only_arguments, out_arguments
+    return tuple(arguments), tuple(kwarg_only_arguments), tuple(out_arguments)
