@@ -54,7 +54,6 @@ from torch.testing._internal.common_quantization import (
     default_per_channel_qconfig,
     test_only_eval_fn,
     ConvBnModel,
-    LinearModelWithSubmodule,
 )
 # Annotated models
 from torch.testing._internal.common_quantization import (
@@ -75,7 +74,6 @@ from torch.jit._recursive import wrap_cpp_module
 # Standard library
 import itertools
 import unittest
-import io
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
@@ -1363,27 +1361,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         FileCheck().check("quantized::embedding_bag_byte_rowwise_offsets") \
                    .run(m.graph)
 
-    @skipIfNoFBGEMM
-    def test_save_observer_state_dict(self):
-        model = LinearModelWithSubmodule().eval()
-        scripted = torch.jit.script(model)
-        prepared = prepare_jit(scripted, {'' : torch.quantization.get_default_qconfig('fbgemm')})
-        x = torch.randn(5, 5)
-        prepared(x)
-        obs_dict = torch.quantization.get_observer_state_dict(prepared)
-        b = io.BytesIO()
-        torch.save(obs_dict, b)
-        b.seek(0)
-        quant = convert_jit(prepared)
-
-        # Prepare new model.
-        scripted = torch.jit.script(model)
-        prep_2 = prepare_jit(scripted, {'' : torch.quantization.get_default_qconfig('fbgemm')})
-        loaded_dict = torch.load(b)
-        # load observer stats into new model
-        torch.quantization.load_observer_state_dict(prep_2, loaded_dict)
-        quant_2 = convert_jit(prep_2)
-        self.assertEqual(quant(x), quant_2(x))
 
 class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
