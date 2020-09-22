@@ -76,6 +76,16 @@ if is_available():
                 are available.
         """
 
+        if backend is not None and not isinstance(backend, backend_registry.BackendType):
+            raise TypeError(
+                "Argument backend must be a member of BackendType"
+            )
+
+        if rpc_backend_options is not None and not isinstance(rpc_backend_options, RpcBackendOptions):
+            raise TypeError(
+                "Argument rpc_backend_options must be an instance of RpcBackendOptions"
+            )
+
         # To avoid breaking users that passed a ProcessGroupRpcBackendOptions
         # without specifying the backend as PROCESS_GROUP when that was the
         # default, we try to detect the backend from the options when only the
@@ -106,6 +116,13 @@ if is_available():
 
         if backend is None:
             backend = BackendType.TENSORPIPE
+
+        if backend == BackendType.PROCESS_GROUP:
+            logger.warning(
+                "RPC was initialized with the PROCESS_GROUP backend which is "
+                "deprecated and slated to be removed and superseded by the TENSORPIPE "
+                "backend. It is recommended to migrate to the TENSORPIPE backend."
+            )
 
         if rpc_backend_options is None:
             # default construct a set of RPC backend options.
