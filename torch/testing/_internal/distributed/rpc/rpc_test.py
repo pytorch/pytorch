@@ -940,7 +940,10 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(0.1)
 
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "timed out after 0\\.10 seconds"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "timed out in _all_gather after 0\\.10 seconds"
+            ):
                 rpc.api._all_gather(SlowPickleClass(0.5))
         else:
             with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
