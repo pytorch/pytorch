@@ -42,8 +42,8 @@ class TORCH_CUDA_API ThreadPredicateMap {
 
   void duplicate(const TensorView* copy, const TensorView* origin);
 
-  // Returns a Bool predicate expression for a given TensorView.
-  kir::Bool* getExpr(const TensorView* tv) const;
+  // Returns a Bool predicate expression for a given output TensorView.
+  kir::Bool* getExpr(const TensorView* out_tv) const;
 
  private:
   Fusion* fusion_;

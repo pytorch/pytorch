@@ -13,12 +13,13 @@ namespace {
 
 Val* getPredicatePerParallelType(
     ParallelType pt,
-    const ThreadPredicateMap::SourceMapType::mapped_type& sources) {
+    const ThreadPredicateMap::SourceMapType& source_map) {
   if (pt == ParallelType::BIDx || pt == ParallelType::BIDy ||
       pt == ParallelType::BIDz) {
-    TORCH_INTERNAL_ASSERT(!sources.empty(), "No predicate source found");
-    TORCH_INTERNAL_ASSERT(sources.size() == 1, "Multiple sources detected");
-    auto src = *sources.begin();
+    auto source = source_map.at(pt);
+    TORCH_INTERNAL_ASSERT(!source.empty(), "No predicate source found");
+    TORCH_INTERNAL_ASSERT(source.size() == 1, "Multiple sources detected");
+    auto src = *source.begin();
     auto flag_name = kir::GridReduction::getPredicateFlagName(src);
     return new kir::NamedScalar(flag_name, DataType::Bool);
   } else {
@@ -28,7 +29,7 @@ Val* getPredicatePerParallelType(
 
 kir::Bool* getPredicate(
     const ir_utils::ParallelTypeBitmap& bits,
-    const ThreadPredicateMap::SourceMapType& sources) {
+    const ThreadPredicateMap::SourceMapType& source_map) {
   if (bits.none()) {
     return new kir::Bool(true);
   }
@@ -37,8 +38,7 @@ kir::Bool* getPredicate(
 
   for (const auto& pt_bool : bits.getMap()) {
     if (pt_bool.second) {
-      auto tp =
-          getPredicatePerParallelType(pt_bool.first, sources.at(pt_bool.first));
+      auto tp = getPredicatePerParallelType(pt_bool.first, source_map);
       pred = (pred == nullptr) ? tp : kir::andExpr(pred, tp);
     }
   }
@@ -85,6 +85,21 @@ void maskSouceMap(
     if (!kv.second) {
       ParallelType ptype = kv.first;
       src_map[ptype].clear();
+    }
+  }
+}
+
+// A bit of a hack for now for GEMM tiling so we don't fetch tiles multiple
+// times. It's safe to do, there may simply be a better place to do it.
+void avoidRedundantWritesToSmem(
+    TensorView* out_tv,
+    ir_utils::ParallelTypeBitmap& pred) {
+  if (out_tv->getMemoryType() == MemoryType::Shared) {
+    for (size_t i = 0; i < out_tv->nDims(); i++) {
+      auto id = out_tv->getComputeAtAxis(i).first;
+      if (out_tv->axis(i)->isBroadcast() && id->isThreadDim()) {
+        pred.set(id->getParallelType(), true);
+      }
     }
   }
 }
@@ -173,15 +188,17 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
 
   // Get rid of any reductions which are bcasted
   output_preds &= bcast_reset_map;
-  // Similarly, drop non-relevant source tensos
+  // Similarly, drop non-relevant source tensors
   maskSouceMap(src_map, bcast_reset_map);
 
   // Run through outputs and set bitset predicates
-  for (const auto* out : expr->outputs()) {
+  for (auto* out : expr->outputs()) {
     if (!ir_utils::isTV(out))
       continue;
     TORCH_INTERNAL_ASSERT(find(ir_utils::asConstTV(out)) == end());
-    insert(ir_utils::asConstTV(out), output_preds, src_map);
+    auto pred_for_this_out = output_preds;
+    avoidRedundantWritesToSmem(ir_utils::asTV(out), pred_for_this_out);
+    insert(ir_utils::asConstTV(out), pred_for_this_out, src_map);
   }
 }
 
@@ -248,9 +265,9 @@ void ThreadPredicateMap::duplicate(
   }
 }
 
-kir::Bool* ThreadPredicateMap::getExpr(const TensorView* tv) const {
-  TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
-  return getPredicate(at(tv).first, at(tv).second);
+kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
+  TORCH_INTERNAL_ASSERT(find(out_tv) != end(), "Couldn't find ", out_tv);
+  return getPredicate(at(out_tv).first, at(out_tv).second);
 }
 
 } // namespace fuser

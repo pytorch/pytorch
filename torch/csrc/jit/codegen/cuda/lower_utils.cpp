@@ -602,8 +602,16 @@ ParallelTypeBitmap getParallelBroadcastDomains(
 
   ParallelTypeBitmap parallel_broadcast;
   const auto& iter_domains = out_tv->domain()->domain();
+  // If the output is on shared memory, assume that all subsequent
+  // reads from all threads in its CTA can be done with no parallel
+  // broadcast. Only one thread will write to shared memory followed
+  // by a proper _syncthreads.
+  const bool output_smem = out_tv->getMemoryType() == MemoryType::Shared;
   for (auto id : iter_domains) {
-    if (id->isBroadcast() && id->isThread()) {
+    if (!id->isBroadcast()) {
+      continue;
+    }
+    if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
       parallel_broadcast.set(id->getParallelType(), true);
     }
   }
