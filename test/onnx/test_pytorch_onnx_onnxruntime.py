@@ -863,19 +863,38 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(ArithmeticModule(), x)
 
+    def test_floor(self):
+        class FloorModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.floor(x)
+
+        x = torch.tensor([-0.5, 0.0, 0.5, 2], dtype=torch.float32)
+        self.run_test(FloorModule(), x)
+
+    # NOTE: floor division tests currently restrict themselves to only
+    #   test positive division. PyTorch's floor division was previously
+    #   implemented incorrectly and would truncate, not floor, the result
+    #   of the division. For example, -5 // 3 = -2, but, historically,
+    #   torch.floor_divide(-5, 3) = -1.
+    # This behavior has been fixed in PyTorch but the update has not been
+    #   applied to ONNX export yet. See https://github.com/pytorch/pytorch/issues/44692.
     def test_floor_div(self):
         class FloorDivModule(torch.nn.Module):
-            def forward(self, x, y):
-                return x // 3, x // 2., \
-                    x.to(dtype=torch.float64) // 3, x.to(dtype=torch.float64) // 2., \
-                    x.to(dtype=torch.int64) // 3, x.to(dtype=torch.int64) // 2., \
-                    x // (y + 1.).to(dtype=torch.int64), x // y, \
-                    x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
-                    x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
+            def forward(self, x_f32, x_f64, x_i64, y_f32, y_f64, y_i64):
+                return x_f32 // 3, x_f32 // 2., \
+                    x_f64 // 3, x_f64 // 2., \
+                    x_i64 // 3, x_i64 // 2., \
+                    x_f32 // (y_i64 + 1), x_f32 // y_f32, \
+                    x_f64 // y_i64, x_f64 // y_f64, \
+                    x_i64 // y_i64, x_i64 // y_f32
 
-        x = torch.randn(2, 3, 4)
-        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
-        self.run_test(FloorDivModule(), (x, y))
+        x_f32 = torch.randn(2, 3, 4)
+        x_f64 = x_f32.to(torch.double)
+        x_i64 = x_f32.to(torch.int64)
+        y_f32 = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
+        y_f64 = y_f32.to(torch.double)
+        y_i64 = y_f32.to(torch.int64)
+        self.run_test(FloorDivModule(), (x_f32, x_f64, x_i64, y_f32, y_f64, y_i64))
 
     def test_floor_div_script(self):
         class FloorDivModule(torch.jit.ScriptModule):

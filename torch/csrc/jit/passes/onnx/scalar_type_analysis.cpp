@@ -130,30 +130,21 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         typesFromTensors.end());
     st = PromoteScalarTypes(typesFromScalars);
   } else {
-    if (typesFromScalars.size() == n->inputs().size()) {
-      // If all inputs are scalars, infer scalar_type by calling
-      // c10::promoteTypes.
-      st = PromoteScalarTypes(typesFromScalars);
-    } else if (output_st) {
+    if (output_st) {
       // If output scalar type is available, use that.
       st = output_st;
-    } else if (!typesFromTensors.empty()) {
-      // When inputs consist of tensors and scalars. In PyTorch, scalars are
-      // implicitly casted to have the same scalar type as input tensors.
-      st = typesFromTensors[0];
-      if (std::any_of(
-              typesFromTensors.begin(),
-              typesFromTensors.end(),
-              [&st](const c10::ScalarType& type) { return type != st; })) {
-        std::cerr
-            << "Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator "
-            << n->kind().toDisplayString()
-            << ". Please report a bug to PyTorch. "
-            << "The scalar type " << c10::toString(*st)
-            << " of the first tensor is chosen." << std::endl;
-      }
+    } else if (n->kind() == onnx::Mod && !typesFromTensors.empty()) {
+      // Most of the operators like Mul are switched to allow implicit type promotion.
+      // But fmod and remainder still only support implicit casting between scalars.
+      // i.e. for torch.remainder(a, b), if a is LongTensor and b is float, b will be cast to Long.
+      st = PromoteScalarTypes(typesFromTensors);
     } else {
-      // When inputs consist of only scalars.
+      // PyTorch now does implicit type promotion regardless whether the inputs are tensors or scalars.
+      // (Previously only scalars support implicit casting).
+      typesFromScalars.insert(
+        typesFromScalars.end(),
+        typesFromTensors.begin(),
+        typesFromTensors.end());
       st = PromoteScalarTypes(typesFromScalars);
     }
   }

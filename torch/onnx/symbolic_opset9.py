@@ -107,13 +107,11 @@ def div(g, self, other):
 
 
 def floor_divide(g, self, other):
-    out = g.op('Div', self, other)
-    # the correct operation is truncate, which is not supported in ONNX,
-    # we cannot call floor since it will behave differently for negative numbers
-    # (eg. -0.1 should become -0 )
-    # - if scalar_type information are not available, assume that
-    # we need to call floor (treat as float)
-    out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    self_f = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    other_f = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    out = div(g, self_f, other_f)
+    # Now PyTorch updates floor_divide to perform floor instead of truncate.
+    out = g.op("Floor", out)
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
@@ -2463,6 +2461,11 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
+    # torch.remainder does not follow regular type promotion logic.
+    # Instead, it is implicitly casting `other` to the same type of `input`.
+    input_scalar_type = input.type().scalarType()
+    if input_scalar_type:
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)
