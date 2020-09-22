@@ -4,6 +4,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from collections import namedtuple
 import itertools
 import unittest
+import re
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -22,6 +23,27 @@ import unittest
 #     tested by the invariant testing
 
 Result = namedtuple('Result', 'state table provenance')
+
+dispatch_keys_to_check = (
+    'CPU',
+    'CUDA',
+    'XLA',
+    'AutogradOther',
+    'AutogradCPU',
+    'AutogradCUDA',
+    'AutogradXLA')
+
+def extract_dispatch_table_with_keys(table, dispatch_keys):
+    extracted = ''
+    table_entries = table.split('\n')
+    regex = re.compile(r"registered at .*FallbackKernel\.cpp.*(\[)")
+    for k in dispatch_keys:
+        for t in table_entries:
+            if t.startswith(k):
+                # mask out file:line info for in-tree backend fallback
+                entry = regex.sub('registered in pytorch framework [', t)
+                extracted += (entry + '\n')
+    return extracted
 
 class TestDispatch(TestCase):
     namespace_index = 0
@@ -207,11 +229,11 @@ class TestDispatch(TestCase):
             # m.impl("test_def", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
             # m.impl("test_def", kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="cpu"),
+            lambda m: m.impl_t_t("foo", dispatch="CPU"),
             # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="autograd"),
+            lambda m: m.impl_t_t("foo", dispatch="Autograd"),
             # m.impl("test_def", kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="autogradcpu")
+            lambda m: m.impl_t_t("foo", dispatch="AutogradCPU")
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
@@ -240,11 +262,11 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "cpu"),
+            lambda m: m.impl_t_t("foo", "CPU"),
             # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
+            lambda m: m.impl_t_t("foo", "Autograd"),
             # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autogradcpu")
+            lambda m: m.impl_t_t("foo", "AutogradCPU")
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
@@ -274,11 +296,11 @@ alias analysis kind: FROM_SCHEMA
             # m.impl("foo", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
             # m.impl("foo", torch::kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "cpu"),
+            lambda m: m.impl_t_t("foo", "CPU"),
             # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
+            lambda m: m.impl_t_t("foo", "Autograd"),
             # m.impl("foo", torch::kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "autogradcpu")
+            lambda m: m.impl_t_t("foo", "AutogradCPU")
         ]).state
         self.assertExpectedInline(state, '''\
 name: test::foo
@@ -294,13 +316,47 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "cpu"),
+            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
             # m.impl("foo", torch::kCUDA, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "xla"),
+            lambda m: m.impl_t_t("foo", "XLA", debug="fn_xla"),
             # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
+            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
             # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autogradcpu")
+            lambda m: m.impl_t_t("foo", "AutogradCPU", debug="fn_autogradcpu")
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
+alias analysis kind: CONSERVATIVE
+CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+XLA: fn_xla :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+AutogradCPU: fn_autogradcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: fn_cpu [kernel]
+CUDA: default_def_name_t_t [catch all]
+XLA: fn_xla [kernel]
+AutogradOther: fn_autograd [autograd kernel]
+AutogradCPU: fn_autogradcpu [kernel]
+AutogradCUDA: fn_autograd [autograd kernel]
+AutogradXLA: fn_autograd [autograd kernel]
+''')
+
+    def test_computed_table_with_cpu_catchall(self):
+        global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
+        result = self.commute("foo", [
+            # m.def("foo", [](const Tensor & x) { return x })
+            lambda m: m.def_name_t_t("foo"),
+            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CPU"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
@@ -309,34 +365,212 @@ schema: test::foo(Tensor _0) -> (Tensor _0)
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-XLA: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
-        def extract_entries(table, dispatch_keys):
-            extracted = ''
-            table_entries = table.split('\n')
-            for k in dispatch_keys:
-                for t in table_entries:
-                    if t.startswith(k):
-                        extracted += (t + '\n')
-            return extracted
-
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_entries(
-            table,
-            ('CPU', 'CUDA', 'XLA', 'AutogradOther', 'AutogradCPU', 'AutogradCUDA', 'AutogradXLA'))
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
 CPU: impl_t_t [kernel]
 CUDA: default_def_name_t_t [catch all]
-XLA: impl_t_t [kernel]
+XLA: default_def_name_t_t [catch all]
+AutogradOther: default_def_name_t_t [catch all]
+AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCUDA: default_def_name_t_t [catch all]
+AutogradXLA: default_def_name_t_t [catch all]
+''')
+
+    def test_computed_table_with_math(self):
+        global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
+        result = self.commute("foo", [
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
+            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Math"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
+alias analysis kind: FROM_SCHEMA
+Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: impl_t_t [math kernel]
+CUDA: impl_t_t [math kernel]
+XLA: impl_t_t [math kernel]
+AutogradOther: impl_t_t [math kernel]
+AutogradCPU: impl_t_t [math kernel]
+AutogradCUDA: impl_t_t [math kernel]
+AutogradXLA: impl_t_t [math kernel]
+''')
+
+    def test_computed_table_with_cpu_math(self):
+        global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
+        result = self.commute("foo", [
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
+            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
+alias analysis kind: FROM_SCHEMA
+CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: fn_cpu [kernel]
+CUDA: fn_math [math kernel]
+XLA: fn_math [math kernel]
+AutogradOther: fn_math [math kernel]
+AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
+AutogradCUDA: fn_math [math kernel]
+AutogradXLA: fn_math [math kernel]
+''')
+
+    def test_computed_table_with_autograd(self):
+        global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
+        result = self.commute("foo", [
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Autograd"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
+alias analysis kind: FROM_SCHEMA
+Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
 AutogradOther: impl_t_t [autograd kernel]
-AutogradCPU: impl_t_t [kernel]
+AutogradCPU: impl_t_t [autograd kernel]
 AutogradCUDA: impl_t_t [autograd kernel]
 AutogradXLA: impl_t_t [autograd kernel]
+''')
+
+    def test_computed_table_with_cpu_autograd_math_catchall(self):
+        result = self.commute("foo", [
+            # m.def("foo", [](const Tensor & x) { return x })
+            lambda m: m.def_name_t_t("foo"),
+            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
+alias analysis kind: CONSERVATIVE
+CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: fn_cpu [kernel]
+CUDA: fn_math [math kernel]
+XLA: fn_math [math kernel]
+AutogradOther: fn_math [math kernel]
+AutogradCPU: fn_autograd [autograd kernel]
+AutogradCUDA: fn_math [math kernel]
+AutogradXLA: fn_math [math kernel]
+''')
+
+    def test_computed_table_with_cpu_autograd_catchall(self):
+        result = self.commute("foo", [
+            # m.def("foo", [](const Tensor & x) { return x })
+            lambda m: m.def_name_t_t("foo"),
+            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
+alias analysis kind: CONSERVATIVE
+CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: fn_cpu [kernel]
+CUDA: default_def_name_t_t [catch all]
+XLA: default_def_name_t_t [catch all]
+AutogradOther: fn_autograd [autograd kernel]
+AutogradCPU: fn_autograd [autograd kernel]
+AutogradCUDA: fn_autograd [autograd kernel]
+AutogradXLA: fn_autograd [autograd kernel]
+''')
+
+    def test_computed_table_with_ambiguous_autogradother(self):
+        result = self.commute("foo", [
+            # m.def("foo", [](const Tensor & x) { return x })
+            lambda m: m.def_name_t_t("foo"),
+            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
+            # m.impl("foo", torch::kQuantizedCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "QuantizedCPU", debug="fn_quantizedcpu"),
+        ])
+        state, table = result.state, result.table
+        self.assertExpectedInline(state, '''\
+name: test::foo
+schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
+alias analysis kind: CONSERVATIVE
+QuantizedCPU: fn_quantizedcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+''')
+
+        # computed dispatch table is too big, so we only check on a few entries we're interested in.
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
+
+        self.assertExpectedInline(extracted_table, '''\
+CPU: fn_math [math kernel]
+CUDA: fn_math [math kernel]
+XLA: fn_math [math kernel]
+AutogradOther: ambiguous_autogradother [ambiguous autogradother]
+AutogradCPU: fn_math [math kernel]
+AutogradCUDA: fn_math [math kernel]
+AutogradXLA: fn_math [math kernel]
 ''')
 
     # Can't do this yet for BC reasons
@@ -430,7 +664,7 @@ alias analysis kind: PURE_FUNCTION
         )
 
     def test_multiple_fallback(self):
-        global_m = C._dispatch_library("IMPL", "_", "xla")
+        global_m = C._dispatch_library("IMPL", "_", "XLA")
         global_m.fallback_fallthrough(),
         try:
             global_m.fallback_fallthrough(),
