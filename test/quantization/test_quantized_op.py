@@ -2717,11 +2717,11 @@ class TestQuantizedLinear(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
-    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate):
+    def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
-        w_packed = pack_fn(weights, optimized_qparams=True)
+        w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
         w_unpacked = unpack_fn(w_packed)
 
         if bit_rate == 8:
@@ -2752,13 +2752,13 @@ class TestQuantizedEmbeddingOps(TestCase):
             conversion_op = "FloatToFused2BitRowwiseQuantized"
             reverse_conversion_op = "Fused2BitRowwiseQuantizedToFloat"
 
-        def get_c2_weights(weights):
+        def get_c2_weights(weights, engine_str):
             workspace.ResetWorkspace()
 
             workspace.FeedBlob("weights", weights)
             workspace.RunOperatorOnce(
                 core.CreateOperator(
-                    conversion_op, ["weights"], ["quantized_weights"], engine="GREEDY"
+                    conversion_op, ["weights"], ["quantized_weights"], engine=engine_str
                 )
             )
             emb_q = workspace.FetchBlob("quantized_weights")
@@ -2775,7 +2775,11 @@ class TestQuantizedEmbeddingOps(TestCase):
                 )
             return torch.from_numpy(emb_q), dequantized_data
 
-        w_packed_c2, w_unpacked_c2 = get_c2_weights(weights)
+        if optimized_qparams:
+            engine = "GREEDY"
+        else:
+            engine = ""
+        w_packed_c2, w_unpacked_c2 = get_c2_weights(weights, engine)
 
         # Compare packed weights against C2.
         np.testing.assert_allclose(w_packed.numpy(), w_packed_c2.numpy(), atol=1e-6, rtol=1e-6)
@@ -2784,30 +2788,33 @@ class TestQuantizedEmbeddingOps(TestCase):
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
-    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim):
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+           optimized_qparams=st.booleans(),)
+    def test_embedding_bag_byte_unpack(self, num_embeddings, embedding_dim, optimized_qparams):
         pack_fn = torch.ops.quantized.embedding_bag_byte_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_byte_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=8)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, optimized_qparams)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),)
-    def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim):
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+           optimized_qparams=st.booleans(),)
+    def test_embedding_bag_4bit_unpack(self, num_embeddings, embedding_dim, optimized_qparams):
         pack_fn = torch.ops.quantized.embedding_bag_4bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=4)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams)
 
     """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
     @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),)
-    def test_embedding_bag_2bit_unpack(self, num_embeddings, embedding_dim):
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
+           optimized_qparams=st.booleans(),)
+    def test_embedding_bag_2bit_unpack(self, num_embeddings, embedding_dim, optimized_qparams):
         pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
         unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
 
-        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=2)
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams)
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
