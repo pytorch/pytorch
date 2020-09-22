@@ -493,11 +493,13 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
+    gather_tensor_options = "TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)"
+
     def dispatch_trace_input(arg_spec):
         name, value, simple_type, nullable = arg_spec
         if declaration['use_c10_dispatcher'] == 'full':
             if value == "options":
-                value = "TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)"
+                value = gather_tensor_options
         else:
             assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
         # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
@@ -525,7 +527,7 @@ def format_trace_inputs(declaration):
         value = out_input['name']
         if declaration['use_c10_dispatcher'] == 'full':
             if value == "options":
-                value = "TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)"
+                value = gather_tensor_options
         else:
             assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
         inplace = ADD_TRACE_INPUT.substitute(name=out_input['name'], input=value)
