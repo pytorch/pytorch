@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
 import itertools
 
@@ -385,6 +385,7 @@ class FunctionSchema:
         This function is based off of get_signature in
         tools.autograd.load_derivatives
         """
+
         # dataclasses.replace could be used here, but it is less
         # type safe so for now I've opted to type everything out
         def strip_arg_annotation(a: Argument) -> Argument:
@@ -394,12 +395,14 @@ class FunctionSchema:
                 default=a.default,  # hmmm
                 annotation=None,
             )
+
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
                 name=r.name,
                 type=r.type,
                 annotation=None,
             )
+
         return FunctionSchema(
             name=OperatorName(
                 name=BaseOperatorName(
