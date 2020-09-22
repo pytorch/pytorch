@@ -26,7 +26,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    _set_rpc_timeout,
 )
 
 from .internal import (
@@ -207,7 +206,7 @@ def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
         if errors:
             raise RuntimeError(
                 f"Followers {[e[0] for e in errors]} timed out in _all_gather "
-                f"after {timeout} seconds. The first exception is {errors[0][1]}"
+                f"after {timeout:.2f} seconds. The first exception is {errors[0][1]}"
             )
 
     return states.gathered_objects
@@ -225,8 +224,9 @@ def _wait_all_workers():
     try:
         _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
     except RuntimeError as ex:
-        logger.error(str(ex))
-
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 @_require_initialized
 def shutdown(graceful=True):
