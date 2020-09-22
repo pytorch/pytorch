@@ -512,6 +512,20 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
+            source='github',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_local_dir(self):
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(
+            local_dir,
+            'mnist',
+            source='local',
             pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
