@@ -628,6 +628,7 @@ class TestBenchmarkUtils(TestCase):
             ("cheap_fn()", 4e-6),
             ("expensive_fn()", 20e-6),
         )
+
         def __init__(self, stmt, setup, timer, globals):
             self._random_state = np.random.RandomState(seed=self._seed)
             self._mean_cost = {k: v for k, v in self._function_costs}[stmt]

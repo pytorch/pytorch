@@ -21,6 +21,7 @@ else:
 
 class Timer(object):
     _timer_cls = timeit.Timer
+
     def __init__(
         self,
         stmt="pass",
