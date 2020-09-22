@@ -42,12 +42,12 @@ inline bool _isnan(T val) {
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
 }
 
 
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
 }
 
 // isfinite
@@ -68,19 +68,19 @@ inline C10_HOST_DEVICE bool _isfinite(T val) {
 
 template <typename T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-inline bool _isfinite(T val) {
+inline C10_HOST_DEVICE bool _isfinite(T val) {
   return std::isfinite(val.real()) && std::isfinite(val.imag());
 }
 
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isfinite(T val) {
-  return at::_isfinite(float(val));
+  return at::_isfinite(static_cast<float>(val));
 }
 
 
 inline C10_HOST_DEVICE bool _isfinite(at::BFloat16 val) {
-  return at::_isfinite(float(val));
+  return at::_isfinite(static_cast<float>(val));
 }
 
 template <typename T>
