@@ -435,6 +435,7 @@ def init_process_group(backend,
     _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
+    _default_pg.barrier()
 
 
 def _new_process_group_helper(world_size,
