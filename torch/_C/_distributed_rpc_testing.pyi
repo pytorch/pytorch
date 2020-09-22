@@ -1,10 +1,10 @@
 from ._distributed_c10d import ProcessGroup
-from ._distributed_rpc import ProcessGroupAgent
+from ._distributed_rpc import ProcessGroupAgent, ProcessGroupRpcBackendOptions
 from datetime import timedelta
 from typing import List, Dict
 
 # distributed/rpc/testing/init.cpp
-class FaultyProcessGroupRpcBackendOptions:
+class FaultyProcessGroupRpcBackendOptions(ProcessGroupRpcBackendOptions):
     def __init__(
         self,
         num_send_recv_threads: int,

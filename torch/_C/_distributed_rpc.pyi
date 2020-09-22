@@ -5,8 +5,12 @@ from ._autograd import ProfilerConfig, ProfilerState
 from ._distributed_c10d import ProcessGroup, Store
 
 # mypy type annotations
+# distributed/rpc/rpc_agent.h
+class RpcBackendOptions:
+    rpcTimeoutSeconds: float
+    initMethod: str
 # distributed/rpc/init.cpp
-class _TensorPipeRpcBackendOptionsBase:
+class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
     num_worker_threads: int
     _transports: Optional[List[str]]
     _channels: Optional[List[str]]
@@ -32,25 +36,7 @@ class _TensorPipeRpcBackendOptionsBase:
             _channels: Optional[List]
         ): ...
     def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
-class ProcessGroupAgent:
-    def __init__(
-        self,
-        worker_name: str,
-        pg: Any,
-        numSendRecvThreads: int,
-        rpcTimeout: timedelta
-    ): ...
-class TensorPipeAgent:
-    def __init__(
-        self,
-        store: Store,
-        name: str,
-        worker_id: int,
-        world_size: int,
-        pg: ProcessGroup,
-        opts: _TensorPipeRpcBackendOptionsBase,
-    ): ...
-class ProcessGroupRpcBackendOptions:
+class ProcessGroupRpcBackendOptions(RpcBackendOptions):
     def __init__(
         self,
         num_send_recv_threads: int,
@@ -74,14 +60,29 @@ class _RpcAgent:
     def get_worker_infos(self) -> List[WorkerInfo]: ...
     def get_debug_info(self) -> Dict[str, str]: ...
     def shutdown(self): ...
+class ProcessGroupAgent(_RpcAgent):
+    def __init__(
+        self,
+        worker_name: str,
+        pg: Any,
+        numSendRecvThreads: int,
+        rpcTimeout: timedelta
+    ): ...
+class TensorPipeAgent(_RpcAgent):
+    def __init__(
+        self,
+        store: Store,
+        name: str,
+        worker_id: int,
+        world_size: int,
+        pg: ProcessGroup,
+        opts: _TensorPipeRpcBackendOptionsBase,
+    ): ...
+    def join(self): ...
 # distributed/rpc/py_rref.h
 class PyRRef:
     @staticmethod
     def _deserialize(tp: Tuple) -> 'PyRRef': ...
-# distributed/rpc/rpc_agent.h
-class RpcBackendOptions:
-    rpcTimeoutSeconds: float
-    initMethod: str
 # distributed/autograd/profiler.h
 class Event:
     name: str
