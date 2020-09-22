@@ -167,6 +167,10 @@ struct ParserImpl {
         prefix = Dots::create(L.cur().range);
         L.next();
       } break;
+      case TK_ELLIPSIS: {
+        prefix = Dots::create(L.cur().range);
+        L.next();
+      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);

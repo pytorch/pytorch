@@ -611,6 +611,7 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
