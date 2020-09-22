@@ -311,7 +311,8 @@ class TestForeach(TestCase):
                             foreach_bin_op(tensors, scalar)
                     return
 
-                if dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=True) and self.device_type == 'cuda':
+                if dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=True) and \
+                   self.device_type == 'cuda':
                     with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
                         foreach_bin_op_(tensors, scalar)
 
