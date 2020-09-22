@@ -35,4 +35,5 @@ if is_available():
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _test_python_store,
+        _round_robin_process_groups,
     )
