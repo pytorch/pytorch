@@ -311,7 +311,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
 
         A, B, D, U, largest = ctx.saved_tensors
 
-        # lobpcg.backward has some limitations. Checks for insupported input
+        # lobpcg.backward has some limitations. Checks for unsupported input
         if A.is_sparse or (B is not None and B.is_sparse and B.requires_grad):
             raise ValueError(
                 'lobpcg.backward does not support sparse input yet.'
@@ -385,6 +385,7 @@ def lobpcg(A,                   # type: Tensor
 
     .. warning:: The backward method does not support sparse and complex inputs.
       It works only when `B` is not provided (i.e. `B == None`).
+      The details of the algorithms are going to be published promptly.
 
     Arguments:
 
