@@ -12,7 +12,7 @@ from torch.testing import \
      _dispatch_dtypes,
      floating_types, floating_types_and, floating_types_and_half,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and)
+     all_types_and_complex_and, all_types)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -376,6 +376,11 @@ op_db = [
     UnaryUfuncInfo('exp2',
                    ref=np.exp2,
                    dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None),
+    UnaryUfuncInfo('nan_to_num',
+                   ref=np.nan_to_num,
+                   dtypes=all_types(),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]
