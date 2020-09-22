@@ -165,14 +165,14 @@ struct AutogradZeroSpecializer {
       return nullptr;
     }
 
-    Node *nonzero_check = graph_->insert(prim::AutogradAllNonZero, {})->node();
-    for (Value *v : nonzero_values) {
+    Node* nonzero_check = graph_->insert(prim::AutogradAllNonZero, {})->node();
+    for (Value* v : nonzero_values) {
       nonzero_check->addInput(v);
     }
     checks.push_back(nonzero_check->output());
 
-    Node *zero_check = graph_->insert(prim::AutogradAllZero, {})->node();
-    for (Value *v : zero_values) {
+    Node* zero_check = graph_->insert(prim::AutogradAllZero, {})->node();
+    for (Value* v : zero_values) {
       zero_check->addInput(v);
     }
     checks.push_back(zero_check->output());
