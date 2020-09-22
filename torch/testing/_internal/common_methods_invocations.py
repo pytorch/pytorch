@@ -7,6 +7,8 @@ import numpy as np
 from torch._six import inf, istuple
 from torch.autograd import Variable
 
+from typing import List, Tuple, Dict, Any
+
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes,
      floating_types, floating_types_and, floating_and_complex_types,
@@ -1540,7 +1542,7 @@ tri_tests_args = [
     (2028, 1, -1)
 ]
 
-tri_large_tests_args = [
+tri_large_tests_args: List[Tuple[int, ...]] = [
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
@@ -1602,9 +1604,9 @@ EXCLUDE_FUNCTIONAL = {
     'reshape',
     'where'  # argument order
 }
-EXCLUDE_GRADCHECK = {
+EXCLUDE_GRADCHECK: Dict[str, Any] = {
 }
-EXCLUDE_GRADGRADCHECK = {
+EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,
