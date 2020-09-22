@@ -15428,6 +15428,12 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
+    'test_tensor_indices_sections',
+    'test_tensor_indices_sections_dim',
+    'test_tensor_indices_sections_dim_neg0',
+    'test_tensor_split_sections',
+    'test_tensor_split_sections_dim',
+    'test_tensor_split_sections_dim_neg0',
 }
 
 EXCLUDE_PYTHON_PRINT = {

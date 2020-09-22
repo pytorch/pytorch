@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      do_test_dtypes, IS_SANDCASTLE, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
      skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC,
-     wrapDeterministicFlagAPITest)
+     wrapDeterministicFlagAPITest, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -8333,6 +8333,92 @@ class TestTorchDeviceType(TestCase):
         # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
+
+    @onlyOnCPUAndCUDA
+    # Skip BFloat16 since numpy does not support it
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    def test_tensor_split_sections(self, device, dtype):
+        input_sizes = [
+            (0,),
+            (10,),
+            (10, 0),
+            (0, 10),
+            (4, 10),
+            (12, 3),
+        ]
+        for input_size in input_sizes:
+            a_base = make_tensor(input_size, device, dtype, low=-9, high=9)
+            # Run tests on transposed input if it has at least 2 dims
+            for a in [a_base, a_base.t()] if a_base.dim() > 2 else [a_base]:
+                a_n = a.cpu().numpy()
+                for dim in range(-a.dim(), a.dim()):
+                    for sections in range(1, 2 * a.size(dim)):
+                        msg = f'input_size {input_size}, sections {sections}, dim {dim}'
+                        result = torch.tensor_split(a, sections, dim)
+                        for result_item in result:
+                            self.assertEqual(result_item.device, torch.device(device), msg=msg)
+                            self.assertEqual(result_item.dtype, dtype, msg=msg)
+                        result_n = np.array_split(a_n, sections, dim)
+                        self.assertEqual(result_n, result, msg=msg)
+
+    @onlyOnCPUAndCUDA
+    # Skip BFloat16 since numpy does not support it
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    def test_tensor_split_indices(self, device, dtype):
+        input_sizes = [
+            (0,),
+            (10,),
+            (10, 0),
+            (0, 10),
+            (4, 10),
+            (12, 3),
+        ]
+        indices_args = [
+            (),
+            (0,),
+            (3,),
+            (10,),
+            (-1,),
+            (-10,),
+            (2, -1),
+            (3, 4, 10),
+            (0, -1, 0, 10),
+            (1, 5, 2, 8),
+        ]
+        for input_size in input_sizes:
+            a_base = make_tensor(input_size, device, dtype, low=-9, high=9)
+            # Run tests on transposed input if it has at least 2 dims
+            for a in [a_base, a_base.t()] if a_base.dim() > 2 else [a_base]:
+                a_n = a.cpu().numpy()
+                for dim in range(-a.dim(), a.dim()):
+                    for indices in indices_args:
+                        result = torch.tensor_split(a, indices, dim)
+                        msg = f'input_size {input_size}, indices {indices}, dim {dim}'
+                        for result_item in result:
+                            self.assertEqual(result_item.device, torch.device(device), msg=msg)
+                            self.assertEqual(result_item.dtype, dtype, msg=msg)
+                        result_n = np.array_split(a_n, indices, dim)
+                        self.assertEqual(result_n, result, msg=msg)
+
+    @onlyOnCPUAndCUDA
+    def test_tensor_split_errors(self, device):
+        S = 10
+        test_cases = [
+            # input size, sections or indices, dim, error type, error message, numpy error type
+            [(S,), 10, 1, IndexError, r'Dimension out of range', IndexError],
+            [(), 10, 0, RuntimeError, r'expected at least a 1-dimensional tensor', IndexError],
+            [(S,), (10,), 1, IndexError, r'Dimension out of range', IndexError],
+            [(), (10,), 0, RuntimeError, r'expected at least a 1-dimensional tensor', IndexError],
+            [(S,), 0, 0, RuntimeError, r'number of sections must be larger than 0, got 0', ValueError],
+            [(S,), -1, 0, RuntimeError, r'number of sections must be larger than 0, got -1', ValueError],
+        ]
+        for input_size, sections_or_indices, dim, err, err_msg, numpy_err in test_cases:
+            a = torch.randn(input_size, device=device)
+            msg = f'input_size {input_size}, sections_or_indices {sections_or_indices}, dim {dim}'
+            with self.assertRaisesRegex(err, err_msg, msg=msg):
+                torch.tensor_split(a, sections_or_indices, dim)
+            with self.assertRaises(numpy_err, msg=msg):
+                np.array_split(a.cpu().numpy(), sections_or_indices, dim)
 
     def test_index(self, device):
 
