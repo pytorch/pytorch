@@ -124,13 +124,13 @@ class GraphModule(torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:
-                if node.op in ['get_attr', 'call_module']:
+                if node.op in ['get_param', 'call_module']:
                     assert isinstance(node.target, str)
                     _copy_attr(root, self, node.target)
         elif isinstance(root, dict):
             targets_to_copy = []
             for node in graph.nodes:
-                if node.op in ['get_attr', 'call_module']:
+                if node.op in ['get_param', 'call_module']:
                     assert isinstance(node.target, str)
                     if node.target not in root:
                         raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +

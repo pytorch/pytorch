@@ -696,6 +696,8 @@ def method_tests():
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
         ('sign', (), NO_ARGS, 'scalar'),
+        ('sgn', (S, S, S), NO_ARGS),
+        ('sgn', (), NO_ARGS, 'scalar'),
         ('trunc', (S, S, S), NO_ARGS, '', (True,)),
         ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('floor', (S, S, S), NO_ARGS, '', (True,)),

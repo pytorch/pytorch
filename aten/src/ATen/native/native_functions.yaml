@@ -277,6 +277,15 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: sgn(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: sgn_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: real(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function
