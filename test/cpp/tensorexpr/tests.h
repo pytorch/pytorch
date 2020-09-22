@@ -214,6 +214,8 @@ namespace jit {
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
   _(SimplifyReorderForCond)                 \
+  _(SimplifyFuseConditions)                 \
+  _(SimplifySyncThreads)                    \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -392,14 +394,20 @@ namespace jit {
   _(LLVMElemwiseAdd)                       \
   _(LLVMElemwiseAddFloat)                  \
   _(LLVMElemwiseLog10Float)                \
+  _(LLVMElemwiseLog1pFloat)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
   _(LLVMElemwiseMaxFloat)                  \
   _(LLVMElemwiseMaxNaNFloat)               \
   _(LLVMElemwiseMinFloat)                  \
   _(LLVMElemwiseMinNaNFloat)               \
+  _(LLVMElemwiseMod)                       \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
+  _(LLVMCompareSelectByteGT)               \
+  _(LLVMCompareSelectByteGE)               \
+  _(LLVMCompareSelectByteLT)               \
+  _(LLVMCompareSelectByteLE)               \
   _(LLVMStoreFloat)                        \
   _(LLVMSimpleMath01)                      \
   _(LLVMComputeMul)                        \
@@ -427,6 +435,7 @@ namespace jit {
   _(CudaOneBlockMultiThreadGlobalReduce1)  \
   _(CudaNoThreadIdxWrite_1)                \
   _(CudaLocalMemReduce_1)                  \
+  _(CudaSharedMemReduce_1)                 \
   _(CudaTestRand01)                        \
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
@@ -442,7 +451,6 @@ namespace jit {
   _(CudaMaskInnerLoopOneBlock)             \
   _(CudaMaskMultiDimMultiAxis)             \
   _(CudaMaskMultiDimMultiLevel)
-// _(CudaSharedMemReduce_1)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)

@@ -425,11 +425,9 @@ std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
 
 void Reducer::set_forward_pass_work_handle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-    at::Tensor& tensor,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
-  forwardPassWorkHandle_.resultTensor = tensor;
   forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
@@ -440,7 +438,7 @@ std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
 
 void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!should_rebuild_buckets()) {
+  if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
   }
   const auto replica_count = replicas_.size();
@@ -573,12 +571,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (divFactor_ == kUnsetDivFactor) {
     divFactor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
-    if (workHandle) {
-      if (!forwardPassWorkHandle_.useStaticWorldSize) {
-        workHandle->wait();
-        at::Tensor& res = forwardPassWorkHandle_.resultTensor;
-        divFactor_ = res.item().to<int>();
-      }
+    if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
+      workHandle->wait();
+      auto results = workHandle->result();
+      // Guard against the results being empty
+      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      at::Tensor& res = results.front();
+      divFactor_ = res.item().to<int>();
     }
   }
 
@@ -624,18 +623,10 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     const c10::Stream currentStream =
         guard.getStream(replica.contents.device());
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::unique_lock<std::mutex> lock(this->mutex_);
+      std::lock_guard<std::mutex> lock(this->mutex_);
       // Run callback with the current stream
       c10::OptionalStreamGuard currentStreamGuard{currentStream};
       this->finalize_backward();
-      // Rebuild bucket if this is the first time to rebuild
-      if (!rebuilt_params_.empty()) {
-        // Unlock since rebuild_buckets() acquires the lock.
-        lock.unlock();
-        rebuild_buckets();
-      } else {
-        lock.unlock();
-      }
     });
   }
 }
