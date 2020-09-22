@@ -378,7 +378,8 @@ def lobpcg(A: Tensor,
 
     .. warning:: The backward method does not support sparse and complex inputs.
       It works only when `B` is not provided (i.e. `B == None`).
-      The details of the algorithms are going to be published promptly.
+      We are actively working on extensions, and the details of
+      the algorithms are going to be published promptly.
 
     .. warning:: While it is assumed that `A` is symmetric, `A.grad` is not.
       To make sure that `A.grad` is symmetric, so that `A - t * A.grad` is symmetric
@@ -507,20 +508,21 @@ def lobpcg(A: Tensor,
                 ortho_fparams=ortho_fparams,
                 ortho_bparams=ortho_bparams)
 
-    # While it is expected that `A` is symmetric,
-    # the `A_grad` might be not. Therefore we perform the trick below,
-    # so that `A_grad` becomes symmetric.
-    # The symmetrization is important for first-order optimization methods,
-    # so that (A - alpha * A_grad) is still a symmetric matrix.
-    # Same holds for `B`.
-    A_sym = (A + A.transpose(-2, -1)) / 2
-    B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
-
     if not torch._jit_internal.is_scripting():
-        return LOBPCGAutogradFunction.apply(
-            A_sym, k, B_sym, X, n, iK, niter, tol, largest,
-            method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
-        )
+        if A.requires_grad or (B is not None and B.requires_grad):
+            # While it is expected that `A` is symmetric,
+            # the `A_grad` might be not. Therefore we perform the trick below,
+            # so that `A_grad` becomes symmetric.
+            # The symmetrization is important for first-order optimization methods,
+            # so that (A - alpha * A_grad) is still a symmetric matrix.
+            # Same holds for `B`.
+            A_sym = (A + A.transpose(-2, -1)) / 2
+            B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
+
+            return LOBPCGAutogradFunction.apply(
+                A_sym, k, B_sym, X, n, iK, niter, tol, largest,
+                method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
+            )
     else:
         if A.requires_grad or (B is not None and B.requires_grad):
             raise RuntimeError(
@@ -528,11 +530,12 @@ def lobpcg(A: Tensor,
                 'If you just want to do the forward, use .detach()'
                 'on A and B before calling into lobpcg'
             )
-        return _lobpcg(
-            A, k, B, X,
-            n, iK, niter, tol, largest, method, tracker,
-            ortho_iparams, ortho_fparams, ortho_bparams
-        )
+
+    return _lobpcg(
+        A, k, B, X,
+        n, iK, niter, tol, largest, method, tracker,
+        ortho_iparams, ortho_fparams, ortho_bparams
+    )
 
 def _lobpcg(A: Tensor,
             k: Optional[int] = None,
