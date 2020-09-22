@@ -217,6 +217,7 @@ namespace jit {
   _(SimplifyFuseConditions)                 \
   _(SimplifySyncThreads)                    \
   _(SimplifyRampSubBroadcast)               \
+  _(SimplifyBroadcastTermExpander)          \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
