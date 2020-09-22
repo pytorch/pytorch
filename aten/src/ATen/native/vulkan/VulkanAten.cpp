@@ -523,14 +523,13 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("slice.Tensor", TORCH_FN(slice));
-  m.impl("reshape", TORCH_FN(reshape));
-  m.impl("select.int", TORCH_FN(select));
-  m.impl("transpose.int", TORCH_FN(transpose));
-  m.impl("_cat", TORCH_FN(cat));
-  m.impl_UNBOXED("transpose_", transpose_);
-  m.impl("view", TORCH_FN(view));
-  m.impl("unsqueeze", TORCH_FN(unsqueeze));
+  m.impl("slice.Tensor", TORCH_FN(at::native::vulkan::aten::slice));
+  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
+  m.impl("select.int", TORCH_FN(at::native::vulkan::aten::select));
+  m.impl("transpose.int", TORCH_FN(at::native::vulkan::aten::transpose));
+  m.impl_UNBOXED("transpose_", at::native::vulkan::aten::transpose_);
+  m.impl("view", TORCH_FN(at::native::vulkan::aten::view));
+  m.impl("unsqueeze", TORCH_FN(at::native::vulkan::aten::unsqueeze));
   m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
@@ -544,12 +543,11 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       "_adaptive_avg_pool2d",
       TORCH_FN(at::native::vulkan::aten::adaptive_avg_pool2d));
-  m.impl("avg_pool2d", TORCH_FN(avg_pool2d));
+  m.impl("avg_pool2d", TORCH_FN(at::native::vulkan::aten::avg_pool2d));
   m.impl("max_pool2d", TORCH_FN(at::native::vulkan::aten::max_pool2d));
-  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
+  m.impl("mul.Scalar", TORCH_FN(at::native::vulkan::aten::mul_scalar));
+  m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
   m.impl_UNBOXED(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
