@@ -458,6 +458,17 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
             torch.jit.script(annotated_fn)
 
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
     def test_subexpression_List_Future(self):
 
         @torch.jit.script

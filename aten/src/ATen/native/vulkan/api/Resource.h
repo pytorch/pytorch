@@ -2,8 +2,6 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
 
 namespace at {
 namespace native {
@@ -11,9 +9,9 @@ namespace vulkan {
 namespace api {
 
 struct Resource final {
-  //
-  // Memory
-  //
+  /*
+    Memory
+  */
 
   struct Memory final {
     VmaAllocator allocator;
@@ -48,9 +46,9 @@ struct Resource final {
     Data<Pointer> map() && = delete;
   };
 
-  //
-  // Buffer
-  //
+  /*
+    Buffer
+  */
 
   struct Buffer final {
     /*
@@ -66,74 +64,17 @@ struct Resource final {
       } usage;
     };
 
-    struct Object final {
-      VkBuffer handle;
-      VkDeviceSize offset;
-      VkDeviceSize range;
-
-      operator bool() const;
-    } object;
-
+    VkBuffer handle;
     Memory memory;
 
     operator bool() const;
   };
 
-  //
-  // Image
-  //
+  /*
+    Image
+  */
 
   struct Image final {
-    //
-    // Sampler
-    //
-
-    struct Sampler final {
-      /*
-        Descriptor
-      */
-
-      struct Descriptor final {
-        VkFilter filter;
-        VkSamplerMipmapMode mipmap_mode;
-        VkSamplerAddressMode address_mode;
-        VkBorderColor border;
-      };
-
-      /*
-        Factory
-      */
-
-      class Factory final {
-       public:
-        explicit Factory(const GPU& gpu);
-
-        typedef Sampler::Descriptor Descriptor;
-        typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
-
-        struct Hasher {
-          size_t operator()(const Descriptor& descriptor) const;
-        };
-
-        Handle operator()(const Descriptor& descriptor) const;
-
-       private:
-        VkDevice device_;
-      };
-
-      /*
-        Cache
-      */
-
-      typedef api::Cache<Factory> Cache;
-      Cache cache;
-
-      explicit Sampler(const GPU& gpu)
-        : cache(Factory(gpu)) {
-      }
-    };
-
     /*
       Descriptor
     */
@@ -152,27 +93,18 @@ struct Resource final {
         VkImageViewType type;
         VkFormat format;
       } view;
-
-      Sampler::Descriptor sampler;
     };
 
-    struct Object final {
-      VkImage handle;
-      VkImageLayout layout;
-      VkImageView view;
-      VkSampler sampler;
-
-      operator bool() const;
-    } object;
-
+    VkImage handle;
+    VkImageView view;
     Memory memory;
 
     operator bool() const;
   };
 
-  //
-  // Pool
-  //
+  /*
+    Pool
+  */
 
   class Pool final {
    public:
@@ -191,7 +123,6 @@ struct Resource final {
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
     std::vector<Handle<Buffer, void(*)(const Buffer&)>> buffers_;
     std::vector<Handle<Image, void(*)(const Image&)>> images_;
-    Image::Sampler sampler_;
   } pool;
 
   explicit Resource(const GPU& gpu)
@@ -239,38 +170,12 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   };
 }
 
-inline Resource::Buffer::Object::operator bool() const {
-  return VK_NULL_HANDLE != handle;
-}
-
 inline Resource::Buffer::operator bool() const {
-  return object;
-}
-
-inline bool operator==(
-    const Resource::Image::Sampler::Descriptor& _1,
-    const Resource::Image::Sampler::Descriptor& _2) {
-    return (_1.filter == _2.filter) &&
-           (_1.mipmap_mode == _2.mipmap_mode) &&
-           (_1.address_mode == _2.address_mode) &&
-           (_1.border == _2.border);
-}
-
-inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(
-      descriptor.filter,
-      descriptor.mipmap_mode,
-      descriptor.address_mode,
-      descriptor.border);
-}
-
-inline Resource::Image::Object::operator bool() const {
   return VK_NULL_HANDLE != handle;
 }
 
 inline Resource::Image::operator bool() const {
-  return object;
+  return VK_NULL_HANDLE != handle;
 }
 
 } // namespace api

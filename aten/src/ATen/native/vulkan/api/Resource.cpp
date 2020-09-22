@@ -63,23 +63,21 @@ void release_buffer(const Resource::Buffer& buffer) {
   // Safe to pass null as buffer or allocation.
   vmaDestroyBuffer(
       buffer.memory.allocator,
-      buffer.object.handle,
+      buffer.handle,
       buffer.memory.allocation);
 }
 
 void release_image(const Resource::Image& image) {
-  // Sampler lifetime managed through the sampler cache.
-
-  if (VK_NULL_HANDLE != image.object.view) {
+  if (VK_NULL_HANDLE != image.view) {
     VmaAllocatorInfo allocator_info{};
     vmaGetAllocatorInfo(image.memory.allocator, &allocator_info);
-    vkDestroyImageView(allocator_info.device, image.object.view, nullptr);
+    vkDestroyImageView(allocator_info.device, image.view, nullptr);
   }
 
   // Safe to pass null as image or allocation.
   vmaDestroyImage(
       image.memory.allocator,
-      image.object.handle,
+      image.handle,
       image.memory.allocation);
 }
 
@@ -129,54 +127,6 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
   }
 }
 
-Resource::Image::Sampler::Factory::Factory(const GPU& gpu)
-  : device_(gpu.device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
-}
-
-typename Resource::Image::Sampler::Factory::Handle
-Resource::Image::Sampler::Factory::operator()(
-    const Descriptor& descriptor) const {
-  const VkSamplerCreateInfo sampler_create_info{
-    VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-    nullptr,
-    0u,
-    descriptor.filter,
-    descriptor.filter,
-    descriptor.mipmap_mode,
-    descriptor.address_mode,
-    descriptor.address_mode,
-    descriptor.address_mode,
-    0.0f,
-    VK_FALSE,
-    0.0f,
-    VK_FALSE,
-    VK_COMPARE_OP_NEVER,
-    0.0f,
-    0.0f,
-    descriptor.border,
-    VK_FALSE,
-  };
-
-  VkSampler sampler{};
-  VK_CHECK(vkCreateSampler(
-      device_,
-      &sampler_create_info,
-      nullptr,
-      &sampler));
-
-  TORCH_CHECK(
-      sampler,
-      "Invalid Vulkan image sampler!");
-
-  return Handle{
-    sampler,
-    Deleter(device_),
-  };
-}
-
 Resource::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     allocator_(
@@ -184,10 +134,9 @@ Resource::Pool::Pool(const GPU& gpu)
           gpu.adapter->runtime->instance(),
           gpu.adapter->handle,
           device_),
-        vmaDestroyAllocator),
-    sampler_(gpu) {
-  buffers_.reserve(Configuration::kReserve);
-  images_.reserve(Configuration::kReserve);
+        vmaDestroyAllocator) {
+    buffers_.reserve(Configuration::kReserve);
+    images_.reserve(Configuration::kReserve);
 }
 
 Resource::Buffer Resource::Pool::allocate(
@@ -223,11 +172,7 @@ Resource::Buffer Resource::Pool::allocate(
 
   buffers_.emplace_back(
       Buffer{
-        Buffer::Object{
-          buffer,
-          0u,
-          descriptor.size,
-        },
+        buffer,
         Memory{
           allocator_.get(),
           allocation,
@@ -312,12 +257,8 @@ Resource::Image Resource::Pool::allocate(
 
   images_.emplace_back(
       Image{
-        Image::Object{
-          image,
-          VK_IMAGE_LAYOUT_UNDEFINED,
-          view,
-          sampler_.cache.retrieve(descriptor.sampler),
-        },
+        image,
+        view,
         Memory{
           allocator_.get(),
           allocation,
