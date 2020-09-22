@@ -435,8 +435,8 @@ class TestQuantizedTensor(TestCase):
         scale = 0.5
         zero_point = 10
         numel = 10
-        for device in get_supported_device_types():
-            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+        for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            for device in get_supported_device_types():
                 # copy from same scale and zero_point
                 q = torch._empty_affine_quantized([numel], scale=scale,
                                                   zero_point=zero_point, device=device, dtype=dtype)
@@ -447,21 +447,29 @@ class TestQuantizedTensor(TestCase):
                 self.assertEqual(q.q_scale(), q2.q_scale())
                 self.assertEqual(q.q_zero_point(), q2.q_zero_point())
                 # copying from different scale and zero_point
-                scale = 3.2
-                zero_point = 5
-                q = torch._empty_affine_quantized([numel], scale=scale,
-                                                  zero_point=zero_point, device=device, dtype=dtype)
+                new_scale = 3.2
+                new_zero_point = 5
+                q = torch._empty_affine_quantized([numel], scale=new_scale,
+                                                  zero_point=new_zero_point, device=device, dtype=dtype)
                 # check original scale and zero_points are set correctly
-                self.assertEqual(q.q_scale(), scale)
-                self.assertEqual(q.q_zero_point(), zero_point)
+                self.assertEqual(q.q_scale(), new_scale)
+                self.assertEqual(q.q_zero_point(), new_zero_point)
                 q.copy_(q2)
                 # check scale and zero_points has been copied
                 self.assertEqual(q, q2)
                 # can't copy from quantized tensor to non-quantized tensor
                 r = torch.empty([numel], dtype=torch.float)
-                q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+                q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype)
                 with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
                     r.copy_(q)
+            # copy from float doesn't support cuda
+            device = 'cpu'
+            # check copy from non-quantized to quantized
+            r = torch.randn([numel], dtype=torch.float).to(device)
+            q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype, device=device)
+            q.copy_(r)
+            qr = torch.quantize_per_tensor(r, scale=scale, zero_point=zero_point, dtype=dtype)
+            self.assertEqual(q, qr)
 
     def test_torch_qtensor_deepcopy(self):
         # cuda is not supported yet
