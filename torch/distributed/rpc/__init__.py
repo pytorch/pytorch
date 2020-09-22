@@ -31,6 +31,7 @@ if is_available():
         RpcBackendOptions,
         _TensorPipeRpcBackendOptionsBase as TensorPipeRpcBackendOptions,
         ProcessGroupRpcBackendOptions,
+        ProcessGroupAgent,
     )  # noqa: F401
     from .api import *  # noqa: F401
     from .backend_registry import BackendType

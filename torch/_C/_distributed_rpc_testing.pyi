@@ -1,4 +1,5 @@
 from ._distributed_c10d import ProcessGroup
+from ._distributed_rpc import ProcessGroupAgent
 from datetime import timedelta
 from typing import List, Dict
 
@@ -13,7 +14,7 @@ class FaultyProcessGroupRpcBackendOptions:
         messages_to_delay: Dict[str, float],
         num_fail_sends: int
     ): ...
-class FaultyProcessGroupAgent:
+class FaultyProcessGroupAgent(ProcessGroupAgent):
     def __init__(
         self,
         name: str,
