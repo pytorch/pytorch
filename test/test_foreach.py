@@ -34,12 +34,19 @@ class TestForeach(TestCase):
         else:
             tensors = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
 
+        if dtype != torch.bool:
+            torch._foreach_add_(tensors, 1)
+
         return tensors
 
-    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op):
+    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, add_one=False):
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
+
+            # Add 1 to avoid division by 0
+            if dtype != torch.bool and add_one:
+                torch.foreach_add_(tensors2, 1)
 
             expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
@@ -620,7 +627,7 @@ class TestForeach(TestCase):
                 self.skipTest("Skipped! See https://github.com/pytorch/pytorch/issues/44489")
             return
 
-        self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
+        self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div, add_one=True)
 
     def test_bin_op_list_error_cases(self, device):
         tensors1 = []
