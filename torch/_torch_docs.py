@@ -8491,9 +8491,9 @@ The inverse of this function is :func:`~torch.ifft`.
 
 .. deprecated:: 1.7.0
     The function :func:`torch.fft` is deprecated and will be removed in a
-    PyTorch 1.8. Use the new :mod:`torch.fft` module functions instead, by
-    importing :mod:`torch.fft` and calling :func:`torch.fft.fft` or
-    :func:`torch.fft.fftn`.
+    PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
+    functions instead, by importing :ref:`torch.fft <torch-fft-module>` and
+    calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8600,9 +8600,9 @@ The inverse of this function is :func:`~torch.fft`.
 
 .. deprecated:: 1.7.0
     The function :func:`torch.ifft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :mod:`torch.fft` module functions
-    instead, by importing :mod:`torch.fft` and calling :func:`torch.fft.ifft`
-    or :func:`torch.fft.ifftn`.
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8694,9 +8694,10 @@ The inverse of this function is :func:`~torch.irfft`.
 
 .. deprecated:: 1.7.0
     The function :func:`torch.rfft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :mod:`torch.fft` module functions
-    instead, by importing :mod:`torch.fft` and calling :func:`torch.fft.rfft`
-    for one-sided output, or :func:`torch.fft.fft` for two-sided output.
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.rfft` for one-sided output, or
+    :func:`torch.fft.fft` for two-sided output.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8772,9 +8773,10 @@ The inverse of this function is :func:`~torch.rfft`.
 
 .. deprecated:: 1.7.0
     The function :func:`torch.irfft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :mod:`torch.fft` module functions
-    instead, by importing :mod:`torch.fft` and calling :func:`torch.fft.irfft`
-    for one-sided input, or :func:`torch.fft.ifft` for two-sided input.
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.irfft` for one-sided input, or
+    :func:`torch.fft.ifft` for two-sided input.
 
 .. warning::
     Generally speaking, input to this function should contain values
