@@ -190,6 +190,8 @@ namespace c10 {
   _(aten, copy_)                     \
   _(aten, div)                       \
   _(aten, div_)                      \
+  _(aten, divide)                    \
+  _(aten, divide_)                   \
   _(aten, true_divide)               \
   _(aten, true_divide_)              \
   _(aten, t_)                        \
@@ -216,6 +218,10 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, mul)                       \
+  _(aten, mul_)                      \
+  _(aten, multiply)                  \
+  _(aten, multiply_)                 \
   _(aten, ne)                        \
   _(aten, ne_)                       \
   _(aten, not_equal)                 \

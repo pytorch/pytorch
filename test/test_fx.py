@@ -4,13 +4,15 @@ import operator
 import numbers
 import pickle
 import copy
+from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -150,7 +152,7 @@ class TestFX(JitTestCase):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
         class NoLeafModulesTracer(Tracer):
-            def is_leaf_module(self, m):
+            def is_leaf_module(self, m, qualname):
                 return False
 
         class MyReluMod(torch.nn.Module):
@@ -172,10 +174,12 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        t = Proxy(g.result)
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
+        t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
-        g.output((t + t).node)
-        gm = GraphModule(m, g)
+        new_g.output((t + t).node)
+        gm = GraphModule(m, new_g)
         self.assertEqual(gm(3, 4), 14)
 
     @skipIfNoTorchVision
@@ -219,8 +223,12 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, (a, b))
 
-    @skipIfRocm
     def test_native_callable(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        torch_root = Path(__file__).resolve().parent.parent
+        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch.ops.load_library(str(p))
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
         #
@@ -440,8 +448,16 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
-        st = SimpleTest()
-        traced = symbolic_trace(st)
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.st = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.st(x)
+
+        n = Nested()
+        traced = symbolic_trace(n)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
         x = torch.rand(3, 4)
@@ -452,9 +468,10 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
 
         def transform(traced):
-            new_graph = copy.deepcopy(traced.graph)
+            new_graph = torch.fx.Graph()
+            new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
+                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)

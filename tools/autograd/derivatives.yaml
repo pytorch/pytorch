@@ -159,7 +159,7 @@
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
-  self: grad * self.sign()
+  self: grad * self.sgn()
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
@@ -330,8 +330,8 @@
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
-  real: not_implemented("complex real")
-  imag: not_implemented("complex imag")
+  real: at::real(grad)
+  imag: at::imag(grad)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs: not_implemented("polar abs")
@@ -341,10 +341,10 @@
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
-  self: grad * -self.sin()
+  self: grad * -self.sin().conj()
 
 - name: cosh(Tensor self) -> Tensor
-  self: grad * self.sinh()
+  self: grad * self.sinh().conj()
 
 - name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   self: not_implemented("count_nonzero")
@@ -397,11 +397,11 @@
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
 # Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad / other
-  other: -grad * (self / other) / other
+  self: div_tensor_self_backward(grad, other, self.scalar_type())
+  other: div_tensor_other_backward(grad, self, other)
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad / other
+  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor
@@ -736,11 +736,11 @@
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad * other
-  other: grad * self
+  self: mul_tensor_backward(grad, other, self.scalar_type())
+  other: mul_tensor_backward(grad, self, other.scalar_type())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * other
+  self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
@@ -928,11 +928,14 @@
 - name: sign(Tensor self) -> Tensor
   self: zeros_like(grad)
 
+- name: sgn(Tensor self) -> Tensor
+  self: sgn_backward(result, grad, self)
+
 - name: sin(Tensor self) -> Tensor
-  self: grad * self.cos()
+  self: grad * self.cos().conj()
 
 - name: sinh(Tensor self) -> Tensor
-  self: grad * self.cosh()
+  self: grad * self.cosh().conj()
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
@@ -1104,10 +1107,10 @@
   self: grad.reshape(self.sizes())
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
+  self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous().conj()) # [gx, -gy]
+  self: at::view_as_real(grad.contiguous()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
@@ -1776,8 +1779,8 @@
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, false, false, false, false, grad_input_mask)
 
 # fft
-- name: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
+- name: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
+  self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalization, onesided, output_sizes)
 
 - name: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
