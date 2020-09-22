@@ -6342,16 +6342,6 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor(a_, dtype=dtypes[0], device=device)
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-        # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
-        # CUDA as long as the two tensors are promoted to a supported type.
-        # TODO: Remove this once logical operators are improved to take care of bfloat16.
-        if self.device_type == 'cuda' and torch.bfloat16 in dtypes:
-            if torch.promote_types(dtypes[0], dtypes[1]) == torch.bfloat16:
-                with self.assertRaises(RuntimeError):
-                    getattr(a, op)(b)
-                return
-
         if dtypes[0].is_complex or dtypes[1].is_complex:
             with self.assertRaises(RuntimeError):
                 getattr(a, op)(b)
@@ -6367,12 +6357,6 @@ class TestTorchDeviceType(TestCase):
         # in-place
         # TODO: remove when different dtypes as operands are supported
         if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
-        # TODO: remove when logical ops support bfloat16 on CUDA.
-        if self.device_type == 'cuda' and dtypes[0] == torch.bfloat16:
             with self.assertRaises(RuntimeError):
                 getattr(a, op + '_')(b)
             return
