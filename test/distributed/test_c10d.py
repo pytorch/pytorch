@@ -2958,7 +2958,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         checkpoint_path = self.file_name + "_model_checkpoint"
         if self.rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
-        dist.barrier()
+        process_group.barrier()
         for p in ddp_withload.parameters():
             p = 0
         map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
