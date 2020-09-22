@@ -526,8 +526,20 @@ class TestQuantizeFx(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
-        register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
+        class DynamicallyQuantizedCustomModule(torch.nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, x):
+                return self.conv(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                quantized = cls(nnqd.Conv2d.from_float(observed_module.conv))
+                return quantized
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -570,35 +582,41 @@ class TestQuantizeFx(QuantizationTestCase):
                         not isinstance(m, torch.nn.Sequential)) or \
                     isinstance(m, CustomModule)
 
-        m = CustomTracer().trace(original_m).eval()
-        qconfig_dict = {'': default_qconfig}
-        # check prepared model
-        m = prepare_static_fx(m, qconfig_dict)
-        # calibration
-        m(data)
-        # all activation observers are inserted in the top level module
-        count_check = {
-            ns.call_module(torch.quantization.MinMaxObserver): 3
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        # TODO: add other quant types after mixed mode support
+        for quant_type in [QuantType.STATIC]:
+            # register observed and quantized custom module classes
+            register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
+            register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 
-        # check converted/quantized model
-        m = convert_static_fx(m)
-        count_check = {
-            ns.call_function(torch.quantize_per_tensor) : 1,
-            ns.call_module(nnq.Conv2d) : 1,
-            ns.call_method('dequantize') : 1,
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-        res = m(data)
+            m = CustomTracer().trace(original_m).eval()
+            qconfig_dict = {'': default_qconfig}
+            # check prepared model
+            m = prepare_static_fx(m, qconfig_dict)
+            # calibration
+            m(data)
+            # all activation observers are inserted in the top level module
+            count_check = {
+                ns.call_module(torch.quantization.MinMaxObserver): 3
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
 
-        # quantize the reference model
-        ref_m = symbolic_trace(original_ref_m).eval()
-        ref_m = prepare_fx(ref_m, qconfig_dict)
-        ref_m(data)
-        ref_m = convert_fx(ref_m)
-        ref_res = ref_m(data)
-        self.assertEqual(res, ref_res)
+            # check converted/quantized model
+            m = convert_static_fx(m)
+            count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_module(nnq.Conv2d) : 1,
+                ns.call_method('dequantize') : 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+            res = m(data)
+
+            # quantize the reference model
+            ref_m = symbolic_trace(original_ref_m).eval()
+            ref_m = prepare_fx(ref_m, qconfig_dict)
+            ref_m(data)
+            ref_m = convert_fx(ref_m)
+            ref_res = ref_m(data)
+            self.assertEqual(res, ref_res)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
