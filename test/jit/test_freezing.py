@@ -480,6 +480,77 @@ class TestFreezing(JitTestCase):
         self.assertEqual(output_s, output_f)
 
 
+    def test_freeze_module_with_preserve_sub_module(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that 'sub1' is preserved entirely and 'sub2' is completely folded
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertFalse(mf.hasattr('sub2'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_preserve_sub_module_and_mutation(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                self.a[0] = 3.3
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that be both sub1 and sub1 are preserved and 'b' is preserved
+        # even if it is not used. To fulfill user request to preserve 'sub1'
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('a'))
+        self.assertTrue(mf.sub2.hasattr('b'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
             def __init__(self):
