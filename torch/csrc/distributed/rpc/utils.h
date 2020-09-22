@@ -85,7 +85,7 @@ TORCH_API void populateRemoteProfiledEvents(
     std::vector<torch::autograd::profiler::Event>& profiledEvents,
     const torch::autograd::profiler::ProfilerConfig& profilerConfig,
     const std::vector<std::vector<torch::autograd::profiler::Event>>&
-        event_lists);
+        eventLists);
 
 } // namespace rpc
 } // namespace distributed
