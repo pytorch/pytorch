@@ -298,8 +298,6 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         # D = D[..., -k:]
         # U = U[..., :, -k:]
 
-        D = D.contiguous()
-        U = U.contiguous()
         ctx.save_for_backward(A, B, D, U, largest)
 
         return D, U
@@ -507,11 +505,23 @@ def lobpcg(A,                   # type: Tensor
     A_sym = (A + A.transpose(-2, -1)) / 2
     B_sym = (B + B.transpose(-2, -1)) / 2 if (B is not None) else None
 
-    return LOBPCGAutogradFunction.apply(
-        A_sym, k, B_sym, X, n, iK, niter, tol, largest,
-        method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
-    )
-
+    if not torch._jit_internal.is_scripting():
+        return LOBPCGAutogradFunction.apply(
+            A_sym, k, B_sym, X, n, iK, niter, tol, largest,
+            method, tracker, ortho_iparams, ortho_fparams, ortho_bparams
+        )
+    else:
+        if A.requires_grad or (B is not None and B.requires_grad):
+            raise RuntimeError(
+                'Script and require grads is not supported atm.'
+                'If you just want to do the forward, use .detach()'
+                'on A and B before calling into lobpcg'
+            )
+        return _lobpcg(
+            A, k, B, X,
+            n, iK, niter, tol, largest, method, tracker,
+            ortho_iparams, ortho_fparams, ortho_bparams
+        )
 
 def _lobpcg(A,                   # type: Tensor
             k=None,              # type: Optional[int]
