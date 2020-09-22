@@ -238,8 +238,8 @@ class DeviceCachingAllocator {
       || (trigger_free_memory_callbacks(params) && get_free_block(params))
       // Attempt allocate
       || alloc_block(params, false)
-      // Free one non-split cached block of sufficient size and retry alloc.
-      || (release_cached_block(params) && alloc_block(params, false))
+      // Free enough available cached blocks to satasfy alloc and retry alloc.
+      || (release_available_cached_blocks(params) && alloc_block(params, false))
       // Free all non-split cached blocks and retry alloc.
       || (release_cached_blocks() && alloc_block(params, true));
 
@@ -659,16 +659,32 @@ class DeviceCachingAllocator {
     return (p.block != nullptr);
   }
 
-  /** Free one oversize cached block of sufficient size **/
-  bool release_cached_block(const AllocParams& p)
+  /** Free one or more blocks to the system allocator.  But only enough to satasfy the target size **/
+  bool release_available_cached_blocks(const AllocParams& p)
   {
     BlockPool& pool = *p.pool;
     Block key = p.search_key;
     key.size = (key.size < kLargeSize) ? kLargeSize : key.size;
     auto it = pool.lower_bound(&key);
-    if (it == pool.end() || (*it)->stream != p.stream())
-      return false;
-    release_block(*it);
+    if (it == pool.end() || (*it)->stream != p.stream()) {
+      // No single block is large enough; free multiple oversize blocks, starting with the largest
+      if (it == pool.begin())
+        return false;
+      size_t totalReleased = 0;
+      --it;  // Back up one item.  Now on the largest block for the correct stream
+      while ((totalReleased < key.size) && ((*it)->size >= kLargeSize)
+              && ((*it)->stream == p.stream()) && (it != pool.begin())) {
+          auto cur = it;
+          totalReleased += (*it)->size;
+          --it;
+          release_block(*cur);
+      }
+      if (totalReleased < key.size)
+        return false;
+    }
+    else {
+      release_block(*it);
+    }
     return true;
   }
 
@@ -678,7 +694,7 @@ class DeviceCachingAllocator {
     // outstanding events are returned to the pool.
     synchronize_and_free_events();
 
-    // Free all non-split cached blocks
+    // Free all non-split cached blocks to system allocator
     release_blocks(large_blocks);
     release_blocks(small_blocks);
     return true;
