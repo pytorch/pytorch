@@ -6574,6 +6574,7 @@
   - name: aten::empty
   - name: aten::eq
   - name: aten::is_nonzero
+  - name: aten::quantized_max_pool1d
   - name: aten::max_pool1d_with_indices
   - name: aten::size
   - name: aten::squeeze_
@@ -7952,6 +7953,11 @@
   - name: aten::tanh
   - name: aten::tanh_
   - name: aten::unsafe_chunk
+- name: aten::quantized_max_pool1d
+  depends:
+  - name: aten::quantized_max_pool2d
+  - name: aten::squeeze
+  - name: aten::unsqueeze
 - name: aten::quantized_max_pool2d
   depends:
   - name: aten::_empty_affine_quantized
