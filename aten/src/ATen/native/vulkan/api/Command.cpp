@@ -1,10 +1,39 @@
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 namespace {
+
+VkCommandPool create_command_pool(
+    const VkDevice device,
+    uint32_t queue_family_index) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
+  const VkCommandPoolCreateInfo command_pool_create_info{
+    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+    nullptr,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    queue_family_index,
+  };
+
+  VkCommandPool command_pool{};
+  VK_CHECK(vkCreateCommandPool(
+      device,
+      &command_pool_create_info,
+      nullptr,
+      &command_pool));
+
+  TORCH_CHECK(
+      command_pool,
+      "Invalid Vulkan command pool!");
+
+  return command_pool;
+}
 
 VkCommandBuffer allocate_command_buffer(
     const VkDevice device,
@@ -125,7 +154,8 @@ void Command::Buffer::copy(
       &buffer_copy);
 }
 
-void Command::Buffer::dispatch(const Shader::WorkGroup& work_group) {
+void Command::Buffer::dispatch(
+    const Shader::WorkGroup& work_group) {
   vkCmdDispatch(
       command_buffer_,
       work_group.x,
@@ -156,50 +186,10 @@ void Command::Buffer::submit(
 }
 
 Command::Pool::Pool(const GPU& gpu)
-  : cache(Factory(gpu)),
-    primary(
-        gpu.device,
-        cache.retrieve({gpu.adapter->compute_queue_family_index})) {
-}
-
-Command::Pool::Factory::Factory(const GPU& gpu)
-  : device_(gpu.device) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        device_,
-        "Invalid Vulkan device!");
-}
-
-typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
-    const Descriptor& descriptor) const {
-  const VkCommandPoolCreateInfo command_pool_create_info{
-    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-    nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    descriptor.queue_family_index,
-  };
-
-  VkCommandPool command_pool{};
-  VK_CHECK(vkCreateCommandPool(
-      device_,
-      &command_pool_create_info,
-      nullptr,
-      &command_pool));
-
-  TORCH_CHECK(
-      command_pool,
-      "Invalid Vulkan command pool!");
-
-  return Handle{
-    command_pool,
-    Deleter(device_),
-  };
-}
-
-Command::Pool::Object::Object(
-    const VkDevice device,
-    const VkCommandPool command_pool)
-  : device_(device),
-    command_pool_(command_pool) {
+  : device_(gpu.device),
+    command_pool_(
+        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index),
+        VK_DELETER(CommandPool)(device_)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -209,12 +199,12 @@ Command::Pool::Object::Object(
       "Invalid Vulkan command pool!");
 }
 
-Command::Buffer Command::Pool::Object::allocate() {
-  return Buffer(device_, command_pool_);
+Command::Buffer Command::Pool::buffer() {
+  return Buffer(device_, command_pool_.get());
 }
 
-void Command::Pool::Object::purge() {
-  VK_CHECK(vkResetCommandPool(device_, command_pool_, 0u));
+void Command::Pool::purge() {
+  VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
 }
 
 } // namespace api
