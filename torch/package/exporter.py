@@ -105,7 +105,7 @@ class PackageExporter:
                     # being provided by this directory structure _before_ attempting to resolve the dependencies
                     # on the source. This makes sure we don't try to copy over modules that will just get
                     # overwritten by this directory blob
-                    to_save.append((submodule_name, _read_file(filename), is_package, dependencies, str(filename)))
+                    to_save.append((submodule_name, _read_file(str(filename)), is_package, dependencies, str(filename)))
 
             for item in to_save:
                 self.save_source_string(*item)
