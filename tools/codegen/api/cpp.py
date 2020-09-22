@@ -153,7 +153,6 @@ JIT_TO_CPP_DEFAULT = {
     'None': 'c10::nullopt',  # UGH this one is type directed
     'Mean': 'at::Reduction::Mean',
     '[]': '{}',
-    '[0,1]': '{0,1}',  # TODO: stop special casing
     'contiguous_format': 'MemoryFormat::Contiguous',
 }
 
@@ -161,6 +160,18 @@ JIT_TO_CPP_DEFAULT = {
 def default_expr(d: str, t: Type) -> str:
     if d == 'None' and str(t) == 'Tensor?':
         return '{}'
+
+    if isinstance(t, OptionalType):
+        if d == 'None':
+            return 'c10::nullopt'
+
+        t_str = argumenttype_type(t.elem, mutable=False)
+        inner_default = default_expr(d, t.elem)
+        return f'{t_str}({inner_default})'
+
+    if isinstance(t, ListType) and d.startswith('[') and d.endswith(']'):
+        return '{' + d[1:-1] + '}'
+
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form
