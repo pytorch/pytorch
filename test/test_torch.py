@@ -9533,9 +9533,10 @@ class TestTorchDeviceType(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @precisionOverride({torch.float32: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64)
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
 
