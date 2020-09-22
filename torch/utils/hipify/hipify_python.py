@@ -668,6 +668,14 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
+"""
+Returns a dict with the following keys:
+    "orig_path"     : absolute path of source file
+    "hipified_path" : absolute path of hipified source file
+    "status"        : "ok"      if hipified file was written out
+                      "skipped" if an identical hipified file already existed
+                      "ignored" if the source file was a hipified file itself
+"""
 def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
@@ -709,6 +717,7 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
                 or f.startswith("THC/")
                 or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
+            # if filename is one of the files being hipified for this extension
             ) or (is_pytorch_extension and any(filename in s for s in all_files)):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
             return m.group(0)
@@ -877,6 +886,7 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
+    # Convert extra_files to relative paths since all_files has all relative paths
     for f in extra_files:
         f_rel = os.path.relpath(f, output_directory)
         if f_rel not in all_files_set:
