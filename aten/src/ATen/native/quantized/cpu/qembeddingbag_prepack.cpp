@@ -183,13 +183,12 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE, bo
     float Xmax = *std::max_element(input_row, input_row + embedding_cols);
 
     Xmin = static_cast<at::Half>(Xmin);
-    float range = Xmax - Xmin;
     float zp = Xmin;
-    //float scale_value = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);;
     if (optimized_qparams) {
-      std::tie(range, zp) = at::choose_qparams_optimized(weight_contig[row], embedding_cols, 200, 0.16, Xmin, Xmax, BIT_RATE);
+      std::tie(Xmax, zp) = at::choose_qparams_optimized(weight_contig[row], embedding_cols, 200, 0.16, Xmin, Xmax, BIT_RATE);
     }
     zp = static_cast<at::Half>(zp);
+    float range = Xmax - zp;
     // Set scale to 1.0f for the corner case of Xmax == Xmin .
     // Any non-zero scale would work because during quantization
     // (X - Xmin) / scale will be 0 for all X unless scale is 0.
@@ -217,7 +216,6 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE, bo
           0,
           std::min<int>(
               lrintf((X - zp) * inverse_scale), (1 << BIT_RATE) - 1));
-      std::cout  << "col " << col << " Float val " << X << " quantized " << (int)quantized <<std::endl;
       // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
       // and index 1 is packed in the upper 4-bits.
       if (col % NUM_ELEM_PER_BYTE == 0) {

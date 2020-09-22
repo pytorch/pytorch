@@ -280,8 +280,10 @@ std::tuple<double, double> choose_qparams_optimized(
     double xmax,
     int64_t bit_rate) {
 
+  xmin = (float) xmin;
+  xmax = (float) xmax;
   float stepsize = (xmax - xmin) / n_bins;
-  int min_bins = n_bins * (1 - ratio);
+  int min_bins = n_bins * (1.0 - (float) ratio);
   std::cout << "Input tensor " << input_tensor << std::endl;
   const float* input = input_tensor.contiguous().data_ptr<float>();
   std::vector<float> q_input(numel);
@@ -319,8 +321,7 @@ std::tuple<double, double> choose_qparams_optimized(
 
   // Calculate scale and bias
   std::cout << "Found xmax xmin " << xmax << " " << xmin << std::endl;
-  float range = xmax - xmin;
-  return std::make_tuple(range, xmin);
+  return std::make_tuple((float) xmax, (float) xmin);
 }
 } // namespace native
 } // namespace at
