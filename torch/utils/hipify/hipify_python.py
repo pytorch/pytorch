@@ -880,7 +880,7 @@ def hipify(
     for f in extra_files:
         f_rel = os.path.relpath(f, output_directory)
         if f_rel not in all_files_set:
-            all_files += f_rel
+            all_files.append(f_rel)
 
     # Start Preprocessor
     return preprocess(
