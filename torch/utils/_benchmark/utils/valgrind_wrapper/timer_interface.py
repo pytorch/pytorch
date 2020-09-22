@@ -168,14 +168,31 @@ class _ValgrindWrapper(object):
         with open(os.path.join(cwd, "callgrind_bindings.cpp"), "rt") as f:
             src = f.read()
 
+        extra_include_paths = ["/usr/include/valgrind"]
+        conda_prefix = os.getenv("CONDA_PREFIX")
+        if conda_prefix is not None:
+            conda_include = os.path.join(conda_prefix, "include", "valgrind")
+            extra_include_paths.insert(0, conda_include)
+
         # We use `load_inline` rather than `load` because supports the `functions`
         # argument and allows the C++ src to use TORCH_CHECK.
-        self._callgrind_bindings = load_inline(
-            name="callgrind_bindings",
-            cpp_sources=[src],
-            extra_include_paths=[cwd],
-            functions=["supported_platform", "toggle"],
-        )
+        try:
+            self._callgrind_bindings = load_inline(
+                name="callgrind_bindings",
+                cpp_sources=[src],
+                extra_include_paths=extra_include_paths,
+                functions=["supported_platform", "toggle"],
+            )
+        except RuntimeError as e:
+            if "fatal error: callgrind.h: No such file or directory" in str(e):
+                extra_include_str = textwrap.indent("\n".join(extra_include_paths), " " * 4)
+                raise RuntimeError(
+                    "Failed to locate `callgrind.h`.\n"
+                    "The following directories were searched:\n"
+                    f"{extra_include_str}") from None
+            # Unknown error, re-raise.
+            raise
+
 
         self._commands_available: Dict[str, bool] = {}
         if self._callgrind_bindings.supported_platform():
@@ -316,8 +333,8 @@ class _ValgrindWrapper(object):
 
                     count_match = re.match(r"^\s*([0-9,]+)\s+(.+:.+)$", l)
                     if count_match:
-                        ir, file_function = count_match.groups()
-                        ir = int(ir.replace(",", ""))
+                        ir_str, file_function = count_match.groups()
+                        ir = int(ir_str.replace(",", ""))
                         fn_counts.append((ir, file_function))
                         continue
 
