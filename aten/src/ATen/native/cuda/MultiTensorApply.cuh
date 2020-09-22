@@ -85,7 +85,7 @@ void multi_tensor_apply(
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
                 loc_block_info++;
 
-                bool tensors_full = (loc_tensor_info == depth_to_max_tensors[depth-1] &&
+                bool tensors_full = (loc_tensor_info == depth_to_max_tensors_scalarlist[depth-1] &&
                     chunk == chunks - 1);
                 bool blocks_full = (loc_block_info == depth_to_max_blocks[depth-1]);
                 bool last_chunk = (t == n_tensors - 1 && chunk == chunks - 1);
@@ -105,6 +105,7 @@ void multi_tensor_apply(
                     }
                     else {
                         tensorListMeta.sizes[0] = tensorListMeta.sizes[loc_tensor_info-1];
+                        tensorListMeta.scalar_vals[0] = tensorListMeta.scalar_vals[loc_tensor_info-1];
                         for(int d = 0; d < depth; d++) {
                             tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info-1];
                         }
