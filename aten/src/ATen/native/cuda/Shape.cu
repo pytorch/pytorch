@@ -12,7 +12,7 @@
 namespace at {
 namespace native {
 
-constexpr int CAT_ARRAY_BATCH_SIZE = 1024;
+constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 
 namespace {
@@ -57,14 +57,6 @@ struct CatArrIndexToOffset {
   }
 };
 
-template <typename T, typename IndexType>
-struct CatArrInputTensor {
-  T* input;
-  IndexType offset;
-  IndexType dimSize;
-  IndexType nElements;
-};
-
 template<typename IndexType, unsigned int MaxDims>
 struct OutputTensorSizeStride {
   IndexType outputSize[MaxDims];
@@ -85,25 +77,35 @@ struct OutputTensorSizeStride {
   *
   * The most important assumption made is that the input tensors are contiguous.
   */
+
+// pass meta data directly through kernel argument instead of pin memory
+template <typename T, typename IndexType, int n>
+struct CatArrInputTensorMetadata {
+  T* input[n];
+  IndexType offset[n];
+  IndexType dimSize[n];
+  IndexType nElements[n];
+};
+
 template <typename T, typename IndexType, int Dims>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 __global__ void CatArrayBatchedCopy(
     T* output,
-    CatArrInputTensor<T, IndexType>* inputs,
+    CatArrInputTensorMetadata<T, IndexType, CAT_ARRAY_BATCH_SIZE> inputs,
     OutputTensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
     IndexType dimStride) {
 
     IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
-    IndexType nElements = inputs[blockIdx.y].nElements;
+    IndexType nElements = inputs.nElements[blockIdx.y];
 
     if(tid >= nElements) return;
 
-    T* data = inputs[blockIdx.y].input;
-    IndexType offset = inputs[blockIdx.y].offset;
-    IndexType dimSize = inputs[blockIdx.y].dimSize;
+    T* data = inputs.input[blockIdx.y];
+    IndexType offset = inputs.offset[blockIdx.y];
+    IndexType dimSize = inputs.dimSize[blockIdx.y];
     IndexType dataOffset = offset * dimStride;
 
     IndexType stride = gridDim.x * blockDim.x;
@@ -145,15 +147,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = out.data_ptr<scalar_t>();
-
-  // Kernel Parameter
-  long tensorMetadataSize =
-    sizeof(CatArrInputTensor<scalar_t, unsigned int>) * CAT_ARRAY_BATCH_SIZE;
-  auto d_inputs_storage = at::empty(
-    {tensorMetadataSize}, out.options().dtype(at::kByte));
-  auto d_inputs = static_cast<CatArrInputTensor<scalar_t, unsigned int> *>(
-    d_inputs_storage.data_ptr());
-
+  CatArrInputTensorMetadata<scalar_t, unsigned int, CAT_ARRAY_BATCH_SIZE> catMetaData;
   OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
@@ -183,32 +177,19 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
   int batchCounter = 0;
   int64_t offset = 0;
   for (int i = 0; i < inputs.size() ; i += CAT_ARRAY_BATCH_SIZE) {
-    // Re-allocate stackInputs every iteration to avoid read-after-write hazard
-    {
-      auto stackInputs_storage = at::empty({tensorMetadataSize},
-          out.options().dtype(at::kByte).device(at::kCPU).pinned_memory(true));
-      auto stackInputs =
-        static_cast<CatArrInputTensor<scalar_t, unsigned int> *>(
-          stackInputs_storage.data_ptr());
-      for (batchCounter = 0;
-           batchCounter < CAT_ARRAY_BATCH_SIZE &&
-             (i+batchCounter) < inputs.size();
-           ++batchCounter) {
-        int64_t dimSize = at::native::size(inputs[i+batchCounter], dimension);
+    for (batchCounter = 0;
+          batchCounter < CAT_ARRAY_BATCH_SIZE &&
+            (i+batchCounter) < inputs.size();
+          ++batchCounter) {
+      int64_t dimSize = at::native::size(inputs[i+batchCounter], dimension);
+      catMetaData.input[batchCounter] = inputs[i+batchCounter].data_ptr<scalar_t>();
+      catMetaData.offset[batchCounter] = offset;
+      catMetaData.dimSize[batchCounter] = dimSize;
+      catMetaData.nElements[batchCounter] = inputs[i+batchCounter].numel();
 
-        stackInputs[batchCounter].input =
-          inputs[i+batchCounter].data_ptr<scalar_t>();
-        stackInputs[batchCounter].offset = offset;
-        stackInputs[batchCounter].dimSize = dimSize;
-        stackInputs[batchCounter].nElements = inputs[i+batchCounter].numel();
-
-        // update offset
-        offset += dimSize;
-      }
-      at::native::copy_(d_inputs_storage, stackInputs_storage,
-                        /* non_blocking= */ true);
+      // update offset
+      offset += dimSize;
     }
-
     // Next, let's consider how we set our kernel launch parameters.
     // We borrow from THCApply, which the kernel's internal indexing
     // is based on.
@@ -219,7 +200,6 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     //many threads from needlessly load meta data if their sizes is small.
     dim3 catGrid;
     getCatGrid(batchCounter, catGrid);
-
 
     if (memory_format != c10::MemoryFormat::Contiguous) {
       switch (dimension) {
@@ -236,7 +216,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 #define HANDLE_CASE(DIMS) \
     CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, d_inputs, param, dimension, param.outputStride[dimension]);
+            data, catMetaData, param, dimension, param.outputStride[dimension]);
     switch (nDims) {
       case 1:
         HANDLE_CASE(1);
@@ -393,11 +373,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       all32BitIndexable &&
       allSameType) {
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-        out.scalar_type(), "cat_cuda", [&]() {
-      parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
-    });
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+          out.scalar_type(), "cat_cuda", [&]() {
+        parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
+      });
 
   } else {
     int64_t offset = 0;
