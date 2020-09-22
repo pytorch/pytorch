@@ -307,10 +307,10 @@ class _Uninitialized final {};
 // with scalarTypeItemSizes as a constexpr static member used by
 // a public inline instance method
 //
-static constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
+constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
+constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
@@ -475,11 +475,10 @@ private:
   */
   static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
     const size_t index = static_cast<uint16_t>(scalar_type);
-    if (C10_LIKELY(index < NumScalarTypes)) {
-      return TypeMeta(index);
-    }
-    error_unrecognized_scalartype(scalar_type);
-    return TypeMeta(); // avoids "control reaches end of non-void function"
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      index < NumScalarTypes,
+      "Unrecognized Scalartype ", scalar_type, " (please report this error)");
+    return TypeMeta(index);
   }
 
   /**
@@ -490,16 +489,10 @@ private:
       return static_cast<ScalarType>(index_);
     }
     error_unsupported_typemeta(*this);
-    return ScalarType::Undefined; // avoids "control reaches end of non-void function"
   }
 
 private:
-  static void error_unrecognized_scalartype(ScalarType scalar_type) {
-    TORCH_CHECK(false, "Unrecognized Scalartype ", scalar_type, " (please report this error)");
-  }
-  static void error_unsupported_typemeta(caffe2::TypeMeta dtype) {
-    TORCH_CHECK(false, "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
-  }
+  [[noreturn]] static void error_unsupported_typemeta(caffe2::TypeMeta dtype);
 
   // hard limit number of registered types
   static constexpr size_t MaxTypeIndex = UINT8_MAX;
