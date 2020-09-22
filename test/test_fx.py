@@ -152,7 +152,7 @@ class TestFX(JitTestCase):
         # Custom delegate to make it so that there are no leaf modules, everything
         # should get traced through
         class NoLeafModulesTracer(Tracer):
-            def is_leaf_module(self, m):
+            def is_leaf_module(self, m, qualname):
                 return False
 
         class MyReluMod(torch.nn.Module):
@@ -336,7 +336,7 @@ class TestFX(JitTestCase):
                 placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.create_node('get_param', 'interpreter')
+            interpreter_node = graph.create_node('get_attr', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -446,8 +446,16 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
-        st = SimpleTest()
-        traced = symbolic_trace(st)
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.st = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.st(x)
+
+        n = Nested()
+        traced = symbolic_trace(n)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
         x = torch.rand(3, 4)
@@ -559,7 +567,7 @@ class TestFX(JitTestCase):
         g = Graph()
         a = g.placeholder('a')
         b = g.call_module('linear', (a,))
-        c = g.get_param('bias')
+        c = g.get_attr('bias')
         d = g.call_method('add', (b, c))
         e = g.call_function(torch.sin, (d,))
         g.output(e)
@@ -576,7 +584,7 @@ class TestFX(JitTestCase):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
         b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
+        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
 

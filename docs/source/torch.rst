@@ -280,6 +280,7 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
@@ -309,6 +310,7 @@ Pointwise Ops
     hypot
     i0
     mul
+    multiply
     mvlgamma
     neg
     negative
