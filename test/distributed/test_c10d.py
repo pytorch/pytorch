@@ -46,7 +46,7 @@ if not c10d.is_available():
 if platform == 'darwin':
     LOOPBACK = 'lo0'
 elif platform == 'win32':
-    LOOPBACK = 'Ethernet'
+    LOOPBACK = 'Ethernet 2'
 else:
     LOOPBACK = 'lo'
 

@@ -39,5 +39,3 @@ fi
 
 echo "Free space on filesystem after build:"
 df -h
-
-netsh interface show interface
