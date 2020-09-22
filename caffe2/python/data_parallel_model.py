@@ -941,7 +941,7 @@ def FinalizeAfterCheckpoint(model, blobs=None, cpu_mode=False):
             uniq_blob_names = [stripBlobName(p) for p in blobs]
 
         # Synchronize to the blob lookup map, as the provided
-        # blobs might have non-parameters, such as momemtum blobs.
+        # blobs might have non-parameters, such as momentum blobs.
         log.info("Creating checkpoint synchronization net")
         devices = model.GetDevices()
         for name in uniq_blob_names:

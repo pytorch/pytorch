@@ -17,7 +17,7 @@ def graph_pretty_str(g, shorten=True) -> str:
     built_in_meth_re = re.compile('<built-in method (.*) of type.*>')
     op_dict = {
         'placeholder': 'plchdr',
-        'get_param': 'gt_prm',
+        'get_attr': 'gt_prm',
         'call_function': 'cl_fun',
         'call_module': 'cl_mod',
         'call_method': 'cl_meth',
@@ -136,5 +136,5 @@ def quantize_node(root_module, graph, node, activation_post_process):
     for key, value in qparams.items():
         setattr(root_module, key + str(idx), value)
         qparam_full_path = key + str(idx)
-        inputs.append(graph.create_node('get_param', qparam_full_path))
+        inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})

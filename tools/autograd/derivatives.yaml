@@ -330,8 +330,8 @@
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
-  real: not_implemented("complex real")
-  imag: not_implemented("complex imag")
+  real: at::real(grad)
+  imag: at::imag(grad)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs: not_implemented("polar abs")
@@ -341,10 +341,10 @@
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
-  self: grad * -self.sin()
+  self: grad * -self.sin().conj()
 
 - name: cosh(Tensor self) -> Tensor
-  self: grad * self.sinh()
+  self: grad * self.sinh().conj()
 
 - name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   self: not_implemented("count_nonzero")
@@ -736,11 +736,11 @@
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad * other
-  other: grad * self
+  self: mul_tensor_backward(grad, other, self.scalar_type())
+  other: mul_tensor_backward(grad, self, other.scalar_type())
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * other
+  self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
@@ -929,10 +929,10 @@
   self: zeros_like(grad)
 
 - name: sin(Tensor self) -> Tensor
-  self: grad * self.cos()
+  self: grad * self.cos().conj()
 
 - name: sinh(Tensor self) -> Tensor
-  self: grad * self.cosh()
+  self: grad * self.cosh().conj()
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
@@ -1104,10 +1104,10 @@
   self: grad.reshape(self.sizes())
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
+  self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous().conj()) # [gx, -gy]
+  self: at::view_as_real(grad.contiguous()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
