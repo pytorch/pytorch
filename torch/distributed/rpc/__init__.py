@@ -28,10 +28,15 @@ if is_available():
         _set_and_start_rpc_agent,
         _set_profiler_node_id,
         _is_current_rpc_agent_set,
+        _rref_context_get_debug_info,
+        _set_rpc_timeout,
+        get_rpc_timeout,
+        enable_gil_profiling,
         RpcBackendOptions,
         _TensorPipeRpcBackendOptionsBase as TensorPipeRpcBackendOptions,
         ProcessGroupRpcBackendOptions,
         ProcessGroupAgent,
+        WorkerInfo,
     )  # noqa: F401
     from .api import *  # noqa: F401
     from .backend_registry import BackendType
