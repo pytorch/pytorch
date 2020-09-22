@@ -133,8 +133,8 @@ class TestForeach(TestCase):
     def test_int_scalar(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3
                 expected = [torch_bin_op(t, scalar) for t in tensors]
@@ -174,8 +174,8 @@ class TestForeach(TestCase):
     def test_int_scalarlist(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1 for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -219,8 +219,8 @@ class TestForeach(TestCase):
     def test_float_scalar(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3.3
                 expected = [torch_bin_op(t, scalar) for t in tensors]
@@ -249,8 +249,8 @@ class TestForeach(TestCase):
     def test_float_scalarlist(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1.1 for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -296,8 +296,8 @@ class TestForeach(TestCase):
     def test_complex_scalar(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3 + 5j
                 expected = [torch_bin_op(t, scalar) for t in tensors]
@@ -333,8 +333,8 @@ class TestForeach(TestCase):
     def test_complex_scalarlist(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [3 + 5j for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -358,8 +358,8 @@ class TestForeach(TestCase):
     def test_bool_scalar(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = True
 
@@ -408,10 +408,10 @@ class TestForeach(TestCase):
     def test_bool_scalarlist(self, device, dtype):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
-                                                                    self.foreach_bin_ops_,
-                                                                    self.torch_bin_ops):
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
-                scalars = [True for _ in range(300)]
+                scalars = [True for _ in range(N)]
 
                 if dtype == torch.bool:
                     if self.device_type == 'cuda':
