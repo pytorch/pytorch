@@ -1,5 +1,4 @@
 import torch
-import torchvision.models as models
 import torch.fx
 import operator
 from typing import Callable, List, Dict
@@ -95,8 +94,8 @@ def create_module_from_nodes(
             graph_outputs.append(new_nodes[node_name])
         if op == "placeholder":
             graph_placeholders.append(new_nodes[node_name])
-    
-    #set graph outputs 
+
+    # set graph outputs 
     if module_outputs:
         graph.output(graph_outputs)
     else:
@@ -141,11 +140,11 @@ class Partition:
 
     def __repr__(self) -> str:
         return f"name: {self.name},\n" \
-        f" nodes: {self.nodes},\n" \
-        f" inputs: {self.inputs},\n" \
-        f" outputs: {self.outputs},\n" \
-        f" partitions depenent on: {self.partitions_dependent_on},\n" \
-        f" parition dependents: {self.partition_dependents}"
+            f" nodes: {self.nodes},\n" \
+            f" inputs: {self.inputs},\n" \
+            f" outputs: {self.outputs},\n" \
+            f" partitions depenent on: {self.partitions_dependent_on},\n" \
+            f" parition dependents: {self.partition_dependents}"
 
 
 # Creates subgraphs out of main graph 
@@ -178,7 +177,7 @@ def split_module(
         for node_name in partition.nodes:
 
             def find_external_inputs(node_arg: torch.fx.Node, cur_partition: Partition):
-                if not (node_arg.name in cur_partition.nodes) and not node_arg.name in cur_partition.inputs:
+                if node_arg.name not in cur_partition.nodes and node_arg.name not in cur_partition.inputs:
                     cur_partition.inputs.append(node_arg.name)
 
             torch.fx.map_arg(orig_nodes[node_name].args, lambda n: find_external_inputs(n, partition))
@@ -193,12 +192,12 @@ def split_module(
                 if input_partition_name != output_partition_name:
                     # if node is an input, need to add dependency between paritions
                     if output_node_name in input_partition.inputs:
-                        if not input_partition_name in output_partition.partition_dependents:
+                        if input_partition_name not in output_partition.partition_dependents:
                             output_partition.partition_dependents.append(input_partition_name)
                             input_partition.partitions_dependent_on.append(output_partition_name)
-                        if not output_node_name in output_partition.outputs:
+                        if output_node_name not in output_partition.outputs:
                             # add node to list of output partition's list of output nodes
-                           output_partition.outputs.append(output_node_name)
+                            output_partition.outputs.append(output_node_name)
 
     # find partitions with no dependencies
     root_partitions : List[str] = []
@@ -216,7 +215,7 @@ def split_module(
             if not partitions[dependent].partitions_dependent_on:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
-        raise RuntimeError(f"cycle exists between partitions!")
+        raise RuntimeError("cycle exists between partitions!")
 
     # info needed to make outer module
     outer_module_nodes : List[str] = []
@@ -226,7 +225,7 @@ def split_module(
     for node_name, node in orig_nodes.items():
         if node.op == 'placeholder':
             outer_module_nodes.append(node_name)
-    
+
     # create submodules from partitions
     for partition_name in sorted_partitions:
         submodule_name = "submod_" + str(partition_name)
@@ -237,7 +236,7 @@ def split_module(
         placeholder_hints = []
         for node_name in partitions[partition_name].inputs:
             node = orig_nodes[node_name]
-            if not node.op in ['placeholder', 'get_attr']: 
+            if node.op not in ['placeholder', 'get_attr']: 
                 # node not originally placeholder, need to convert 
                 placeholder_hints.append(node_name)
             submodule_nodes.append(node_name)
@@ -301,11 +300,11 @@ split_graph = split_module(my_module_traced, my_module, mod_partition)
 
 print(split_graph)
 
-x = torch.rand(3,4)
-y = torch.rand(3,4)
+x = torch.rand(3, 4)
+y = torch.rand(3, 4)
 
-orig_out = my_module_traced(x,y)
-subgraphs_out = split_graph(x,y)
+orig_out = my_module_traced(x, y)
+subgraphs_out = split_graph(x, y)
 
 print(orig_out)
 print()
