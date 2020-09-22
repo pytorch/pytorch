@@ -67,8 +67,20 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
 
 class Graph:
     def __init__(self):
-        self.nodes : List[Node] = []
+        self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
+
+    @property
+    def nodes(self):
+        return tuple(self._nodes)
+
+    def graph_copy(self, g : 'Graph'):
+        """
+        Append all nodes from graph `g` to this graph
+        """
+        val_map : Dict[Node, Node] = {}
+        for node in g._nodes:
+            val_map[node] = self.node_copy(node, lambda n : val_map[n])
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -86,7 +98,7 @@ class Graph:
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        self.nodes.append(n)
+        self._nodes.append(n)
         return n
 
     # sugar for above when you know the op
@@ -161,7 +173,7 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
-        for node in self.nodes:
+        for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
@@ -237,7 +249,7 @@ class Graph:
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
-        node_strs = [format_node(node) for node in self.nodes]
+        node_strs = [format_node(node) for node in self._nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}):'
         for node_str in node_strs:
