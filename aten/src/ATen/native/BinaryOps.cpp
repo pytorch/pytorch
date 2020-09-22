@@ -20,6 +20,7 @@ DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(floordiv_stub);
 DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
@@ -202,32 +203,36 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
   // Computes the output dtype
   auto result_dtype = at::native::result_type(TensorList{self, other});
-  auto true_divide_out_type = result_dtype;
-  if (c10::isIntegralType(result_dtype, /*include_bool=*/true)) {
-    true_divide_out_type = typeMetaToScalarType(at::get_default_dtype());
+
+  TORCH_CHECK(result_dtype != ScalarType::Bool,
+    "torch.floor_divide is not implemented for scalar type bool!");
+
+  // NOTE: floordiv_stub handles the special case of integer floor division
+  if (c10::isIntegralType(result_dtype, /*include_bool=*/false)) {
+    auto iter = TensorIterator::binary_op(result, self, other);
+    floordiv_stub(iter.device_type(), iter);
+    return result;
   }
 
-  // Uses the given result if true_divide can accept it as an out= argument
-  if (canCast(true_divide_out_type, result.scalar_type())) {
-    return at::true_divide_out(result, self, other).floor_();
-  }
-
-  // Validates safe casting
-  TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
-    "result type ", result_dtype, " can't be cast to the "
-    "desired output type ", result.scalar_type());
-
-  const auto r = self.true_divide(other).floor_();
-  resize_output(result, r.sizes().vec());
-  result.copy_(r);
-  return result;
+  return at::true_divide_out(result, self, other).floor_();
 }
 
-// NOTE: this cannot just call floor_divide_out without preparing the
-//   result tensor properly.
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  const auto result_dtype = at::native::result_type(TensorList{self, other});
-  return self.true_divide(other).floor_().to(result_dtype);
+  // Computes the output dtype
+  auto result_dtype = at::native::result_type(TensorList{self, other});
+
+  TORCH_CHECK(result_dtype != ScalarType::Bool,
+    "torch.floor_divide is not implemented for scalar type bool!");
+
+  // NOTE: floordiv_stub handles the special case of integer floor division
+  if (c10::isIntegralType(result_dtype, /*include_bool=*/false)) {
+    Tensor result;
+    auto iter = TensorIterator::binary_op(result, self, other);
+    floordiv_stub(iter.device_type(), iter);
+    return iter.output();
+  }
+
+  return self.true_divide(other).floor_();
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {
@@ -1019,18 +1024,6 @@ Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scala
 
 TORCH_LIBRARY_IMPL(aten, Meta, m) {
   m.impl("add.Tensor", binary_op_with_scalar_meta);
-}
-
-// Implements C-style division. Performs true division with float input(s),
-//   and integer division with integer inputs. Note that integer division is
-//   not equivalent to floor division. Integer division truncates its
-//   quotient while floor division, as the name suggests, floors it.
-// NOTE: this function is intended for internal use only.
-Tensor& _c_style_div_(Tensor& self, Scalar other) {
-  const auto tensor_other = wrapped_scalar_tensor(other);
-  auto iter = TensorIterator::binary_op(self, self, tensor_other);
-  div_stub(iter.device_type(), iter);
-  return self;
 }
 
 } // namespace native

@@ -7769,11 +7769,6 @@
   python_module: linalg
   variants: function
 
-## Undocumented functions intended for internal use only
-- func: _c_style_div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: method
-
 ## Functions that are only for testing
 # These functions are undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
