@@ -453,7 +453,12 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    return g.op("Reshape", self, size)
+    size = sym_help._maybe_get_const(size, 'is')
+    if sym_help._is_value(size):
+        shape = size
+    else:
+        shape = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Reshape", self, shape)
 
 
 def view_as(g, self, other):
