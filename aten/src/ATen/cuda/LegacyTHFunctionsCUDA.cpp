@@ -436,6 +436,7 @@ Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const
     return self;
 }
 Tensor & _th_take_out(Tensor & result, const Tensor & self, const Tensor & index) {
+    AT_ERROR("TEST - confirmed that _th_take_out (cuda) is still in use");
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -509,6 +510,7 @@ Tensor & _th_take_out(Tensor & result, const Tensor & self, const Tensor & index
     return result;
 }
 Tensor _th_take(const Tensor & self, const Tensor & index) {
+    AT_ERROR("TEST - confirmed that _th_take (cuda) is still in use");
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
