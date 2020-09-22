@@ -101,7 +101,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 //     if(dataType == CUDNN_DATA_HALF)
 //       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
 //
-//     Update: AT_CUDNN_CHECK is updated with AT_CUDNN_CHECK_WITH_CONV_ARGS, which
+//     Update: AT_CUDNN_CHECK is updated with AT_CUDNN_CHECK_WITH_SHAPES, which
 //        automatically prints tensor shapes and convolution parameters if there is
 //        a cuDNN exception thrown.
 //
@@ -488,7 +488,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     if (!benchmark) {
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionForwardAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionForwardAlgorithm_v7(
           args.handle,
           args.idesc.desc(),
           args.wdesc.desc(),
@@ -500,7 +500,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnFindConvolutionForwardAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionForwardAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
           args.wdesc.desc(), args.weight.data_ptr(),
@@ -524,7 +524,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     const ConvolutionArgs& args,
     algo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionForwardWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionForwardWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.wdesc.desc(),
@@ -558,7 +558,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     if (!benchmark) {
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionBackwardDataAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardDataAlgorithm_v7(
           args.handle,
           args.wdesc.desc(),
           args.odesc.desc(),
@@ -570,7 +570,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnFindConvolutionBackwardDataAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardDataAlgorithmEx(
           args.handle,
           args.wdesc.desc(), args.weight.data_ptr(),
           args.odesc.desc(), args.output.data_ptr(),
@@ -594,7 +594,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     const ConvolutionArgs& args,
     cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionBackwardDataWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
@@ -630,7 +630,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     int perf_count;
     if (!benchmark) {
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
           args.handle,
           args.idesc.desc(),
           args.odesc.desc(),
@@ -642,7 +642,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardFilterAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
           args.odesc.desc(), args.output.data_ptr(),
@@ -664,7 +664,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
@@ -881,12 +881,12 @@ void raw_cudnn_convolution_forward_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType), args);
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnConvolutionForward(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionForward(
           args.handle,
           &one, args.idesc.desc(), input.data_ptr(),
           args.wdesc.desc(), weight.data_ptr(),
@@ -1018,12 +1018,12 @@ void raw_cudnn_convolution_backward_input_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(bwdDataAlgPerf.mathType);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType), args);
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnConvolutionBackwardData(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBackwardData(
           args.handle,
           &one, args.wdesc.desc(), weight.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
@@ -1181,12 +1181,12 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(bwdFilterAlgPerf.mathType);
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType), args);
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK_WITH_CONV_ARGS(cudnnConvolutionBackwardFilter(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBackwardFilter(
           args.handle,
           &one, args.idesc.desc(), input.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
