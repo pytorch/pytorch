@@ -270,7 +270,7 @@ void testFuserPass_Multidevice() {
     KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cuda:0),
-          %y : Float(20:1, device=cuda:1),
+          %y : Float(20, strides=[1], device=cuda:1),
           %z : Float(20, strides=[1], device=cpu)):
       %x2 : Tensor = aten::mul(%x, %x)
       %y2 : Tensor = aten::mul(%y, %y)

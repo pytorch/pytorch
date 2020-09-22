@@ -10592,7 +10592,7 @@ a")
                 out = fn()
                 graph_str = torch.jit.last_executed_optimized_graph()
                 self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
+                FileCheck().check("Double(3, 4, strides=[4, 1], requires_grad=0, device=cpu)") \
                            .check_not("Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(graph_str)
 
             # fn = self.checkScript(test_rand, ())
