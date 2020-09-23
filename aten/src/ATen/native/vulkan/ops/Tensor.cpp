@@ -32,7 +32,7 @@ api::Resource::Buffer allocate_staging(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  return context->resource().pool.allocate(
+  return context->resource().pool.buffer(
       api::Resource::Buffer::Descriptor{
         std::accumulate(
             sizes.cbegin(),
@@ -73,7 +73,7 @@ api::Resource::Buffer allocate_buffer(
              VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
 
-  return context->resource().pool.allocate(
+  return context->resource().pool.buffer(
       api::Resource::Buffer::Descriptor{
         std::accumulate(
             sizes.cbegin(),
@@ -126,7 +126,7 @@ api::Resource::Image allocate_image(
           "Only Tensors with 1 <= dim <= 4 can be represented as a Vulkan Image!");
   }
 
-  return context->resource().pool.allocate(
+  return context->resource().pool.image(
       api::Resource::Image::Descriptor{
         VK_IMAGE_TYPE_3D,
         convert(options.dtype()),
@@ -158,6 +158,11 @@ api::Resource::Image maybe_allocate_image(
   }
 
   return allocate_image(context, sizes, options);
+}
+
+api::Resource::Fence allocate_fence(
+    api::Context* const context) {
+  return context->resource().pool.fence();
 }
 
 void copy_staging_to_buffer(
@@ -229,6 +234,7 @@ vTensor::vTensor()
     image_{},
     buffer_{},
     staging_{},
+    fence_{},
     dirty_{} {
   enforce_invariants();
 }
@@ -241,6 +247,7 @@ vTensor::vTensor(
     image_(maybe_allocate_image(context, sizes, options)),
     buffer_(allocate_buffer(context, sizes, options)),
     staging_(maybe_allocate_staging(context, sizes, options)),
+    fence_(allocate_fence(context)),
     dirty_{} {
   enforce_invariants();
 }
@@ -250,7 +257,7 @@ const vTensor* vTensor::host_impl() const {
 
   if (dirty_.image || dirty_.buffer) {
     api::Command::Buffer command_buffer =
-        context_->command().pool.primary.allocate();
+        context_->command().pool.buffer();
 
     command_buffer.begin();
     {
@@ -305,7 +312,7 @@ vTensor::Buffer vTensor::buffer() const & {
 
   if (dirty_.staging || dirty_.image) {
     api::Command::Buffer command_buffer =
-        context_->command().pool.primary.allocate();
+        context_->command().pool.buffer();
 
     command_buffer.begin();
     {
@@ -340,7 +347,7 @@ vTensor::Image vTensor::image() const & {
 
   if (dirty_.staging || dirty_.buffer) {
     api::Command::Buffer command_buffer =
-        context_->command().pool.primary.allocate();
+        context_->command().pool.buffer();
 
     command_buffer.begin();
     {
