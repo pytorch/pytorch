@@ -306,7 +306,6 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
-
   std::vector<Use> uses = observer_out->uses();
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
