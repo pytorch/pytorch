@@ -2948,11 +2948,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         for p in ddp_withload.parameters():
             with torch.no_grad():
                 p.zero_()
-                p.add_(50.)
         for p in ddp_withoutload.parameters():
             with torch.no_grad():
                 p.zero_()
-                p.add_(50.)
 
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
@@ -2975,7 +2973,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         for p in ddp_withload.parameters():
             with torch.no_grad():
                 p.zero_()
-                p.add_(50.)
         map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
         ddp_withload.load_state_dict(
             torch.load(checkpoint_path, map_location=map_location))
