@@ -1276,7 +1276,7 @@ def _compute_norm(t, n, dim):
     Args:
         t (torch.Tensor): tensor representing the parameter to prune
         n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-            entries for argument p in torch.norm
+            entries for argument ord in torch.linalg.norm
         dim (int): dim identifying the channels to prune
 
     Returns:
@@ -1290,5 +1290,5 @@ def _compute_norm(t, n, dim):
         dim = dims[dim]
     dims.remove(dim)
 
-    norm = torch.linalg.norm(t, p=n, dim=dims)
+    norm = torch.linalg.norm(t, ord=n, dim=dims)
     return norm
