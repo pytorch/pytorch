@@ -39,6 +39,7 @@ if is_available():
         _TensorPipeRpcBackendOptionsBase as TensorPipeRpcBackendOptions,
         ProcessGroupRpcBackendOptions,
         ProcessGroupAgent,
+        TensorPipeAgent,
         WorkerInfo,
     )  # noqa: F401
     from torch._C._distributed_c10d import Store
