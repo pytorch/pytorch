@@ -10,6 +10,10 @@
 #include <test/cpp/common/support.h>
 #else
 #include "c10/util/Exception.h"
+// Temporary: we are going to remove these polyfills entirely.
+// But for now avoid redefining them if they are already defined in gtest.
+// (ASSERT_EQ is a proxy for whether gtest is already present)
+#ifndef ASSERT_EQ
 #define ASSERT_EQ(x, y) TORCH_INTERNAL_ASSERT((x) == (y))
 #define ASSERT_NE(x, y) TORCH_INTERNAL_ASSERT((x) != (y))
 #define ASSERT_TRUE TORCH_INTERNAL_ASSERT
@@ -31,6 +35,7 @@
     }                                   \
     ASSERT_TRUE(threw);                 \
   }
+#endif // ndef(ASSERT_EQ)
 
 #endif // defined(USE_GTEST)
 
