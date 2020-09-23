@@ -802,14 +802,15 @@ Example:
 fftfreq = _add_docstr(_fft.fft_fftfreq, r"""
 fftfreq(n, d=1.0, *, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns Discrete Fourier Transform sample frequencies for signal size :attr:`n`.
+Computes the discrete Fourier Transform sample frequencies for a signal of size :attr:`n`.
 
 Note:
 
-    By convention, the FFT returns positive frequency terms first, followed by
-    the negative frequencies in reverse order, so that ``f[-i]`` in python
-    gives the negative frequency terms. For an FFT of length :attr:`n` and
-    with inputs spaced in length unit :attr:`d`, the frequencies are::
+    By convention, :func:`~torch.fft.fft` returns positive frequency terms
+    first, followed by the negative frequencies in reverse order, so that
+    ``f[-i]`` for all :math:`i \leq n/2`` in Python gives the negative
+    frequency terms. For an FFT of length :attr:`n` and with inputs spaced in
+    length unit :attr:`d`, the frequencies are::
 
         f = [0, 1, ..., (n - 1) // 2, -(n // 2), ..., -1] / (d * n)
 
@@ -824,6 +825,8 @@ Args:
     d (float, optional): The sampling length scale.
         The unit length (or time) between individual samples in the FFT input.
         If given, the frequencies are given in physical units of 1/unit.
+
+Keyword Args:
     {dtype}
     {layout}
     {device}
@@ -835,7 +838,9 @@ Example:
     >>> torch.fft.fftfreq(5)
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
 
-    In this example, the Nyquist frequency at ``f[2]`` is given as negative:
+    For even input, we can see the Nyquist frequency at ``f[2]`` is given as
+    negative:
+
     >>> torch.fft.fftfreq(4)
     tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
@@ -844,12 +849,12 @@ Example:
 rfftfreq = _add_docstr(_fft.fft_rfftfreq, r"""
 rfftfreq(n, d=1.0, *, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns sample frequencies for :func:`~torch.fft.rfft` with signal size :attr:`n`.
+Computes sample frequencies for :func:`~torch.fft.rfft` with a signal of size :attr:`n`.
 
 Note:
 
-    :func:`~torch.fft.rfft` returns Hermitian one-sided output. So, only the
-    positive frequency terms are included. For a real FFT of length :attr:`n`
+    :func:`~torch.fft.rfft` returns Hermitian one-sided output, so only the
+    positive frequency terms are returned. For a real FFT of length :attr:`n`
     and with inputs spaced in length unit :attr:`d`, the frequencies are::
 
         f = torch.arange((n + 1) // 2) / (d * n)
@@ -857,7 +862,7 @@ Note:
 Note:
     For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
     either negative or positive. Unlike :func:`~torch.fft.fftfreq`,
-    :func:`~torch.fft.rfftfreq` always considers it to be positive.
+    :func:`~torch.fft.rfftfreq` always returns it to be positive.
 
 
 Args:
@@ -865,6 +870,8 @@ Args:
     d (float, optional): The sampling length scale.
         The unit length (or time) between individual samples in the FFT input.
         If given, the frequencies are given in physical units of 1/unit.
+
+Keyword Args:
     {dtype}
     {layout}
     {device}
@@ -887,16 +894,17 @@ Example:
 """.format(**factory_common_args))
 
 fftshift = _add_docstr(_fft.fft_fftshift, r"""
-fftshift(x, dim=None) -> Tensor
+fftshift(input, dim=None) -> Tensor
+
 
 Shift zero-frequency FFT terms to the center of the tensor.
 
 Note:
     By convention, the FFT returns positive frequency terms first, followed by
-    the negative frequencies in reverse order, so that ``f[-i]`` in python
-    gives the negative frequency terms. :func:`~torch.fft.fftshift` rearranges
-    all frequencies into ascending order from negative to positive with the
-    zero-frequency term in the center.
+    the negative frequencies in reverse order, so that ``f[-i]`` for all
+    :math:`i \leq n/2` in Python gives the negative frequency terms.
+    :func:`~torch.fft.fftshift` rearranges all frequencies into ascending order
+    from negative to positive with the zero-frequency term in the center.
 
 Note:
     For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
@@ -904,7 +912,7 @@ Note:
     :func:`~torch.fft.fftshift` always considers it to be negative.
 
 Args:
-    x (Tensor): the tensor in FFT order
+    input (Tensor): the tensor in FFT order
     dim (int, Tuple[int], optional): The dimensions to rearrange.
         Only dimensions specified here will be rearranged, any other dimensions
         will be left in their original order.
@@ -942,16 +950,16 @@ Example:
 """)
 
 ifftshift = _add_docstr(_fft.fft_ifftshift, r"""
-ifftshift(x, dim=None) -> Tensor
+ifftshift(input, dim=None) -> Tensor
 
-Inverse of :func:`fftshift`.
+Inverse of :func:`~torch.fft.fftshift`.
 
 This takes the FFT representation with zero-frequency FFT terms in the center
 of the tensor and shifts it into the normal FFT output, with zero-frequency
 terms at the beginning and negative frequency terms at the end.
 
 Args:
-    x (Tensor): the tensor in FFT order
+    input (Tensor): the tensor in FFT order
     dim (int, Tuple[int], optional): The dimensions to rearrange.
         Only dimensions specified here will be rearranged, any other dimensions
         will be left in their original order.

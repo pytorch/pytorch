@@ -7834,12 +7834,12 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: fft_fftshift(Tensor x, int[1]? dim=None) -> Tensor
+- func: fft_fftshift(Tensor self, int[1]? dim=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
   variants: function
 
-- func: fft_ifftshift(Tensor x, int[1]? dim=None) -> Tensor
+- func: fft_ifftshift(Tensor self, int[1]? dim=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
   variants: function
