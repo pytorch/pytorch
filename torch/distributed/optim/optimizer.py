@@ -188,10 +188,10 @@ class DistributedOptimizer:
         """
         dist_autograd._is_valid_context(context_id)
         rpc_futs = []
-        for optim in self.remote_optimizers:
+        for optimizer in self.remote_optimizers:
             rpc_futs.append(rpc.rpc_async(
-                optim.owner(),
+                optimizer.owner(),
                 _local_optimizer_step,
-                args=(optim, context_id),
+                args=(optimizer, context_id),
             ))
         _wait_for_all(rpc_futs)
