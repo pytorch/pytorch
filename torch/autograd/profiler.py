@@ -740,7 +740,7 @@ class FunctionEvent(FormattedTimesMixin):
     @property
     def self_cuda_time_total(self):
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) - \
-        sum([child.cuda_time_total for child in self.cpu_children])
+            sum([child.cuda_time_total for child in self.cpu_children])
 
     @property
     def cpu_time_total(self):
