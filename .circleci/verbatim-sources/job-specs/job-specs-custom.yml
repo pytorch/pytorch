@@ -109,7 +109,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.4.1"
+      xcode: "11.2.1"
     steps:
       - checkout
       - run_brew_for_macos_build
@@ -143,7 +143,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.4.1"
+      xcode: "11.2.1"
     steps:
       - checkout
       - attach_workspace:
