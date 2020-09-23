@@ -77,7 +77,7 @@ int64_t RedisStoreHandler::add(const std::string& name, int64_t value) {
 }
 
 int64_t RedisStoreHandler::getNumKeys() {
-  CHECK(false) << "getNumKeys not implemented for FileStoreHandler";
+  CHECK(false) << "getNumKeys not implemented for RedisStoreHandler";
   return 0;
 }
 
