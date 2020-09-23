@@ -224,7 +224,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   }
   std::shared_ptr<TupleType> type() const;
 
-  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
+  CAFFE2_API friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
 
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
@@ -271,6 +271,21 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
+    }
+  }
+
+  /**
+   * Wait on the future until it completes and throw an
+   * exception if an error exists.
+   */
+  virtual void waitAndThrow() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!completed_) {
+      finished_cv_.wait(lock);
+    }
+
+    if (eptr_) {
+      std::rethrow_exception(eptr_);
     }
   }
 
