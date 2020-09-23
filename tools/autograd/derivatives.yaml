@@ -884,7 +884,7 @@
   self: renorm_backward(grad, self, p, dim, maxnorm)
 
 - name: repeat(Tensor self, int[] repeats) -> Tensor
-  self: repeat_backward(grad, self.dim(), repeats, self.sizes())
+  self: repeat_backward(grad, repeats, self.sizes())
 
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.

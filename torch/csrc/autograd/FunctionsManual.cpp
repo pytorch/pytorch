@@ -705,11 +705,12 @@ Tensor sum_tensorlist(TensorList tl) {
   return sum;
 }
 
-Tensor repeat_backward(Tensor grad, int64_t input_dims, IntArrayRef repeats, IntArrayRef input_shape) {
+Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
     return at::zeros(input_shape, grad.options());
   }
+  const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
