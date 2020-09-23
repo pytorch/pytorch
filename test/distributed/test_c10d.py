@@ -2904,11 +2904,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_save_load_checkpoint(self):
         dist.init_process_group(
-                "gloo",
-                init_method=f"file://{self.file_name}",
-                world_size=self.world_size,
-                rank=self.rank
-            )
+            "gloo",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank
+        )
 
         class TestModel(nn.Module):
             def __init__(self):
