@@ -1,11 +1,16 @@
+from typing import List, Optional
+
 import torch.distributed.rpc as rpc
+import torch.optim as optim
+from .adagrad import FunctionalAdagrad
 import torch.distributed.autograd as dist_autograd
+
 
 from collections import defaultdict
 from threading import Lock
 
 
-class _LocalOptimizer:
+class _LocalOptimizer(object):
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
     # making a simplifying assumption here that if there is more
@@ -14,20 +19,36 @@ class _LocalOptimizer:
     # trainer will create its own instance of _LocalOptimizer but
     # they will all optimize the same parameters on each worker)
     global_lock = Lock()
+    functional_optim_map = {
+        optim.Adagrad: FunctionalAdagrad,
+        # torch.optim.Adam: torch.distributed.optim.Adam
+    }
 
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
-        self.optim = optim_cls(
-            [rref.local_value() for rref in local_params_rref],
+        optim_ctor = _LocalOptimizer.functional_optim_map.get(optim_cls, optim_cls)
+        self.is_functional_optim = (optim_ctor != optim_cls)
+        self._local_params = [rref.local_value() for rref in local_params_rref]
+        self.optim = optim_ctor(
+            self._local_params,
             *args,
             **kwargs)
 
     def step(self, autograd_ctx_id):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
 
-        with _LocalOptimizer.global_lock:
-            for param, grad in all_local_grads.items():
-                param.grad = grad
-            self.optim.step()
+        if self.is_functional_optim:
+            # apply functional optimizer step with a list of gradients
+            grads: List[Optional[torch.Tensor]] = [
+                all_local_grads[p] if p in all_local_grads else None
+                for p in self._local_params
+            ]
+
+            self.optim.step(grads)
+        else:
+            with _LocalOptimizer.global_lock:
+                for param, grad in all_local_grads.items():
+                    param.grad = grad
+                self.optim.step()
 
 
 def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):

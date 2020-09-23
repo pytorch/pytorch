@@ -6,6 +6,16 @@ from typing import List
 
 # TODO: use foreach API in optim.functional to do all the computation
 
+def _make_sparse(grad, grad_indices, values):
+    size = grad.size()
+    if grad_indices.numel() == 0 or values.numel() == 0:
+        return torch.empty_like(grad)
+    return torch.sparse_coo_tensor(grad_indices, values, size)
+    # constructor = grad.new
+    # if grad_indices.dim() == 0 or values.dim() == 0:
+    #     return constructor().resize_as_(grad)
+    # return constructor(grad_indices, values, size)
+
 def adagrad(params: List[Tensor],
             grads: List[Tensor],
             state_sums: List[Tensor],
@@ -33,15 +43,10 @@ def adagrad(params: List[Tensor],
             grad_values = grad._values()
             size = grad.size()
 
-            def make_sparse(values):
-                constructor = grad.new
-                if grad_indices.dim() == 0 or values.dim() == 0:
-                    return constructor().resize_as_(grad)
-                return constructor(grad_indices, values, size)
-            state_sum.add_(make_sparse(grad_values.pow(2)))
+            state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
             std = state_sum.sparse_mask(grad)
             std_values = std._values().sqrt_().add_(eps)
-            param.add_(make_sparse(grad_values / std_values), alpha=-clr)
+            param.add_(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
         else:
             state_sum.addcmul_(grad, grad, value=1)
             std = state_sum.sqrt().add_(eps)
