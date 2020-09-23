@@ -267,6 +267,26 @@ class TestEnum(JitTestCase):
 
         self.assertEqual(scripted(), Color.RED.value)
 
+    def test_string_enum_as_module_attribute(self):
+        global Color
+
+        class Color(Enum):
+            RED = "red"
+            GREEN = "green"
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, e: Color):
+                super(TestModule, self).__init__()
+                self.e = e
+
+            def forward(self):
+                return (self.e.name, self.e.value)
+
+        m = TestModule(Color.RED)
+        scripted = torch.jit.script(m)
+
+        self.assertEqual(scripted(), (Color.RED.name, Color.RED.value))
+
     def test_enum_return(self):
         global Color
 
