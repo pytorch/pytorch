@@ -8517,7 +8517,7 @@ The inverse of this function is :func:`~torch.ifft`.
 .. deprecated:: 1.7.0
     The function :func:`torch.fft` is deprecated and will be removed in
     PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
-    functions instead, by importing :ref:`torch.fft <torch-fft-module>` and
+    functions, instead, by importing :ref:`torch.fft <torch-fft-module>` and
     calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
 
 .. note::
@@ -8626,7 +8626,7 @@ The inverse of this function is :func:`~torch.fft`.
 .. deprecated:: 1.7.0
     The function :func:`torch.ifft` is deprecated and will be removed in a
     future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
     and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
 
 .. note::
@@ -8720,7 +8720,7 @@ The inverse of this function is :func:`~torch.irfft`.
 .. deprecated:: 1.7.0
     The function :func:`torch.rfft` is deprecated and will be removed in a
     future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
     and calling :func:`torch.fft.rfft` for one-sided output, or
     :func:`torch.fft.fft` for two-sided output.
 
@@ -8799,7 +8799,7 @@ The inverse of this function is :func:`~torch.rfft`.
 .. deprecated:: 1.7.0
     The function :func:`torch.irfft` is deprecated and will be removed in a
     future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions instead, by importing :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
     and calling :func:`torch.fft.irfft` for one-sided input, or
     :func:`torch.fft.ifft` for two-sided input.
 
