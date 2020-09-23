@@ -180,7 +180,7 @@ class Reducer {
   // and on the same device can be batched. The tensor that represents the
   // flattened gradient uses the same type and is placed on the same device.
   // Buckets are filled as the gradients they hold are computed (triggered by
-  // autograd hooks). Buckets are reduced in a predetemined order that is
+  // autograd hooks). Buckets are reduced in a predetermined order that is
   // identical across processes.
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
