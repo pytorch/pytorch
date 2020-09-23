@@ -75,7 +75,7 @@ class Tensor(torch._C._TensorBase):
                         self._backward_hooks)
                 else:
                     new_tensor = self.new()
-                    new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())  
+                    new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     new_tensor.requires_grad = self.requires_grad
             memo[id(self)] = new_tensor
             return new_tensor
@@ -160,7 +160,7 @@ class Tensor(torch._C._TensorBase):
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
             # legacy serialization of Tensor
-            self.set_(*state)  
+            self.set_(*state)
             return
         elif len(state) == 5:
             # legacy serialization of Variable
