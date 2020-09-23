@@ -655,9 +655,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
                     if name == 'min_vals':
-                        self.min_vals = val
+                        self.min_vals.copy_(val)
                     else:
-                        self.max_vals = val
+                        self.max_vals.copy_(val)
             elif strict:
                 missing_keys.append(key)
 
@@ -1161,8 +1161,8 @@ def load_observer_state_dict(mod, obs_dict):
         prefix = name + '.'
         if _is_activation_post_process(module):
             if _is_per_channel_script_obs_instance(module):
-                # For per-channel observers we need a custom load_from_state_dict which is currently not
-                # accessible when the module is scripted.
+                # For per-channel observers we need to call a custom load_from_state_dict to resize the tensor.
+                # However this is not called when the module is scripted and we end up calling the default one in module.py
                 module._load_from_state_dict_script(obs_dict, prefix, {}, True, missing_keys, unexpected_keys, [])
             else:
                 module._load_from_state_dict(obs_dict, prefix, {}, False, missing_keys, unexpected_keys, [])
