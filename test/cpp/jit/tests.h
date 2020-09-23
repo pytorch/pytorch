@@ -160,6 +160,10 @@ namespace jit {
   _(GPU_FusionComputeAtCommonConsumer3)             \
   _(GPU_FusionComputeAtNoCommonConsumer)            \
   _(GPU_FusionScalarInputs)                         \
+  _(GPU_FusionBCastConcretizeBasic)                 \
+  _(GPU_FusionBCastConcretizeRfactor)               \
+  _(GPU_FusionProveIdEqBasic)                       \
+  _(GPU_FusionProveIdEqRfactor)                     \
   _(GPU_FusionRFactorReplay)                        \
   _(GPU_FusionReduction)                            \
   _(GPU_FusionReduction2)                           \
