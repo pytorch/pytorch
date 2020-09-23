@@ -36,16 +36,16 @@ C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(
 
 #if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
-    const std::string& interface_name,
+    const std::string& interfaceName,
     const std::string& hostname) {
   TORCH_CHECK(
-      !interface_name.empty() || !hostname.empty(),
+      !interfaceName.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
       "can't be empty");
 
   ::gloo::transport::tcp::attr attr;
-  if (!interface_name.empty()) {
-    attr.iface = interface_name;
+  if (!interfaceName.empty()) {
+    attr.iface = interfaceName;
   } else {
     attr.hostname = hostname;
   }
@@ -61,16 +61,16 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 
 #if GLOO_HAVE_TRANSPORT_UV
 static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
-    const std::string& interface_name,
+    const std::string& interfaceName,
     const std::string& hostname) {
   TORCH_CHECK(
-      !interface_name.empty() || !hostname.empty(),
+      !interfaceName.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeUVDevice(): interface or hostname "
       "can't be empty");
 
   ::gloo::transport::uv::attr attr;
-  if (!interface_name.empty()) {
-    attr.iface = interface_name;
+  if (!interfaceName.empty()) {
+    attr.iface = interfaceName;
   } else {
     attr.hostname = hostname;
   }
@@ -88,21 +88,21 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 static const char* glooDeviceTransport = getenv("GLOO_DEVICE_TRANSPORT");
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
-    makeDeviceForInterface(const std::string& interface_name) {
+    makeDeviceForInterface(const std::string& interfaceName) {
   if (glooDeviceTransport) {
-    return GlooDeviceRegistry()->Create(glooDeviceTransport, interface_name, "");
+    return GlooDeviceRegistry()->Create(glooDeviceTransport, interfaceName, "");
   }
 
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create("LINUX", interface_name, "");
+  return GlooDeviceRegistry()->Create("LINUX", interfaceName, "");
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("APPLE", interface_name, "");
+  return GlooDeviceRegistry()->Create("APPLE", interfaceName, "");
 #endif
 
 #ifdef _WIN32
-  return GlooDeviceRegistry()->Create("WIN32", interface_name, "");
+  return GlooDeviceRegistry()->Create("WIN32", interfaceName, "");
 #endif
 
   throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");

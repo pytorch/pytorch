@@ -7,8 +7,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <io.h>
 #include <fileapi.h>
+#include <io.h>
 #else
 #include <sys/file.h>
 #include <unistd.h>
@@ -33,8 +33,7 @@
 #define LOCK_SH 0x00000010
 #define LOCK_UN 0x00000100
 
-int flock_(int fd, int op)
-{
+int flock_(int fd, int op) {
     HANDLE hdl = (HANDLE) _get_osfhandle(fd);
     DWORD low = 1, high = 0;
     OVERLAPPED offset = {0, 0, 0, 0, NULL};
