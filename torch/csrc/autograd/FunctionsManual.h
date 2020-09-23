@@ -44,6 +44,8 @@ at::Tensor pow_backward_self(at::Tensor grad, const at::Tensor & self, const at:
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Tensor& self, const at::Tensor& exponent, at::Tensor result);
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Scalar & base, const at::Tensor& exponent, at::Tensor result);
 at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
 at::Tensor mvlgamma_backward(at::Tensor grad, const at::Tensor & self, int64_t p);
 at::Tensor permute_backwards(const at::Tensor & grad, at::IntArrayRef fwd_dims);
 at::Tensor rad2deg_backward(const at::Tensor& grad);
@@ -74,6 +76,7 @@ at::Tensor sum_tensorlist(at::TensorList tl);
 at::Tensor repeat_backward(at::Tensor grad, int64_t input_dims, at::IntArrayRef repeats);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
+at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(const at::Tensor & grad, const at::Tensor & self, bool unbiased);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 at::Tensor std_backward(const at::Tensor & result, const at::Tensor & grad, const at::Tensor & self, bool unbiased);
