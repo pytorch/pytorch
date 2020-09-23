@@ -175,7 +175,7 @@ Tensor& divide_(Tensor& self, Scalar other) {
 
 // true_divide, an alias for div
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  return native::div_out(result, self, divisor);
+  return at::div_out(result, self, divisor);
 }
 
 Tensor true_divide(const Tensor& self, const Tensor& divisor) {
