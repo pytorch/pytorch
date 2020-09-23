@@ -3911,40 +3911,6 @@ class TestNN(NNTestCase):
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_Conv2d_size_1_kernel_on_GPU_without_cudnn(self, dtype=torch.float):
-        inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
-        with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, kernel_size=1).to("cuda", dtype)
-            conv2 = torch.nn.Conv2d(3, 3, kernel_size=1).to("cuda", dtype)
-            conv2.bias.data.copy_(conv1.bias.data)
-            conv2.weight.data.copy_(conv1.weight.data)
-            out1 = conv1(inputs)
-            out2 = conv2(inputs)
-            self.assertEqual(out1, out2, atol=0.0, rtol=0)
-            y = torch.randn(out1.size(), device="cuda", dtype=dtype)
-            out1.backward(y)
-            out2.backward(y)
-            self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0)
-            self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0, rtol=0)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_Conv3d_size_1_kernel_on_GPU_without_cudnn(self, dtype=torch.float):
-        inputs = torch.randn(2, 3, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
-        with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv3d(3, 3, kernel_size=1).to("cuda", dtype)
-            conv2 = torch.nn.Conv3d(3, 3, kernel_size=1).to("cuda", dtype)
-            conv2.bias.data.copy_(conv1.bias.data)
-            conv2.weight.data.copy_(conv1.weight.data)
-            out1 = conv1(inputs)
-            out2 = conv2(inputs)
-            self.assertEqual(out1, out2, atol=0.0, rtol=0)
-            y = torch.randn(out1.size(), device="cuda", dtype=dtype)
-            out1.backward(y)
-            out2.backward(y)
-            self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0)
-            self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0, rtol=0)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
         x = torch.randn(192, 16, 50).cuda()
@@ -10716,6 +10682,82 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(x.is_contiguous())
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
+
+    @onlyCUDA
+    def test_Conv2d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 5, 5)
+        conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.Conv2d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
+    @onlyCUDA
+    def test_ConvTranspose2d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 5, 5)
+        conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.ConvTranspose2d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
+    @onlyCUDA
+    def test_Conv3d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 3, 5, 5)
+        conv_cpu = torch.nn.Conv3d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.Conv3d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
+    @onlyCUDA
+    def test_ConvTranspose3d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 3, 5, 5)
+        conv_cpu = torch.nn.ConvTranspose3d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.ConvTranspose3d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
     def _ordered_sequence(self, device, dtype):
         """Create ordered list of random sequences"""
