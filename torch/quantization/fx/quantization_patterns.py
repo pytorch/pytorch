@@ -1,37 +1,26 @@
 import torch
-from torch.quantization.default_mappings import (
-    DEFAULT_MODULE_MAPPING,
-    DEFAULT_OPERATOR_MAPPING,
-)
 from torch.fx.graph import (
     Node,
+)
+from ..quantization_mappings import (
+    get_static_quant_module_class,
+    get_quantized_operator,
+)
+from ..custom_module_class_mappings import (
+    get_quantized_custom_module_class,
 )
 from .pattern_utils import (
     register_quant_pattern,
     register_dynamic_quant_pattern,
 )
-from .utils import _parent_name
+from .utils import (
+    _parent_name,
+    quantize_node,
+    get_per_tensor_qparams,
+)
 
 from abc import ABC, abstractmethod
 import operator
-
-# ------------------------
-# Helper Functions
-# ------------------------
-
-def get_qparams(activation_post_process):
-    scale, zero_point = activation_post_process.calculate_qparams()
-    scale = float(scale)
-    zero_point = int(zero_point)
-    dtype = activation_post_process.dtype
-    return scale, zero_point, dtype
-
-def quantize_node(node, activation_post_process):
-    scale, zero_point, dtype = get_qparams(activation_post_process)
-    return torch.quantize_per_tensor(node, scale, zero_point, dtype)
-
-def quantize(quantizer, node):
-    quantize_node(node, quantizer.activation_post_process_map[node.name])
 
 # -------------------------
 # Pattern Registrations
@@ -195,10 +184,7 @@ class ConvRelu(QuantizeHandler):
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
-            # TODO: make the mapping configurable?
-            assert type(self.conv) in DEFAULT_MODULE_MAPPING, \
-                'unhandled conv type:{}'.format(type(self.conv))
-            qconv_cls = DEFAULT_MODULE_MAPPING[type(self.conv)]
+            qconv_cls = get_static_quant_module_class(type(self.conv))
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
@@ -216,8 +202,9 @@ class ConvRelu(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 conv_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.conv2d, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
-                    conv_out, quantizer.activation_post_process_map[self.conv_node.name])
+                    root_module, quantizer.quantized_graph, conv_out, quantizer.activation_post_process_map[self.conv_node.name])
             else:
                 assert len(self.conv_node.args) == 7, \
                     'only conv2d calls with all arguments specified is support right now in debug=False option'
@@ -231,7 +218,7 @@ class ConvRelu(QuantizeHandler):
                 # construct conv input
                 conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                 activation_post_process = quantizer.activation_post_process_map[self.conv_node.name]
-                scale, zero_point, _ = get_qparams(activation_post_process)
+                scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                 qconv_args = (conv_input, packed_weight, scale, zero_point)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 return quantizer.quantized_graph.create_node(
@@ -291,7 +278,10 @@ class LinearReLU(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
                 linear_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.linear, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
+                    root_module,
+                    quantizer.quantized_graph,
                     linear_out,
                     quantizer.activation_post_process_map[self.linear_node.name])
             else:
@@ -320,7 +310,7 @@ class LinearReLU(QuantizeHandler):
                 linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                 activation_post_process = \
                     quantizer.activation_post_process_map[self.linear_node.name]
-                scale, zero_point, _ = get_qparams(activation_post_process)
+                scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                 qlinear_args = (linear_input, packed_weight, scale, zero_point)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
@@ -345,7 +335,7 @@ class BatchNorm(QuantizeHandler):
             self.bn[1].activation_post_process = activation_post_process
         else:
             self.bn.activation_post_process = activation_post_process
-        qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
+        qbn_cls = get_static_quant_module_class(type(self.bn))
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
@@ -381,7 +371,8 @@ class DefaultNode(QuantizeHandler):
         if node.op == 'call_module':
             module = quantizer.modules[node.target]
             module.activation_post_process = activation_post_process
-            quantized_module = DEFAULT_MODULE_MAPPING[type(module)].from_float(module)
+            quantized_module_cls = get_static_quant_module_class(type(module))
+            quantized_module = quantized_module_cls.from_float(module)
             parent_name, name = _parent_name(node.target)
             setattr(quantizer.modules[parent_name], name, quantized_module)
             return quantizer.quantized_graph.create_node(
@@ -395,7 +386,7 @@ class DefaultNode(QuantizeHandler):
             scale = float(scale)
             zero_point = int(zero_point)
 
-            quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
             kwargs = load_arg(quantized=False)(node.kwargs)
             kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
@@ -415,7 +406,7 @@ class ELU(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+        quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
         kwargs = load_arg(quantized=False)(node.kwargs)
         kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
@@ -513,7 +504,33 @@ class CopyNode(QuantizeHandler):
 class DefaultQuant(QuantizeHandler):
     def convert(self, quantizer, node):
         assert self.all_nodes
-        return quantize(quantizer, node)
+        root_module = quantizer.modules['']
+        return quantize_node(
+            root_module,
+            quantizer.quantized_graph,
+            node, quantizer.activation_post_process_map[node.name])
+
+class CustomModuleQuantizeHandler(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        """ Convert a float custom module to quantized custom module
+        """
+        assert node.op == 'call_module'
+        observed_custom_module = quantizer.modules[node.target]
+        if node.name in quantizer.activation_post_process_map:
+            observed_custom_module.activation_post_process = \
+                quantizer.activation_post_process_map[node.name]
+        quantized_custom_module_class = \
+            get_quantized_custom_module_class(observed_custom_module._FLOAT_MODULE)
+        quantized_custom_module = \
+            quantized_custom_module_class.from_observed(observed_custom_module)
+        parent_name, name = _parent_name(node.target)
+        setattr(quantizer.modules[parent_name], name, quantized_custom_module)
+        # hardcoded the qunatized input to be None (take whatever is in the environemnt),
+        # we can extend this
+        # if there is a need, e.g. get the indexes of quantized inputs from some
+        # module attribute like module._QUANTIZED_INPUT_INDEXES
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 
 # 2. Post Training Dynamic Quantizatoin Patterns
 @register_dynamic_quant_pattern(torch.nn.Linear)
@@ -546,9 +563,16 @@ class DynamicLinear(QuantizeHandler):
                     'call_function', torch.nn.functional.linear, args, kwargs)
             else:
                 # linear args:
-                # (x, weight, bias)
-                # quantize weight
-                quantized_weight = load_arg(quantized=True)(self.linear_node.args[1])
+                # (x, observed_weight, bias)
+                # get observer for the weight
+                weight_observer = quantizer.activation_post_process_map[self.linear_node.args[1].args[0].name]
+
+                if weight_observer.dtype == torch.float16:
+                    linear_weight = load_arg(quantized=False)(self.linear_node.args[1])
+                    prepack_op = torch.ops.quantized.linear_prepack_fp16
+                else:
+                    linear_weight = load_arg(quantized=True)(self.linear_node.args[1])
+                    prepack_op = torch.ops.quantized.linear_prepack
                 bias = None
                 # all args after bias, including bias
                 other_args = load_arg(quantized=False)(self.linear_node.args[2:])
@@ -561,10 +585,10 @@ class DynamicLinear(QuantizeHandler):
                         'expect bias provided as a keyword argument when it is not a positional argument'
                     bias = kwargs['bias']
                     kwargs.pop('bias')
-                prepack_args = (quantized_weight, bias)
+                prepack_args = (linear_weight, bias)
                 # pack weight
                 packed_weight = quantizer.quantized_graph.create_node(
-                    'call_function', torch.ops.quantized.linear_prepack, prepack_args, {})
+                    'call_function', prepack_op, prepack_args, {})
                 # construct dynamic linear input
                 non_quantized_input = load_arg(quantized=False)(self.linear_node.args[0])
                 qdynamic_linear_args = (non_quantized_input, packed_weight)

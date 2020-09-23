@@ -39,8 +39,8 @@
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
@@ -121,8 +121,7 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if !defined(__HIP_PLATFORM_HCC__)
-TORCH_API void runJITCPPTests(bool runCuda);
-TORCH_API void runTENSOREXPRCPPTests(bool runCuda);
+TORCH_API void runJITCPPTests();
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -184,6 +183,8 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
@@ -283,12 +284,15 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, int quant_type_int) {
+          [](Module& module,
+             int quant_type_int,
+             const std::vector<std::string>& preserved_attrs) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type);
+            return Finalize(module, quant_type, preserved_attrs);
           },
           py::arg("module"),
-          py::arg("quant_type_int") = 1)
+          py::arg("quant_type_int") = 1,
+          py::arg("preserved_attrs") = std::vector<std::string>())
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -372,6 +376,26 @@ void initJITBindings(PyObject* module) {
             }
             PropagateInputShapes(graph);
           })
+      .def(
+          "_jit_interpret_graph",
+          [](std::shared_ptr<Graph>& graph, py::tuple inputs) {
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = graph->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            Code code(graph, "<on-demand-func>");
+            InterpreterState(code).run(stack);
+            return createPyObjectForStack(std::move(stack));
+          },
+          py::doc(
+              "Interpret a JIT graph with given inputs without running any optimization passes on it"))
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
@@ -398,27 +422,15 @@ void initJITBindings(PyObject* module) {
 #if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
-          [](bool runCuda) {
+          []() {
             // We have to release the GIL inside this method, because if we
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             pybind11::gil_scoped_release _no_gil;
-            return runJITCPPTests(runCuda);
-          },
-          py::arg("run_cuda"))
+            return runJITCPPTests();
+          })
       .def("_jit_has_cpp_tests", []() { return true; })
-      .def(
-          "_run_tensorexpr_cpp_tests",
-          [](bool runCuda) {
-            // We have to release the GIL inside this method, because if we
-            // happen to initialize the autograd engine in these tests, the
-            // newly spawned worker threads will try to initialize their
-            // PyThreadState*, and they need the GIL for this.
-            pybind11::gil_scoped_release _no_gil;
-            return runTENSOREXPRCPPTests(runCuda);
-          },
-          py::arg("run_cuda"))
       .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
       .def("_jit_run_cpp_tests", []() { throw std::exception(); })
@@ -511,7 +523,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_get_trigger_value",
-          [](const std::string& trigger_name) {
+          [](const std::string& trigger_name) -> int {
             using namespace torch::jit::tensorexpr;
             ExecutionTrigger* trigger =
                 ExecutionTriggerList::GetInstance().FindByName(trigger_name);
@@ -638,8 +650,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
-          [](script::Module& module) {
-            return vulkanOptimizeForMobile(module);
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return vulkanOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",

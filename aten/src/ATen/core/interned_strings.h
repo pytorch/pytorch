@@ -143,6 +143,8 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, rpc_sync)                  \
+  _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
@@ -186,6 +188,12 @@ namespace c10 {
   _(aten, __isnot__)                 \
   _(aten, copy)                      \
   _(aten, copy_)                     \
+  _(aten, div)                       \
+  _(aten, div_)                      \
+  _(aten, divide)                    \
+  _(aten, divide_)                   \
+  _(aten, true_divide)               \
+  _(aten, true_divide_)              \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
   _(aten, addcdiv_)                  \
@@ -193,12 +201,31 @@ namespace c10 {
   _(aten, addmv_)                    \
   _(aten, addr_)                     \
   _(aten, baddbmm_)                  \
+  _(aten, ge)                        \
   _(aten, ge_)                       \
+  _(aten, greater_equal)             \
+  _(aten, greater_equal_)            \
+  _(aten, gt)                        \
   _(aten, gt_)                       \
+  _(aten, greater)                   \
+  _(aten, greater_)                  \
+  _(aten, le)                        \
   _(aten, le_)                       \
+  _(aten, less_equal)                \
+  _(aten, less_equal_)               \
   _(aten, lerp_)                     \
+  _(aten, lt)                        \
   _(aten, lt_)                       \
+  _(aten, less)                      \
+  _(aten, less_)                     \
+  _(aten, mul)                       \
+  _(aten, mul_)                      \
+  _(aten, multiply)                  \
+  _(aten, multiply_)                 \
+  _(aten, ne)                        \
   _(aten, ne_)                       \
+  _(aten, not_equal)                 \
+  _(aten, not_equal_)                \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \

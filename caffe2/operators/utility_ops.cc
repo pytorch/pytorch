@@ -1073,3 +1073,8 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GatherRanges,
     "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
     caffe2::GatherRangesOp<caffe2::CPUContext>)
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsGather,
+    "_caffe2::LengthsGather(Tensor data, Tensor lengths, Tensor indices) -> (Tensor)",
+    caffe2::LengthsGatherOp<caffe2::CPUContext>)
