@@ -1559,6 +1559,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     TEST_WITH_TSAN,
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
+@skip_if_rocm
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -2123,6 +2124,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
@@ -2130,6 +2132,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
+    @skip_if_rocm
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
@@ -2137,6 +2140,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
     def test_ddp_multi_device_module_config(self):
         gpus = gpus_for_rank(self.world_size)[self.rank]
 
@@ -2167,6 +2171,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_fp16(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -2198,6 +2203,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_arbitrary_forward_return_value(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2482,6 +2488,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_multiple_outputs_multiple_backward(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2532,6 +2539,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_no_grad(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2643,6 +2651,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_accumulate_gradients_no_sync(self):
         """
         Runs _test_accumulate_gradients_no_sync using default inputs
@@ -2651,6 +2660,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_accumulate_gradients_no_sync_allreduce_hook(self):
         """
         Runs multiple iterations on _test_accumulate_gradients_no_sync
@@ -2670,6 +2680,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
         """
         Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
@@ -2699,6 +2710,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_accumulate_gradients_module(self):
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
@@ -2840,6 +2852,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_failure_recovery(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -3161,6 +3174,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_future_passing_gpu_nccl(self):
         """
         This unit test verifies whether the Future object is passed properly using nccl backend.
@@ -3178,6 +3192,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that just calls
@@ -3200,6 +3215,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that calls allreduce and then
@@ -3591,6 +3607,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -3642,36 +3659,42 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_clean_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(0))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_nonzero_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(1))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGKILL))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGTERM))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_blocking_wait_with_barrier(self):
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3694,6 +3717,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_invalid_nccl_blocking_wait_env(self):
         self._run_invalid_nccl_blocking_wait_env('abc')
         self._run_invalid_nccl_blocking_wait_env('-1')
