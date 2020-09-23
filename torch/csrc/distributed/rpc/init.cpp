@@ -27,7 +27,6 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -50,6 +49,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
@@ -121,14 +125,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_metrics",
               &RpcAgent::getMetrics,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_get_timeout",
-              // intentionally not releasing GIL to avoid context switch
-              [](const RpcAgent& self) {
-                return self.getRpcTimeout().count() / float(kToMilliseconds);
-              }
-          );
+              py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "PyRRef", R"(

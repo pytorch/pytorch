@@ -9,10 +9,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
-
 //////////////////////////  MessageCounter  /////////////////////////////////
 
 ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)

@@ -17,8 +17,8 @@ constexpr float kDefaultRpcTimeoutSeconds = 60;
 // timeout for RPCs.
 constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
-constexpr long kToMilliseconds = 1000;
-const std::string kRpcTimeoutErrorStr =
+constexpr float kSecToMsConversion = 1000;
+constexpr auto kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
 using steady_clock_time_point =
