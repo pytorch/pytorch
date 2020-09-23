@@ -394,7 +394,6 @@ private:
 //   });
 //   Code to profile
 // }
-
 struct TORCH_API TLSProfilerGuard {
   explicit TLSProfilerGuard(
       const ProfilerConfig& cfg,

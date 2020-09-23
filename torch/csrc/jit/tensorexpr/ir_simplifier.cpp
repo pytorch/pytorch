@@ -123,7 +123,7 @@ const Expr* combineMultilane(const Expr* lhs, const Expr* rhs) {
         throw malformed_input("multilane lane mismatch");
       }
       const Expr* ret = new Ramp(
-          new Op(bc->value(), ramp->base()), ramp->stride(), ramp->lanes());
+          new Op(ramp->base(), bc->value()), ramp->stride(), ramp->lanes());
       return ret;
     }
   }
