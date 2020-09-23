@@ -3950,5 +3950,19 @@ void testSimplifySyncThreads() {
   }
 }
 
+void testSimplifyRampSubBroadcast() {
+  KernelScope kernel_scope;
+  int num_lanes = 4;
+  ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
+  ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
+  ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
+  Ramp* newRamp = simplified.AsNode<Ramp>();
+  IS_NODE_WITH_NAME(IntImm, newRamp->base(), base);
+  ASSERT_EQ(base->value(), 5);
+  IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
+  ASSERT_EQ(stride->value(), 6);
+  ASSERT_EQ(newRamp->lanes(), num_lanes);
+}
+
 } // namespace jit
 } // namespace torch
