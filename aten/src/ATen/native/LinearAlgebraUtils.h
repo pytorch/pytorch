@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
@@ -76,6 +78,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
