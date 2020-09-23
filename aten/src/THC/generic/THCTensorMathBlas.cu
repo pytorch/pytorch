@@ -281,7 +281,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
 #endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_BFLOAT16)
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   THCudaBlas_BgemmStridedBatched(
       state,
       transpose_batch1,
@@ -310,15 +310,13 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
     THCTensor_(freeCopyTo)(state, result_, result);
   }
 
-#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(THC_REAL_IS_BFLOAT16) && !(defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
   // To avoid "variable was set but never used" warning
   [&transpose_batch1, &transpose_batch2, &lda, &ldb, &ldc]{}();
   TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
 #endif
   }
-#if !defined(THC_REAL_IS_BFLOAT16) || defined(__HIP_PLATFORM_HCC__)
   at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");

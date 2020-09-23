@@ -77,14 +77,12 @@ class Adam(Optimizer):
 
             for p in group['params']:
                 if p.grad is not None:
+                    if p.grad.is_sparse:
+                        raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                     params_with_grad.append(p)
                     grads.append(p.grad)
 
             for p in params_with_grad:
-                for g in grads:
-                    if g.is_sparse:
-                        raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-
                 state = self.state[p]
 
                 # State initialization
@@ -112,13 +110,13 @@ class Adam(Optimizer):
             bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
             bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
             if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, group['params'], group['weight_decay'])
+                grads = torch._foreach_add(grads, group['params'], group['weight_decay'])
 
             #
             # Decay the first and second moment running average coefficient
             #
             torch._foreach_mul_(exp_avg, beta1)
-            torch._foreach_add_(exp_avg, grads, 1 - beta1)
+            torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
 
             torch._foreach_mul_(exp_avg_sq, beta2)
             torch._foreach_addcmul_(exp_avg_sq, grads, grads, 1 - beta2)
@@ -129,13 +127,12 @@ class Adam(Optimizer):
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                max_exp_avg_sq_sqrt = [torch.div(a, b) for a, b in zip(max_exp_avg_sq_sqrt, bias_correction_sqrt)]
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-
-                exp_avg_sq_sqrt = [torch.div(a, b) for a, b in zip(exp_avg_sq_sqrt, bias_correction_sqrt)]
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
             step_size = [group['lr'] / bc for bc in bias_correction1]

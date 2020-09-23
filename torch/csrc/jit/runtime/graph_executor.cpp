@@ -159,6 +159,12 @@ struct CaptureList {
     }
   }
 
+  void release_variables() {
+    for (auto& var_capture_ : var_captures_) {
+      var_capture_.reset_data();
+    }
+  }
+
  private:
   enum Capture : uint8_t {
     CAPTURE_TENSOR,
@@ -309,6 +315,10 @@ struct DifferentiableGraphBackward : public autograd::Node {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }
+  }
+
+  void release_variables() override {
+    captures_.release_variables();
   }
 
  private:
@@ -593,7 +603,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    SOURCE_DUMP("Optimizing the following function:", opt_graph);
+    GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
