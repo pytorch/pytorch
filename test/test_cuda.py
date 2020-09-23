@@ -279,6 +279,7 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
+    @skipIfRocm
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
