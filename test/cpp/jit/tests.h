@@ -113,8 +113,6 @@ namespace jit {
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
-  _(ArgumentSpec)                                   \
-  _(CompleteArgumentSpec)                           \
   _(Fusion)                                         \
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
@@ -220,8 +218,6 @@ namespace jit {
   _(GPU_FusionThreadPredicate)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
-  _(ArgumentSpec)               \
-  _(CompleteArgumentSpec)       \
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
