@@ -55,6 +55,7 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(ExprSplitWithMaskRepeatedNoMask)        \
   _(SplitWithTailWithLoopOptions)           \
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
