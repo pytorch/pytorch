@@ -4114,7 +4114,7 @@ class TestNN(NNTestCase):
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
         if AMPERE_OR_ROCM:
-            dev_dtypes.append(("cuda", torch.bfloat16))
+            dev_dtypes += [("cuda", torch.bfloat16)]
         for device, dtype in dev_dtypes:
             m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).to(device, dtype)
             i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
@@ -4152,7 +4152,7 @@ class TestNN(NNTestCase):
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
         if AMPERE_OR_ROCM:
-            dev_dtypes.append(("cuda", torch.bfloat16))
+            dev_dtypes += [("cuda", torch.bfloat16)]
         for device, dtype in dev_dtypes:
             m = nn.Conv2d(4, 16, kernel_size=3, groups=2, bias=False).to(device, dtype)
             i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
