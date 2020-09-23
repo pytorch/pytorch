@@ -53,6 +53,7 @@ using ::c10::FunctionSchema;
 
 using ResolutionCallback = std::function<py::function(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
+using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
 namespace {
 
@@ -1301,6 +1302,7 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
+         const ClassMethodDefaults& defaults,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
@@ -1339,6 +1341,30 @@ void initJitScriptBindings(PyObject* module) {
 
         const auto self = SimpleSelf(classType);
         cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
+
+        // Stitch in default arguments for methods. Properties don't need to be
+        // considered since there is no way to invoke setters without passing in
+        // a value.
+        auto defs_it = methodDefs.begin();
+        while (defs_it != methodDefs.end()) {
+          auto def_name = (*defs_it).name().name();
+          // If the method is not in the defaults map, assume there are
+          // no default arguments for it.
+          auto default_it = defaults.find(def_name);
+          if (default_it == defaults.end()) {
+            continue;
+          }
+
+          const auto method_name =
+              QualifiedName(classname, (*defs_it).name().name());
+          auto& method = cu->get_function(method_name);
+          method.setSchema(getSchemaWithNameAndDefaults(
+              defs_it->range(),
+              method.getSchema(),
+              at::nullopt,
+              default_it->second));
+          ++defs_it;
+        }
       });
   m.def(
       "_jit_script_interface_compile",
