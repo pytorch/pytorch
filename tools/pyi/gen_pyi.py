@@ -531,7 +531,7 @@ def gen_pyi(declarations_path, out):
                      'def __init__(self, other: Tensor) -> None: ...',
                      'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
                      ],
-        'as_subclass': ["def as_subclass(self, cls) -> Tensor: ..."],
+        'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
@@ -573,10 +573,10 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
-        'set_': ['def set_(self, storage: Storage, offset: _int, size: Size, stride: Tuple[_int]) -> Tensor: ...',
+        'set_': ['def set_(self, storage: Storage, offset: _int, size: Size, stride: Tuple[_int, ...]) -> Tensor: ...',
                  'def set_(self, storage: Storage) -> Tensor: ...'],
-        'split': ['def split(self, split_size: _int, dim: _int=0) -> Union[Tuple[Tensor, ...], List[Tensor]]: ...',
-                  'def split(self, split_size: Tuple[_int], dim: _int=0) -> Union[Tuple[Tensor, ...], List[Tensor]]: ...'],
+        'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
+                  'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
