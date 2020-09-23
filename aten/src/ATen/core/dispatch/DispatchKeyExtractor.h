@@ -120,7 +120,7 @@ public:
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
-  DispatchKey getDispatchKeyBoxed(const torch::jit::Stack* stack) const {
+  DispatchKey getDispatchKeyBoxed(DispatchKeySet eligibleKeys, const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
@@ -134,7 +134,7 @@ public:
         }
       }
     });
-    return dispatchKeySetToDispatchKey_(DispatchKeySet::FULL, ks);
+    return dispatchKeySetToDispatchKey_(eligibleKeys, ks);
   }
 
   template<class... Args>

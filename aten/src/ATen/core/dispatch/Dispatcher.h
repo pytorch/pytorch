@@ -136,6 +136,8 @@ public:
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  void callBoxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Stack* stack) const;
+  void redispatchBoxed(const OperatorHandle& op, DispatchKey currentDispatchKey, Stack* stack) const;
 
   // ------------------------------------------------------------------------
   //
@@ -296,6 +298,10 @@ public:
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
+  void redispatchBoxed(DispatchKey currentDispatchKey, Stack* stack) const {
+    c10::Dispatcher::singleton().redispatchBoxed(*this, currentDispatchKey, stack);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
@@ -400,12 +406,9 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
-inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+inline void Dispatcher::callBoxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Stack* stack) const {
   const auto& entry = op.operatorIterator_->op;
-  auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKey);
-
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
@@ -424,6 +427,20 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);
+}
+
+inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKey currentDispatchKey, Stack* stack) const {
+  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor().getDispatchKeyBoxed(
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey), stack
+  );
+  return callBoxedWithDispatchKey(op, dispatchKey, stack);
+}
+
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor().getDispatchKeyBoxed(
+      DispatchKeySet::FULL, stack);
+  return callBoxedWithDispatchKey(op, dispatchKey, stack);
 }
 
 } // namespace c10

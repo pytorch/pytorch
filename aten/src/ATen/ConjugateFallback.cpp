@@ -49,7 +49,7 @@ void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
     // We assume that view operators automatically handle conjugation
     // correctly by propagating the Conjugate dispatch key in key_set.
     // This is not necessarily always right, so you should test these cases.
-    op.callBoxed(stack);
+    op.redispatchBoxed(DispatchKey::Conjugate, stack);
     return;
   }
 
