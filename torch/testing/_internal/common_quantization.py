@@ -11,7 +11,8 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
+    get_default_qat_qconfig
 from torch.quantization.quantization_mappings import (
     get_dynamic_quant_module_mappings,
     get_qconfig_propagation_list,
@@ -614,12 +615,13 @@ class QuantizationTestCase(TestCase):
         if type(inputs) == list:
             inputs = inputs[0]
         if quant_type == QuantType.QAT:
+            qconfig_dict = {'': get_default_qat_qconfig(torch.backends.quantized.engine)}
             model.train()
         else:
+            qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
             model.eval()
         original = symbolic_trace(model)
 
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
             prepare = prepare_dynamic_fx
             convert = convert_dynamic_fx
