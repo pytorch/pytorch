@@ -104,7 +104,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
-    bool timedOut();
+    bool timedOut(std::chrono::milliseconds timeout = kNoTimeout);
 
     std::vector<at::Tensor> result() override;
 

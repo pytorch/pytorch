@@ -338,7 +338,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       // Synchronize so that the CUDA Event corresponding to this collective
       // has completed.
       cudaEventSynchronize((*cudaEvents_)[i]);
-      if (timedOut()) {
+      if (timedOut(timeout)) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
         // time out error and thus can not abort ncclComms accordingly.
@@ -413,11 +413,13 @@ void ProcessGroupNCCL::parseNcclAsyncErrorHandling() {
   }
 }
 
-bool ProcessGroupNCCL::WorkNCCL::timedOut() {
+bool ProcessGroupNCCL::WorkNCCL::timedOut(std::chrono::milliseconds timeout) {
+  std::chrono::milliseconds workTimeout =
+      timeout == kNoTimeout ? opTimeout_ : timeout;
   auto currentTimepoint = std::chrono::steady_clock::now();
   return (
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          currentTimepoint - workStartTime_) >= opTimeout_);
+          currentTimepoint - workStartTime_) >= workTimeout);
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
