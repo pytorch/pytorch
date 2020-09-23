@@ -142,7 +142,7 @@ class TestOut(TestCase):
         expected = op(sample.input, *sample.args, **sample.kwargs)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
-        out_kwargs['out'] = out = torch.empty(expected.shape, device=device, dtype=dtype)
+        out_kwargs['out'] = out = torch.empty_like(expected)
         op(sample.input, *sample.args, **out_kwargs)
         self.assertEqual(expected, out)
 
