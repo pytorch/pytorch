@@ -173,13 +173,18 @@ def get_jit_class_def(cls, self_name):
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
-    py_ast = ast.parse(dedent_src)
+    py_ast = ast.parse(source)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
 def check_and_indent_multiline_strings(sourcelines):
-    indices = [index for index, source in enumerate(sourcelines) if '\"\"\"' in source]
+    indices = []
+    for index, source in enumerate(sourcelines):
+        if '\"\"\"' in source and source.find('\"\"\"') == source.rfind('\"\"\"'):
+            indices.append(index)
+
+    if len(indices) == 0: return sourcelines
     for i in range(0, len(indices), 2):
         start = indices[i]
         end = indices[i + 1]
