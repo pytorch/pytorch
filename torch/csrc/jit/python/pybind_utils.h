@@ -637,6 +637,7 @@ inline IValue toIValue(
         return mod.value()._ivalue();
       }
 
+      // Check if the obj is a ScriptClass.
       if (py::isinstance(
               obj,
               py::module::import("torch.jit").attr("RecursiveScriptClass"))) {
@@ -644,12 +645,19 @@ inline IValue toIValue(
         return inst._ivalue();
       }
 
-      throw py::cast_error(c10::str(
+      // Custom class?
+      try {
+        Object* script_object = object.cast<Object*>();
+        return script_object->_ivalue();
+      } catch (...) {
+        throw py::cast_error(c10::str(
             "Object ",
             py::str(obj),
             " is not a TorchScript compatible type;"
             " it must be scripted before being passed as a value for an argument of type ",
-           type->repr_str()));
+            type->repr_str()));
+      }
+
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue

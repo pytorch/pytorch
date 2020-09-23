@@ -105,7 +105,8 @@ struct PythonResolver : public Resolver {
     }
 
     auto unwrapped = py::module::import("inspect").attr("unwrap")(obj);
-    py::bool_ isClass = py::module::import("inspect").attr("isclass")(unwrapped);
+    py::bool_ isClass =
+        py::module::import("inspect").attr("isclass")(unwrapped);
 
     if (!py::cast<bool>(isClass)) {
       return nullptr;
@@ -119,8 +120,10 @@ struct PythonResolver : public Resolver {
         py::cast<std::string>(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(unwrapped)));
 
-    auto pyClass = py::module::import("torch.jit._state").attr("_get_script_class")(qualifiedName.qualifiedName());
-    if(!pyClass.is_none()) {
+    auto pyClass =
+        py::module::import("torch.jit._state")
+            .attr("_get_script_class")(qualifiedName.qualifiedName());
+    if (!pyClass.is_none()) {
       return get_python_cu()->get_type(qualifiedName);
     }
 
@@ -794,6 +797,8 @@ void initJitScriptBindings(PyObject* module) {
                   return method.name();
                 });
               })
+          .def(
+              "_properties", [](Object& self) { return self.get_properties(); })
           .def(
               "equals",
               [](Object& self, const Object& rhs) { return self.equals(rhs); })

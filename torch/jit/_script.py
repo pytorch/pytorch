@@ -13,7 +13,7 @@ import copy
 import pickle
 import warnings
 from typing import Any, Dict
-
+import pdb
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -262,11 +262,18 @@ if _enabled:
             super(RecursiveScriptClass, self).__init__()
             self.__dict__["_initializing"] = True
             self._c = cpp_class
+
+            # Add wrapped object's properties to this class instance.
+            self._props = {prop[0]: property(prop[1], prop[2]) for prop in self._c._properties()}
+
             self._initializing = False
 
         def __getattr__(self, attr):
             if self._initializing:
                 return super(RecursiveScriptClass, self).__getattr__(attr)
+
+            if attr in self._props:
+                return self._props[attr].fget()
 
             return getattr(self._c, attr)
 
@@ -274,16 +281,18 @@ if _enabled:
             if self._initializing:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
+            if attr in self._props:
+                return self._props[attr].fset(value)
+
             setattr(self._c, attr, value)
 
         # Delegate calls to magic methods like __len__ to the C++ module backing the
         # RecursiveScriptClass.
         def forward_magic_method(self, method_name, *args, **kwargs):
+            if not self._c._has_method(method_name):
+                raise TypeError()
+
             self_method = self.__getattr__(method_name)
-            if getattr(self_method, "__func__", None) == getattr(
-                RecursiveScriptClass, method_name
-            ):
-                raise NotImplementedError()
             return self_method(*args, **kwargs)
 
         def __iter__(self):
@@ -306,6 +315,12 @@ if _enabled:
 
         def __add__(self, other):
             return self.forward_magic_method("__add__", other)
+
+        def __iadd__(self, other):
+            if self._c._has_method("__iadd__"):
+                return self.forward_magic_method("__iadd__", other)
+            else:
+                return self.forward_magic_method("__add__", other)
 
         def __sub__(self, other):
             return self.forward_magic_method("__sub__", other)
@@ -367,6 +382,11 @@ if _enabled:
         def __str__(self):
             return self.forward_magic_method("__str__")
 
+        def __enter__(self):
+            return self.forward_magic_method("__enter__")
+
+        def __exit__(self, type, tb, traceback):
+            return self.forward_magic_method("__exit__", type, tb, traceback)
 
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash

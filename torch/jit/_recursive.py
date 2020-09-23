@@ -6,6 +6,7 @@ import textwrap
 import functools
 import warnings
 from typing import Dict, List, Set, Type
+from enum import Enum
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
@@ -251,7 +252,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
         # If the type of the value is a user-defined class type, script it before trying
         # to infer the type.
-        if type(value).__module__ != "builtins":
+        attr_py_type = type(value)
+        if attr_py_type.__module__ != "builtins" and attr_py_type is not torch.Tensor and attr_py_type is not torch.jit.Attribute and attr_py_type is not torch._C.ScriptObject and not issubclass(attr_py_type, Enum) and attr_py_type is not torch.qscheme and attr_py_type is not torch.device and attr_py_type is not torch.dtype:
+            print(attr_py_type)
             torch.jit.script(type(value))
 
         attr_type = infer_type(name, value)
