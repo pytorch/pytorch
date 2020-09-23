@@ -654,7 +654,7 @@ class TestBenchmarkUtils(TestCase):
 
         def assert_reprs_match(measurement, expected):
             measurement_repr = re.sub(
-                "object at 0x[0-9a-f]{12}>",
+                "object at 0x[0-9a-fA-F]+>",
                 "object at 0xXXXXXXXXXXXX>",
                 repr(measurement)
             )
