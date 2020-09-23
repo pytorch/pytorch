@@ -2,6 +2,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Resource.h>
 
 namespace at {
 namespace native {
@@ -59,12 +60,44 @@ struct Descriptor final {
         VkDevice device,
         VkDescriptorPool descriptor_pool,
         VkDescriptorSetLayout descriptor_set_layout);
+    Set(const Set&) = delete;
+    Set& operator=(const Set&) = delete;
+    Set(Set&&) = default;
+    Set& operator=(Set&&) = default;
+    ~Set() = default;
 
-    void bind();
+    Set& bind(
+        uint32_t binding,
+        VkDescriptorType type,
+        const Resource::Buffer& buffer);
+
+    Set& bind(
+        uint32_t binding,
+        VkDescriptorType type,
+        const Resource::Image& image);
+
+    VkDescriptorSet handle() const;
+
+   private:
+    struct Stream final {
+      uint32_t binding;
+      VkDescriptorType type;
+      union {
+        VkDescriptorBufferInfo buffer;
+        VkDescriptorImageInfo image;
+      } info;
+    };
+
+    void update(const Stream& stream);
 
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
+
+    struct {
+      c10::SmallVector<Stream, 8u> streams;
+      mutable bool dirty;
+    } bindings_;
   };
 
   //
@@ -74,6 +107,11 @@ struct Descriptor final {
   class Pool final {
    public:
     explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&) = default;
+    Pool& operator=(Pool&&) = default;
+    ~Pool() = default;
 
     Set allocate(VkDescriptorSetLayout descriptor_set_layout);
     void purge();
