@@ -26,11 +26,7 @@ class TORCH_API FutureError final : public std::exception {
 // Most implementation is copied from FutureMessage and
 // c10::ivalue::Future
 template <typename T>
-#ifdef _WIN32
-class Future final {
-#else
-class TORCH_API Future final {
-#endif
+class TORCH_PYTHON_API Future final {
  public:
   Future() = default;
 

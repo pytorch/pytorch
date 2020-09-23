@@ -57,11 +57,7 @@ struct RecvWork {
   torch::Tensor payload_;
 };
 
-#ifdef _WIN32
-class ProcessGroupAgent : public RpcAgent {
-#else
-class TORCH_API ProcessGroupAgent : public RpcAgent {
-#endif
+class TORCH_PYTHON_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
       std::string workerName,

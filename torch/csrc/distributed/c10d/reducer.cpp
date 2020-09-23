@@ -89,14 +89,7 @@ Reducer::Reducer(
       for (size_t variable_index = 0; variable_index < variable_count;
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
-        const auto index = VariableIndex{
-#ifdef _MSC_VER
-            replica_index, variable_index
-#else
-            .replica_index = replica_index,
-            .variable_index = variable_index,
-#endif
-        };
+        const auto index = VariableIndex(replica_index, variable_index);
 
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
@@ -481,14 +474,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
     const auto variable_count = replicas_[replica_index].size();
     for (size_t variable_index = 0; variable_index < variable_count;
          ++variable_index) {
-      const auto index = VariableIndex{
-#ifdef _MSC_VER
-          replica_index, variable_index
-#else
-          .replica_index = replica_index,
-          .variable_index = variable_index,
-#endif
-      };
+      const auto index = VariableIndex(replica_index, variable_index);
       push_rebuilt_params(index);
     }
   }
@@ -858,15 +844,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] = VariableLocator{
-#ifdef _MSC_VER
-          bucket_index,
-          intra_bucket_index++,
-#else
-          .bucket_index = bucket_index,
-          .intra_bucket_index = intra_bucket_index++,
-#endif
-      };
+      variable_locators_[variable_index] = VariableLocator(
+        bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
