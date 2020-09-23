@@ -308,7 +308,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "deleteKey",
+              "delete_key",
               &::c10d::Store::deleteKey,
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -669,7 +669,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupGloo::Options>())
+           ::c10d::ProcessGroupGloo::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -700,7 +701,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -710,7 +712,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupNCCL::Options>())
+           ::c10d::ProcessGroupNCCL::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -726,7 +729,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+          py::call_guard<py::gil_scoped_release>());
 
   py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
       .def(py::init<>())
@@ -741,9 +745,12 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
-    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-  });
+  processGroupMPI.def_static(
+    "create",
+    [](std::vector<int> ranks) {
+      return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+    },
+    py::call_guard<py::gil_scoped_release>());
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

@@ -304,11 +304,11 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 }
 
 int64_t FileStore::getNumKeys() {
-  throw std::runtime_error("Not Implemented");
+  throw std::runtime_error("getNumKeys not implemented for FileStore");
 }
 
-void FileStore::deleteKey(const std::string& key) {
-  throw std::runtime_error("Not Implemented");
+void FileStore::deleteKey(const std::string& /* unused */) {
+  throw std::runtime_error("deleteKey not implemented for FileStore");
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {

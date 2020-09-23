@@ -240,11 +240,6 @@ void TCPStoreDaemon::getNumKeysHandler(int socket) const {
 
 void TCPStoreDaemon::deleteHandler(int socket) {
   std::string key  = tcputil::recvString(socket);
-  std::cout << key << std::endl;
-  std::cout << "----------" << std::endl;
-  for (auto k : tcpStore_) {
-    std::cout << k.first << std::endl;
-  }
   tcpStore_.erase(key);
 }
 

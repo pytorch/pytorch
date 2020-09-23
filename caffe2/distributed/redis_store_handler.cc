@@ -77,12 +77,12 @@ int64_t RedisStoreHandler::add(const std::string& name, int64_t value) {
 }
 
 int64_t RedisStoreHandler::getNumKeys() {
-  CHECK(false) << "getNumKeys not implemented for FileStoreHandler";
+  CHECK(false) << "getNumKeys not implemented for RedisStoreHandler";
   return 0;
 }
 
-void RedisStoreHandler::deleteKey(const std::string& key) {
-  CHECK(false) << "deleteKey not implemented for FileStoreHandler";
+void RedisStoreHandler::deleteKey(const std::string& /* unused */) {
+  CHECK(false) << "deleteKey not implemented for RedisStoreHandler";
 }
 
 bool RedisStoreHandler::check(const std::vector<std::string>& names) {
