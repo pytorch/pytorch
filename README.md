@@ -375,6 +375,6 @@ A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chila
 
 Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
-## License
+## License    
 
 PyTorch is a BSD-style licensed, as found in the [LICENSE](LICENSE) file.
