@@ -8,6 +8,16 @@ using namespace torch::nn;
 
 struct TransformerTest : torch::test::SeedingFixture {};
 
+// a generic function to set constants for parameters so we have fixed result for deterministic test
+template<typename Model>
+void set_parameter_to_constants(Model& model, const torch::TensorOptions& tensor_options) {
+  torch::NoGradGuard guard;
+  for (auto& p : model->parameters()) {
+    auto sz = p.view(-1).size(0);
+    p.copy_(torch::cos(torch::arange(0, sz, tensor_options).view(p.sizes())));
+  }
+}
+
 // a generic function to provide consistent encoder/decoder layer for all the transformer tests
 template<typename T_LAYER, typename T_OPTIONS>
 T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
@@ -23,13 +33,7 @@ T_LAYER get_a_test_layer(const torch::TensorOptions& tensor_options) {
   }
 
   // set constant weights of the model
-  {
-    torch::NoGradGuard guard;
-    for (auto& p : layer->parameters()) {
-      auto sz = p.view(-1).size(0);
-      p.copy_(torch::cos(torch::arange(0, sz, tensor_options).view(p.sizes())));
-    }
-  }
+  set_parameter_to_constants<T_LAYER>(layer, tensor_options);
 
   return layer;
 }
@@ -579,6 +583,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerEncoder) {
       ")");
 }
 
+
 TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
   ASSERT_EQ(
       c10::str(TransformerDecoderLayer(4, 2)),
@@ -586,18 +591,18 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
       "  (self_attn): torch::nn::MultiheadAttention(\n"
       "    (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "  )\n"
-      "  (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "  (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       "  (multihead_attn): torch::nn::MultiheadAttention(\n"
       "    (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "  )\n"
-      "  (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "  (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       "  (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
       "  (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
       "  (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
-      "  (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "  (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "  (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       "  (norm3): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "  (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "  (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "  (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
       ")");
 }
 
@@ -978,8 +983,7 @@ void transformer_decoder_test_helper(bool is_cuda) {
 
   // Multiple layers with norm
   norm = LayerNorm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
-  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6)
-    .norm(AnyModule(norm)));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6).norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -1036,54 +1040,151 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoder) {
       "  (layers): torch::nn::ModuleList(\n"
       "    (0): torch::nn::TransformerDecoderLayerImpl(\n"
       "      (self_attn): torch::nn::MultiheadAttention(\n"
-      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
-      " bias=true)\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "      )\n"
-      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
       "      (multihead_attn): torch::nn::MultiheadAttention(\n"
-      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
-      " bias=true)\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "      )\n"
-      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
-      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048,"
-      " bias=true)\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
       "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4,"
-      " bias=true)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
       "      (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
       "    )\n"
       "    (1): torch::nn::TransformerDecoderLayerImpl(\n"
       "      (self_attn): torch::nn::MultiheadAttention(\n"
-      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
-      " bias=true)\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "      )\n"
-      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
       "      (multihead_attn): torch::nn::MultiheadAttention(\n"
-      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
-      " bias=true)\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "      )\n"
-      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
-      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048,"
-      " bias=true)\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
       "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4,"
-      " bias=true)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
       "      (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
       "    )\n"
       "  )\n"
-      "  (norm): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
+      "  (norm): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       ")");
+}
+
+void transformer_test_helper(bool is_cuda) {
+    // this is a deterministic test for Transformere
+    torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
+    torch::TensorOptions tensor_options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+
+    // transformer created encoder/decoder
+    Transformer model(TransformerOptions()
+      .d_model(4)
+      .nhead(2)
+      .num_encoder_layers(2)
+      .num_decoder_layers(1)
+      .dim_feedforward(16)
+      .dropout(0.0)
+      .activation(torch::kReLU));
+
+    set_parameter_to_constants<Transformer>(model, tensor_options);
+    if (tensor_options.device() == torch::kCUDA) {
+      model->to(torch::kCUDA);
+    }
+
+    // transformer with customized encoder/decoder
+    LayerNorm enorm(LayerNormOptions({4}));
+    TransformerEncoder encoder(TransformerEncoderOptions(
+      TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 2).norm(AnyModule(enorm)));
+
+    LayerNorm dnorm(LayerNormOptions({4}));
+    TransformerDecoder decoder(TransformerDecoderOptions(
+      TransformerDecoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 1).norm(AnyModule(dnorm)));
+
+    Transformer model_cus(TransformerOptions()
+      .d_model(4)
+      .nhead(2)
+      .custom_encoder(AnyModule(encoder))
+      .custom_decoder(AnyModule(decoder)));
+
+    set_parameter_to_constants<Transformer>(model_cus, tensor_options);
+    if (tensor_options.device() == torch::kCUDA) {
+      model_cus->to(torch::kCUDA);
+    }
+
+    // test cases
+    torch::Tensor src = torch::tensor({
+      {{1.0,  2.0,  3.0,  4.0},  {5.0, 6.0, 7.0, 8.0}},
+      {{9.0,  10.0, 11.0, 12.0}, {13.0, 14.0, 15.0, 16.0}},
+      {{17.0, 18.0, 19.0, 20.0}, {21.0, 22.0, 23.0, 24.0}}}, tensor_options);
+
+    torch::Tensor tgt = torch::tensor({
+      {{1.0,  2.0,  3.0,  4.0},  {5.0, 6.0, 7.0, 8.0}},
+      {{9.0,  10.0, 11.0, 12.0}, {13.0, 14.0, 15.0, 16.0}}}, tensor_options);
+
+    torch::Tensor ref_output = torch::tensor({
+      {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}},
+      {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}}}, tensor_options);
+    torch::Tensor result = model(src, tgt);
+    torch::Tensor result_cus = model_cus(src, tgt);
+    ASSERT_EQ(result.sizes(), ref_output.sizes());
+    ASSERT_TRUE(result.equal(result_cus));
+    ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
+
+    torch::Tensor src_mask = Transformer::Impl::generate_square_subsequent_mask(src.size(0)).to(tensor_options);
+    ref_output = torch::tensor({
+      {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}},
+      {{2.695875, 0.347114, -0.044355, -0.549541}, {2.696091, 0.347015, -0.044770, -0.548522}}}, tensor_options);
+    result = model(src, tgt, src_mask);
+    result_cus = model_cus(src, tgt, src_mask);
+    ASSERT_EQ(result.sizes(), ref_output.sizes());
+    ASSERT_TRUE(result.equal(result_cus));
+    ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
+
+    torch::Tensor tgt_key_padding_mask = torch::zeros({tgt.size(1), tgt.size(0)}, tensor_options) == 1;
+    tgt_key_padding_mask[0][0] = 1;
+    tgt_key_padding_mask[1][1] = 1;
+    ref_output = torch::tensor({
+      {{2.696114, 0.347004, -0.044813, -0.548417}, {2.696091, 0.347015, -0.044770, -0.548522}},
+      {{2.696114, 0.347004, -0.044813, -0.548417}, {2.696091, 0.347015, -0.044770, -0.548522}}}, tensor_options);
+    result = model(src, tgt, src_mask, torch::Tensor(), torch::Tensor(), torch::Tensor(), tgt_key_padding_mask);
+    result_cus = model_cus(src, tgt, src_mask, torch::Tensor(), torch::Tensor(), torch::Tensor(), tgt_key_padding_mask);
+    ASSERT_EQ(result.sizes(), ref_output.sizes());
+    ASSERT_TRUE(result.equal(result_cus));
+    ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
+}
+
+TEST_F(TransformerTest, Transformer) {
+  transformer_test_helper(false);
+}
+
+TEST_F(TransformerTest, Transformer_CUDA) {
+  transformer_test_helper(true);
+}
+
+TEST_F(TransformerTest, TransformerArgsCorrectness) {
+  Transformer model(TransformerOptions()
+    .d_model(4)
+    .nhead(2)
+    .num_encoder_layers(2)
+    .num_decoder_layers(1)
+    .dim_feedforward(16)
+    .dropout(0.0)
+    .activation(torch::kReLU));
+
+  torch::Tensor src = torch::randn({2, 3, 4});
+  torch::Tensor tgt = torch::randn({3, 2, 4});
+
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have equal batch size");
+
+  tgt = torch::randn({2, 3, 3});
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have same feature size as d_model");
+
+  src = torch::randn({2, 3});
+  ASSERT_THROWS_WITH(model(src, tgt), "src and tgt should have 3 dimensions");
 }

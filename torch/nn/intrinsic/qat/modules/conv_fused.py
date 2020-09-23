@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import math
 import torch
 import torch.nn as nn
@@ -146,6 +145,16 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                 if prefix + v1_name in state_dict:
                     state_dict[prefix + v2_name] = state_dict[prefix + v1_name]
                     state_dict.pop(prefix + v1_name)
+                elif prefix + v2_name in state_dict:
+                    # there was a brief period where forward compatibility
+                    # for this module was broken (between
+                    # https://github.com/pytorch/pytorch/pull/38478
+                    # and https://github.com/pytorch/pytorch/pull/38820)
+                    # and modules emitted the v2 state_dict format while
+                    # specifying that version == 1. This patches the forward
+                    # compatibility issue by allowing the v2 style entries to
+                    # be used.
+                    pass
                 elif strict:
                     missing_keys.append(prefix + v2_name)
 

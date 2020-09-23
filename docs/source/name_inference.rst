@@ -197,6 +197,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.sigmoid_`,None
    ":meth:`Tensor.sign`, :func:`torch.sign`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sign_`,None
+   ":meth:`Tensor.sgn`, :func:`torch.sgn`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sgn_`,None
    ":meth:`Tensor.sin`, :func:`torch.sin`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sin_`,None
    ":meth:`Tensor.sinh`, :func:`torch.sinh`",:ref:`keeps_input_names-doc`

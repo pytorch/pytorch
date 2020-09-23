@@ -431,7 +431,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor &self) {
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
@@ -632,7 +632,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
+static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upper, bool transpose, bool unitriangular) {
 #ifndef USE_LAPACK
   AT_ERROR("triangular_solve: LAPACK library not found in compilation");
 #else
@@ -647,12 +647,13 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transp
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto infos_data = infos.data_ptr<int>();
 
-  int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    int* infos_working_ptr = &infos_data[i];
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, infos_working_ptr);
   }
 #endif
 }
@@ -661,9 +662,15 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, cons
                                                         bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
+  auto infos_tensor = at::empty(batchCount(self), self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cpu", [&]{
-    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
+    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, infos_tensor, upper, transpose, unitriangular);
   });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos_tensor, "triangular_solve_cpu");
+  } else {
+    singleCheckErrors(infos_tensor.item<int64_t>(), "triangular_solve_cpu");
+  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
