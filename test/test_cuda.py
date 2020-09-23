@@ -281,11 +281,14 @@ class TestCuda(TestCase):
 
     def test_cudart_register(self):
         t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
         self.assertEquals(r, 0)
+        self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
         self.assertEquals(r, 0)
+        self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
         gc.collect()
