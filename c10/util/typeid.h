@@ -302,6 +302,21 @@ class _Uninitialized final {};
 
 } // namespace detail
 
+//
+// note: these are outside TypeMeta bc gcc seems to have trouble
+// with scalarTypeItemSizes as a constexpr static member used by
+// a public inline instance method
+//
+static constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
+
+// item sizes for TypeMeta::itemsize() fast path
+static constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
+#define SCALAR_TYPE_SIZE(T, name) sizeof(T),
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
+#undef SCALAR_TYPE_SIZE
+    0, // Undefined
+};
+
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
  * as a blob, or the data type of a tensor, with a unique run-time id. It also
@@ -363,6 +378,9 @@ private:
    * Returns the size of the item.
    */
   inline size_t itemsize() const noexcept {
+    if (C10_LIKELY(isScalarType())) {
+      return scalarTypeItemSizes[index_];
+    }
     return data().itemsize_;
   }
   /**
