@@ -33,7 +33,7 @@ void div_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void floordiv_kernel_cuda(TensorIterator& iter) {
+void floordiv_integral_kernel_cuda(TensorIterator& iter) {
   // In the special case of unsigned integer division, floor division
   //   is equivalent to truncation division (since the signs of
   //   the divisor and dividend are always the same)
@@ -91,7 +91,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
-REGISTER_DISPATCH(floordiv_stub, &floordiv_kernel_cuda);
+REGISTER_DISPATCH(floordiv_integral_stub, &floordiv_integral_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 
 }} // namespace at::native

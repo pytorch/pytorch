@@ -115,7 +115,7 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-void floordiv_kernel(TensorIterator& iter) {
+void floordiv_integral_kernel(TensorIterator& iter) {
   // In the special case of unsigned integer division, floor division
   //   is equivalent to truncation division (since the signs of
   //   the divisor and dividend are always the same)
@@ -808,7 +808,7 @@ REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
-REGISTER_DISPATCH(floordiv_stub, &floordiv_kernel);
+REGISTER_DISPATCH(floordiv_integral_stub, &floordiv_integral_kernel);
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);

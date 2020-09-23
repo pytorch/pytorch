@@ -20,7 +20,7 @@ DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
-DEFINE_DISPATCH(floordiv_stub);
+DEFINE_DISPATCH(floordiv_integral_stub);
 DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
@@ -212,10 +212,10 @@ Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other
   TORCH_CHECK(computation_dtype != ScalarType::Bool,
     "torch.floor_divide is not implemented for scalar type bool!");
 
-  // NOTE: floordiv_stub handles the special case of integer floor division
+  // NOTE: floordiv_integral_stub handles the special case of integer floor division
   if (c10::isIntegralType(computation_dtype, /*include_bool=*/false)) {
     auto iter = TensorIterator::binary_op(result, self, other);
-    floordiv_stub(iter.device_type(), iter);
+    floordiv_integral_stub(iter.device_type(), iter);
     return result;
   }
 
@@ -229,11 +229,11 @@ Tensor floor_divide(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(computation_dtype != ScalarType::Bool,
     "torch.floor_divide is not implemented for scalar type bool!");
 
-  // NOTE: floordiv_stub handles the special case of integer floor division
+  // NOTE: floordiv_integral_stub handles the special case of integer floor division
   if (c10::isIntegralType(computation_dtype, /*include_bool=*/false)) {
     Tensor result;
     auto iter = TensorIterator::binary_op(result, self, other);
-    floordiv_stub(iter.device_type(), iter);
+    floordiv_integral_stub(iter.device_type(), iter);
     return iter.output();
   }
 
