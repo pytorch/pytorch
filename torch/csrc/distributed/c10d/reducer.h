@@ -89,7 +89,6 @@ class Reducer {
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
       std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-      at::Tensor& tensor,
       bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For

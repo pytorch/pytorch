@@ -171,6 +171,16 @@ public:
     auto angle = _mm256_permute_ps(angle_(), 0xB1); // angle    90-angle
     return _mm256_and_ps(angle, real_mask);         // angle    0
   }
+  Vec256<c10::complex<float>> sgn() const {
+    auto abs = abs_();
+    auto zero = _mm256_setzero_ps();
+    auto mask = _mm256_cmp_ps(abs, zero, _CMP_EQ_OQ);
+    auto abs_val = Vec256(abs);
+
+    auto div = values / abs_val.values;       // x / abs(x)
+
+    return _mm256_blendv_ps(div, zero, mask);
+  }
   __m256 real_() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));

@@ -40,15 +40,13 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
-    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
                                 torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
-    TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
@@ -280,6 +278,18 @@ class TestCuda(TestCase):
         # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
+
+    @skipIfRocm
+    def test_cudart_register(self):
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        cudart = torch.cuda.cudart()
+        r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
+        self.assertEquals(r, 0)
+        self.assertTrue(t.is_pinned())
+        r = cudart.cudaHostUnregister(t.data_ptr())
+        self.assertEquals(r, 0)
+        self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
         gc.collect()

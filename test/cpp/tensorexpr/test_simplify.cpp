@@ -3687,11 +3687,9 @@ void testSimplifyFuseConditions() {
             Store::make(a, {1}, j, mask),
             nullptr),
     });
-
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
-
     auto it = block->begin();
     it++;
     IS_NODE_WITH_NAME(Cond, *it, cond);
@@ -3720,7 +3718,6 @@ void testSimplifyFuseConditions() {
             Store::make(a, {1}, j, mask),
             nullptr),
     });
-
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
@@ -3751,7 +3748,6 @@ void testSimplifyFuseConditions() {
             Store::make(a, {1}, j, mask),
             nullptr),
     });
-
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
@@ -3786,7 +3782,6 @@ void testSimplifyFuseConditions() {
                                      CompareSelectOperation::kLT),
                                  Store::make(a, {1}, i, mask),
                                  nullptr)});
-
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
@@ -3859,6 +3854,114 @@ void testSimplifyFuseConditions() {
     IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
     IS_NODE_WITH_NAME(For, true_block->front(), loop);
   }
+}
+
+void testSimplifySyncThreads() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {4}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+
+  {
+    // Merge two inner SyncThreads.
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+
+  {
+    // Eliminate outer SyncThreads.
+    auto body = Block::make(
+        {new SyncThreads(), Store::make(a, {1}, 0, 1), new SyncThreads()});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    auto it = block->begin();
+    IS_NODE(Store, *it);
+  }
+
+  {
+    // Merge many inner SyncThreads.
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+
+  {
+    // Merge multiple outer SyncThreads.
+    auto body = Block::make({new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads()});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    auto it = block->begin();
+    IS_NODE(Store, *it);
+  }
+
+  {
+    // Merge multiple sections;
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             Store::make(a, {2}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {3}, 0, 1)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 6);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+}
+
+void testSimplifyRampSubBroadcast() {
+  KernelScope kernel_scope;
+  int num_lanes = 4;
+  ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
+  ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
+  ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
+  Ramp* newRamp = simplified.AsNode<Ramp>();
+  IS_NODE_WITH_NAME(IntImm, newRamp->base(), base);
+  ASSERT_EQ(base->value(), 5);
+  IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
+  ASSERT_EQ(stride->value(), 6);
+  ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
 } // namespace jit
