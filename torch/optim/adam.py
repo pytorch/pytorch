@@ -86,7 +86,7 @@ class Adam(Optimizer):
             exp_avg_sqs = []
             state_sums = []
             max_exp_avg_sqs = []
-            state_step = 0
+            state_steps = []
 
             for p in group['params']:
                 if p.grad is not None:
@@ -103,8 +103,8 @@ class Adam(Optimizer):
 
                     # update the steps for each param group update
                     state['step'] += 1
-                    # record the step that associate with the param group
-                    state_step = state['step']
+                    # record the step after step update
+                    state_steps.append(state['step'])
 
                 beta1, beta2 = group['betas']
 
@@ -113,10 +113,10 @@ class Adam(Optimizer):
                        exp_avgs,
                        exp_avg_sqs,
                        max_exp_avg_sqs,
+                       state_steps,
                        group['amsgrad'],
                        beta1,
                        beta2,
-                       state_step,
                        group['lr'],
                        group['weight_decay'],
                        group['eps']
