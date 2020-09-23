@@ -1,8 +1,6 @@
 import torch
 import torch.fx
-import operator
 from typing import Callable, List, Dict
-
 
 class MyModule(torch.nn.Module):
     def __init__(self):
@@ -15,132 +13,25 @@ class MyModule(torch.nn.Module):
         w = self.linear(y).clamp(min=0.0, max=1.0) 
         return z + w
 
-
 # Symbolically trace handbuild model for testing
 my_module = MyModule()
 my_module_traced = torch.fx.symbolic_trace(my_module)
 
-
-
-# Creates a module from the nodes and root torch.nn.module of a sybmolically traced torch.fx.GraphModule
-#
-# module_name: name for new module's root torch.nn.module
-# module_node_names: list of node names to add to new graph, need to match names in orig_nodes
-# module_outputs: list of node names which are outputs of this submodule
-# orig_nodes: nodes from original torch.fx.GraphModule
-# orig_root_module: original torch.nn.module which orig_nodes's torch.fx.GraphModule was traced from
-# submodule_hints: if adding submodules from modules created by this function, add their names here
-#                  and add their names to module_node_names and add their nodes to orig_nodes
-# placeholder_hints: if node in module was originally not a placeholder but now is for this graph,
-#                    add node name here
-def create_module_from_nodes(
-    module_name: str,
-    module_node_names: List[str],
-    module_outputs: List[str],
-    orig_nodes: Dict[str, torch.fx.Node],
-    orig_root_module: torch.nn.Module,
-    submodule_hints: List[str],
-    placeholder_hints: List[str],
-) -> (torch.fx.GraphModule, torch.fx.Node):
-    # create new graph
-    graph = torch.fx.Graph()
-
-    # for tracking graph info 
-    new_nodes: Dict[str, torch.fx.Node] = {}
-    graph_placeholders = []
-    graph_outputs = []
-
-    # copy over nodes from original graph
-    for node_name in module_node_names:
-        orig_node = orig_nodes[node_name]
-
-        if node_name in placeholder_hints:
-            # actual node work done in another submodule, result is input into this submodule
-            op = 'placeholder' if node_name in placeholder_hints else orig_node.op
-            new_args = ()
-            new_kwargs = ()
-            target = node_name
-        else:
-            op = orig_node.op
-
-            # perform arg and kwarg transformation
-            def replace_args(old_node: torch.fx.Node, new_nodes: Dict[str, torch.fx.Node]):
-                return new_nodes[old_node.name]
-
-            new_args = torch.fx.map_arg(
-                orig_node.args, lambda n: replace_args(n, new_nodes)
-            )
-            new_kwargs = torch.fx.map_arg(
-                orig_node.kwargs, lambda n: replace_args(n, new_nodes)
-            )
-
-            # create target
-            target = (
-                module_name + "." + orig_node.name
-                if orig_node.op in ["get_attr", "call_module"]
-                else orig_node.target
-            )
-
-        # create new node
-        new_nodes[node_name] = graph.create_node(
-            op=op,
-            target=target,
-            args=new_args,
-            kwargs=new_kwargs,
-            name=orig_node.name,
-        )
-
-        if node_name in module_outputs:
-            graph_outputs.append(new_nodes[node_name])
-        if op == "placeholder":
-            graph_placeholders.append(new_nodes[node_name])
-
-    # set graph outputs 
-    if module_outputs:
-        graph.output(graph_outputs)
-    else:
-        graph.output(new_nodes[module_node_names[-1]])
-
-    # set up dict for copying over targets
-    subgraph_targets = {}
-    for node_name, node in new_nodes.items():
-        if node.op in ["get_attr", "call_module"]:
-            if node_name in submodule_hints:
-                # when node is a module created from this function, target is
-                # in orig_node's target directly
-                node_target = orig_nodes[node_name].target
-            else:
-                # the actual target still lives in the original torch.nn.module's hiearchy
-                node_target = orig_root_module
-                for atom in orig_nodes[node_name].target.split("."):
-                    node_target = getattr(node_target, atom)
-            subgraph_targets[str(node.target)] = node_target
-
-    module: torch.fx.GraphModule = torch.fx.GraphModule(subgraph_targets, graph)
-    module_as_node = torch.fx.Node(
-        graph=graph,
-        name=module_name,
-        op="call_module",
-        target=module,
-        args=tuple(graph_placeholders),
-        kwargs={},
-    )
-
-    return (module, module_as_node)
-
-
 class Partition:
     def __init__(self, name: str):
         self.name: str = name
-        self.nodes: List[str] = []
-        self.inputs: List[str] = []
-        self.outputs: List[str] = []
-        self.partitions_dependent_on: List[str] = []
-        self.partition_dependents: List[str] = []
+        self.node_names: List[str] = []
+        self.inputs: Set[str] = set()
+        self.outputs: Set[str] = set()
+        self.partitions_dependent_on: Set[str] = set()
+        self.partition_dependents: Set[str] = set()
+        self.graph : torch.fx.Graph = torch.fx.Graph()
+        self.environment : Dict[torch.fx.Node, torch.fx.Node] = {}
+        self.targets : Dict[str, Any] = {}
 
     def __repr__(self) -> str:
         return f"name: {self.name},\n" \
-            f" nodes: {self.nodes},\n" \
+            f" nodes: {self.node_names},\n" \
             f" inputs: {self.inputs},\n" \
             f" outputs: {self.outputs},\n" \
             f" partitions depenent on: {self.partitions_dependent_on},\n" \
@@ -156,53 +47,49 @@ def split_module(
     partitions: Dict[str, Partition] = {}
     orig_nodes: Dict[str, torch.fx.Node] = {}
 
+    def record_cross_partition_use(def_node : torch.fx.Node, use_node : torch.fx.Node):
+        def_partition_name = getattr(def_node, '_fx_partition', None)
+        use_partition_name = getattr(use_node, '_fx_partition', None)
+        if def_partition_name != use_partition_name:
+            if def_partition_name is not None:
+                def_partition = partitions[def_partition_name]
+                def_partition.outputs.add(def_node.name)
+                if use_partition_name is not None:
+                    def_partition.partition_dependents.add(use_partition_name)
+
+            if use_partition_name is not None:
+                use_partition = partitions[use_partition_name]
+                use_partition.inputs.add(def_node.name)
+                if def_partition_name is not None:
+                    use_partition.partitions_dependent_on.add(def_partition_name)
+
     # split nodes into parititons
     for node in m.graph.nodes:
         orig_nodes[node.name] = node
 
-        # TODO currently placeholders/parameters aren't put into random partitions, 
+        # TODO currently placeholders/parameters aren't put into random partitions,
         # rather they're added to the graphs where they are used down below
         if node.op in ["placeholder", "get_attr"]:
             continue
-        partition_name = split_callback(node)
+        partition_name = str(split_callback(node))
 
         # add node to partitions
-        if (partition := partitions.get(partition_name)) is None:
+        partition = partitions.get(partition_name)
+        if partition is None:
             partitions[partition_name] = partition = Partition(partition_name)
 
-        partition.nodes.append(node.name)
+        partition.node_names.append(node.name)
+        node._fx_partition = partition_name
 
-    # analyze parition inputs, is partition input if is a node argument and isn't inside of parition already
-    for partition in partitions.values():
-        for node_name in partition.nodes:
+        torch.fx.map_arg(node.args, lambda def_node: record_cross_partition_use(def_node, node))
+        torch.fx.map_arg(node.kwargs, lambda def_node: record_cross_partition_use(def_node, node))
 
-            def find_external_inputs(node_arg: torch.fx.Node, cur_partition: Partition):
-                if node_arg.name not in cur_partition.nodes and node_arg.name not in cur_partition.inputs:
-                    cur_partition.inputs.append(node_arg.name)
-
-            torch.fx.map_arg(orig_nodes[node_name].args, lambda n: find_external_inputs(n, partition))
-            torch.fx.map_arg(orig_nodes[node_name].kwargs, lambda n: find_external_inputs(n, partition))
-
-    # analyze partition outputs, is an output if it is used outside the partition itself
-    for output_partition_name, output_partition in partitions.items():
-        for output_node_name in output_partition.nodes:
-            # for each node in each partition, compare against all other nodes in other paritition inputs
-            # to check if node is an output
-            for input_partition_name, input_partition in partitions.items():
-                if input_partition_name != output_partition_name:
-                    # if node is an input, need to add dependency between paritions
-                    if output_node_name in input_partition.inputs:
-                        if input_partition_name not in output_partition.partition_dependents:
-                            output_partition.partition_dependents.append(input_partition_name)
-                            input_partition.partitions_dependent_on.append(output_partition_name)
-                        if output_node_name not in output_partition.outputs:
-                            # add node to list of output partition's list of output nodes
-                            output_partition.outputs.append(output_node_name)
+    torch.fx.map_arg(m.graph.result, lambda n: record_cross_partition_use(n, None))
 
     # find partitions with no dependencies
     root_partitions : List[str] = []
     for partition_name, partition in partitions.items():
-        if not partition.partitions_dependent_on:
+        if not len(partition.partitions_dependent_on):
             root_partitions.append(partition_name)
 
     # check partitions for circular dependencies and create topological partition ordering
@@ -217,74 +104,86 @@ def split_module(
     if len(sorted_partitions) != len(partitions):
         raise RuntimeError("cycle exists between partitions!")
 
-    # info needed to make outer module
-    outer_module_nodes : List[str] = []
-    submodule_hints = []
-
-    # add original placeholders to outer graph
-    for node_name, node in orig_nodes.items():
-        if node.op == 'placeholder':
-            outer_module_nodes.append(node_name)
-
-    # create submodules from partitions
+    # add placeholders to parititons
     for partition_name in sorted_partitions:
-        submodule_name = "submod_" + str(partition_name)
-        submodule_hints.append(submodule_name)
-        submodule_nodes = []
+        partition = partitions[partition_name]
+        for input in partition.inputs:
+            placeholder = partition.graph.placeholder(input)
+            partition.environment[orig_nodes[input]] = placeholder
 
-        # track placeholders 
-        placeholder_hints = []
-        for node_name in partitions[partition_name].inputs:
-            node = orig_nodes[node_name]
-            if node.op not in ['placeholder', 'get_attr']: 
-                # node not originally placeholder, need to convert 
-                placeholder_hints.append(node_name)
-            submodule_nodes.append(node_name)
+    # Transform nodes and collect targets for partition's submodule
+    for node in m.graph.nodes:
+        if hasattr(node, '_fx_partition'):
+            partition = partitions[node._fx_partition]
 
-        # grab rest of nodes from partition
-        submodule_nodes.extend(partitions[partition_name].nodes)
+            # swap out old graph nodes in kw/args with references to new nodes in this submodule
+            gathered_args = torch.fx.graph.map_arg(node.args, lambda n : partition.environment[n])
+            gathered_kwargs = torch.fx.graph.map_arg(node.kwargs, lambda n : partition.environment[n])
 
-        # create submodule itself
-        submodule, submodule_node = create_module_from_nodes(
-            module_name=submodule_name,
-            module_node_names=submodule_nodes,
-            module_outputs=partitions[partition_name].outputs,
-            orig_nodes=orig_nodes,
-            orig_root_module=root_m,
-            submodule_hints=[],
-            placeholder_hints=placeholder_hints,
-        )
+            if node.op not in ['call_module', 'get_attr']:
+                target = node.target
+            else:
+                target_atoms = node.target.split('.')
+                target_attr = m
+                for atom in target_atoms:
+                    if not hasattr(target_attr, atom):
+                        raise RuntimeError(f'Operator target {node.target} not found!')
+                    target_attr = getattr(target_attr, atom)
+                partition.targets[node.target] = target_attr
+                target = target_atoms[-1]
 
-        # prep information for outer module 
-        orig_nodes[submodule_name] = submodule_node
-        outer_module_nodes.append(submodule_name)
+            new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,
+                                                   kwargs=gathered_kwargs)
+            partition.environment[node] = new_node
 
-        # need to unpack submodule outputs into new nodes in outer module
-        # to allow for them to be passed into other submodules 
-        for counter, output_node_name in enumerate(partitions[partition_name].outputs):
-            output_node = torch.fx.Node(
-                graph=None,
-                name=output_node_name,
-                op="call_function",
-                target=operator.getitem,
-                args=(orig_nodes[submodule_name], counter),
-                kwargs={},
-            )
-            orig_nodes[output_node_name] = output_node
-            outer_module_nodes.append(output_node_name) 
+    # Set up values to construct base module
+    base_mod_env : Dict[str, torch.fx.Node] = {}
+    base_mod_graph : torch.fx.Graph = torch.fx.Graph()
+    base_mod_attrs : Dict[str, torch.fx.GraphModule] = {}
+    for node in m.graph.nodes:
+        if node.op == 'placeholder':
+            base_mod_env[node.name] = base_mod_graph.placeholder(node.name)
+        elif node.op == 'get_attr':
+            base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
+            attr_val = m
+            for atom in node.target.split('.'):
+                if not hasattr(attr_val, atom):
+                    raise RuntimeError(f'Node target {node.target} not found!')
+                attr_val = getattr(attr_val, atom)
+            base_mod_attrs[node.target] = attr_val
 
-    # create outer GraphModule
-    outer_graph_module, _ = create_module_from_nodes(
-        module_name='outer_graph',
-        module_node_names=outer_module_nodes,
-        module_outputs=[],
-        orig_nodes=orig_nodes,
-        orig_root_module=root_m,
-        submodule_hints=submodule_hints,
-        placeholder_hints=[]
-    )
+    # Do some things iterating over the partitions in topological order again:
+    # 1) Finish off submodule Graphs by setting corresponding outputs
+    # 2) Construct GraphModules for each submodule
+    # 3) Construct the base graph by emitting calls to those submodules in
+    #    topological order
 
-    return outer_graph_module
+    for partition_name in sorted_partitions:
+        partition = partitions[partition_name]
+
+        # Set correct output values
+        output_vals = tuple(partition.environment[orig_nodes[name]] for name in partition.outputs)
+        output_vals = output_vals[0] if len(output_vals) == 1 else output_vals
+        partition.graph.output(output_vals)
+
+        # Construct GraphModule for this partition
+        submod_name = f'submod_{partition_name}'
+        base_mod_attrs[submod_name] = torch.fx.GraphModule(partition.targets, partition.graph)
+
+        # Emit call in base graph to this submodule
+        output_val = base_mod_graph.call_module(submod_name, [base_mod_env[name] for name in partition.inputs])
+        if len(partition.outputs) > 1:
+            # Unpack multiple return values from submodule
+            output_val_proxy = torch.fx.Proxy(output_val)
+            for i, output_name in enumerate(partition.outputs):
+                base_mod_env[output_name] = output_val_proxy[i].node
+        else:
+            base_mod_env[list(partition.outputs)[0]] = output_val
+
+    # Set output value for base graph
+    base_mod_graph.output(torch.fx.graph.map_arg(m.graph.result, lambda n : base_mod_env[n.name]))
+
+    return torch.fx.GraphModule(base_mod_attrs, base_mod_graph)
 
 # random mod partitioning
 partition_counter = 0
@@ -298,7 +197,6 @@ def mod_partition(node: torch.fx.Node):
 
 split_graph = split_module(my_module_traced, my_module, mod_partition)
 
-print(split_graph)
 
 x = torch.rand(3, 4)
 y = torch.rand(3, 4)
