@@ -69,6 +69,8 @@ enum class ScalarType : int8_t {
   NumOptions
 };
 
+constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
+
 namespace impl {
 
 // These are used to map ScalarTypes to C++ types.
