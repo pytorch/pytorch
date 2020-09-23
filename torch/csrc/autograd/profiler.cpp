@@ -388,9 +388,6 @@ void pushProfilingCallbacks() {
 
 const int kCUDAWarmupStart = 5;
 
-// temp. workaround for dispatcher ::Profiler key
-thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -445,12 +442,10 @@ void enableProfiler(const ProfilerConfig& new_config) {
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
-  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -472,22 +467,29 @@ void enableProfiler(const ProfilerConfig& new_config) {
   state->mark("__start_profile", false);
 }
 
-thread_event_lists disableProfiler() {
+thread_event_lists disableProfiler(bool cleanupTLSState, bool consolidate) {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  std::shared_ptr<c10::DebugInfoBase> state;
+  if (cleanupTLSState) {
+    state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  } else {
+    state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
+  }
+
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
-  g_.pop_back();
-  at::removeCallback(state_ptr->callbackHandle());
+  if (cleanupTLSState) {
+    at::removeCallback(state_ptr->callbackHandle());
+  }
 
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (!consolidate || state_ptr->config().state == ProfilerState::NVTX) {
     return thread_event_lists();
   }
 
   state_ptr->mark("__stop_profile");
-
+  // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
 

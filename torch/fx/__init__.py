@@ -36,7 +36,7 @@ print(tabulate(node_specs, headers=['opcode', 'name', 'target', 'args', 'kwargs'
 opcode         name           target                                                   args                kwargs
 -------------  -------------  -------------------------------------------------------  ------------------  -----------
 placeholder    x              x                                                        ()                  {}
-get_param      linear_weight  linear.weight                                            ()                  {}
+get_attr       linear_weight  linear.weight                                            ()                  {}
 call_function  add_1          <built-in function add>                                  (x, linear_weight)  {}
 call_module    linear_1       linear                                                   (add_1,)            {}
 call_method    relu_2         relu                                                     [linear_1]          {}
@@ -48,7 +48,7 @@ The semantics are as follows:
 
 - `placeholder` represents a function input. The `name` attribute specifies the name this value will take on.
   `target` is similarly the name of the argument. `args` and `kwargs` are don't-care
-- `get_param` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
+- `get_attr` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
    fetch is assigned to. `target` is the fully-qualified name of the parameter's position in the module hierarchy.
    `args` and `kwargs` are don't-care
 - `call_function` applies a free function to some values. `name` is similarly the name of the value to assign
@@ -86,7 +86,7 @@ Because this code is valid PyTorch code, the resulting `GraphModule` can be used
 '''
 
 from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, DefaultDelegate
+from .symbolic_trace import symbolic_trace, Tracer
 from .graph import Graph, map_arg
 from .node import Node
 from .proxy import Proxy
