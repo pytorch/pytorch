@@ -16,6 +16,11 @@ struct Command final {
   class Buffer final {
    public:
     Buffer(VkDevice device, VkCommandPool command_pool);
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    Buffer(Buffer&&) = default;
+    Buffer& operator=(Buffer&&) = default;
+    ~Buffer() = default;
 
     void begin();
     void end();
@@ -38,6 +43,11 @@ struct Command final {
   class Pool final {
    public:
     explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&) = default;
+    Pool& operator=(Pool&&) = default;
+    ~Pool() = default;
 
     Buffer buffer();
     void purge();

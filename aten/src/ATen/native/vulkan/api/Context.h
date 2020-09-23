@@ -44,16 +44,16 @@ class Context final {
     return command_;
   }
 
-  inline Descriptor& descriptor() {
-    return descriptor_;
-  }
-
   inline Shader& shader() {
     return shader_;
   }
 
   inline Pipeline& pipeline() {
     return pipeline_;
+  }
+
+  inline Descriptor& descriptor() {
+    return descriptor_;
   }
 
   inline Resource& resource() {
@@ -83,9 +83,9 @@ class Context final {
   Handle<VkDevice, Deleter> device_;
   VkQueue queue_;
   Command command_;
-  Descriptor descriptor_;
   Shader shader_;
   Pipeline pipeline_;
+  Descriptor descriptor_;
   Resource resource_;
 };
 
