@@ -2903,8 +2903,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_not_multigpu
     def test_save_load_checkpoint(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        dist.init_process_group(
+                "gloo",
+                init_method=f"file://{self.file_name}",
+                world_size=self.world_size,
+                rank=self.rank
+            )
 
         class TestModel(nn.Module):
             def __init__(self):
@@ -2934,13 +2938,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         ddp_withload = DistributedDataParallel(
             model_withload,
             device_ids=[device_id],
-            process_group=process_group,
         )
         ddp_withoutload = DistributedDataParallel(
             model_withoutload,
             device_ids=[device_id],
-            process_group=process_group,
         )
+
+        # ensure that both models start with the same set of parameters. By default they are randomized on construction
+        for p in ddp_withload.parameters():
+            with torch.no_grad():
+                p.zero_()
+                p.add_(50.)
+        for p in ddp_withoutload.parameters():
+            with torch.no_grad():
+                p.zero_()
+                p.add_(50.)
 
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
@@ -2955,12 +2967,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         train_loop(ddp_withload, optimizer_withload, 3)
 
         # zero out parameters and reload them from the state dict
-        checkpoint_path = self.file_name + "_model_checkpoint"
+        checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
         if self.rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
-        process_group.barrier()
+
+        dist.barrier()
         for p in ddp_withload.parameters():
-            p = 0
+            with torch.no_grad():
+                p.zero_()
+                p.add_(50.)
         map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
         ddp_withload.load_state_dict(
             torch.load(checkpoint_path, map_location=map_location))
