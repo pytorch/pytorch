@@ -254,10 +254,6 @@ class DistOptimizerTest(RpcAgentTestFixture):
 
             new_w1 = rpc_async_method(MyModule.get_w, remote_module1).wait()
             new_w2 = rpc_async_method(MyModule.get_w, remote_module2).wait()
-            print("old w1: ")
-            print(old_w1)
-            print("new w1: ")
-            print(new_w1)
 
             # ensure optimizer changed weights
             self.assertNotEqual(old_w1, new_w1)
