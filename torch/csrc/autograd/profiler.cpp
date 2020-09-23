@@ -281,8 +281,15 @@ struct ProfilerThreadLocalState
       const std::vector<std::vector<int64_t>>& shapes) const {
     if (sequence_nr >= 0 || shapes.size() > 0) {
       std::stringstream s;
+#ifdef __HIP_PLATFORM_HCC__
+      s << name.str();
+#endif
       if (sequence_nr >= 0) {
+#ifdef __HIP_PLATFORM_HCC__
+        s << msg << sequence_nr;
+#else
         s << name.str() << msg << sequence_nr;
+#endif
       }
       if (shapes.size() > 0) {
         s << ", sizes = [";
