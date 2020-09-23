@@ -23,6 +23,7 @@ namespace jit {
   _(ExprLongTest)                           \
   _(ExprHalfTest)                           \
   _(ExprDoubleTest)                         \
+  _(ExprDisallowBoolArithmetic)             \
   _(ExprVectorAdd01)                        \
   _(ExprCompareSelectEQ)                    \
   _(ExprCompareSelectDtypes)                \
