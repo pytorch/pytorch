@@ -232,7 +232,7 @@ class Reducer {
   // with the result of `future_work`.
   void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
 
-  // If gradient_as_bucket_view_ is false, after all reduce buckets,
+  // If gradient_as_bucket_view_ is false, after allreduce buckets,
   // copy bucket results back to grads.
   void copy_bucket_to_grad(
       torch::autograd::Variable& variable,
@@ -241,7 +241,7 @@ class Reducer {
       bool global_unused);
   // Check layout of grad and bucket_view before calling copy_grad_to_bucket
   void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
-  // If gradient_as_bucket_view_ is false, before all reduce buckets,
+  // If gradient_as_bucket_view_ is false, before allreduce buckets,
   // copy grads to buckets.
   void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
 

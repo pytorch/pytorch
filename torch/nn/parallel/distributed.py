@@ -315,28 +315,28 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
-        gradient_as_bucket_view: this is a prototype feature. When set to ``True``,
+        gradient_as_bucket_view (bool): this is a prototype feature. When set to ``True``,
                       gradients will be views pointing to different offsets of
                       allreduce communication buckets. This can reduce peak memory
                       usage, where the saved memory size will be equal to the total
-                      grads size. Moreover, it avoids the overhead of copying
+                      gradients size. Moreover, it avoids the overhead of copying
                       between gradients and allreduce communication buckets.
-                      When gradients are views, "detach_()" cannot be called on the
+                      When gradients are views, ``detach_()`` cannot be called on the
                       gradients. If hitting such errors, please fix it by referring to
                       the :meth:torch.optim.Optimizer.zero_grad function in
-                      "torch/optim/optimizer.py" as the solution.
-                      Warning! It is also found that 'gradient_as_bucket_view = true'
-                      does not work as expected when apex.amp is used for
-                      mixed precision training. apex.amp maintained stashed gradients
+                      ``torch/optim/optimizer.py`` as the solution.
+                      Warning! It is also found that ``gradient_as_bucket_view = true``
+                      does not work as expected when ``apex.amp`` is used for
+                      mixed precision training. ``apex.amp`` maintained stashed gradients
                       that are used for unscaling gradients. These stashed gradients
                       are pointed to gradients (will be communication buckets when
-                      'gradient_as_bucket_view = true') before starting new iteration.
+                      ``gradient_as_bucket_view = true``) before starting new iteration.
                       In new iteration, the communication buckets are mutated and thus
                       these stashed gradients will be unexpectedly mutated as well,
-                      the unexpectedly muated stached gradients may result in wrong
+                      the unexpectedly muated stashed gradients may result in wrong
                       results. To fix it, these stashed gradients should not be pointed
                       to gradients, instead they should be copied from gradients when
-                      'gradient_as_bucket_view = true'.
+                      ``gradient_as_bucket_view = true``.
 
     Attributes:
         module (Module): the module to be parallelized

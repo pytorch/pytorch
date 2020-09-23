@@ -1112,7 +1112,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
             replica.bucket_views_out[intra_bucket_index];
         auto& bucket_view_in = replica.bucket_views_in[intra_bucket_index];
         // If communication_hook is registered, bucket_view_out stores
-        // all reduced results in a newly allocated tensor, copy bucket_view_out
+        // allreduced results in a newly allocated tensor, copy bucket_view_out
         // back to bucket_view_in that referring to replica.content tensor and
         // grad.
         if (!bucket_view_in.is_alias_of(bucket_view_out)) {
@@ -1129,19 +1129,18 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
               if (!grad.is_alias_of(bucket_view_in)) {
                 grad.copy_(bucket_view_in);
                 TORCH_WARN_ONCE(
-                    "It is found that it is possible that gradient is not  "
-                    "alias of bucket_view_in here when there are two  "
-                    "different parameter variables in the model share "
-                    "the same storage. For example, param0 and param1 "
-                    "share the same gradient variable grad0. grad0 "
-                    "firstly points to bucket_view_in0 when param0 gradient "
-                    "is ready, then grad0 points to bucket_view_in1 when "
-                    "param1 gradient is ready during  "
-                    "''mark_variable_ready_dense''. In this case, grad0 "
-                    "is not alias of bucket_view_in0 here, although it can "
-                    "still copy bucket_view_in0 to grad0. If you have this "
-                    "case, please check whether it is expected in your "
-                    "application.");
+                    "Detected at least one parameter gradient is not the "
+                    "expected DDP bucket view when setting "
+                    "gradient_as_bucket_view=True. This can happen when "
+                    "multiple parameters sharing the same gradient. For "
+                    "example, param0 and param1 share the same gradient "
+                    "grad0. In this case, grad0 would first point to "
+                    "bucket_view_in0 when param0 is ready. Later, when "
+                    "param1 is ready, it will override grad0 to point to "
+                    "bucket_view_in1. However, param0 still expects grad0 "
+                    "to point to bucket_view_in0, and hence hit this "
+                    "warning. If you saw this message, please double-check if "
+                    "the above situation is expected for your application.");
               }
             }
             // The grad is modified and needs to be written back.
