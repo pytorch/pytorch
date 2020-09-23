@@ -894,7 +894,7 @@ def smoothl1loss_zero_beta_test():
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none', beta=0)),
         cpp_function_call='''F::smooth_l1_loss(
             i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone), 0)''',
-        input_fn=lambda: t.clone(),
+        input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
@@ -1275,6 +1275,7 @@ new_module_tests = [
     smoothl1loss_no_reduce_test(),
     smoothl1loss_no_reduce_scalar_test(),
     smoothl1loss_beta_test(),
+    smoothl1loss_zero_beta_test(),
     multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
