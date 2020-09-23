@@ -86,21 +86,17 @@ void rsqrt_kernel_cuda(TensorIterator& iter) {
 
 void sqrt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sqrt_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sqrt_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::sqrt(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::sqrt(a);
     });
   });
 }
 
 void sigmoid_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        scalar_t one = scalar_t(1);
-        return  one / (one + std::exp(- a));
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      scalar_t one = scalar_t(1);
+      return  one / (one + std::exp(- a));
     });
   });
 }
@@ -112,25 +108,23 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
       iter.dtype(),
       "logit_cuda",
       [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "logit_cuda", [&] {
-          using T_ACC = acc_type<scalar_t, true>;
-          const T_ACC eps = eps_scalar.to<T_ACC>();
-          if (eps < T_ACC(0)) {
-            gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-              const T_ACC x_acc = static_cast<T_ACC>(x);
-              return c10::cuda::compat::log(x_acc / (T_ACC(1) - x_acc));
-            });
-          } else {
-            const T_ACC lo = eps;
-            const T_ACC hi = T_ACC(1) - eps;
-            gpu_kernel(
-                iter, [lo, hi] GPU_LAMBDA(scalar_t x) -> scalar_t {
-                  const T_ACC x_acc = static_cast<T_ACC>(x);
-                  T_ACC z = x_acc < lo ? lo : (x_acc > hi ? hi : x_acc);
-                  return c10::cuda::compat::log(z / (T_ACC(1) - z));
-                });
-          }
-        });
+        using T_ACC = acc_type<scalar_t, true>;
+        const T_ACC eps = eps_scalar.to<T_ACC>();
+        if (eps < T_ACC(0)) {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+            const T_ACC x_acc = static_cast<T_ACC>(x);
+            return c10::cuda::compat::log(x_acc / (T_ACC(1) - x_acc));
+          });
+        } else {
+          const T_ACC lo = eps;
+          const T_ACC hi = T_ACC(1) - eps;
+          gpu_kernel(
+              iter, [lo, hi] GPU_LAMBDA(scalar_t x) -> scalar_t {
+                const T_ACC x_acc = static_cast<T_ACC>(x);
+                T_ACC z = x_acc < lo ? lo : (x_acc > hi ? hi : x_acc);
+                return c10::cuda::compat::log(z / (T_ACC(1) - z));
+              });
+        }
       });
 }
 
