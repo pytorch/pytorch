@@ -814,6 +814,9 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
+                i = 0
+                WARN_THRESHOLD = 1000
+                warned = False
                 while not all_procs_joined:
                     if i > WARN_THRESHOLD and not warned:
                         my_rank = dist.get_rank(self.process_group)
@@ -862,6 +865,7 @@ class DistributedDataParallel(Module):
                             self._match_unused_params_allreduce()
                         # It will push rebuilt params only once during training period
                         self.reducer._push_all_rebuilt_params()
+                        i += 1
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
