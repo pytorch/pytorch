@@ -98,10 +98,11 @@ struct DevicesContext {
   }
 
  private:
-  const bool noCuda_;
   std::vector<CUDAStream> streams_;
-
 #endif
+
+ private:
+  const bool noCuda_;
 };
 
 
