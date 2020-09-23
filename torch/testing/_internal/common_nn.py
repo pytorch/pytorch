@@ -5100,6 +5100,7 @@ class CriterionTest(InputVariableMixin, TestBase):
             cpu_input = convert_dtype(cpu_input, dtype, True)
             # NLLLoss requires target to be LongTensor
             if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
+                assert False
                 cpu_target = convert_dtype(cpu_target, dtype)
             cpu_module.type(dtype)
             gpu_module.type(dtype)
