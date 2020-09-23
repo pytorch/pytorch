@@ -33,6 +33,7 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
+from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
@@ -2645,6 +2646,19 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
             m = torch.nn.utils.weight_norm(m)
             m = torch.nn.utils.weight_norm(m)
+
+    def test_parameterlistdict_setting_attributes(self):
+        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterList is not supported"):
+            torch.nn.utils.weight_norm(mod, "0")
+
+        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterDict is not supported"):
+            torch.nn.utils.weight_norm(mod, "b")
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
@@ -9570,7 +9584,7 @@ class TestNNDeviceType(NNTestCase):
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
@@ -9853,6 +9867,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
 
             v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
+            v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))
             v(lambda: F.margin_ranking_loss(input, input, input.sign(), reduction=reduction))
             v(lambda: F.cosine_embedding_loss(input, input, input[:, 0].sign(), reduction=reduction))
 
@@ -11538,32 +11553,32 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
@@ -11636,7 +11651,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -11650,7 +11665,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -11842,7 +11857,6 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_pooling_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
         self._test_bfloat16_ops(torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)
@@ -12172,6 +12186,85 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
+
+    @onlyOnCPUAndCUDA
+    def test_triplet_margin_with_distance_loss_default_parity(self, device):
+        # Test for `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.  Checks
+        # for parity against the respective non-distance-agnostic
+        # implementations of triplet margin loss (``nn.TripletMarginLoss`
+        # and `F.triplet_margin_loss`) under *default args*.
+
+        for extra_args in \
+                itertools.product((0.5, 1, 1.5), (True, False), ('none', 'mean', 'sum')):
+            kwargs = {'margin': extra_args[0], 'swap': extra_args[1], 'reduction': extra_args[2]}
+
+            anchor = torch.randn(5, 10, device=device, requires_grad=True)
+            positive = torch.randn(5, 10, device=device, requires_grad=True)
+            negative = torch.randn(5, 10, device=device, requires_grad=True)
+
+            # Test forward, functional
+            expected = F.triplet_margin_loss(anchor, positive, negative, **kwargs)
+            actual = F.triplet_margin_with_distance_loss(anchor, positive, negative, **kwargs)
+            self.assertEqual(actual, expected, rtol=1e-6, atol=1e-6)
+
+            # Test forward, module
+            loss_ref = nn.TripletMarginLoss(**kwargs)
+            loss_op = nn.TripletMarginWithDistanceLoss(**kwargs)
+            self.assertEqual(loss_op(anchor, positive, negative),
+                             loss_ref(anchor, positive, negative),
+                             rtol=1e-6, atol=1e-6)
+
+            # Test backward
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
+                a, p, n, **kwargs), (anchor, positive, negative)))
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
+                            (anchor, positive, negative)))
+
+    @onlyOnCPUAndCUDA
+    def test_triplet_margin_with_distance_loss(self, device):
+        # Test for parity between `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.
+
+        pairwise_distance = nn.PairwiseDistance()
+
+        def cosine_distance(x, y):
+            return 1.0 - F.cosine_similarity(x, y)
+
+        distance_functions = (pairwise_distance, cosine_distance,
+                              lambda x, y: 1.0 - F.cosine_similarity(x, y))
+
+        reductions = ('mean', 'none', 'sum')
+        margins = (1.0, 1.5, 0.5)
+        swaps = (True, False)
+
+        for distance_fn, reduction, margin, swap \
+                in itertools.product(distance_functions, reductions, margins, swaps):
+            anchor = torch.randn(5, 10, device=device, requires_grad=True)
+            positive = torch.randn(5, 10, device=device, requires_grad=True)
+            negative = torch.randn(5, 10, device=device, requires_grad=True)
+
+            # Test backward
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
+                a, p, n, distance_function=distance_fn, reduction=reduction, margin=margin, swap=swap),
+                (anchor, positive, negative)))
+            loss_op = nn.TripletMarginWithDistanceLoss(distance_function=distance_fn,
+                                                       reduction=reduction, margin=margin, swap=swap)
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(
+                a, p, n), (anchor, positive, negative)))
+            traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
+            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
+                a, p, n), (anchor, positive, negative)))
+
+            # Test forward parity
+            functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
+                                                             distance_function=distance_fn,
+                                                             reduction=reduction, margin=margin, swap=swap)
+            modular = loss_op(anchor, positive, negative)
+            traced = traced_loss_op(anchor, positive, negative)
+            self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
+            self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
+
 
 class TestModuleGlobalHooks(TestCase):
 
