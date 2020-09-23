@@ -810,7 +810,7 @@ def batch_isend_irecv(p2p_op_list):
     Send or Receive tensors asynchronously and return a list of requests.
 
     Process each of the operations in p2p_op_list and return the corresponding
-    requests.
+    requests. NCCL and Gloo backend are currently supported.
 
     Arguments:
         p2p_op_list: A list of point-to-point operations(type of each operator is
