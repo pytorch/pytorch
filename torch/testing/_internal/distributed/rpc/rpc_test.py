@@ -1515,6 +1515,7 @@ class RpcTest(RpcAgentTestFixture):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
+
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._run_test_profiler_with_async_rpc_udf()
