@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -315,30 +316,51 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
-    if (!node_type->isComplete()) {
-      return;
-    }
-    onnx::TypeProto* t = v->mutable_type();
-    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
-    onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-    std::vector<std::int64_t> sizes =
-        node_type->sizes().concrete_sizes().value();
-    for (size_t i = 0; i < sizes.size(); i++) {
-      shape->add_dim();
-      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
-        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
-      } else {
-        shape->mutable_dim(i)->set_dim_value(sizes[i]);
+  auto tensorTypeToONNXType = [&dynamic_axes, &name](
+                                  TensorTypePtr t,
+                                  onnx::TypeProto_Tensor* tensor_type) {
+    if (t->sizes().isComplete()) {
+      // onnx::TypeProto* onnx_type = v->mutable_type();
+      // onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
+      onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
+      std::vector<std::int64_t> sizes = t->sizes().concrete_sizes().value();
+      for (size_t i = 0; i < sizes.size(); i++) {
+        shape->add_dim();
+        if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+            (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+          shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+        } else {
+          shape->mutable_dim(i)->set_dim_value(sizes[i]);
+        }
       }
     }
-    tensor_type->set_elem_type(
-        ATenTypeToOnnxType(node_type->scalarType().value()));
+    if (t->scalarType()) {
+      // onnx::TypeProto* onnx_type = v->mutable_type();
+      // onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
+      tensor_type->set_elem_type(ATenTypeToOnnxType(t->scalarType().value()));
+    }
+  };
+
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+    if (node_type->sizes().isComplete() || node_type->scalarType()) {
+      onnx::TypeProto* onnx_type = v->mutable_type();
+      onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
+      tensorTypeToONNXType(node_type, tensor_type);
+    }
   } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
-    onnx::TypeProto* t = v->mutable_type();
-    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    onnx::TypeProto* onnx_type = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
     tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
+  } else if (ListTypePtr list_type = n->type()->cast<ListType>()) {
+    auto elem_type = list_type->getElementType();
+    if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
+      onnx::TypeProto* onnx_type = v->mutable_type();
+      onnx::TypeProto_Sequence* sequence_type =
+          onnx_type->mutable_sequence_type();
+      onnx::TypeProto_Tensor* tensor_type =
+          sequence_type->mutable_elem_type()->mutable_tensor_type();
+      tensorTypeToONNXType(inner_node_type, tensor_type);
+    }
   }
 }
 
@@ -865,6 +887,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       proto_size <= INT_MAX,
       "Exporting model exceed maximum protobuf size of 2GB. "
       "Please call torch.onnx.export with use_external_data_format=True.");
+  GRAPH_UPDATE("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());

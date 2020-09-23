@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 r"""
 The torch.onnx module contains functions to export models into the ONNX
@@ -510,8 +509,38 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                         operator_export_type, google_printer,
                                         val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
-def _diagnose_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
-                     input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
+                                  input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+    r"""
+    This diagnostic tool runs your model with operator_export_type set to
+    OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of 
+    all the ops that are not supported/implemented by the current exporter
+
+    operator_export_type is set to OperatorExportTypes.ONNX_FALLTHROUGH by default
+        OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+        in ONNX, fall through and export the operator as is, as a custom 
+        ONNX op. Using this mode, the op can be exported and implemented by
+        the user for their runtime backend.
+        Example graph::
+
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                %4 : None = prim::Constant()
+                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                return (%5)
+
+        is exported as::
+
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                %4 : None = prim::Constant()
+                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                return (%5)
+
+        In the above example, aten::cumsum in not implemented in opset 9, hence exporter falls 
+        through and provides a list of unsupported ops, the result being:
+            Unsupported ops : [aten:cumsum]
+    """
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -888,6 +917,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
                 for b in n.blocks():
                     new_block = new_node.addBlock()
+                    # Copy input metadata to subblock
+                    # This is for Loop only, since If only has a single input.
+                    for i, b_in in enumerate(b.inputs()):
+                        if i > 0 and (i + 1) < len(inputs):
+                            b_in.setType(inputs[i + 1].type())
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
                 # Process Loop and If after subblock is converted.
