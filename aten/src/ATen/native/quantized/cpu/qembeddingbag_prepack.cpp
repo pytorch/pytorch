@@ -94,7 +94,7 @@ namespace {
 // Note - This is a temporary pack function for embedding bag which quantizes
 // and packs the float weight tensor. In the next step it will be replaced by a
 // quantize and pack function once we support FP scale and FP zero_point
-Tensor qembeddingbag_byte_prepack(const Tensor& weight, bool optimized_qparams) {
+Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
