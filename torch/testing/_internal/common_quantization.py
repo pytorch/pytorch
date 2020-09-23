@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
@@ -16,11 +11,12 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
-from torch.quantization.default_mappings import (
-    DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST,
-    DEFAULT_QAT_MODULE_MAPPING,
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
+    get_default_qat_qconfig
+from torch.quantization.quantization_mappings import (
+    get_dynamic_quant_module_mappings,
+    get_qconfig_propagation_list,
+    get_qat_module_mappings,
 )
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -191,7 +187,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
+    convert(module, get_dynamic_quant_module_mappings(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -347,7 +343,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
+            propagate_qconfig_list = get_qconfig_propagation_list()
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
            and type(module) in propagate_qconfig_list:
@@ -355,7 +351,7 @@ class QuantizationTestCase(TestCase):
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+        if type(module) not in get_qat_module_mappings().values():
             for child in module.children():
                 self.checkObservers(child)
 
@@ -619,12 +615,13 @@ class QuantizationTestCase(TestCase):
         if type(inputs) == list:
             inputs = inputs[0]
         if quant_type == QuantType.QAT:
+            qconfig_dict = {'': get_default_qat_qconfig(torch.backends.quantized.engine)}
             model.train()
         else:
+            qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
             model.eval()
         original = symbolic_trace(model)
 
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
             prepare = prepare_dynamic_fx
             convert = convert_dynamic_fx

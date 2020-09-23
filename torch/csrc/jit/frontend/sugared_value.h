@@ -254,7 +254,8 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
-      throw ErrorReport(loc) << "Expected integer literal for index. "
+      throw ErrorReport(loc)
+          << "Expected integer literal for index. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "
           << "Enumeration is supported, e.g. 'for index, v in enumerate(self): ...'";
     }
@@ -770,6 +771,30 @@ struct TORCH_API SugaredEnumClass : public SugaredValue {
 
  private:
   EnumTypePtr enum_type_;
+};
+
+struct TORCH_API SliceValue : public SugaredValue {
+  explicit SliceValue(Value* start, Value* stop, Value* step)
+      : start_(start), stop_(stop), step_(step) {}
+
+  std::string kind() const override {
+    return "Python slice value";
+  }
+
+  Value* start() {
+    return start_;
+  };
+  Value* stop() {
+    return stop_;
+  };
+  Value* step() {
+    return step_;
+  };
+
+ private:
+  Value* start_;
+  Value* stop_;
+  Value* step_;
 };
 
 } // namespace jit

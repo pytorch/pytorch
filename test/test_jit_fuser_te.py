@@ -1,7 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 from collections import defaultdict
 
 import unittest
@@ -774,6 +770,8 @@ class TestTEFuser(JitTestCase):
         ge(*inputs_cuda0)
         ge(*inputs_cuda1)
 
+    # TODO: we're currently not checking 'device' in the type info when pulling
+    # nodes into a fusion group. We should fix that and re-enable this test.
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_kernel_cache_multi_gpu(self):
@@ -889,7 +887,7 @@ class TestTEFuser(JitTestCase):
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
                               'because the kernels sometimes trigger bugs in compilers '
                               '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
+                raise unittest.SkipTest('Failed to compile') from e
             else:
                 raise
 
@@ -1239,6 +1237,10 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_superslomo(self):
         # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
+        # A few interesting things happen here: strided inputs of mixed size,
+        # plus outputs of mixed shapes.  The latter characteristic happened to
+        # expose a memory corruption bug due to not properly guarding the
+        # outputs.
         def eager(t0, t1, t2, t3, t4):
             t5 = torch.mul(t0, t4)
             t6 = torch.mul(t2, t3)
@@ -1259,7 +1261,8 @@ class TestTEFuser(JitTestCase):
         for _ in range(4):
             for pair in zip(script(*inputs), eager(*inputs)):
                 test, ref = pair
-                self.assertEqual(test, ref)
+                torch.testing.assert_allclose(test, ref)
+        self.assertAllFused(script.graph_for(*inputs))
 
 
 if __name__ == '__main__':

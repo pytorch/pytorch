@@ -106,6 +106,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // and False otherwise.
     bool timedOut();
 
+    std::vector<at::Tensor> result() override;
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
@@ -157,6 +159,13 @@ class ProcessGroupNCCL : public ProcessGroup {
         futureNCCLCallbackStreams_;
 
     friend class ProcessGroupNCCL;
+  };
+
+  struct Options {
+    explicit Options();
+
+    std::chrono::milliseconds opTimeout;
+    bool isHighPriorityStream;
   };
 
   // FutureNCCL is a subclass of ivalue's Future. The goal is to use
@@ -339,8 +348,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::shared_ptr<Store>& store,
       int rank,
       int size,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis));
+      Options options = Options());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
@@ -350,9 +358,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int rank,
       int size,
       const std::string& groupName,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis))
-      : ProcessGroupNCCL(store, rank, size, opTimeout) {}
+      Options options = Options())
+      : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
 
@@ -615,9 +622,18 @@ class ProcessGroupNCCL : public ProcessGroup {
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
 
-  // Dedicated CUDA stream for each available device that runs FutureNCCL then
-  // callbacks.
+  // In single-process single-device mode, WorkNCCL::getFuture is supported.
+  // Depending on the device index of collective outputs, WorkNCCL will pass
+  // the corresponding device's then callback stream to FutureNCCL.
+  // We just inititalize futureNCCLCallbackStreams_ inside the constructor and
+  // set its size to the total number of available devices and depending on the
+  // device of the NCCL collective's outputs, we later set the callback stream
+  // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
+  // before.
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
+
+  // Schedule NCCL operations on high priority CUDA streams.
+  bool isHighPriorityStream_ = false;
 };
 
 } // namespace c10d

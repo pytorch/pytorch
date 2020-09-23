@@ -120,6 +120,16 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
+PyRRef::~PyRRef() {
+  if (type_.has_value()) {
+    (*type_).dec_ref();
+    // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+    // decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    (*type_).ptr() = nullptr;
+  }
+}
+
 c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
@@ -235,6 +245,19 @@ py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
     }
   }
+}
+
+py::object PyRRef::getRRefType() {
+  // GIL is not released when calling this function.
+  if (!type_.has_value()) {
+    pybind11::gil_scoped_release release;
+    auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+    auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
+    pybind11::gil_scoped_acquire acquire;
+    type_ = isOwner() ? typeFuncs.onOwner_(*this) : typeFuncs.onUser_(*this);
+  }
+
+  return *type_;
 }
 
 py::tuple PyRRef::pickle() const {
