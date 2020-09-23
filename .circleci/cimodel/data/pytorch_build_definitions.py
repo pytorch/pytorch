@@ -6,7 +6,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.pytorch_build_data import CONFIG_TREE_DATA, TopLevelNode
-from cimodel.data.simple.util.branch_filters import gen_filter_dict
+from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 from cimodel.data.simple.util.docker_constants import gen_docker_image
 
 
@@ -166,7 +166,8 @@ class DocPushConf(object):
                 "branch": self.branch,
                 "requires": [self.parent_build],
                 "context": "org-member",
-                "filters": gen_filter_dict(branches_list=["nightly"])
+                "filters": gen_filter_dict(branches_list=["nightly"],
+                                           tags_list=RC_PATTERN)
             }
         }
 
@@ -348,6 +349,8 @@ def instantiate_configs():
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
         # should run on a CPU-only build that runs on all PRs.
+        # XXX should this be updated to a more modern build? Projects are
+        #     beginning to drop python3.6
         if (
             distro_name == "xenial"
             and fc.find_prop("pyver") == "3.6"
