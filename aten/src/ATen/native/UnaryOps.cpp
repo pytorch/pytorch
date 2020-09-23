@@ -231,6 +231,10 @@ Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor exp(const Tensor& self) { return unary_op_impl(self, at::exp_out); }
 Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
 
+Tensor& exp2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, exp2_stub); }
+Tensor exp2(const Tensor& self) { return unary_op_impl(self, at::exp2_out); }
+Tensor& exp2_(Tensor& self) { return unary_op_impl_(self, at::exp2_out); }
+
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
@@ -256,6 +260,10 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
+Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
@@ -292,6 +300,17 @@ Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
+Tensor& sgn_out(Tensor& result, const Tensor& self) {
+  if (self.is_complex()) {
+    return unary_op_impl_out(result, self, sgn_stub);
+  } else {
+    return unary_op_impl_out(result, self, sign_stub);
+  }
+}
+
+Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
+Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
 Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
@@ -397,9 +416,9 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
-Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
-Tensor negative(const Tensor& self) { return at::native::neg(self); }
-Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return self.neg(); }
+Tensor& negative_(Tensor& self) { return self.neg_(); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -612,9 +631,11 @@ DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
@@ -629,6 +650,7 @@ DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
+DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

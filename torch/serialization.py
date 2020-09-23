@@ -821,7 +821,7 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-def _load(zip_file, map_location, pickle_module, **pickle_load_args):
+def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
@@ -847,7 +847,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
         return storage
 
     # Load the data (which may in turn use `persistent_load` to load tensors)
-    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+    data_file = io.BytesIO(zip_file.get_record(pickle_file))
     unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()

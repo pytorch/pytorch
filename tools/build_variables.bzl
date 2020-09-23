@@ -177,6 +177,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/hoist_conv_packed_params.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/inline_forked_closures.cpp",
+    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/insert_guards.cpp",
@@ -301,8 +302,6 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
-    "torch/csrc/jit/runtime/register_string_ops.cpp",
-    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]
@@ -554,6 +553,7 @@ libtorch_python_distributed_sources = [
     "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
     "torch/csrc/distributed/rpc/request_callback_impl.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_agent.cpp",
+    "torch/csrc/distributed/rpc/tensorpipe_utils.cpp",
     "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
     "torch/csrc/distributed/rpc/testing/init.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
@@ -573,49 +573,5 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
     _libtorch_python_sources.extend(libtorch_python_distributed_sources)
-
-    _libtorch_python_sources.extend([
-        "test/cpp/jit/torch_python_test.cpp",
-        "test/cpp/tensorexpr/padded_buffer.cpp",
-        "test/cpp/jit/test_alias_analysis.cpp",
-        "test/cpp/jit/test_argument_spec.cpp",
-        "test/cpp/jit/test_autodiff.cpp",
-        "test/cpp/jit/test_backend.cpp",
-        "test/cpp/jit/test_base.cpp",
-        "test/cpp/jit/test_class_import.cpp",
-        "test/cpp/jit/test_class_parser.cpp",
-        "test/cpp/jit/test_class_type.cpp",
-        "test/cpp/jit/test_code_template.cpp",
-        "test/cpp/jit/test_constant_pooling.cpp",
-        "test/cpp/jit/test_cleanup_passes.cpp",
-        "test/cpp/jit/test_create_autodiff_subgraphs.cpp",
-        "test/cpp/jit/test_custom_class.cpp",
-        "test/cpp/jit/test_custom_operators.cpp",
-        "test/cpp/jit/test_dce.cpp",
-        "test/cpp/jit/test_fuser.cpp",
-        "test/cpp/jit/test_gpu.cpp",
-        "test/cpp/jit/test_graph_executor.cpp",
-        "test/cpp/jit/test_inliner.cpp",
-        "test/cpp/jit/test_interface.cpp",
-        "test/cpp/jit/test_interpreter.cpp",
-        "test/cpp/jit/test_ir.cpp",
-        "test/cpp/jit/test_irparser.cpp",
-        "test/cpp/jit/test_jit_type.cpp",
-        "test/cpp/jit/test_lite_interpreter.cpp",
-        "test/cpp/jit/test_lite_trainer.cpp",
-        "test/cpp/jit/test_misc.cpp",
-        "test/cpp/jit/test_mobile_type_parser.cpp",
-        "test/cpp/jit/test_module_api.cpp",
-        "test/cpp/jit/test_peephole_optimize.cpp",
-        "test/cpp/jit/test_qualified_name.cpp",
-        "test/cpp/jit/test_save_load.cpp",
-        "test/cpp/jit/test_schema_matching.cpp",
-        "test/cpp/jit/test_subgraph_matcher.cpp",
-        "test/cpp/jit/test_subgraph_rewriter.cpp",
-        "test/cpp/jit/test_subgraph_utils.cpp",
-        "test/cpp/jit/test_utils.cpp",
-    ])
-
-    _libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
 
     return _libtorch_python_sources

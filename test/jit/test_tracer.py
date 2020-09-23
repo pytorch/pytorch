@@ -1188,6 +1188,17 @@ class TestTracer(JitTestCase):
             torch.tensor([15])
         )
 
+        @torch.jit.script
+        def use_device(x):
+            return torch.zeros_like(x, device=x.device)
+
+        def foo(x):
+            return use_device(x)
+
+        traced_tensor_size = torch.jit.trace(foo, torch.rand(7,))
+        self.run_pass('inline', traced_tensor_size.graph)
+        FileCheck().check("prim::device").run(traced_tensor_size.graph)
+
     @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
