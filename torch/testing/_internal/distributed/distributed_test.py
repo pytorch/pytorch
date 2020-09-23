@@ -584,21 +584,43 @@ class DistributedTest:
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
-
-            send_recv_op_list = []
-            send_recv_tensor_list = []
-            peer_list = []
+            p2p_op_list = []
 
             for src in range(0, dist.get_world_size()):
                 if src == rank:
                     continue
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                send_recv_op_list.extend([dist.irecv, dist.isend])
-                send_recv_tensor_list.extend([recv_tensor, send_tensor])
-                peer_list.extend([src, src])
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
+                p2p_op_list.append(recv_op)
+                send_op = dist.P2POp(dist.isend, send_tensor, src)
+                p2p_op_list.append(send_op)
 
-            reqs = dist.batch_isend_irecv(send_recv_op_list, send_recv_tensor_list, peer_list)
+            reqs = dist.batch_isend_irecv(p2p_op_list)
+            for req in reqs:
+                req.wait()
+
+            self._barrier()
+
+        # GLOO Batch SEND RECV CPU
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "gloo", "GLOO Batch Send Recv CPU")
+        def test_batch_isend_irecv_gloo(self):
+            self._barrier()
+            rank = dist.get_rank()
+            p2p_op_list = []
+
+            for src in range(0, dist.get_world_size()):
+                if src == rank:
+                    continue
+                send_tensor = _build_tensor(rank + 1)
+                recv_tensor = _build_tensor(src + 1, value=-1)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
+                p2p_op_list.append(recv_op)
+                send_op = dist.P2POp(dist.isend, send_tensor, src)
+                p2p_op_list.append(send_op)
+
+            reqs = dist.batch_isend_irecv(p2p_op_list)
             for req in reqs:
                 req.wait()
 
@@ -617,7 +639,8 @@ class DistributedTest:
                     RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    req = dist.batch_isend_irecv([dist.isend], [send_tensor], [1])
+                    send_op = dist.P2POp(dist.isend, send_tensor, 1)
+                    req = dist.batch_isend_irecv([send_op])
                     req.wait()
 
         # NCCL Batch SEND RECV Op Error
@@ -630,26 +653,27 @@ class DistributedTest:
                 rank_to_GPU = self._init_multigpu_helper()
                 device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(
-                    RuntimeError, "^Invalid function."
+                    RuntimeError, "^Invalid ``op``"
                 ):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
-                    req = dist.batch_isend_irecv([dist.broadcast], [send_tensor], [1])
+                    send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
+                    req = dist.batch_isend_irecv([send_op])
                     req.wait()
 
-        # NCCL Batch SEND RECV peer_list Length Error
+        # NCCL Batch SEND RECV p2p_op_list Error
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
-        def test_batch_isend_irecv_peer_list_err(self):
+        def test_batch_isend_irecv_op_list_err(self):
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
                 rank_to_GPU = self._init_multigpu_helper()
                 device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(
-                    RuntimeError, "^Expected parameters to be the same length"
+                    RuntimeError, "^Invalid ``p2p_op_list``"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    req = dist.batch_isend_irecv([dist.isend], [send_tensor], [1, 1])
+                    req = dist.batch_isend_irecv([1, 2])
                     req.wait()
 
         # NCCL Batch SEND RECV Mixed Backend Error
@@ -667,11 +691,9 @@ class DistributedTest:
                     RuntimeError, "All groups need to use the same backend"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    req = dist.batch_isend_irecv(
-                        [dist.isend, dist.isend],
-                        [send_tensor, send_tensor],
-                        [1, 1],
-                        group_list=[group_gloo, group_nccl])
+                    send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
+                    send_op_nccl = dist.P2POp(dist.isend, send_tensor, 1, group_nccl)
+                    req = dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
                     req.wait()
 
         # NCCL SEND RECV

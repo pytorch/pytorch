@@ -239,40 +239,28 @@ def _check_tensor_list(param, param_name):
                            "to be of type List[torch.Tensor].".format(param_name))
 
 
-def _check_op_list(op_list, list_name):
+def _check_op(op):
     """
-    Helper to check that the ``op_list`` is a list of functions.
+    Helper to check that the ``op`` is either isend or irecv.
     """
-    if not isinstance(op_list, list) or \
-       not all(op in [isend, irecv] for op in op_list):
-        raise RuntimeError(f"Invalid function. Expected fucntion in `{op_list}` "
-                           f"to be of type torch.distributed.isend or "
-                           f"torch.distributed.irecv.")
+    if op not in [isend, irecv]:
+        raise RuntimeError("Invalid ``op``. Expected ``op`` "
+                           "to be of type ``torch.distributed.isend`` or "
+                           "``torch.distributed.irecv``.")
+
+def _check_p2p_op_list(p2p_op_list):
+    """
+    Helper to check that the ``p2p_op_list`` is a list of P2POp instances and
+    all ops use the same backend.
+    """
+    if not isinstance(p2p_op_list, list) or \
+       not all(isinstance(p2p_op, P2POp) for p2p_op in p2p_op_list):
+        raise RuntimeError("Invalid ``p2p_op_list``. Each op is expected to "
+                           "to be of type ``torch.distributed.P2POp``.")
 
 
-def _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list):
-    """
-    Helper to check that all the inputs have the same length.
-    """
-    expected_length = len(op_list)
-    check_list = [tensor_list, peer_list]
-    if group_list is not None:
-        check_list.append(group_list)
-    if tag_list is not None:
-        check_list.append(tag_list)
-
-    for curr_list in check_list:
-        if not isinstance(curr_list, list) or expected_length != len(curr_list):
-            raise RuntimeError(f"Expected parameters to be the same length, "
-                               f"{expected_length} vs {len(curr_list)}, value: {curr_list}")
-
-
-def _check_group_backend(group_list, backend_name):
-    """
-    Helper to check that all groups in ``group_list`` use the same backend.
-    """
-    if not isinstance(group_list, list) or \
-       not all(backend_name == get_backend(group) for group in group_list):
+    backend = get_backend(p2p_op_list[0].group)
+    if not all(backend == get_backend(p2p_op.group) for p2p_op in p2p_op_list):
         raise RuntimeError("All groups need to use the same backend.")
 
 
@@ -778,6 +766,34 @@ def recv(tensor,
         return src
 
 
+class P2POp(object):
+    """
+    A class to save point-to-point operations for ``batch_isend_irecv``.
+
+    This calss saves the type of P2P operation, communication buffer, peer rank,
+    Process Group group, and tag. Instances of this class will be passed to
+    ``batch_isend_irecv`` for point-to-point communications.
+
+    Arguments:
+        op (callable): A function to send data to or receive data from a peer process.
+        tensor (Tensor): Tensor to send or receive.
+        peer (int): Destination or source rank.
+        group (ProcessGroup, optional): The process group to work on.
+        tag (int, optional): Tag to match send with recv.
+    """
+    def __init__(self, op, tensor, peer, group=group.WORLD, tag=0):
+        self.op = op
+        self.tensor = tensor
+        self.peer = peer
+        self.group = group
+        self.tag = tag
+
+    def __new__(cls, op, tensor, peer, group=group.WORLD, tag=0):
+        _check_op(op)
+        _check_single_tensor(tensor, "tensor")
+        return object.__new__(cls)
+
+
 @contextlib.contextmanager
 def _batch_p2p_manager(backend):
     if backend == Backend.NCCL:
@@ -789,30 +805,18 @@ def _batch_p2p_manager(backend):
             ProcessGroupNCCL._group_end()
 
 
-def batch_isend_irecv(op_list,
-                      tensor_list,
-                      peer_list,
-                      group_list=None,
-                      tag_list=None):
+def batch_isend_irecv(p2p_op_list):
     """
     Send or Receive tensors asynchronously and return a list of requests.
 
-    Process the first item in each passed parameters, and then the second item
-    in each passed parameters, etc.  Each of these lists should be the same length
-    as the op_list. The ``ith`` element in ``tensor_list``, ``peer_list``, ``group_list``,
-    and ``tag_list`` are the communication tensor, peer process, Process Group
-    group, tag, respectively, for the `ith` element of ``op_list``.
+    Process each of the operations in p2p_op_list and return the corresponding
+    requests.
 
     Arguments:
-        op_list: list of point-to-point operations(type of each operations is either
-        ``torch.distributed.isend`` or ``torch.distributed.irecv``. The order of the
-        isend/irecv in the list matters and it needs to match with corresponding
-        isend/irecv on the remote end.
-        tensor_list (list[Tensor]): list of send or recv tensors.
-        peer_list (list[int]): list of peer ranks to send to or receive from.
-        group_list (list[ProcessGroup], Optional): list of groups to operator on. All
-        groups in ``group_list`` should use the same backend.
-        tag_list (list[int], Optional): list of tags to match send with recv.
+        p2p_op_list: A list of point-to-point operations(type of each operator is
+        ``torch.distributed.P2POp``. The order of the isend/irecv in the list
+        matters and it needs to match with corresponding isend/irecv on the
+        remote end.
 
     Returns:
         A list of distributed request objects returned by calling the corresponding
@@ -821,31 +825,25 @@ def batch_isend_irecv(op_list,
     Examples:
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
-        >>> op_list = [dist.isend, dist.irecv]
-        >>> tensor_list = [send_tensor, recv_tensor]
-        >>> peer_list = [(rank + 1) % world_size, (rank + 1) % world_size]
-        >>> reqs = batch_isend_irecv(op_list, tensor_list, peer_list)
+        >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> reqs = batch_isend_irecv([send_op, recv_op])
         >>> for req in reqs:
         >>>     req.wait()
         >>> recv_tensor
         tensor([2, 3])     # Rank 0
         tensor([0, 1])     # Rank 1
     """
-    _check_op_list(op_list, "op_list")
-    _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list)
-
-    backend = get_backend(group.WORLD if group_list is None else group_list[0])
-    if group_list is not None:
-        _check_group_backend(group_list, backend)
-
+    _check_p2p_op_list(p2p_op_list)
+    backend = get_backend(p2p_op_list[0].group)
     reqs = []
     with _batch_p2p_manager(backend):
-        for i in range(len(op_list)):
-            op = op_list[i]
-            tensor = tensor_list[i]
-            peer = peer_list[i]
-            curr_group = group.WORLD if group_list is None else group_list[i]
-            tag = 0 if tag_list is None else tag_list[i]
+        for p2p_op in p2p_op_list:
+            op = p2p_op.op
+            tensor = p2p_op.tensor
+            peer = p2p_op.peer
+            curr_group = p2p_op.group
+            tag = p2p_op.tag
 
             ret = op(tensor, peer, curr_group, tag)
 
