@@ -477,9 +477,9 @@ del manager_path
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
 if TYPE_CHECKING:
-    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
-    # PR #43339 for details.  
+    # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
@@ -586,3 +586,16 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from .overrides import has_torch_function, handle_torch_function
+
+def do_assert(condition, message):
+    r"""An alternative to Python's assert which is symbolically traceable.
+    TODO before land: align on function name (assert is reserved).
+    TODO before land: align on where this function should live
+    #  (torch, torch.fx, torch.fx.utils, etc).
+    TODO before land: update the docs after ^ are resolved
+    """
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(do_assert, (condition,), condition, message)
+    torch._C.do_assert(condition, message)
