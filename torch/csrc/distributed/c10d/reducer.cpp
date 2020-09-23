@@ -1233,7 +1233,7 @@ void Reducer::runGradCallbackForVariable(
     // Under distributed autograd
 #ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
-endif
+#endif
   }
 }
 
