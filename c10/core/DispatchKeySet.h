@@ -186,26 +186,17 @@ public:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-#define DISPATCH_KEY(dk) \
-  DispatchKey::dk,
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  FOR_EACH_RUNTIME_AUTOGRAD_DISPATCH_KEY(DISPATCH_KEY)
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
+  DispatchKey::AutogradXLA,
+  DispatchKey::AutogradPrivateUse1,
+  DispatchKey::AutogradPrivateUse2,
+  DispatchKey::AutogradPrivateUse3,
+  DispatchKey::AutogradOther,
 });
-
-// autogradother_backends contains all backend keys that maps to
-// AutogradOther.
-constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
-  FOR_EACH_BACKEND_DISPATCH_KEY_MAPPED_TO_AUTOGRAD_OTHER(DISPATCH_KEY)
-});
-
-// backend_dispatch_keyset contains all backend keys
-constexpr DispatchKeySet backend_dispatch_keyset = DispatchKeySet({
-  FOR_EACH_BACKEND_DISPATCH_KEY(DISPATCH_KEY)
-});
-#undef DISPATCH_KEY
-
 
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
