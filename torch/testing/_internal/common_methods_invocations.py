@@ -63,9 +63,10 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 supports_out_param=True,  # whether the op supports the out kwarg
                  skips=tuple(),  # information about which tests to skip
-                 decorators=None,  # decorators to apply to generated tests
-                 supports_out_param=True):  # does it support out=... ?
+                 decorators=None):  # decorators to apply to generated tests
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, _dispatch_dtypes)
@@ -86,10 +87,10 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.supports_out_param = supports_out_param
 
         self.skips = skips
         self.decorators = decorators
-        self.supports_out_param = supports_out_param
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
