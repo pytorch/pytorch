@@ -28,7 +28,6 @@ class TestForeach(TestCase):
     def _get_test_data(self, device, dtype, N):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
-
         elif dtype in torch.testing.get_all_int_dtypes():
             tensors = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
         else:
@@ -36,20 +35,16 @@ class TestForeach(TestCase):
 
         return tensors
 
-    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, add_one=False):
+    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
-
-            # Add 1 to avoid division by 0
-            if dtype != torch.bool and add_one:
-                torch._foreach_add_(tensors2, 1)
 
             expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
             foreach_op_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
-            self.assertEqual(tensors1, expected)
+            self.assertEqual(tensors1, res)
 
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
@@ -619,12 +614,24 @@ class TestForeach(TestCase):
         if dtype in torch.testing.integral_types_and(torch.bool):
             if self.device_type == 'cpu':
                 with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                    self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div, add_one=True)
+                    self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
             else:
                 self.skipTest("Skipped! See https://github.com/pytorch/pytorch/issues/44489")
             return
 
-        self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div, add_one=True)
+        for N in [30, 300]:
+            tensors1 = self._get_test_data(device, dtype, N)
+            
+            if dtype in [torch.bfloat16, torch.bool, torch.float16]:
+                tensors2 = [torch.zeros(N, N, device=device, dtype=dtype).add(2) for _ in range(N)]
+            else:
+                tensors2 = self._get_test_data(device, dtype, N)
+
+            expected = [torch.div(tensors1[i], tensors2[i]) for i in range(N)]
+            res = torch._foreach_div(tensors1, tensors2)
+            torch._foreach_div_(tensors1, tensors2)
+            self.assertEqual(res, tensors1)
+            self.assertEqual(tensors1, res)
 
     def test_bin_op_list_error_cases(self, device):
         tensors1 = []
