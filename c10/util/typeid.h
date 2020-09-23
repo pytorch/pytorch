@@ -302,21 +302,6 @@ class _Uninitialized final {};
 
 } // namespace detail
 
-//
-// note: these are outside TypeMeta bc gcc seems to have trouble
-// with scalarTypeItemSizes as a constexpr static member used by
-// a public inline instance method
-//
-constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
-
-// item sizes for TypeMeta::itemsize() fast path
-constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
-#define SCALAR_TYPE_SIZE(T, name) sizeof(T),
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
-#undef SCALAR_TYPE_SIZE
-    0, // Undefined
-};
-
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
  * as a blob, or the data type of a tensor, with a unique run-time id. It also
@@ -378,9 +363,6 @@ private:
    * Returns the size of the item.
    */
   inline size_t itemsize() const noexcept {
-    if (C10_LIKELY(isScalarType())) {
-      return scalarTypeItemSizes[index_];
-    }
     return data().itemsize_;
   }
   /**
@@ -502,8 +484,6 @@ private:
     TORCH_CHECK(index <= MaxTypeIndex,
       "Maximum number of CAFFE_KNOWN_TYPE declarations has been exceeded. ",
       "Please report this issue.");
-    auto typeId = TypeIdentifier::Get<T>();
-    auto typeName = c10::util::get_fully_qualified_type_name<T>();
     typeMetaDatas()[index] = detail::TypeMetaData{
       sizeof(T),
       detail::_PickNew<T>(),
@@ -511,8 +491,8 @@ private:
       detail::_PickCopy<T>(),
       detail::_PickPlacementDelete<T>(),
       detail::_PickDelete<T>(),
-      typeId,
-      typeName};
+      TypeIdentifier::Get<T>(),
+      c10::util::get_fully_qualified_type_name<T>()};
     return index;
   }
 
@@ -533,10 +513,10 @@ private:
 
 // specializations of TypeMeta::_typeMetaData for ScalarType types
 
-#define DEFINE_SCALAR_METADATA_INSTANCE(T, name) \
-  template <>                                                               \
-  constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept {     \
-    return static_cast<uint16_t>(ScalarType::name); \
+#define DEFINE_SCALAR_METADATA_INSTANCE(T, name)              \
+  template <>                                                 \
+  constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept {  \
+    return static_cast<uint16_t>(ScalarType::name);           \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
@@ -595,7 +575,7 @@ inline std::ostream& operator<<(
 #define CAFFE_KNOWN_TYPE(T)                                           \
   template <>                                                         \
   EXPORT_IF_NOT_GCC uint16_t TypeMeta::_typeMetaData<T>() noexcept {  \
-    static const uint16_t index = addTypeMetaData<T>();       \
+    static const uint16_t index = addTypeMetaData<T>();               \
     return index;                                                     \
   }
 

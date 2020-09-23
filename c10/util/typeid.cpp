@@ -28,16 +28,16 @@ std::atomic<uint16_t> TypeMeta::nextTypeIndex(NumScalarTypes);
 // fixed length array of TypeMetaData instances
 detail::TypeMetaData* TypeMeta::typeMetaDatas() {
   static detail::TypeMetaData instances[MaxTypeIndex + 1] = {
-#define SCALAR_TYPE_META(T, name) \
-    /* ScalarType::name */ \
-    detail::TypeMetaData( \
-      sizeof(T), \
-      detail::_PickNew<T>(), \
-      detail::_PickPlacementNew<T>(), \
-      detail::_PickCopy<T>(), \
-      detail::_PickPlacementDelete<T>(), \
-      detail::_PickDelete<T>(), \
-      TypeIdentifier::Get<T>(), \
+#define SCALAR_TYPE_META(T, name)         \
+    /* ScalarType::name */                \
+    detail::TypeMetaData(                 \
+      sizeof(T),                          \
+      detail::_PickNew<T>(),              \
+      detail::_PickPlacementNew<T>(),     \
+      detail::_PickCopy<T>(),             \
+      detail::_PickPlacementDelete<T>(),  \
+      detail::_PickDelete<T>(),           \
+      TypeIdentifier::Get<T>(),           \
       c10::util::get_fully_qualified_type_name<T>()),
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
 #undef SCALAR_TYPE_META
