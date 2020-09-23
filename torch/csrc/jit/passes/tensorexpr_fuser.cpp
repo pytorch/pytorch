@@ -284,8 +284,13 @@ void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
 
 class TensorExprFuser {
  public:
-  TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
-      : graph_(std::move(graph)), min_group_size_(min_group_size) {}
+  TensorExprFuser(
+      std::shared_ptr<Graph> graph,
+      size_t min_group_size,
+      bool disable_shape_checks)
+      : graph_(std::move(graph)),
+        min_group_size_(min_group_size),
+        disable_shape_checks_(disable_shape_checks) {}
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
@@ -606,7 +611,7 @@ class TensorExprFuser {
 
   bool canHandle(Node* node) {
     REQ(node->kind() != prim::Constant);
-    REQ(allShapesAreKnown(node));
+    REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
 
     // Don't include nodes whose inputs are tensor constants - we cannot handle
@@ -836,9 +841,14 @@ class TensorExprFuser {
 
   // Minimal size of a fusion group
   size_t min_group_size_;
+  // If true, shapes are ignored
+  bool disable_shape_checks_;
 };
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
+void FuseTensorExprs(
+    std::shared_ptr<Graph>& graph,
+    size_t min_group_size,
+    bool disable_shape_checks) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -849,7 +859,7 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size);
+  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
