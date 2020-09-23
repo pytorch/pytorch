@@ -33,6 +33,7 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
+from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
@@ -11552,32 +11553,32 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
@@ -11650,7 +11651,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -11664,7 +11665,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
