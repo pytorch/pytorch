@@ -824,7 +824,7 @@ class DistributedDataParallel(Module):
                         warnings.warn(
                             "Detected uneven input skew of greater "
                             f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
-                            f"has at least {WARN_THRESHOLD} less inputs than "
+                            f"has at least {WARN_THRESHOLD} fewer inputs than "
                             "other currently active ranks. This level of skew could "
                             "lead to performance degradation during training."
                         )
