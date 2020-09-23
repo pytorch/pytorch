@@ -531,7 +531,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-class TraceableCustomModuleHandler(QuantizeHandler):
+class TraceableCustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         if quantizer.is_dynamic_quant:

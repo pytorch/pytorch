@@ -240,14 +240,6 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        # swap custom modules to observed custom modules
-        for node in model.graph.nodes:
-            if node.op == 'call_module' and \
-               is_traceable_custom_module(self.modules[node.target]):
-                # add node to matched nodes
-                custom_module_qconfig = self.qconfig_map[node.name]
-                matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
-
         # indexes for the inputs that needs to be observed
         observed_input_idxs = []
         graph_inputs = []
@@ -332,7 +324,7 @@ class Quantizer:
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed_node_names_set:
                         observed_node_names_set.add(node.name)
-                elif isinstance(obj, TraceableCustomModuleHandler):
+                elif isinstance(obj, TraceableCustomModuleQuantizeHandler):
                     assert node.op == 'call_module'
                     output_is_observed = self.modules[node.target]
                     if output_is_observed:
@@ -448,13 +440,6 @@ class Quantizer:
         matches = self._find_matches(model.graph, self.modules, self.patterns)
 
         quants = self._find_quants(model.graph, matches)
-
-        # add custom modules to the match
-        for node in model.graph.nodes:
-            if node.op == 'call_module' and \
-               is_observed_traceable_custom_module(self.modules[node.target]):
-                custom_module_qconfig = self.qconfig_map[node.name]
-                matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
 
         self.quantized_graph = Graph()
         env = {}
@@ -749,6 +734,16 @@ class Quantizer:
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+
+        # add traceable custom modules to the match
+        for node in graph.nodes:
+            if node.op == 'call_module' and \
+               (is_traceable_custom_module(self.modules[node.target]) or
+                is_observed_traceable_custom_module(self.modules[node.target])):
+                # add node to matched nodes
+                custom_module_qconfig = self.qconfig_map[node.name]
+                match_map[node.name] = (
+                    node, [node], TraceableCustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
         return match_map
 
