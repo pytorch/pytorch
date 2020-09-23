@@ -12,6 +12,7 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/utils/cuda_enabled.h>
 
 #ifdef USE_CUDA
 #include <torch/cuda.h>
@@ -489,14 +490,9 @@ void RequestCallbackNoPython::processRpc(
       auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
       // If requested with CUDA from caller but CUDA is not available on this
       // machine, fallback to CPU and log a warning instead of crashing.
-      #ifdef USE_CUDA
-      int cudaNumDevices = torch::cuda::device_count();
-      #else
-      int cudaNumDevices = 0;
-      #endif
       if (profilingConfig.state ==
               torch::autograd::profiler::ProfilerState::CUDA &&
-          cudaNumDevices == 0) {
+          !this->cudaAvailable()) {
         profilingConfig = torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU,
             profilingConfig.report_input_shapes,
@@ -509,7 +505,7 @@ void RequestCallbackNoPython::processRpc(
       TORCH_INTERNAL_ASSERT(
           profilingConfig.state !=
                   torch::autograd::profiler::ProfilerState::CUDA ||
-              cudaNumDevices > 0,
+              this->cudaAvailable(),
           "Profiler state set to CUDA but CUDA not available.");
       const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
@@ -597,6 +593,14 @@ Message RequestCallbackNoPython::handleError(
       ": ",
       e.what());
   return createExceptionResponse(errorMsg, messageId);
+}
+
+bool RequestCallbackNoPython::cudaAvailable() const {
+  #ifdef USE_CUDA
+  return true;
+  #else
+  return false;
+  #endif
 }
 
 } // namespace rpc
