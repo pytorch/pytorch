@@ -910,8 +910,9 @@ Note:
 
 Note:
     For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
-    either negative or positive. Like :func:`~torch.fft.fftfreq`,
-    :func:`~torch.fft.fftshift` always considers it to be negative.
+    either negative or positive. :func:`~torch.fft.fftshift` always puts the
+    Nyquist term at the 0-index; equivalent to the negative frequency.
+    This is the same convention used by :func:`~torch.fft.fftfreq`.
 
 Args:
     input (Tensor): the tensor in FFT order
@@ -930,8 +931,8 @@ Example:
     >>> torch.fftshift(f)
     tensor([-0.5000, -0.2500, 0.0000, 0.2500])
 
-    Also notice that the Nyquist frequency at ``f[2]`` was considered negative
-    and so was moved to the beginning of the tensor.
+    Also notice that the Nyquist frequency term at ``f[2]`` was moved to the
+    beginning of the tensor.
 
     This also works for multi-dimensional transforms:
     >>> x = torch.fft.fftfreq(5, d=1/5) + 0.1 * torch.fft.fftfreq(5, d=1/5).unsqueeze(1)
@@ -955,10 +956,6 @@ ifftshift = _add_docstr(_fft.fft_ifftshift, r"""
 ifftshift(input, dim=None) -> Tensor
 
 Inverse of :func:`~torch.fft.fftshift`.
-
-This takes the FFT representation with zero-frequency FFT terms in the center
-of the tensor and shifts it into the normal FFT output, with zero-frequency
-terms at the beginning and negative frequency terms at the end.
 
 Args:
     input (Tensor): the tensor in FFT order

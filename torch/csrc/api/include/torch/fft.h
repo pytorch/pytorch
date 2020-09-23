@@ -226,7 +226,7 @@ inline Tensor ihfft(const Tensor& self,
   return torch::fft_ihfft(self, n, dim, norm);
 }
 
-/// Returns Discrete Fourier Transform sample frequencies for signal size n.
+/// Computes the discrete Fourier Transform sample frequencies for a signal of size n.
 ///
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.fftfreq
 ///
@@ -242,7 +242,7 @@ inline Tensor fftfreq(int64_t n, const TensorOptions& options={}) {
   return torch::fft_fftfreq(n, /*d=*/1.0, options);
 }
 
-/// Returns Discrete Fourier Transform sample frequencies for signal size n.
+/// Computes the sample frequencies for torch.fft.rfft with a signal of size n.
 ///
 /// Like torch.fft.rfft, only the positive frequencies are included.
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.rfftfreq
@@ -259,7 +259,8 @@ inline Tensor rfftfreq(int64_t n, const TensorOptions& options) {
   return torch::fft_rfftfreq(n, /*d=*/1.0, options);
 }
 
-/// Shift zero-frequency FFT terms to the centre of the array.
+/// Reorders n-dimensional FFT output to have negative frequency terms first, by
+/// a torch.roll operation.
 ///
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.fftshift
 ///
