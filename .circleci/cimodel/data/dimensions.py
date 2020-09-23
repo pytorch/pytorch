@@ -9,6 +9,7 @@ CUDA_VERSIONS = [
 
 ROCM_VERSIONS = [
     "3.7",
+    "3.8",
 ]
 
 GPU_VERSIONS = [None] + ["cuda" + v for v in CUDA_VERSIONS] + ["rocm" + v for v in ROCM_VERSIONS]
