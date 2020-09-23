@@ -1007,10 +1007,11 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   }
 
   bool tail_is_needed = true;
-  if (dynamic_cast<const IntImm*>(f->start()) &&
-      dynamic_cast<const IntImm*>(f->stop())) {
-    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
-    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+  const Expr* start = IRSimplifier::simplify(f->start());
+  const Expr* stop = IRSimplifier::simplify(f->stop());
+  if (start->isConstant() && stop->isConstant()) {
+    int start_val = immediateAs<int>(start);
+    int stop_val = immediateAs<int>(stop);
     int size_val = stop_val - start_val;
     int tail_size = size_val % factor;
     if (tail_size == 0) {
