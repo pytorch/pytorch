@@ -898,8 +898,7 @@ Example:
 fftshift = _add_docstr(_fft.fft_fftshift, r"""
 fftshift(input, dim=None) -> Tensor
 
-
-Shift zero-frequency FFT terms to the center of the tensor.
+Reorder n-dimensional FFT output to have negative frequency terms first. 
 
 Note:
     By convention, the FFT returns positive frequency terms first, followed by
