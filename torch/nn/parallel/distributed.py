@@ -4,7 +4,7 @@ import itertools
 import os
 import inspect
 import logging
-
+import warnings
 import torch
 
 from . import comm
@@ -431,7 +431,6 @@ class DistributedDataParallel(Module):
 
         if self.device_ids and len(self.device_ids) > 1:
 
-            import warnings
             warnings.warn(
                 "Single-Process Multi-GPU is not the recommended mode for "
                 "DDP. In this mode, each DDP instance operates on multiple "
@@ -815,8 +814,18 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                # Schedules allreduce to match fwd pass allreduce in non-joined procs
                 while not all_procs_joined:
+                    if i > WARN_THRESHOLD and not warned:
+                        my_rank = dist.get_rank(self.process_group)
+                        warnings.warn(
+                            "Detected uneven input skew of greater "
+                            f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
+                            f"has at least {WARN_THRESHOLD} less inputs than "
+                            "other currently active ranks. This level of skew could "
+                            "lead to performance degradation during training."
+                        )
+                        warned = True
+                    # Schedules allreduce to match fwd pass allreduce in non-joined procs
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
                         all_procs_joined = True
