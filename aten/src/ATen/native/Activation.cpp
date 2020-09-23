@@ -719,6 +719,15 @@ Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
   return dX;
 }
 
+Tensor infinitely_differentiable_gelu_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self * self).exp_();
+  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+}
+
 Tensor& leaky_relu_out(
     Tensor& result,
     const Tensor& self,

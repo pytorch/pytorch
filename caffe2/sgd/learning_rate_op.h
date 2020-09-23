@@ -81,13 +81,13 @@ class LearningRateOp final : public Operator<Context> {
       return new HillLearningRate<T>(
           num_iter, start_multiplier, gamma, power, end_multiplier);
     } else if (policy == "slope") {
-      int64_t num_iter_1 =
-          this->template GetSingleArgument<int64_t>(arg_prefix + "num_iter_1", 0);
+      int64_t num_iter_1 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_1", 0);
       DCHECK_GT(num_iter_1, 0);
       T multiplier_1 = this->template GetSingleArgument<float>(
           arg_prefix + "multiplier_1", 0.);
-      int64_t num_iter_2 =
-          this->template GetSingleArgument<int64_t>(arg_prefix + "num_iter_2", 0);
+      int64_t num_iter_2 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_2", 0);
       DCHECK_GT(num_iter_1, 0);
       T multiplier_2 = this->template GetSingleArgument<float>(
           arg_prefix + "multiplier_2", 0.);
@@ -191,7 +191,7 @@ class LearningRateOp final : public Operator<Context> {
       int stepsize =
           this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
       T decay =
-          this->template GetSingleArgument<int>(arg_prefix + "decay", 1.0);
+          this->template GetSingleArgument<float>(arg_prefix + "decay", 1.0);
       DCHECK_GT(stepsize, 0);
       DCHECK_GE(max_lr, base_lr_);
       return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);

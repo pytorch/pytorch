@@ -210,7 +210,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::floor, {"floorf(${0})", "floor(${0})"}},
       {aten::round, {"roundf(${0})", "round(${0})"}},
       {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
-      {aten::frac, {"fracf(${0})", "frac(${0})"}},
+      {aten::frac, {"${0} - truncf(${0})", "${0} - trunc(${0})"}},
       {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
       {aten::neg, "-${0}"},
       // simple binary
