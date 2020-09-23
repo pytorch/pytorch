@@ -28,14 +28,15 @@ TORCH_API Node* createSingletonSubgraph(
 
 // Merge a node into a subgraph node. If `toMerge` is also a subgraph, the
 // subgraphs are merged.
-// `toMerge` is destroyed.
+// If `destroyNode` is true `toMerge` is destroyed.
 // An optional argument 'vmap' could be used to retrieve value mappings.
 // Values will be mapped to their new subgraph values
-TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
+TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode, bool destroyNode=true);
 TORCH_API void mergeNodeIntoSubgraph(
     Node* toMerge,
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap);
+    std::unordered_map<Value*, Value*>& vmap, 
+    bool destroyNode=true);
 
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.

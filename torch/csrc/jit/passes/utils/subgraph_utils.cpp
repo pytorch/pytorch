@@ -40,11 +40,18 @@ void mergeSubgraph(
   // Now we're merging the "unmerged" nodes into the mergeFrom subgraph. That
   // will give us a new map: "unmerged" -> "merged".
   std::unordered_map<Value*, Value*> merge_vmap;
+
+  // defer destroying nodes until after all nodes have been merged, otherwise we run into lifetime issues where the previous mapping of the merged nodes inputs/outputs can be overwritten with newly created values
+  std::vector<Node*> merged_nodes;
   while (it != end_it) {
-    // NB: mergeNodeIntoSubgraph destroys node, hence the complications
     Node* node = *it;
     ++it;
-    mergeNodeIntoSubgraph(node, mergeTo, merge_vmap);
+    merged_nodes.push_back(node);
+    mergeNodeIntoSubgraph(node, mergeTo, merge_vmap, /*destroyNode*/ false);
+  }
+
+  for (Node *n: merged_nodes) {
+    n->destroy();
   }
 
   // Vmap should contain "original" -> "merged" mapping, thus we basically need
@@ -151,7 +158,8 @@ std::unordered_set<Value*> closedOverValues(
 void mergeNodeIntoSubgraph(
     Node* toMerge,
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap) {
+    std::unordered_map<Value*, Value*>& vmap,
+    bool destroyNode) {
   AT_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
   if (hasSubgraph(toMerge)) {
     return mergeSubgraph(subgraphNode, toMerge, vmap);
@@ -257,11 +265,14 @@ void mergeNodeIntoSubgraph(
     }
   }
   // Remove the original node now that the merge is complete
-  toMerge->destroy();
+  if (destroyNode) {
+    toMerge->destroy();
+  }
 }
-void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
+
+void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode, bool destroyNode) {
   std::unordered_map<Value*, Value*> vmap;
-  mergeNodeIntoSubgraph(toMerge, subgraphNode, vmap);
+  mergeNodeIntoSubgraph(toMerge, subgraphNode, vmap, destroyNode);
 }
 
 Node* createSingletonSubgraph(
