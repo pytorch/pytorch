@@ -21,6 +21,8 @@ conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 1D convolution over an input signal composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
@@ -56,6 +58,8 @@ conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 
 Applies a 2D convolution over an input image composed of several input
 planes.
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
@@ -95,6 +99,8 @@ conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 3D convolution over an input image composed of several input
 planes.
 
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
@@ -130,6 +136,8 @@ conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
@@ -169,6 +177,8 @@ conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
@@ -210,6 +220,8 @@ conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 
 Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
+
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
@@ -1659,6 +1671,8 @@ def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Shape:
 
@@ -3712,6 +3726,42 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
                                      swap, reduction_enum)
+
+
+def triplet_margin_with_distance_loss(anchor, positive, negative, *, distance_function=None,
+                                      margin=1.0, swap=False, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], float, bool, str) -> Tensor
+    r"""
+    See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
+    """
+    if torch.jit.is_scripting():
+        raise NotImplementedError("F.triplet_margin_with_distance_loss does not support JIT scripting: "
+                                  "functions requiring Callables cannot be scripted.")
+
+    tens_ops = (anchor, positive, negative)
+    if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+        return handle_torch_function(
+            triplet_margin_with_distance_loss, tens_ops, anchor, positive, negative,
+            distance_function=distance_function, margin=margin, swap=swap, reduction=reduction)
+
+    distance_function = distance_function if distance_function is not None else pairwise_distance
+
+    positive_dist = distance_function(anchor, positive)
+    negative_dist = distance_function(anchor, negative)
+
+    if swap:
+        swap_dist = distance_function(positive, negative)
+        negative_dist = torch.min(negative_dist, swap_dist)
+
+    output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
+
+    reduction_enum = _Reduction.get_enum(reduction)
+    if reduction_enum == 1:
+        return output.mean()
+    elif reduction_enum == 2:
+        return output.sum()
+    else:
+        return output
 
 
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):

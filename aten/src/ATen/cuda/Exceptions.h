@@ -2,6 +2,11 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+
+#ifdef CUDART_VERSION
+#include <cusolver_common.h>
+#endif
+
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
@@ -53,6 +58,21 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 cusparseGetErrorString(__err),                  \
                 " when calling `" #EXPR "`");                   \
   } while (0)
+
+// cusolver related headers are only supported on cuda now
+#ifdef CUDART_VERSION
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                              \
+  do {                                                          \
+    cusolverStatus_t __err = EXPR;                              \
+    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,               \
+                "cusolver error: ", __err,                      \
+                ", when calling `" #EXPR "`");                  \
+  } while (0)
+
+#else
+#define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#endif
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
 
