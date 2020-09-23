@@ -1601,6 +1601,7 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1620,6 +1621,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1629,6 +1631,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1638,6 +1641,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1647,6 +1651,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1657,6 +1662,7 @@ new_module_tests = [
         desc='zero_batch',
         test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_dilated',
@@ -1664,6 +1670,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
         input_size=(2, 4, 10),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_groups',
@@ -1672,6 +1679,7 @@ new_module_tests = [
         input_size=(2, 4, 6),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1702,6 +1710,7 @@ new_module_tests = [
         cudnn=True,
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d_groups',
