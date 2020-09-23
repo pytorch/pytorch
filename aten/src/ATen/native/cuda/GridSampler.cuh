@@ -153,15 +153,11 @@ scalar_t safe_downgrade_to_int_range(scalar_t x){
   return x;
 }
 
-// Computes the pixel source index value for a grid coordinate
-template <typename scalar_t>
+template<typename scalar_t>
 static __forceinline__ __device__
-scalar_t grid_sampler_compute_source_index(
-    scalar_t coord,
-    int size,
-    GridSamplerPadding padding_mode,
-    bool align_corners) {
-  coord = grid_sampler_unnormalize(coord, size, align_corners);
+scalar_t compute_coordinates(scalar_t coord, int size,
+                             GridSamplerPadding padding_mode,
+                             bool align_corners) {
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
@@ -176,7 +172,20 @@ scalar_t grid_sampler_compute_source_index(
     coord = clip_coordinates(coord, size);
   }
 
-  coord = safe_downgrade_to_int_range(coord); 
+  coord = safe_downgrade_to_int_range(coord);
+  return coord;
+}
+
+// Computes the pixel source index value for a grid coordinate
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t grid_sampler_compute_source_index(
+    scalar_t coord,
+    int size,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  coord = grid_sampler_unnormalize(coord, size, align_corners);
+  coord = compute_coordinates(coord, size, padding_mode, align_corners);
   return coord;
 }
 
@@ -227,58 +236,43 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
 template<typename scalar_t>
 static __forceinline__ __device__
 scalar_t get_value_bounded(
-    scalar_t *data, int W, int H, int x, int y, int sW, int sH,
+    scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y); 
+
   if (padding_mode == GridSamplerPadding::Zeros) {
-    return within_bounds_2d(y, x, H, W) ? data[y * sH + x * sW]: static_cast<scalar_t>(0); 
-  } else if (padding_mode == GridSamplerPadding::Border) {
-    x = clip_coordinates(x, W);
-    y = clip_coordinates(y, H);
-    return data[y * sH + x * sW];
-  } else { // padding_mode == GridSamplerPadding::Reflection
-    if (align_corners) {
-      x = reflect_coordinates(x, 0, 2*(W - 1));
-      y = reflect_coordinates(y, 0, 2*(H - 1));
-    } else {
-      x = reflect_coordinates(x, -1, 2*W - 1);
-      y = reflect_coordinates(y, -1, 2*H - 1);
-    }
-    x = clip_coordinates(x, W);
-    y = clip_coordinates(y, H);
-    return data[y * sH + x * sW];
+    return within_bounds_2d(iy, ix, H, W) ? data[iy * sH + ix * sW]: static_cast<scalar_t>(0); 
+  } else {
+    return data[iy * sH + ix * sW];
   }
 }
 
 template<typename scalar_t>
 static __forceinline__ __device__
 void add_value_bounded(
-    scalar_t* data, int W, int H, int x, int y, int sW, int sH,
+    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     scalar_t delta,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
-  if (padding_mode == GridSamplerPadding::Zeros) {
-    if (within_bounds_2d(y, x, H, W)) {
-      gpuAtomicAdd(data + y * sH + x * sW, delta);
-    }
-  } else if (padding_mode == GridSamplerPadding::Border) {
-    x = clip_coordinates(x, W);
-    y = clip_coordinates(y, H);
-    gpuAtomicAdd(data + y * sH + x * sW, delta);
-  } else { // padding_mode == GridSamplerPadding::Reflection
-    if (align_corners) {
-      x = reflect_coordinates(x, 0, 2*(W - 1));
-      y = reflect_coordinates(y, 0, 2*(H - 1));
-    } else {
-      x = reflect_coordinates(x, -1, 2*W - 1);
-      y = reflect_coordinates(y, -1, 2*H - 1);
-    }
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
 
-    x = clip_coordinates(x, W);
-    y = clip_coordinates(y, H);
-    gpuAtomicAdd(data + y * sH + x * sW, delta);
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y); 
+
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    if (within_bounds_2d(iy, ix, H, W)) {
+      gpuAtomicAdd(data + iy * sH + ix * sW, delta);
+    }
+  } else {
+    gpuAtomicAdd(data + iy * sH + ix * sW, delta);
   }
 }
 

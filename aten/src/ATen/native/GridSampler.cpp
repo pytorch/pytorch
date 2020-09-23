@@ -492,8 +492,8 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
             ix = grid_sampler_unnormalize(x, inp_W, align_corners);
             iy = grid_sampler_unnormalize(y, inp_H, align_corners);
 
-            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
-            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+            scalar_t ix_nw = std::floor(ix);
+            scalar_t iy_nw = std::floor(iy);
 
             const scalar_t tx = ix - ix_nw;
             const scalar_t ty = iy - iy_nw;
@@ -506,10 +506,10 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               // Interpolate 4 values the in the x directon
               for (int64_t i = 0; i < 4; i++) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
-                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw - 1, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 0, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 1, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
-                  get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H, ix_nw + 2, iy_nw - 1 + i, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+                  get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
                   tx);
               }
 
@@ -668,12 +668,11 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
 
-            scalar_t dummy;
-            ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &dummy);
-            iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &dummy);
+            ix = grid_sampler_unnormalize(x, inp_W, align_corners);
+            iy = grid_sampler_unnormalize(y, inp_H, align_corners);
 
-            int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
-            int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+            scalar_t ix_nw = std::floor(ix);
+            scalar_t iy_nw = std::floor(iy);
 
             const scalar_t tx = ix - ix_nw;
             const scalar_t ty = iy - iy_nw;
@@ -702,21 +701,20 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
                 for (int64_t j = 0; j < 4; j++) {
 
                   // set input gradient
-                  add_value_bounded<scalar_t>(gInp_ptr_NC, inp_W, inp_H, ix_nw - 1 + i, iy_nw - 1 + j,
-                    gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
+                  add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                    inp_W, inp_H, gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
 
                   // set grid gradient
-                  scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, inp_W, inp_H,
-                    ix_nw - 1 + i, iy_nw - 1 + j, inp_sW, inp_sH, padding_mode, align_corners);
+                  scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                    inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
 
                   gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
                   giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
-
-                  gGrid_ptr_NHW[0] = gix_mult * gix;
-                  gGrid_ptr_NHW[1] = giy_mult * giy;
                 }
               }
             }
+            gGrid_ptr_NHW[0] = gix_mult * gix;
+            gGrid_ptr_NHW[1] = giy_mult * giy;
           }
         }
       }
