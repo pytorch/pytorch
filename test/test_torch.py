@@ -6342,16 +6342,6 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor(a_, dtype=dtypes[0], device=device)
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-        # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
-        # CUDA as long as the two tensors are promoted to a supported type.
-        # TODO: Remove this once logical operators are improved to take care of bfloat16.
-        if self.device_type == 'cuda' and torch.bfloat16 in dtypes:
-            if torch.promote_types(dtypes[0], dtypes[1]) == torch.bfloat16:
-                with self.assertRaises(RuntimeError):
-                    getattr(a, op)(b)
-                return
-
         if dtypes[0].is_complex or dtypes[1].is_complex:
             with self.assertRaises(RuntimeError):
                 getattr(a, op)(b)
@@ -6367,12 +6357,6 @@ class TestTorchDeviceType(TestCase):
         # in-place
         # TODO: remove when different dtypes as operands are supported
         if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
-        # TODO: remove when logical ops support bfloat16 on CUDA.
-        if self.device_type == 'cuda' and dtypes[0] == torch.bfloat16:
             with self.assertRaises(RuntimeError):
                 getattr(a, op + '_')(b)
             return
@@ -11288,6 +11272,19 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
             torch.signbit(t, out=out)
 
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sgn(self, device, dtype):
+        x = torch.randn(100, dtype=dtype)
+        angle = x.angle()
+        out = x.sgn()
+        self.assertEqual(out.angle(), angle)
+        self.assertEqual(out.abs(), torch.ones_like(x).real)
+
+        x_out = torch.empty_like(x)
+        torch.sgn(x, out=x_out)
+        self.assertEqual(x_out.angle(), angle)
+        self.assertEqual(x_out.abs(), torch.ones_like(x).real)
+
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
     def test_signbit_non_boolean_output(self, device, dtype):
         # test non-boolean tensors as the `out=` parameters
@@ -14709,6 +14706,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.logit_(1e-6),
                 lambda x, y: x.sign(),
                 lambda x, y: x.sign_(),
+                lambda x, y: x.sgn(),
+                lambda x, y: x.sgn_(),
                 lambda x, y: x.sin(),
                 lambda x, y: x.sin_(),
                 lambda x, y: x.sinh(),
@@ -19627,8 +19626,6 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
-_complex_and_float_types2 = _float_types2 + _complex_types
-
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -19799,20 +19796,21 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
+        _cpu_types, True, [tf32_on_and_off(0.005)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
