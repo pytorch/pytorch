@@ -67,6 +67,78 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
   }
 }
 
+
+struct DevicesContext {
+
+  DevicesContext(const DevicesContext& other) = default;
+  DevicesContext(DevicesContext&& other) = default;
+
+  DevicesContext& operator=(const DevicesContext& rhs) = default;
+  DevicesContext& operator=(DevicesContext&& rhs) & = default;
+
+  void synchronize() {}
+
+#ifndef USE_CUDA
+  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {}
+#else
+  // Use the noCuda arg to disable streams management when deviceMaps are not
+  // set.
+  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {
+    if (!noCuda_) {
+      auto deviceNum = at::cuda::device_count();
+      streams_.reserve(deviceNum);
+      for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
+        streams_.emplace_back(at::cuda::getStreamFromPool(idx));
+      }
+    }
+  }
+
+  inline const std::vector<CUDAStream>& getCUDAStreams() const {
+    return streams_;
+  }
+
+ private:
+  const bool noCuda_;
+  std::vector<CUDAStream> streams_;
+
+#endif
+};
+
+
+struct DevicesStateGuard {
+
+#ifdef USE_CUDA
+  DevicesStateGuard(const DevicesContext& ctx) {
+    const auto& streams = ctx.getCUDAStreams();
+    std::vector<CUDAStream> prevStreams_;
+    prevStreams_.reserve(streams.size());
+    for (const auto& stream: streams) {
+      prevStreams_.emplace_back(
+          at::cuda::getCurrentCUDAStream(stream.device_index()));
+      at::cuda::setCurrentCUDAStream(stream);
+    }
+  }
+
+  ~DevicesStateGuard() noexcept {
+    for (auto& stream : prevStreams_) {
+      at::cuda::setCurrentCUDAStream(std::move(stream));
+    }
+  }
+#else
+  DevicesStateGuard(DevicesContext /* unused */) {};
+#endif
+
+  DevicesStateGuard(const DevicesStateGuard& other) = delete;
+  DevicesStateGuard(DevicesStateGuard&& other) = delete;
+  DevicesStateGuard& operator=(const DevicesStateGuard& rhs) = delete;
+  DevicesStateGuard& operator=(DevicesStateGuard&& rhs) = delete;
+
+ private:
+#ifdef USE_CUDA
+  std::vector<CUDAStream> prevStreams_;
+#endif
+};
+
 } // namespace
 
 C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);

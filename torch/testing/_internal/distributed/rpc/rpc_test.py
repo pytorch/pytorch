@@ -1,6 +1,7 @@
 import concurrent.futures
 import contextlib
 import json
+import logging
 import sys
 from threading import Lock
 import time
@@ -471,6 +472,14 @@ class AsyncExecutionClass:
 
 def return_future():
     return torch.futures.Future()
+
+
+class FooBackendOptions(rpc.RpcBackendOptions):
+    def __init__(self, init_method):
+        # Must call the __init__ of the superclass (and do so directly,
+        # without using super()) because... pybind.
+        rpc.RpcBackendOptions.__init__(self)
+        self.init_method = init_method
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -3326,8 +3335,97 @@ class RpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
+    def test_wrong_types(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument backend must be a member of BackendType",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="TENSORPIPE",
+            )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument rpc_backend_options must be an instance of RpcBackendOptions",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=self.rpc_backend,
+                rpc_backend_options={"init_method": self.init_method}
+            )
+
+    def test_cannot_infer_backend_from_options(self):
+        # An exception should be raised if the backend isn't specified but
+        # options are given which are not an instance of any of the known
+        # agents' option classes.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(TypeError, "Could not infer backend for options"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
+
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # ProcessGroupRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+        self.assertIn(
+            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
+            "\n".join(cm.output),
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
+
+    def test_logs_deprecation_warning(self):
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+        self.assertIn(
+            "It is recommended to migrate to the TENSORPIPE backend.",
+            "\n".join(cm.output),
+        )
 
     @skip_if_lt_x_gpu(2)
     @dist_init
@@ -3923,6 +4021,37 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # TensorPipeRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.TENSORPIPE,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.TensorPipeAgent)
+
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_set_and_get_num_worker_threads(self):
@@ -4306,10 +4435,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         event.wait(s0)
         return z
 
-    def _test_custom_stream(self, fn):
+    def _test_custom_stream(self, fn, device_map):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {"cuda:0": "cuda:1"})
+        options.set_device_map(dst, device_map)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4333,6 +4462,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, 2 * x)
 
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream(self):
+        self._test_custom_stream(self._test_stream_sync, {"cuda:0": "cuda:1"})
+
     def _test_stream_multi_async(self, dst):
         if self.rank == 0:
             futs = []
@@ -4349,11 +4482,38 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             for i in range(20):
                 self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)
 
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_multi(self):
+        self._test_custom_stream(
+            self._test_stream_multi_async,
+            {"cuda:0": "cuda:1"}
+        )
+
+    @staticmethod
+    def _nested_slow_add_on_user_stream(x, y, z):
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._slow_add_on_user_stream,
+            args=(x, y)
+        )
+
+        return TensorPipeAgentRpcTest._slow_add_on_user_stream(ret, z)
+
+    def _test_stream_nested_sync(self):
+        if self.rank == 0:
+            x = torch.ones(2, 2).to(0)
+            ret = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+                args=(x, x, x)
+            )
+            self.assertEqual(ret, 3 * x)
 
     @skip_if_lt_x_gpu(2)
-    def  test_custom_stream(self):
-        self._test_custom_stream(self._test_stream_sync)
+    def test_custom_stream_nested(self):
+        self._test_custom_stream(
+            self._test_stream_sync,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
 
-    @skip_if_lt_x_gpu(2)
-    def  test_custom_stream_multi(self):
-        self._test_custom_stream(self._test_stream_multi_async)
+    # todo add jit tests

@@ -7739,14 +7739,29 @@ class TestTorchDeviceType(TestCase):
         for upper, batchsize in product([True, False], [262144, 524288]):
             cholesky_test_helper(2, batchsize, device, upper)
 
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import \
+            (random_symmetric_pd_matrix,
+             random_fullrank_matrix_distinct_singular_value)
 
         def cholesky_test_helper(n, batch_dims, upper):
-            A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
+            # This is a workaround while there is no support for complex random_symmetric_pd_matrix
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A = A_real + 1j * A_imag
+                # There is no support for complex batched matmul yet
+                matmul_list = []
+                for mat in A.contiguous().view(-1, n, n):
+                    matmul_list.append(mat @ mat.t().conj())
+                A = torch.stack(matmul_list).view(*batch_dims, n, n)
+            else:
+                A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
             self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
@@ -7754,26 +7769,38 @@ class TestTorchDeviceType(TestCase):
         for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
             cholesky_test_helper(3, batchsize, upper)
 
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        x = torch.rand(10, 10, dtype=dtype, device=device) + 1e-1
-        A = torch.mm(x, x.t())
+        from torch.testing._internal.common_utils import \
+            (random_symmetric_pd_matrix,
+             random_fullrank_matrix_distinct_singular_value)
+
+        # This is a workaround while there is no support for complex random_symmetric_pd_matrix
+        if dtype.is_complex:
+            real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            A_real = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
+            A_imag = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
+            A = A_real + 1j * A_imag
+            A = A @ A.t().conj()
+        else:
+            A = random_symmetric_pd_matrix(10, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
-        B = torch.mm(C, C.t())
+        B = torch.mm(C, C.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
         # test Upper Triangular
         U = torch.cholesky(A, True)
-        B = torch.mm(U.t(), U)
+        B = torch.mm(U.t().conj(), U)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t())
+        B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
@@ -12654,7 +12681,7 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm            
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
@@ -16830,6 +16857,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                  atol=0.01, rtol=0)
                 self.assertEqual(method(a1, a2), op(a1, a2))
 
+    @dtypes(torch.bfloat16, torch.float)
+    def test_true_divide_out(self, device, dtype):
+        a1 = torch.tensor([4.2, 6.2], dtype=dtype, device=device)
+        a2 = torch.tensor([2., 2.], dtype=dtype, device=device)
+        res = torch.empty_like(a1)
+        self.assertEqual(torch.true_divide(a1, a2, out=res),
+                         torch.tensor([2.1, 3.1], dtype=dtype, device=device),
+                         atol=0.01, rtol=0)
+
     @onlyCUDA
     @dtypes(torch.half)
     def test_divmul_scalar(self, device, dtype):
@@ -19626,8 +19662,6 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
-_complex_and_float_types2 = _float_types2 + _complex_types
-
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -19798,20 +19832,21 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
+        _cpu_types, True, [tf32_on_and_off(0.005)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
