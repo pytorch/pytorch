@@ -589,7 +589,7 @@ quantized_gru = torch.ops.aten.quantized_gru
 
 from .overrides import has_torch_function, handle_torch_function
 
-def do_assert(condition, message):
+def Assert(condition, message):
     r"""An alternative to Python's assert which is symbolically traceable.
     TODO before land: align on function name (assert is reserved).
     TODO before land: align on where this function should live
@@ -597,5 +597,5 @@ def do_assert(condition, message):
     TODO before land: update the docs after ^ are resolved
     """
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
-        return handle_torch_function(do_assert, (condition,), condition, message)
-    torch._C.do_assert(condition, message)
+        return handle_torch_function(Assert, (condition,), condition, message)
+    torch._C.Assert(condition, message)

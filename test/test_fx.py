@@ -605,13 +605,13 @@ class TestFX(JitTestCase):
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch.do_assert(x.shape[1] > 4, message)
+                torch.Assert(x.shape[1] > 4, message)
                 return x
 
         m = AssertsTensorShape()
         # verify traceability
         traced = symbolic_trace(m)
-        # verify assertion works correctly at runtime
+        # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
         with self.assertRaisesRegex(RuntimeError, message):
             traced(torch.rand(4, 3))

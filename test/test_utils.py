@@ -671,5 +671,17 @@ class TestBenchmarkUtils(TestCase):
                 x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertion on model works correctly at runtime
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(RuntimeError, "bar"):
+            torch.Assert(False, "bar")
+        # verify type checks
+        type_error_msg = "expected types bool, string, but got int, int"
+        with self.assertRaisesRegex(RuntimeError, type_error_msg):
+            torch.Assert(1, 2)
+
+
 if __name__ == '__main__':
     run_tests()

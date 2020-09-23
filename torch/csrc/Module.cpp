@@ -564,14 +564,14 @@ static PyObject * THPModule_vmapmode_decrement_nesting(PyObject* _unused, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPModule_doAssert(PyObject* _unused, PyObject *args) {
+static PyObject * THPModule_Assert(PyObject* _unused, PyObject *args) {
   PyObject *condition;
   PyObject *message;
   if (!PyArg_ParseTuple(args, "OO", &condition, &message)) {
     return nullptr;
   }
   THPUtils_assert(PyBool_Check(condition) && THPUtils_checkString(message),
-    "do_assert expected types bool, string, but got %s, %s",
+    "Assert expected types bool, string, but got %s, %s",
     THPUtils_typename(condition), THPUtils_typename(message));
   std::string message_str = THPUtils_unpackString(message);
   THPUtils_assert(condition == Py_True, message_str.c_str());
@@ -628,7 +628,7 @@ static PyMethodDef TorchMethods[] = {
   {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", (PyCFunction)THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", (PyCFunction)THPModule_disable_torch_function, METH_VARARGS, nullptr},
-  {"do_assert", (PyCFunction)THPModule_doAssert, METH_VARARGS, nullptr},
+  {"Assert", (PyCFunction)THPModule_Assert, METH_VARARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
