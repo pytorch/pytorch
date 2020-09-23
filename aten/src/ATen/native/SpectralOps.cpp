@@ -436,7 +436,7 @@ Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
   Tensor result = native::arange(n, options);
   auto right_slice = result.slice(0, (n + 1) / 2, 0);
   at::arange_out(right_slice, -(n/2), 0, 1);
-  result.mul_(1.0 / (n * d));
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
   return result;
 }
 
@@ -445,10 +445,12 @@ Tensor fft_rfftfreq(int64_t n, double d, const TensorOptions& options) {
   TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
               "rfftfreq requires a floating point or complex dtype");
   Tensor result = native::arange(n/2 + 1, options);
-  result.mul_(1.0 / (n * d));
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
   return result;
 }
 
+// If an array dim is specified, wraps them according to self.dim().
+// Otherwise returns a vector of all dims.
 DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt) {
   DimVector dim;
   if (dim_opt) {

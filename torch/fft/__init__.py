@@ -823,8 +823,9 @@ Note:
 Args:
     n (int): the FFT length
     d (float, optional): The sampling length scale.
-        The unit length (or time) between individual samples in the FFT input.
-        If given, the frequencies are given in physical units of 1/unit.
+        The spacing between individual samples of the FFT input.
+        The default assumes unit spacing, dividing that result by the actual
+        spacing gives the result in physical frequency units.
 
 Keyword Args:
     {dtype}
@@ -849,7 +850,7 @@ Example:
 rfftfreq = _add_docstr(_fft.fft_rfftfreq, r"""
 rfftfreq(n, d=1.0, *, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Computes sample frequencies for :func:`~torch.fft.rfft` with a signal of size :attr:`n`.
+Computes the sample frequencies for :func:`~torch.fft.rfft` with a signal of size :attr:`n`.
 
 Note:
 
@@ -862,14 +863,15 @@ Note:
 Note:
     For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
     either negative or positive. Unlike :func:`~torch.fft.fftfreq`,
-    :func:`~torch.fft.rfftfreq` always returns it to be positive.
+    :func:`~torch.fft.rfftfreq` always returns is as positive.
 
 
 Args:
     n (int): the real FFT length
     d (float, optional): The sampling length scale.
-        The unit length (or time) between individual samples in the FFT input.
-        If given, the frequencies are given in physical units of 1/unit.
+        The spacing between individual samples of the FFT input.
+        The default assumes unit spacing, dividing that result by the actual
+        spacing gives the result in physical frequency units.
 
 Keyword Args:
     {dtype}

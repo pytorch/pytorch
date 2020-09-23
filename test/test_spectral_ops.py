@@ -627,6 +627,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftfreq_numpy(self, device, dtype):
@@ -653,6 +654,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fftshift_numpy(self, device, dtype):
@@ -679,6 +681,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
     def test_fftshift_frequencies(self, device, dtype):
