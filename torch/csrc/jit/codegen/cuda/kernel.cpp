@@ -33,6 +33,7 @@ class KernelIrScanner : private OptOutDispatch {
 
  public:
   explicit KernelIrScanner(const std::vector<Expr*>& exprs) {
+    TORCH_INTERNAL_ASSERT(!exprs.empty());
     for (auto expr : exprs) {
       handle(expr);
     }
@@ -89,14 +90,21 @@ class KernelIrScanner : private OptOutDispatch {
 } // namespace
 
 // TODO(kir): Kernel IR validation
-Kernel::Kernel(std::vector<Expr*> exprs, ThreadPredicateMap predicate_map)
-    : exprs_(std::move(exprs)), predicate_map_(std::move(predicate_map)) {
+void Kernel::finalize(
+    std::vector<Expr*> top_level_exprs,
+    ThreadPredicateMap predicate_map) {
+  TORCH_CHECK(top_level_exprs_.empty());
+  TORCH_CHECK(!predicate_map_);
+  top_level_exprs_ = std::move(top_level_exprs);
+  predicate_map_ =
+      std::make_unique<ThreadPredicateMap>(std::move(predicate_map));
   analyze();
 }
 
 void Kernel::analyze() {
   FUSER_PERF_SCOPE("Kernel::analyze");
-  const KernelIrScanner ir_scanner(exprs_);
+
+  const KernelIrScanner ir_scanner(top_level_exprs_);
 
   // Cache the list of buffers used within the kernel
   summary_.war_hazard_syncs = ir_scanner.war_hazard_syncs;

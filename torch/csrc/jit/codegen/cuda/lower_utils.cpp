@@ -1,8 +1,11 @@
+
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <algorithm>
@@ -167,15 +170,15 @@ class CloneLoopNest : public OptOutMutator {
   Expr* to_clone_ = nullptr;
 
   Statement* mutate(kir::ForLoop* fl) final {
-    std::vector<Expr*> mutated_exprs;
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto parent_scope =
+        fl == to_clone_ ? parent_scope_ : fl->parentScope();
+    auto new_loop = ir_builder.create<kir::ForLoop>(
+        fl->index(), fl->iter_domain(), parent_scope);
     for (Expr* expr : fl->body().exprs()) {
-      mutated_exprs.push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
+      new_loop->body().push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
     }
-    if (fl == to_clone_)
-      return new kir::ForLoop(
-          fl->index(), fl->iter_domain(), mutated_exprs, parent_scope_);
-    return new kir::ForLoop(
-        fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
+    return new_loop;
   }
 
   CloneLoopNest(Expr* _to_clone, Expr* _parent_scope)
@@ -324,15 +327,19 @@ Expr* getParent(Expr* scope) {
 
 // Open a new inner most for loop
 kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
-  const auto kir_id = kir::lowerValue(id)->as<kir::IterDomain>();
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  const auto kir_id = GpuLower::lowerValue(id)->as<kir::IterDomain>();
   kir::ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     std::stringstream ss;
     ss << id->getParallelType();
-    new_scope = new kir::ForLoop(
-        new kir::NamedScalar(ss.str(), DataType::Int), kir_id, {}, scope);
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
+        kir_id,
+        scope);
   } else {
-    new_scope = new kir::ForLoop(new kir::Int(c10::nullopt), kir_id, {}, scope);
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::Int>(c10::nullopt), kir_id, scope);
   }
   if (scope != nullptr)
     pushBack(scope, new_scope);
@@ -642,7 +649,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     // Grab the axis ID
 
     auto ca_id = tv->getComputeAtAxis(tv_i).first;
-    auto kir_ca_id = kir::lowerValue(ca_id)->as<kir::IterDomain>();
+    auto kir_ca_id = GpuLower::lowerValue(ca_id)->as<kir::IterDomain>();
 
     loops_it =
         std::find_if(loops_it, loops.end(), [&kir_ca_id](const auto& loop) {

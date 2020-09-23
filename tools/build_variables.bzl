@@ -363,6 +363,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir.cpp",
+    "torch/csrc/jit/codegen/cuda/kernel_ir_builder.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",

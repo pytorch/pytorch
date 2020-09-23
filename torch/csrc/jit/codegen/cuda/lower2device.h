@@ -32,7 +32,13 @@ class TORCH_CUDA_API GpuLower {
   //
   static Val* lowerValue(const Val* val);
 
+  // TODO(kir): we have two methods which do almost the same thing
+  //
   Val* getLowerValue(const Val* val);
+
+  //! Returns the currently active lowering object
+  //! (or nullptr if no lowering is in progress)
+  static GpuLower* current();
 
  private:
   void lower();

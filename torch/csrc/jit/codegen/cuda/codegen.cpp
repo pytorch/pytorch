@@ -132,7 +132,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void genBody() {
-    for (auto expr : kernel_->exprs()) {
+    for (auto expr : kernel_->topLevelExprs()) {
       OptInConstDispatch::handle(expr);
     }
   }
@@ -532,6 +532,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
   }
 
   void handle(const kir::ForLoop* node) final {
+    // TODO(kir): handle this during lowering
     if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast()) {
       handle(node->body());
       return;

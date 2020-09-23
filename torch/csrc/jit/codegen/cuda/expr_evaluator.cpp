@@ -34,6 +34,8 @@ void StatefulExpressionEvaluator::safeBind(
   }
 
   if (lower != nullptr) {
+    // TODO(kir): we should not need to lower (or mutate the IR in any way)
+    //  during expression evaluation
     auto lowered_val = lower->getLowerValue(value);
     already_concrete_val = getValue(lowered_val);
 

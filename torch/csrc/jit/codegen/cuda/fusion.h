@@ -144,10 +144,12 @@ class TORCH_CUDA_API Fusion final {
   StmtNameType registerStatement(Statement* stmt);
 
   // Lowered nodes
+  // TODO(kir): to be removed
   StmtNameType registerLoweredVal(Val* val);
   StmtNameType registerLoweredExpr(Expr* expr);
 
   // Lowered counterpart to inFusion()
+  // TODO(kir): to be removed
   bool inKernelIr(const Statement* stmt) const;
 
   // Check if val is used in this fusion. Not equivelent to DCE

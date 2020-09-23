@@ -9,6 +9,9 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
+// TODO(kir): only needed until we can fix Fusion::origin()
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {

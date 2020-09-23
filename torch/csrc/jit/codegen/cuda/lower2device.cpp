@@ -21,6 +21,8 @@ thread_local GpuLower* active_gpu_lower = nullptr;
 void GpuLower::replaceSymbolicSizes() {
   FUSER_PERF_SCOPE("replaceSymbolicSizes");
 
+  kir::IrBuilder ir_builder(kernel());
+
   // Grab inputs and outputs
   // TODO: Only run through inputs for the size map, outputs don't actually set
   // any sizes of the problem.
@@ -48,10 +50,9 @@ void GpuLower::replaceSymbolicSizes() {
 
     size_t dim = 0;
     for (auto id : root_td) {
+      const Val* orig_size = id->extent();
+
       // Output sizes could have reduction axes, which isn't what gets output.
-
-      Val* orig_size = id->extent();
-
       if (id->isReduction()) {
         continue;
       } else if (id->getIterType() == IterType::BroadcastWithoutStride) {
@@ -64,12 +65,13 @@ void GpuLower::replaceSymbolicSizes() {
         continue;
       }
 
+      // TODO(kir): consider a different implementation which doesn't
+      //  hijack the kir_map_
       if (kir_map_.find(orig_size) == kir_map_.end()) {
         std::stringstream ss;
         ss << "T" << tv->name() << ".size[" << dim++ << "]";
-        auto new_size =
-            new kir::NamedScalar(ss.str(), orig_size->getDataType().value());
-        kir_map_[orig_size] = new_size;
+        kir_map_[orig_size] = ir_builder.create<kir::NamedScalar>(
+            ss.str(), orig_size->getDataType().value());
       }
     }
   }
@@ -94,6 +96,9 @@ void GpuLower::lower() {
 
   FusionGuard fg(fusion_);
 
+  // Start with a fresh kernel
+  kernel_ = std::make_unique<Kernel>();
+
   // prepare for lowering
   validateIr(fusion_);
   replaceSymbolicSizes();
@@ -114,15 +119,15 @@ void GpuLower::lower() {
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, sync_exprs);
 
-  // We now have the lowered expressions, store the final lowered Kernel IR
-  kernel_ = std::make_unique<Kernel>(indexed_loops, preds);
+  // We now have the lowered expressions, finalize the kernel IR
+  kernel_->finalize(indexed_loops, preds);
 
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
-    kernel_->addInput(kir::lowerValue(input));
+    kernel_->addInput(GpuLower::lowerValue(input));
   }
   for (auto output : fusion_->outputs()) {
-    kernel_->addOutput(kir::lowerValue(output));
+    kernel_->addOutput(GpuLower::lowerValue(output));
   }
 }
 
@@ -137,7 +142,8 @@ Kernel* GpuLower::kernel() const {
 //
 class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
-  explicit KernelIrMapper(GpuLower* gpu_lower) : gpu_lower_(gpu_lower) {}
+  explicit KernelIrMapper(GpuLower* gpu_lower)
+      : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
 
   Val* lower(const Val* value) {
     const auto it = gpu_lower_->kir_map_.find(value);
@@ -166,12 +172,13 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
     switch (def->type()) {
       case ExprType::UnaryOp: {
         const auto op = def->as<fuser::UnaryOp>();
-        new kir::UnaryOp(op->getUnaryOpType(), lowered_value, lower(op->in()));
+        ir_builder_.create<kir::UnaryOp>(
+            op->getUnaryOpType(), lowered_value, lower(op->in()));
         break;
       }
       case ExprType::BinaryOp: {
         const auto op = def->as<fuser::BinaryOp>();
-        new kir::BinaryOp(
+        ir_builder_.create<kir::BinaryOp>(
             op->getBinaryOpType(),
             lowered_value,
             lower(op->lhs()),
@@ -180,7 +187,7 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
       }
       case ExprType::TernaryOp: {
         const auto op = def->as<fuser::TernaryOp>();
-        new kir::TernaryOp(
+        ir_builder_.create<kir::TernaryOp>(
             op->getTernaryOpType(),
             lowered_value,
             lower(op->in1()),
@@ -206,51 +213,53 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const TensorDomain* node) override {
-    const auto lowered_node = new kir::TensorDomain(node);
+    const auto lowered_node = ir_builder_.create<kir::TensorDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const IterDomain* node) override {
-    const auto lowered_node = new kir::IterDomain(node);
+    const auto lowered_node = ir_builder_.create<kir::IterDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const TensorView* node) override {
-    const auto lowered_node = new kir::TensorView(node);
+    const auto lowered_node = ir_builder_.create<kir::TensorView>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Bool* node) override {
-    const auto lowered_node = new kir::Bool(node);
+    const auto lowered_node = ir_builder_.create<kir::Bool>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Float* node) override {
-    const auto lowered_node = new kir::Float(node);
+    const auto lowered_node = ir_builder_.create<kir::Float>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Half* node) override {
-    const auto lowered_node = new kir::Half(node);
+    const auto lowered_node = ir_builder_.create<kir::Half>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Int* node) override {
-    const auto lowered_node = new kir::Int(node, false);
+    const auto lowered_node = ir_builder_.create<kir::Int>(node, false);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const NamedScalar* node) override {
-    const auto lowered_node =
-        new kir::NamedScalar(node->name(), node->getDataType().value());
+    const auto lowered_node = ir_builder_.create<kir::NamedScalar>(
+        node->name(), node->getDataType().value());
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
  private:
   GpuLower* gpu_lower_ = nullptr;
+  kir::IrBuilder ir_builder_;
 };
 
 Val* GpuLower::lowerValue(const Val* val) {
+  TORCH_INTERNAL_ASSERT(!kir::isLoweredVal(val));
   TORCH_INTERNAL_ASSERT(active_gpu_lower != nullptr);
   KernelIrMapper kir_mapper(active_gpu_lower);
   return kir_mapper.lower(val);
@@ -259,6 +268,11 @@ Val* GpuLower::lowerValue(const Val* val) {
 Val* GpuLower::getLowerValue(const Val* val) {
   KernelIrMapper kir_mapper(this);
   return kir_mapper.lower(val);
+}
+
+GpuLower* GpuLower::current() {
+  TORCH_INTERNAL_ASSERT(active_gpu_lower != nullptr);
+  return active_gpu_lower;
 }
 
 } // namespace fuser

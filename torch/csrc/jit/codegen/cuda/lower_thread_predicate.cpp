@@ -1,9 +1,12 @@
+
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 namespace torch {
 namespace jit {
@@ -14,6 +17,8 @@ namespace {
 Val* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::SourceMapType& source_map) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
   if (pt == ParallelType::BIDx || pt == ParallelType::BIDy ||
       pt == ParallelType::BIDz) {
     auto source = source_map.at(pt);
@@ -21,17 +26,20 @@ Val* getPredicatePerParallelType(
     TORCH_INTERNAL_ASSERT(source.size() == 1, "Multiple sources detected");
     auto src = *source.begin();
     auto flag_name = kir::GridReduction::getPredicateFlagName(src);
-    return new kir::NamedScalar(flag_name, DataType::Bool);
+    return ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool);
   } else {
-    return kir::eqExpr(kir::NamedScalar::getParallelIndex(pt), new kir::Int(0));
+    return ir_builder.eqExpr(
+        kir::NamedScalar::getParallelIndex(pt), ir_builder.create<kir::Int>(0));
   }
 }
 
 kir::Bool* getPredicate(
     const ir_utils::ParallelTypeBitmap& bits,
     const ThreadPredicateMap::SourceMapType& source_map) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
   if (bits.none()) {
-    return new kir::Bool(true);
+    return ir_builder.create<kir::Bool>(true);
   }
 
   Val* pred = nullptr;
@@ -39,7 +47,7 @@ kir::Bool* getPredicate(
   for (const auto& pt_bool : bits.getMap()) {
     if (pt_bool.second) {
       auto tp = getPredicatePerParallelType(pt_bool.first, source_map);
-      pred = (pred == nullptr) ? tp : kir::andExpr(pred, tp);
+      pred = (pred == nullptr) ? tp : ir_builder.andExpr(pred, tp);
     }
   }
 

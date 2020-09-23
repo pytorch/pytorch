@@ -1,8 +1,6 @@
 
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 // TODO(kir): remove these once the Kernel IR is separated from Fusion IR
@@ -12,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <string>
 #include <unordered_map>
@@ -22,12 +21,25 @@ namespace jit {
 namespace fuser {
 namespace kir {
 
+class IrBuilder;
+
+//! Token used to restrict the access to Kernel IR constructors
+//!
+//! Granular "friendship" token, used to implement the "passkey" idiom:
+//! https://www.spiria.com/en/blog/desktop-software/passkey-idiom-and-better-friendship-c
+//! https://arne-mertz.de/2016/10/passkey-idiom
+//!
+class Passkey {
+  friend class IrBuilder;
+  Passkey() {}
+};
+
 class TORCH_CUDA_API NamedScalar : public Val {
  public:
-  NamedScalar(std::string name, DataType dtype)
+  NamedScalar(Passkey, std::string name, DataType dtype)
       : Val(ValType::KirNamedScalar, dtype, true, true), name_(name) {}
 
-  explicit NamedScalar(const fuser::NamedScalar* node)
+  explicit NamedScalar(Passkey, const fuser::NamedScalar* node)
       : Val(node), name_(node->name()) {}
 
   const std::string& name() const {
@@ -54,11 +66,11 @@ class TORCH_CUDA_API NamedScalar : public Val {
 
 class TORCH_CUDA_API Bool : public Val {
  public:
-  explicit Bool(const c10::optional<bool>& value)
+  explicit Bool(Passkey, const c10::optional<bool>& value)
       : Val(ValType::KirScalar, DataType::Bool, true, true),
         maybe_value_(value) {}
 
-  explicit Bool(const fuser::Bool* node)
+  explicit Bool(Passkey, const fuser::Bool* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -79,11 +91,11 @@ class TORCH_CUDA_API Float : public Val {
  public:
   using ScalarType = double;
 
-  explicit Float(const c10::optional<ScalarType>& value)
+  explicit Float(Passkey, const c10::optional<ScalarType>& value)
       : Val(ValType::KirScalar, DataType::Float, true, true),
         maybe_value_(value) {}
 
-  explicit Float(const fuser::Float* node)
+  explicit Float(Passkey, const fuser::Float* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -102,11 +114,11 @@ class TORCH_CUDA_API Float : public Val {
 
 class TORCH_CUDA_API Half : public Val {
  public:
-  explicit Half(const c10::optional<float>& value)
+  explicit Half(Passkey, const c10::optional<float>& value)
       : Val(ValType::KirScalar, DataType::Half, true, true),
         maybe_value_(value) {}
 
-  explicit Half(const fuser::Half* node)
+  explicit Half(Passkey, const fuser::Half* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -127,11 +139,11 @@ class TORCH_CUDA_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  explicit Int(const c10::optional<ScalarType>& value)
+  explicit Int(Passkey, const c10::optional<ScalarType>& value)
       : Val(ValType::KirScalar, DataType::Int, true, true),
         maybe_value_(value) {}
 
-  explicit Int(const fuser::Int* node, bool /*avoid_zero_ambiguity*/)
+  explicit Int(Passkey, const fuser::Int* node, bool /*avoid_zero_ambiguity*/)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -150,9 +162,9 @@ class TORCH_CUDA_API Int : public Val {
 
 class TORCH_CUDA_API IterDomain : public Val {
  public:
-  IterDomain(Val* start, Val* extent);
+  IterDomain(Passkey, Val* start, Val* extent);
 
-  explicit IterDomain(const fuser::IterDomain* iter_domain);
+  explicit IterDomain(Passkey, const fuser::IterDomain* iter_domain);
 
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
@@ -216,9 +228,9 @@ class TORCH_CUDA_API IterDomain : public Val {
 
 class TORCH_CUDA_API TensorDomain : public Val {
  public:
-  explicit TensorDomain(std::vector<IterDomain*> domain);
+  explicit TensorDomain(Passkey, std::vector<IterDomain*> domain);
 
-  explicit TensorDomain(const fuser::TensorDomain* tensor_domain);
+  explicit TensorDomain(Passkey, const fuser::TensorDomain* tensor_domain);
 
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
@@ -285,7 +297,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
 class TORCH_CUDA_API TensorView : public Val {
  public:
-  explicit TensorView(const fuser::TensorView* tv);
+  explicit TensorView(Passkey, const fuser::TensorView* tv);
 
   TensorDomain* domain() const {
     return domain_;
@@ -310,7 +322,7 @@ class TORCH_CUDA_API TensorView : public Val {
 
 class TORCH_CUDA_API UnaryOp : public Expr {
  public:
-  UnaryOp(UnaryOpType type, Val* out, Val* in);
+  UnaryOp(Passkey, UnaryOpType type, Val* out, Val* in);
 
   Val* out() const {
     return out_;
@@ -332,7 +344,7 @@ class TORCH_CUDA_API UnaryOp : public Expr {
 
 class TORCH_CUDA_API BinaryOp : public Expr {
  public:
-  BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
+  BinaryOp(Passkey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
   Val* out() const {
     return out_;
@@ -359,7 +371,13 @@ class TORCH_CUDA_API BinaryOp : public Expr {
 
 class TORCH_CUDA_API TernaryOp : public Expr {
  public:
-  TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
+  TernaryOp(
+      Passkey,
+      TernaryOpType type,
+      Val* out,
+      Val* in1,
+      Val* in2,
+      Val* in3);
 
   Val* out() const {
     return out_;
@@ -392,6 +410,7 @@ class TORCH_CUDA_API TernaryOp : public Expr {
 class TORCH_CUDA_API ReductionOp : public Expr {
  public:
   ReductionOp(
+      Passkey,
       BinaryOpType reduction_op_type,
       Val* init,
       Val* out,
@@ -434,7 +453,10 @@ class TORCH_CUDA_API ReductionOp : public Expr {
 
 class TORCH_CUDA_API TensorIndex : public Val {
  public:
-  TensorIndex(const fuser::TensorView* view, std::vector<Val*> indices);
+  TensorIndex(
+      Passkey,
+      const fuser::TensorView* view,
+      std::vector<Val*> indices);
 
   std::vector<Val*>::size_type nDims() const {
     return indices_.size();
@@ -457,7 +479,7 @@ class TORCH_CUDA_API TensorIndex : public Val {
 
 class TORCH_CUDA_API BroadcastOp : public Expr {
  public:
-  BroadcastOp(Val* out, Val* in);
+  BroadcastOp(Passkey, Val* out, Val* in);
 
   Val* out() const {
     return out_;
@@ -482,6 +504,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
 class TORCH_CUDA_API Allocate : public Expr {
  public:
   explicit Allocate(
+      Passkey,
       Val* buffer,
       MemoryType memory_type = MemoryType::Local,
       Val* size = nullptr,
@@ -517,7 +540,7 @@ class TORCH_CUDA_API Allocate : public Expr {
 // Sync represents __syncthreads barrier for block level coordination.
 class TORCH_CUDA_API Sync : public Expr {
  public:
-  explicit Sync(bool war_sync = false);
+  explicit Sync(Passkey, bool war_sync = false);
 
   bool isWarHazardSync() const {
     return war_sync_;
@@ -528,6 +551,7 @@ class TORCH_CUDA_API Sync : public Expr {
   bool war_sync_ = false;
 };
 
+// TODO(kir): promote to IR node
 class TORCH_CUDA_API Scope {
  public:
   Scope() = default;
@@ -589,11 +613,7 @@ class TORCH_CUDA_API Scope {
 //
 class TORCH_CUDA_API ForLoop : public Expr {
  public:
-  explicit ForLoop(
-      Val* index,
-      IterDomain* iter_domain,
-      const std::vector<Expr*>& body = {},
-      Expr* parent_scope = nullptr);
+  ForLoop(Passkey, Val* index, IterDomain* iter_domain, Expr* parent_scope);
 
   Val* index() const {
     return index_;
@@ -633,11 +653,7 @@ class TORCH_CUDA_API ForLoop : public Expr {
 //
 class TORCH_CUDA_API IfThenElse : public Expr {
  public:
-  explicit IfThenElse(
-      Bool* cond,
-      const std::vector<Expr*>& then_body = {},
-      const std::vector<Expr*>& else_body = {},
-      Expr* parent_scope = nullptr);
+  explicit IfThenElse(Passkey, Bool* cond, Expr* parent_scope);
 
   Bool* cond() const {
     return cond_;
@@ -681,9 +697,10 @@ class TORCH_CUDA_API IfThenElse : public Expr {
 // reduction and sync buffers.
 class TORCH_CUDA_API GridReduction : public Expr {
  public:
-  explicit GridReduction(ReductionOp* reduction_op);
+  explicit GridReduction(Passkey, ReductionOp* reduction_op);
 
   GridReduction(
+      Passkey,
       ReductionOp* reduction_op,
       Allocate* reduction_buffer,
       Allocate* sync_buffer,
@@ -714,24 +731,6 @@ class TORCH_CUDA_API GridReduction : public Expr {
   Allocate* sync_buffer_ = nullptr;
   Bool* pred_ = nullptr;
 };
-
-// Simple classification helpers
-bool isLoweredScalar(const Val* val);
-bool isLoweredVal(const Val* val);
-
-// Converts a Fusion IR value into the Kernel IR equivalent
-Val* lowerValue(const Val* val);
-
-// A minimal builder interface
-Val* andExpr(Val* lhs, Val* rhs);
-Val* eqExpr(Val* lhs, Val* rhs);
-Val* ltExpr(Val* lhs, Val* rhs);
-Val* addExpr(Val* lhs, Val* rhs);
-Val* subExpr(Val* lhs, Val* rhs);
-Val* mulExpr(Val* lhs, Val* rhs);
-Val* divExpr(Val* lhs, Val* rhs);
-Val* ceilDivExpr(Val* lhs, Val* rhs);
-Val* modExpr(Val* lhs, Val* rhs);
 
 } // namespace kir
 } // namespace fuser
