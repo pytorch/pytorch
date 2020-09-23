@@ -4490,30 +4490,60 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
     @staticmethod
-    def _nested_slow_add_on_user_stream(x, y, z):
+    def _nested_slow_add_on_user_stream(dst, x, y, z):
         ret = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._slow_add_on_user_stream,
             args=(x, y)
         )
 
+        print(ret)
+
         return TensorPipeAgentRpcTest._slow_add_on_user_stream(ret, z)
 
-    def _test_stream_nested_sync(self):
+    def _test_stream_nested_sync(self, dst):
         if self.rank == 0:
             x = torch.ones(2, 2).to(0)
+            y = torch.ones(2, 2).to(0) * 2
+            z = torch.ones(2, 2).to(0) * 3
+            nested_dst = worker_name((self.rank + 2) % self.world_size)
             ret = rpc.rpc_sync(
                 dst,
                 TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
-                args=(x, x, x)
+                args=(nested_dst, x, y, z)
             )
-            self.assertEqual(ret, 3 * x)
+            self.assertEqual(ret, 6 * x)
 
     @skip_if_lt_x_gpu(2)
-    def test_custom_stream_nested(self):
+    def test_custom_stream_nested_x(self):
         self._test_custom_stream(
-            self._test_stream_sync,
+            self._test_stream_nested_sync,
             {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
         )
 
-    # todo add jit tests
+    def _test_stream_nested_multi_async(self, dst):
+        if self.rank == 0:
+            futs = []
+            n = 10
+            for i in range(n):
+                x = torch.ones(2, 2).to(0) * (i - 1)
+                y = torch.ones(2, 2).to(0) * i
+                z = torch.ones(2, 2).to(0) * (i + 1)
+                nested_dst = worker_name((self.rank + 2) % self.world_size)
+                futs.append(
+                    rpc.rpc_async(
+                        dst,
+                        TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+                        args=(nested_dst, x, y, z)
+                    )
+                )
+
+            for i in range(n):
+                self.assertEqual(futs[i].wait(), 3 * torch.ones(2, 2).to(0) * i)
+
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_nested_multi(self):
+        self._test_custom_stream(
+            self._test_stream_nested_multi_async,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
