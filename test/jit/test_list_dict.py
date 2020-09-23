@@ -408,6 +408,34 @@ class TestList(JitTestCase):
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
 
+    def test_slice_index(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        a = torch.tensor(
+            [
+                [[1, 11], [2, 22]],
+                [[3, 33], [4, 44]],
+                [[5, 55], [6, 66]],
+            ]
+        )
+
+        def test_index_slice1(x):
+            x = x[:, :, [0, 1]]
+            return x
+
+        def test_index_slice2(x):
+            x = x[[2, 1, 0], :, :]
+            return x
+
+        def test_index_slice3(x):
+            x = x[[0, 1], :, [1]]
+            return x
+
+        test_func(test_index_slice1, (a,))
+        test_func(test_index_slice2, (a,))
+        test_func(test_index_slice3, (a,))
+
     def test_mutable_list_append(self):
         def test_append():
             a = [0, 1]
