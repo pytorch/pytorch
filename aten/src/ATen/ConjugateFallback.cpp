@@ -28,6 +28,31 @@ void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
   const auto num_arguments = arguments.size();
   const auto stack_start = stack->size() - num_arguments;
 
+  c10::optional<bool> is_write;
+  for (int64_t i = 0; i < num_arguments; ++i) {
+    const auto& alias_info = arguments[i].alias_info();
+    if (alias_info.has_value()) {
+      if (is_write.has_value()) {
+        TORCH_CHECK(*is_write == alias_info->isWrite(),
+          "Unsupported operator for conjugate fallback: ", op.schema().name(),
+          "Conjugate fallback doesn't work for operators with a mix "
+          "mutable and non-mutable inputs that alias with outputs, "
+          "this must be implemented manually.  "
+          "If you got this error on a core op, please report a bug to PyTorch.");
+      } else {
+        is_write = alias_info->isWrite();
+      }
+    }
+  }
+
+  if (is_write.has_value() && !*is_write) {
+    // We assume that view operators automatically handle conjugation
+    // correctly by propagating the Conjugate dispatch key in key_set.
+    // This is not necessarily always right, so you should test these cases.
+    op.callBoxed(stack);
+    return;
+  }
+
   // Mutable inputs to be tracked separately
   std::vector<Tensor> mutable_inputs;
 
@@ -37,13 +62,11 @@ void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
       continue;
     }
     const auto& argument = arguments[i];
-    bool is_write = false;
+    bool mut_arg = false;
     if (argument.alias_info()) {
-      TORCH_CHECK(argument.alias_info()->isWrite(),
-        "Conjugate fallback doesn't work for non-mutable input arguments that "
-        "alias with outputs, these must be implemented manually.  "
-        "If you got this error on a core op, please report a bug to PyTorch");
-      is_write = true;
+      // Was already tested by is_write loop above
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
+      mut_arg = true;
     }
     auto* impl = ivalue.unsafeToTensorImpl();
     if (!impl->is_conj()) {
@@ -51,7 +74,7 @@ void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
     }
 
     auto tensor = std::move(ivalue).toTensor();
-    if (is_write) {
+    if (mut_arg) {
       // TODO: This is a waste if the argument is write only
       native::conj_physical_(tensor);
       tensor.set_conj(false);
