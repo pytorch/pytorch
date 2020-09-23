@@ -12,6 +12,7 @@ from . import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
+    get_rpc_timeout,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
     _destroy_rref_context,
@@ -25,7 +26,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    _set_rpc_timeout,
 )
 
 from .internal import (
@@ -165,7 +165,7 @@ def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
 
     is_leader = leader_name == self_name
     if timeout == UNSET_RPC_TIMEOUT:
-        timeout = _get_current_rpc_agent()._get_timeout()
+        timeout = get_rpc_timeout()
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -179,9 +179,7 @@ def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
         )
 
     with _all_gather_dict_lock:
-        states = _all_gather_sequence_id_to_states[
-            sequence_id
-        ]
+        states = _all_gather_sequence_id_to_states[sequence_id]
     states.proceed_signal.wait()
 
     # Phase 2: Leader broadcast gathered results to all followers
@@ -198,16 +196,17 @@ def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
             )
             worker_name_to_response_future_dict[follower_name] = fut
 
-        failed_followers = []
+        errors = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                failed_followers.append(follower_name)
+                errors.append((follower_name, ex))
 
-        if failed_followers:
+        if errors:
             raise RuntimeError(
-                f"Followers {failed_followers} timed out after {timeout:.2f} seconds"
+                f"Followers {[e[0] for e in errors]} timed out in _all_gather "
+                f"after {timeout:.2f} seconds. The first exception is {errors[0][1]}"
             )
 
     return states.gathered_objects
@@ -225,7 +224,9 @@ def _wait_all_workers():
     try:
         _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
     except RuntimeError as ex:
-        logger.error(str(ex))
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 
 @_require_initialized
