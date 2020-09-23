@@ -12,11 +12,6 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/utils/cuda_enabled.h>
-
-#ifdef USE_CUDA
-#include <torch/cuda.h>
-#endif
 
 namespace torch {
 namespace distributed {
