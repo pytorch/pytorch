@@ -508,6 +508,7 @@ class TestFX(JitTestCase):
         self.assertTrue(hasattr(m, 'attr'))
         m = copy.deepcopy(m)
         self.assertTrue(hasattr(m, 'attr'))
+        self.assertTrue(hasattr(m, 'training'))
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
