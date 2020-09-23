@@ -263,7 +263,12 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {}
+  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+    if (!this->elem) {
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
+    }
+  }
 
  private:
   TypePtr elem;
@@ -454,6 +459,20 @@ struct CAFFE2_API SymbolicShape {
     shape_symbols.reserve(*rank);
     for(size_t i = 0; i < *rank; ++i) {
       shape_symbols.push_back(ShapeSymbol::newSymbol());
+    }
+    dims_ = shape_symbols;
+  }
+
+  // Mix of known and unknown ranks
+  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+    std::vector<ShapeSymbol> shape_symbols;
+    shape_symbols.reserve(dims.size());
+    for(c10::optional<int64_t> dim: dims) {
+      if(!dim) {
+        shape_symbols.push_back(ShapeSymbol::newSymbol());
+      } else {
+        shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
+      }
     }
     dims_ = shape_symbols;
   }
@@ -975,6 +994,16 @@ struct CAFFE2_API FutureType
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs->cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    }
+    return false;
   }
 
  private:

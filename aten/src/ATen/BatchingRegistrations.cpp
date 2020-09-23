@@ -19,7 +19,7 @@ namespace at {
 // NOTE: [When should I add a batching rule?]
 // When you are adding a new operator, you'll need to add a batching rule so
 // that vmap can work efficiently with said operator. If you do not, we'll attempt
-// to generate a slow fallback for the batching rule (this is not yet implemented).
+// to generate a slow fallback for the batching rule.
 
 // NOTE: [How to write batching rules?]
 // The signature of a batching rule should look like exactly like the C++ signature
@@ -223,11 +223,31 @@ Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
+  return maybe_wrap_dim(dim, input_sizes.size()) + num_batch_dims;
+}
+
+Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
+  grad_input.select(physical_dim, index).copy_(grad_physical.tensor());
+  return grad_physical.newLogicalFromPhysical(grad_input);
+}
+
 Tensor slice_batching_rule(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().slice(dim_physical, start, end, step);
   return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor slice_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  auto physical_dim = getGradInputPhysicalDim(dim, input_sizes, grad_physical.numBatchDims());
+  grad_input.slice(physical_dim, start, end, step).copy_(grad_physical.tensor());
+  return grad_physical.newLogicalFromPhysical(grad_input);
 }
 
 Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -236,6 +256,15 @@ Tensor diagonal_batching_rule(const Tensor& self, int64_t offset, int64_t dim1, 
   auto dim2_physical = self_physical.getPhysicalDim(dim2);
   auto result = at::diagonal(self_physical.tensor(), offset, dim1_physical, dim2_physical);
   return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor diagonal_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  auto dim1_physical = getGradInputPhysicalDim(dim1, input_sizes, grad_physical.numBatchDims());
+  auto dim2_physical = getGradInputPhysicalDim(dim2, input_sizes, grad_physical.numBatchDims());
+  grad_input.diagonal(offset, dim1_physical, dim2_physical).copy_(grad_physical.tensor());
+  return grad_physical.newLogicalFromPhysical(grad_input);
 }
 
 Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef destination) {
@@ -493,6 +522,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl("is_complex", native::is_complex);
+  m.impl("conj", native::conj);
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
@@ -531,6 +562,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(ceil);
   UNARY_POINTWISE(cos);
   UNARY_POINTWISE(cosh);
+  UNARY_POINTWISE(_conj);
   UNARY_POINTWISE(digamma);
   UNARY_POINTWISE(exp);
   UNARY_POINTWISE(expm1);
@@ -614,6 +646,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // cat/stack
   m.impl("cat", cat_batching_rule);
   m.impl("stack", stack_batching_rule);
+
+  // backward operators
+  m.impl("select_backward", select_backward_batching_rule);
+  m.impl("slice_backward", slice_backward_batching_rule);
+  m.impl("diagonal_backward", diagonal_backward_batching_rule);
 }
 
 } // namespace at
