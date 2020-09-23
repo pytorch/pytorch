@@ -230,7 +230,6 @@ ncclResult_t ncclAlltoallv(
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
 const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
-constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
@@ -335,12 +334,10 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
-    // Use the passed in timeout if provided, otherwise use the default
-    // opTimeout for each WorkNCCL object.
-    std::chrono::milliseconds workTimeout =
-        timeout == kNoTimeout ? opTimeout_ : timeout;
-    // Wait for the operation to complete.
-    while (!isCompleted()) {
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      // Synchronize so that the CUDA Event corresponding to this collective
+      // has completed.
+      cudaEventSynchronize((*cudaEvents_)[i]);
       if (timedOut()) {
         // When operation times out due to some errors that are not
         // detected by nccl communicators, ncclCommWatchdog can not check this
@@ -348,7 +345,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         // So explicitly abort ncclComms here before throwing this timed out
         // exception to users, after this, ncclCommWatchdog can detect nccl
         // communicators are aborted and clean up devNCCLCommMap_ accordingly.
-        // if throwing timed out excepiton without aborting nccl communicators
+        // if throwing timed out exception without aborting nccl communicators
         // here, it was observed that CUDA GPU will have 100% utilization and
         // can not run new events successfully.
         for (const auto& ncclComm : ncclComms_) {
@@ -360,11 +357,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         }
         throw std::runtime_error("Operation timed out!");
       }
-      // Check for errors and throw appropriate exception.
-      checkAndThrowException();
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
+
     checkAndThrowException();
   }
 
@@ -561,7 +555,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
       }
     }
 
-    if (asyncErrorHandling_) {
+    if (blockingWait_ || asyncErrorHandling_) {
       std::unique_lock<std::mutex> lock(workListMutex_);
       for (auto& work : workList_) {
         work->checkAndSetException();
@@ -999,7 +993,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->store_ = store_;
   }
 
-  if (asyncErrorHandling_) {
+  if (blockingWait_ || asyncErrorHandling_) {
     workEnqueue(work);
   }
 
