@@ -132,7 +132,8 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         if isinstance(root, torch.nn.Module):
-            self.__dict__ = root.__dict__
+            if hasattr(root, 'training'):
+                self.training = root.training
             for node in graph.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
@@ -193,7 +194,9 @@ def forward(self, {', '.join(free_variables)}):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, self.graph)
+        graph_module = GraphModule(fake_mod, self.graph)
+        graph_module.__dict__ = fake_mod.__dict__
+        return graph_module
 
     def __copy__(self):
         return GraphModule(self, self.graph)
