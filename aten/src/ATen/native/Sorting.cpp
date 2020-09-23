@@ -217,7 +217,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   //        The reductions are fine, as long as the axis being reduced along
   //        isn't of 0 elements (and the output has elements).
   TORCH_CHECK(
-      self.numel() > 0,
+      self.numel() != 0 || (dim >= 0 && self.size(dim) != 0),
       "cannot perform reduction function kthvalue",
       " on tensor with no elements because the operation does not have an identity");
   TORCH_CHECK(
