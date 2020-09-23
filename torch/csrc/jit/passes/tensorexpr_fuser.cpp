@@ -464,7 +464,6 @@ class TensorExprFuser {
             prev_fusion_group);
       } else {
         GRAPH_DEBUG("Cannot merge into the previous fusion group");
-        post_merge_fusion_groups.push_back(prev_fusion_group);
         prev_fusion_group = fusion_group;
       }
     }
@@ -503,7 +502,7 @@ class TensorExprFuser {
   }
 
   void inlineSmallFusionGroups(Block* block) {
-    for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* n = *it;
       it++;
 
