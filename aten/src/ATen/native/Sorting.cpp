@@ -12,6 +12,7 @@
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
 
 namespace {
@@ -514,6 +515,37 @@ Tensor median_cpu(const Tensor& self) {
     result.fill_(tmp_values[k]);
   });
   return result.view({});
+}
+
+std::tuple<Tensor&, Tensor&> sort_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool descending
+    ) {
+  values.resize_(self.sizes()).copy_(self);
+  indices.resize_(self.sizes());
+
+  // check if self is scalar
+  if (self.dim() == 0 && self.numel() == 1) {
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  sort_stub(kCPU, values, indices, dim, descending);
+
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> sort_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool descending
+    ) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return sort_out_cpu(values, indices, self, dim, descending);
 }
 
 } // namespace native
