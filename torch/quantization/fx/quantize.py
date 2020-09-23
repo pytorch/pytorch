@@ -18,6 +18,12 @@ from torch.quantization import (
 from ..quantization_mappings import (
     get_qat_module_mappings,
 )
+from ..custom_module_class_mappings import (
+    is_custom_module_class,
+    get_observed_custom_module_class,
+    mark_observed_custom_module,
+    is_observed_custom_module,
+)
 
 from ..quantize import _remove_qconfig
 
@@ -128,6 +134,10 @@ def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
             isinstance(module, torch.quantization.FakeQuantize))
 
+def is_submodule_of_fake_quant(name, module, named_modules):
+    parent_name, _ = _parent_name(name)
+    return is_activation_post_process(named_modules[parent_name])
+
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
@@ -175,7 +185,6 @@ def convert_dict_to_ordered_dict(qconfig_dict):
     _convert_to_ordered_dict('object_type', qconfig_dict)
     _convert_to_ordered_dict('module_name_regex', qconfig_dict)
     _convert_to_ordered_dict('module_name', qconfig_dict)
-
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -284,7 +293,7 @@ class Quantizer:
             elif node.op == 'call_module':
                 module_qconfig = get_qconfig(node.target)
                 # regex is not supported eager mode propagate_qconfig_, we'll need to
-                # set the qconfig explictly here in case regex
+                # set the qconfig explicitly here in case regex
                 # is used
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
@@ -293,7 +302,6 @@ class Quantizer:
         if not inplace:
             model = copy.deepcopy(model)
         self.is_dynamic_quant = is_dynamic_quant
-        # TODO: allow user specified patterns
         if self.is_dynamic_quant:
             self.patterns = get_dynamic_quant_patterns()
         else:
@@ -338,6 +346,8 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
+                if qconfig is None:
+                    continue
 
                 def insert_observer(node, observer, device):
                     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
@@ -349,10 +359,22 @@ class Quantizer:
                     if device:
                         getattr(model, observer_name).to(device)
 
+                if isinstance(obj, CustomModuleQuantizeHandler):
+                    custom_module = self.modules[node.target]
+                    observed_custom_module_class = \
+                        get_observed_custom_module_class(type(custom_module))
+                    observed_custom_module = \
+                        observed_custom_module_class.from_float(custom_module)
+                    mark_observed_custom_module(observed_custom_module, type(custom_module))
+                    parent_name, name = _parent_name(node.target)
+                    setattr(self.modules[parent_name], name, observed_custom_module)
+
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
                     continue
 
+                # inserting observers for output of observed module, or mark the output
+                # as observed
                 if isinstance(obj, CopyNode):
                     assert node.op in [
                         'call_module',
@@ -458,6 +480,7 @@ class Quantizer:
         self.modules = dict(model.named_modules())
 
         matches = self._find_matches(model.graph, self.modules, self.patterns)
+
         quants = self._find_quants(model.graph, matches)
         self.quantized_graph = Graph()
         env = {}
@@ -612,9 +635,10 @@ class Quantizer:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
+        module_dict = dict(model.named_modules())
         to_be_removed = []
         for name, module in model.named_modules():
-            if is_activation_post_process(module):
+            if is_activation_post_process(module) and not is_submodule_of_fake_quant(name, module, module_dict):
                 to_be_removed.append(name)
         for n in to_be_removed:
             delattr(model, n)
@@ -722,6 +746,16 @@ class Quantizer:
                             all_matched.add(n.name)
                         # break after finding the first match
                         break
+
+        # add custom module instances to the match result
+        for node in graph.nodes:
+            if node.op == 'call_module' and \
+               (is_custom_module_class(type(self.modules[node.target])) or
+                    is_observed_custom_module(self.modules[node.target])):
+                custom_module_qconfig = self.qconfig_map[node.name]
+                match_map[node.name] = (
+                    node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+
         return match_map
 
     def _find_quants(self, graph, matches):
