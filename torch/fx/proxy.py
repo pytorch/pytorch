@@ -4,7 +4,7 @@ import inspect
 import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, NoReturn, Any, Union, Callable
+from typing import Tuple, Dict, Optional, Iterable, Any, Union, Callable
 from .node import Target, Node, Argument, base_types
 
 class TracerBase:
@@ -48,6 +48,31 @@ class TracerBase:
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
+
+    def to_bool(self, obj: 'Proxy') -> bool:
+        """Called when a proxy object is being converted to a boolean, such as
+        when used in control flow.  Normally we don't know what to do because
+        we don't know the value of the proxy, but a custom tracer can attach more
+        information to the graph node using create_node and can choose to return a value.
+        """
+        raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
+
+    def iter(self, obj: 'Proxy') -> iter:
+        """Called when a proxy object is being iterated over, such as
+        when used in control flow.  Normally we don't know what to do because
+        we don't know the value of the proxy, but a custom tracer can attach more
+        information to the graph node using create_node and can choose to return an iterator.
+        """
+        raise TraceError('Proxy object cannot be iterated. '
+                         'This can be attempted when used in a for loop or as a *args or **kwargs function argument.')
+
+    def keys(self, obj: 'Proxy') -> Any:
+        """Called when a proxy object is has the keys() method called.
+        This is what happens when ** is called on a proxy. This should return an
+        iterator it ** is suppose to work in your custom tracer.
+        """
+        return Attribute(obj, 'keys')()
+
 
 # used in Proxy object when just appending to the graph while not tracing.
 class GraphAppendingTracer(TracerBase):
@@ -102,19 +127,14 @@ class Proxy:
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))  # type: ignore
-        if inst.opname == 'CALL_FUNCTION_EX':
-            self._no_arg_unpack()
-        else:
-            self._no_control_flow()
 
-    def _no_control_flow(self) -> NoReturn:
-        raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
+        return self.tracer.iter(self)
 
-    def _no_arg_unpack(self) -> NoReturn:
-        raise TraceError('Proxy object cannot be unpacked as function argument')
+    def __bool__(self) -> bool:
+        return self.tracer.to_bool(self)
 
-    def __bool__(self) -> NoReturn:
-        self._no_control_flow()
+    def keys(self):
+        return self.tracer.keys(self)
 
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()

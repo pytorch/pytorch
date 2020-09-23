@@ -603,6 +603,41 @@ class TestFX(JitTestCase):
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
 
+    def test_iterable_inputs(self):
+        def apply_shape(shape, obj):
+            if isinstance(shape, dict):
+                return {k: obj[k] for k, v in shape.items()}
+            if isinstance(shape, list):
+                return [obj[i] for i, _ in enumerate(shape)]
+
+        class Custom(Tracer):
+            def __init__(self, input_shape):
+                self.input_shape = input_shape
+                super().__init__()
+
+            def iter(self, obj: 'Proxy') -> iter:
+                if obj.node.op == 'placeholder' and obj.node.target in self.input_shape:
+                    shape = self.input_shape[obj.node.target]
+                    return iter(apply_shape(shape, obj))
+                return super().iter(obj)
+
+            def keys(self, obj: 'Proxy'):
+                if obj.node.op == 'placeholder' and obj.node.target in self.input_shape:
+                    shape = self.input_shape[obj.node.target]
+                    return shape.keys()
+                return super().keys(obj)
+
+        class Model(torch.nn.Module):
+            def what(self, c, a, b):
+                return c * a + b
+
+            def forward(self, *args, **kwargs):
+                return self.what(*args, **kwargs)
+
+        r = Custom({'*args': ['*'], '**kwargs': {'a': '*', 'b': '*'}}).trace(Model())
+        print(r.code)
+
+
 
 if __name__ == '__main__':
     run_tests()
