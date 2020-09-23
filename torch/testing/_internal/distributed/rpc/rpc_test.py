@@ -1,6 +1,7 @@
 import concurrent.futures
 import contextlib
 import json
+import logging
 import sys
 from threading import Lock
 import time
@@ -128,6 +129,19 @@ class MyPickleClass:
 
     def set(self, val):
         self.t = val
+
+
+class SlowPickleClass:
+    def __init__(self, t):
+        self.t = t
+
+    def __getstate__(self):
+        time.sleep(self.t)
+        return (self.t, )
+
+    def __setstate__(self, obj):
+        self.t = obj[0]
+        time.sleep(self.t)
 
 
 class MyClass:
@@ -448,9 +462,23 @@ class AsyncExecutionClass:
         )
         return ret_fut
 
+    @rpc.functions.async_execution
+    def bound_async_add(self, to, x, y, z):
+        return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: fut.wait() + z
+        )
+
 
 def return_future():
     return torch.futures.Future()
+
+
+class FooBackendOptions(rpc.RpcBackendOptions):
+    def __init__(self, init_method):
+        # Must call the __init__ of the superclass (and do so directly,
+        # without using super()) because... pybind.
+        rpc.RpcBackendOptions.__init__(self)
+        self.init_method = init_method
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -530,6 +558,20 @@ class RpcTest(RpcAgentTestFixture):
     def test_self_remote_rref_as_remote_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
+
+    @dist_init
+    def test_rref_proxy_non_exist(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+        msg = "non_exist is not an attribute of type"
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.rpc_sync().non_exist()
+
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.rpc_async().non_exist()
+
+        with self.assertRaisesRegex(ValueError, msg):
+            rref.remote().non_exist()
 
     def _test_rref_proxy_tensor(self, dst):
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
@@ -901,6 +943,20 @@ class RpcTest(RpcAgentTestFixture):
             expected[info.name] = info.id
 
         self.assertEqual(expected, results)
+
+    @dist_init
+    def test_all_gather_timeout(self):
+        rpc._set_rpc_timeout(0.1)
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "timed out in _all_gather after 0\\.10 seconds"
+            ):
+                rpc.api._all_gather(SlowPickleClass(0.5))
+        else:
+            with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
+                rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
@@ -1986,6 +2042,60 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
+    def test_rref_type(self):
+
+        def launched_rpc(events):
+            expected_name = "rpc_sync#_rref_typeof_on_owner"
+            return any([e.name.startswith(expected_name) for e in events])
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
+
+        with torch.autograd.profiler.profile() as p:
+            t = rref._get_type()
+
+        self.assertTrue(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        with torch.autograd.profiler.profile() as p:
+            for _ in range(10):
+                t = rref._get_type()
+
+        self.assertFalse(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        rref = rpc.remote(dst, MyClass, args=(0,))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @dist_init
+    def test_rref_type_with_error(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        # 10 ms timeout
+        rref = rpc.remote(dst, raise_func)
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            rref._get_type()
+
+    @dist_init
+    def test_rref_type_owner(self):
+        rref = RRef(torch.ones(2) + 1)
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+        rref = RRef(MyClass(0))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @staticmethod
+    def _slow_add(x, y):
+        time.sleep(1)
+        return x + y
+
+    @dist_init
+    def test_rref_type_slow_init(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, RpcTest._slow_add, args=(torch.ones(2), 1))
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+    @dist_init
     def test_owner_equality(self):
         a = RRef(40)
         b = RRef(50)
@@ -2331,6 +2441,24 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
         # exit all workers non-gracefully.
         rpc.shutdown(graceful=False)
+
+    @dist_init
+    def test_deadlock(self):
+        # this test is copied from https://github.com/pytorch/pytorch/issues/45089
+        if self.rank == 1:
+            dst1 = worker_name((self.rank + 1) % self.world_size)
+            x = torch.ones(2)
+            y = torch.ones(2)
+            rpc.rpc_async(dst1, RpcTest._slow_add, args=(x, y), timeout=15).wait()
+
+        dist_initialized = dist.is_initialized()
+        if not dist_initialized:
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
     @dist_init(setup_rpc=False)
     def test_local_shutdown_with_rpc(self):
@@ -2973,6 +3101,40 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE
         )
 
+    def _test_test_async_class_rref_proxy(self, mode=RPCExecMode.SYNC):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+        rref = rpc.remote(dst1, AsyncExecutionClass)
+
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2) + 1
+        if mode == RPCExecMode.SYNC:
+            ret = rref.rpc_sync().static_async_add(dst2, x, x, y)
+            ret += rref.rpc_sync().class_async_add(dst2, x, x, y)
+            ret += rref.rpc_sync().bound_async_add(dst2, x, x, y)
+        elif mode == RPCExecMode.ASYNC:
+            ret = rref.rpc_async().static_async_add(dst2, x, x, y).wait()
+            ret += rref.rpc_async().class_async_add(dst2, x, x, y).wait()
+            ret += rref.rpc_async().bound_async_add(dst2, x, x, y).wait()
+        elif mode == RPCExecMode.REMOTE:
+            ret = rref.remote().static_async_add(dst2, x, x, y).to_here()
+            ret += rref.remote().class_async_add(dst2, x, x, y).to_here()
+            ret += rref.remote().bound_async_add(dst2, x, x, y).to_here()
+
+        self.assertEqual(ret, 3 * 4 * x)
+
+    @dist_init
+    def test_async_class_rref_proxy(self):
+        self._test_test_async_class_rref_proxy()
+
+    @dist_init
+    def test_async_class_rref_proxy_async(self):
+        self._test_test_async_class_rref_proxy(mode=RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_class_rref_proxy_remote(self):
+        self._test_test_async_class_rref_proxy(mode=RPCExecMode.REMOTE)
+
     def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
@@ -3172,8 +3334,97 @@ class RpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
+    def test_wrong_types(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument backend must be a member of BackendType",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="TENSORPIPE",
+            )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument rpc_backend_options must be an instance of RpcBackendOptions",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=self.rpc_backend,
+                rpc_backend_options={"init_method": self.init_method}
+            )
+
+    def test_cannot_infer_backend_from_options(self):
+        # An exception should be raised if the backend isn't specified but
+        # options are given which are not an instance of any of the known
+        # agents' option classes.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(TypeError, "Could not infer backend for options"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
+
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # ProcessGroupRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+        self.assertIn(
+            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
+            "\n".join(cm.output),
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
+
+    def test_logs_deprecation_warning(self):
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+        self.assertIn(
+            "It is recommended to migrate to the TENSORPIPE backend.",
+            "\n".join(cm.output),
+        )
 
     @skip_if_lt_x_gpu(2)
     @dist_init
@@ -3769,6 +4020,37 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # TensorPipeRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.TENSORPIPE,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.TensorPipeAgent)
+
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_set_and_get_num_worker_threads(self):
@@ -4137,3 +4419,5 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
+        rpc.shutdown()

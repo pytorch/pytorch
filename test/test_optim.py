@@ -6,7 +6,7 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
-import torch.optim.multi_tensor as optim_mt
+import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -295,6 +295,37 @@ class TestOptim(TestCase):
                 lambda params: optimizer(params, lr=0.005),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
+
+    def test_multi_tensor_optimizers(self):
+        orig_optimizers = [optim.Adam, optim.AdamW, optim.SGD, optim.RMSprop, optim.Rprop]
+        mt_optimizers = [optim._multi_tensor.Adam, optim._multi_tensor.AdamW, 
+                         optim._multi_tensor.SGD, optim._multi_tensor.RMSprop,
+                         optim._multi_tensor.Rprop]
+
+        for opt1, opt2 in zip(orig_optimizers, mt_optimizers):
+            optimizers = [opt1, opt2]
+            weight_base = torch.randn(10, 5, requires_grad=True, device='cuda')
+            weight = [weight_base, weight_base]
+            bias = [torch.randn(10, requires_grad=True, device='cuda') for _ in range(2)]
+            input = [torch.randn(5, device='cuda') for _ in range(2)]
+
+            res = []
+            for i in range(2):
+                opt = optimizers[i]([weight[i], bias[i]], lr=1e-3)
+                def fn():
+                    opt.zero_grad()
+                    y = weight[i].mv(input[i])
+                    if y.is_cuda and bias[i].is_cuda and y.get_device() != bias[i].get_device():
+                        y = y.cuda(bias[i].get_device())
+                    loss = (y + bias[i]).pow(2).sum()
+                    loss.backward()
+                    return loss
+
+                for _ in range(10):
+                    opt.step(fn)
+
+                res.append(fn().item())
+            self.assertEqual(res[0], res[1], atol=1e-0, rtol=1e-0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
