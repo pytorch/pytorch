@@ -374,7 +374,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
-    AT_ERROR("BFloat16 gemm in CUDA requires Ampere or later GPU");
+    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
   }
 }
 #endif
