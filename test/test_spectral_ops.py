@@ -309,6 +309,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double
     def test_fft_backward(self, device, dtype):
         test_args = list(product(
