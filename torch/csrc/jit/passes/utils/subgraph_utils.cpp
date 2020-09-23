@@ -41,7 +41,9 @@ void mergeSubgraph(
   // will give us a new map: "unmerged" -> "merged".
   std::unordered_map<Value*, Value*> merge_vmap;
 
-  // defer destroying nodes until after all nodes have been merged, otherwise we run into lifetime issues where the previous mapping of the merged nodes inputs/outputs can be overwritten with newly created values
+  // defer destroying nodes until after all nodes have been merged, otherwise we
+  // run into lifetime issues where the previous mapping of the merged nodes
+  // inputs/outputs can be overwritten with newly created values
   std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
@@ -50,7 +52,7 @@ void mergeSubgraph(
     mergeNodeIntoSubgraph(node, mergeTo, merge_vmap, /*destroyNode*/ false);
   }
 
-  for (Node *n: merged_nodes) {
+  for (Node* n : merged_nodes) {
     n->destroy();
   }
 
@@ -270,7 +272,10 @@ void mergeNodeIntoSubgraph(
   }
 }
 
-void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode, bool destroyNode) {
+void mergeNodeIntoSubgraph(
+    Node* toMerge,
+    Node* subgraphNode,
+    bool destroyNode) {
   std::unordered_map<Value*, Value*> vmap;
   mergeNodeIntoSubgraph(toMerge, subgraphNode, vmap, destroyNode);
 }
