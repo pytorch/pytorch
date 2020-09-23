@@ -291,15 +291,16 @@ endif()
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(USE_DISTRIBUTED)
-    add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
-    target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
-    add_dependencies(process_group_agent torch c10d)
 
     # Define this target even if we're building without TensorPipe, to make life
     # easier to other targets that depend on this. However, in that case, by not
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT MSVC)
+      add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+      target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
+      add_dependencies(process_group_agent torch c10d)
+
       add_library(tensorpipe_agent
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
@@ -495,7 +496,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
       )
     endif()
-    if(USE_DISTRIBUTED)
+    if(USE_DISTRIBUTED AND NOT WIN32)
       append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
   endif()

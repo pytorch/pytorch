@@ -1,7 +1,6 @@
 import logging
 import threading
 
-import sys
 import torch
 import torch.distributed as dist
 
@@ -30,6 +29,7 @@ if is_available():
         _set_and_start_rpc_agent,
     )  # noqa: F401
     from .api import *  # noqa: F401
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
@@ -38,11 +38,6 @@ if is_available():
 
     import numbers
 
-    if sys.platform != 'win32':
-        from .options import TensorPipeRpcBackendOptions  # noqa: F401
-        _default_rpc_backend = BackendType.TENSORPIPE
-    else:
-        _default_rpc_backend = BackendType.PROCESS_GROUP
 
     def init_rpc(
         name,
@@ -183,7 +178,7 @@ if is_available():
 
 
     def _init_rpc_backend(
-        backend=_default_rpc_backend,
+        backend=backend_registry.BackendType.TENSORPIPE,
         store=None,
         name=None,
         rank=-1,

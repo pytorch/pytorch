@@ -561,6 +561,12 @@ libtorch_python_distributed_sources = [
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
 ]
 
+libtorch_python_distributed_win32_sources = [
+    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/init.cpp",
+    "torch/csrc/distributed/c10d/reducer.cpp",
+]
+
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
         "autograd/generated/python_functions.cpp",

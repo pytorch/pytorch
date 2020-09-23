@@ -32,10 +32,11 @@ if NO_MULTIPROCESSING_SPAWN:
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 
-if sys.platform == 'win32':
-    LOOPBACK = 'Ethernet'
-else:
-    LOOPBACK = 'lo'
+def create_device():
+    if sys.platform == 'win32':
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
+    else:
+        return c10d.ProcessGroupGloo.create_device(interface='lo')
 
 
 class ProcessGroupShareTensorTest(TestCase):
@@ -45,7 +46,7 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
+        opts.devices = [create_device()]
         opts.timeout = 5.0
         opts.threads = threads
         return opts

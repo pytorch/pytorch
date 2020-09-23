@@ -97,15 +97,19 @@ Reducer::Reducer(
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
 
+#ifndef _WIN32
         using torch::distributed::autograd::ThreadLocalDistAutogradContext;
+#endif
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<torch::autograd::utils::LambdaPostHook>(
                     [=](const torch::autograd::variable_list& outputs,
                         const torch::autograd::variable_list& /* unused */) {
+#ifndef _WIN32
                       this->rpc_context_.set(
                           ThreadLocalDistAutogradContext::getContextPtr());
+#endif
                       this->autograd_hook(index);
                       return outputs;
                     })),
@@ -1227,7 +1231,9 @@ void Reducer::runGradCallbackForVariable(
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
+#ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+endif
   }
 }
 

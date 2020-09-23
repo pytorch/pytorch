@@ -31,58 +31,54 @@ c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
 using torch::utils::Future;
 
 // Manages RRef lifetime and keeps track of RRef forks.
-// Move TORCH_API from class to individual functions, since TORCH_API
-// will be defined as __declspec(dllimport) when compiling with MSVC,
-// and we have thread_local variables defined in class RRefContext
-// which are not allowed to added __declspec(dllimport).
-class RRefContext {
+class TORCH_API RRefContext {
  public:
-  TORCH_API static RRefContext& getInstance();
+  static RRefContext& getInstance();
   // NB: This method must be called before destructing RRefContext singleton.
   // Similar to delForkOfOwner, this method returns a vector of OwnerRRefs that
   // hold py::object. The call-site is also responsible for resetting those
   // shared_ptr objects with a GIL. See comments at delForkOfOwner() for more
   // details.
-  TORCH_API static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
+  static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
       bool ignoreRRefLeak = true);
 
-  TORCH_API static void handleException(const FutureMessage& fm);
+  static void handleException(const FutureMessage& fm);
 
-  TORCH_API RRefContext(const RRefContext&) = delete;
-  TORCH_API RRefContext(RRefContext&& other) = delete;
-  TORCH_API void operator=(const RRefContext&) = delete;
-  TORCH_API RRefContext& operator=(RRefContext&& other) = delete;
+  RRefContext(const RRefContext&) = delete;
+  RRefContext(RRefContext&& other) = delete;
+  void operator=(const RRefContext&) = delete;
+  RRefContext& operator=(RRefContext&& other) = delete;
 
-  TORCH_API ~RRefContext();
+  ~RRefContext();
 
   // get the worker id of the current worker
-  TORCH_API inline worker_id_t getWorkerId() const {
+  inline worker_id_t getWorkerId() const {
     return agent_->getWorkerInfo().id_;
   }
 
   // get the worker name of the current worker
-  TORCH_API inline const std::string& getWorkerName() const {
+  inline const std::string& getWorkerName() const {
     return agent_->getWorkerInfo().name_;
   }
 
   //  generate a globally unique ID
-  TORCH_API inline GloballyUniqueId genGloballyUniqueId() {
+  inline GloballyUniqueId genGloballyUniqueId() {
     return GloballyUniqueId(getWorkerId(), nextLocalId_++);
   }
 
-  TORCH_API inline const std::shared_ptr<RpcAgent>& agent() const {
+  inline const std::shared_ptr<RpcAgent>& agent() const {
     return agent_;
   }
 
   // create a ``UserRRef`` owned by the worker ``ownerId``
-  TORCH_API c10::intrusive_ptr<UserRRef> createUserRRef(
+  c10::intrusive_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,
       const TypePtr& type);
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
   // method, we pass type here to validate or help the rref creation.
-  TORCH_API c10::intrusive_ptr<RRef> getOrCreateRRef(
+  c10::intrusive_ptr<RRef> getOrCreateRRef(
       const RRefForkData& rfd,
       const TypePtr& type);
 
@@ -94,7 +90,7 @@ class RRefContext {
   // What's common in these two cases are, 1) the RRefId is already generated
   // 2) the TypePtr is presented. So it can always create the ``OwnerRRef`` if
   // it is not yet available.
-  TORCH_API c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
+  c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
       const TypePtr& type);
 
@@ -104,14 +100,14 @@ class RRefContext {
   // 2) create the ``OwnerRRef`` on `rpc.remote()` caller side.
   // What's common in these two cases are, 1) the RRefId hasn't been generated
   // 2) the TypePtr is presented.
-  TORCH_API c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
+  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not
   // available, e.g., when processing to_here(). The forceCreated flag can be
   // used to ensure that the rref is created on the owner, otherwise throw in
   // cases where the user of this API expects this to return a completed future.
-  TORCH_API std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
+  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
       const RRefId& rrefId,
       bool forceCreated = false);
 
@@ -125,15 +121,15 @@ class RRefContext {
   // and this could happen before the self remote call finishes. To prevent
   // that, this API adds the RRefId as a ForkId, which will then delete the
   // ForkId when the self remote is done.
-  TORCH_API void addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref);
+  void addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref);
 
   // Register a fork of the ``OwnerRRef``, and inserts a intrusive_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
-  TORCH_API void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   // Performs the same function as addForkOfOwner but ignores duplicate
   // requests. This idempotent function is used with RREF_FORK_REQUEST calls,
   // whereas all other message types use the non-idempotent variant.
-  TORCH_API void addForkOfOwnerIfNotPresent(const RRefId& rrefId, const ForkId& forkId);
+  void addForkOfOwnerIfNotPresent(const RRefId& rrefId, const ForkId& forkId);
   // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
   // IValue or py::object. For the later, this method will acquire GIL.
   // NB: If this fork deletion triggered deleting OwnerRRef, this method will
@@ -143,16 +139,16 @@ class RRefContext {
   // py::object, deleting it require GIL. The call site should guarded it with
   // a GIL and reset the shared_ptr. The GIL-guarded deletion is intentionally
   // left out of this function to avoid creating dependency on pybind.
-  TORCH_API c10::intrusive_ptr<RRef> delForkOfOwner(
+  c10::intrusive_ptr<RRef> delForkOfOwner(
       const RRefId& rrefId,
       const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
-  TORCH_API RRefForkData prepareChildFork(const c10::intrusive_ptr<RRef>& rref);
+  RRefForkData prepareChildFork(const c10::intrusive_ptr<RRef>& rref);
   // Invoked when unpickling an RRef to send RREF_FORK_REQUEST to owner and
   // send RREF_CHILD_ACCEPT to the parent.
   // NB: forkId is necessary here as the rref could be an OwnerRRef
-  TORCH_API void notifyOwnerAndParentOfFork(
+  void notifyOwnerAndParentOfFork(
       const ForkId& forkId,
       worker_id_t parent,
       const c10::intrusive_ptr<RRef>& rref);
@@ -165,29 +161,29 @@ class RRefContext {
   // previously submitted rpc/remote calls are acked before sending out the
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
-  TORCH_API void addPendingChild(
+  void addPendingChild(
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
-  TORCH_API void delPendingChild(const ForkId& forkId);
+  void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
-  TORCH_API void addPendingUser(
+  void addPendingUser(
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
-  TORCH_API void delPendingUser(const ForkId& forkId);
-  TORCH_API void addConfirmedUser(
+  void delPendingUser(const ForkId& forkId);
+  void addConfirmedUser(
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
 
   // Retrieve a pending user given the fork ID. Throws if the user has already
   // been confirmed (i.e. is no longer in the pendingUsers_ map).
-  TORCH_API c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
+  c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
   // then be consumed and cleared in waitForThreadLocalPendingRRefs().
-  TORCH_API void recordThreadLocalPendingRRefs();
+  void recordThreadLocalPendingRRefs();
   // End recording new pending UserRRefs, and clear the thread_local userTable_.
   // Returns a Future which will be marked as completed when all pending
   // UserRRefs in the current userTable_ are confirmed by their owners. The bool
@@ -198,20 +194,20 @@ class RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  TORCH_API std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
+  std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
   // Only call this function when there are errors during a recording session,
   // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
   // properly.
   // TODO: make this a context guard
-  TORCH_API void clearRecordedPendingRRefsOnError();
+  void clearRecordedPendingRRefsOnError();
 
-  TORCH_API void delUser(
+  void delUser(
       const worker_id_t owner,
       const RRefId& rrefId,
       const ForkId& forkId);
-  TORCH_API void delAllUsersAndUnforkedOwners(std::chrono::milliseconds timeoutMillis);
+  void delAllUsersAndUnforkedOwners(std::chrono::milliseconds timeoutMillis);
 
-  TORCH_API std::unordered_map<std::string, std::string> getDebugInfo();
+  std::unordered_map<std::string, std::string> getDebugInfo();
 
  private:
   struct PendingUserState {
@@ -310,11 +306,7 @@ class RRefContext {
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.
-#ifdef _WIN32
-  thread_local static std::vector<std::shared_ptr<PendingUserState>> userTable_;
-#else
   static thread_local std::vector<std::shared_ptr<PendingUserState>> userTable_;
-#endif
   // A flag indicating whether subsequently created UserRRefs should be added to
   // the thread_local userTable_. The flag is set to true before serializing
   // RPC arguments and then set to false before running the corresponding
@@ -338,11 +330,7 @@ class RRefContext {
   // without confirmation is OK, because the creator would either call to_here
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
-#ifdef _WIN32
- thread_local static bool recording_;
-#else
   static thread_local bool recording_;
-#endif
 };
 
 } // namespace rpc

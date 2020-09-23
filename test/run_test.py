@@ -100,7 +100,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
-    'distributed/test_distributed_spawn',
 ]
 
 ROCM_BLOCKLIST = [
