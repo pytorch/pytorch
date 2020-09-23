@@ -739,7 +739,7 @@ class Quantizer:
         for node in graph.nodes:
             if node.op == 'call_module' and \
                (is_traceable_custom_module(self.modules[node.target]) or
-                is_observed_traceable_custom_module(self.modules[node.target])):
+                    is_observed_traceable_custom_module(self.modules[node.target])):
                 # add node to matched nodes
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
