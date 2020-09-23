@@ -713,6 +713,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S,), (0, ), 'zero_dim'),
+        ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),

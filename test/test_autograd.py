@@ -4459,14 +4459,6 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
-    def test_repeat_zero_dim(self):
-        a = torch.rand(10, requires_grad=True)
-        gradcheck(lambda x: x.repeat(0).sum(), a)
-        gradgradcheck(lambda x: x.repeat(0).sum(), a)
-
-        gradcheck(lambda x: x.repeat(0), a)
-        gradgradcheck(lambda x: x.repeat(0), a)
-
     def test_nansum_with_nans(self):
         a = torch.randn(2, 2, 2, 2)
         with torch.no_grad():
