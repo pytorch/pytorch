@@ -11659,6 +11659,24 @@ class TestTorchDeviceType(TestCase):
         m2 = torch.tensor([3., 4.], dtype=torch.bfloat16)
         self.assertEqual(m1 + m2, torch.tensor([4., 6.], dtype=torch.bfloat16))
 
+        # different alpha types
+        m1 = torch.tensor([2 + 3j, 4 + 5j], dtype=torch.complex64, device=device)
+        m2 = torch.tensor([4 + 5j, 2 + 3j], dtype=torch.complex64, device=device)
+        # add complex numbers with float alpha
+        res = torch.add(m1, m2, alpha=0.1)
+        expected = torch.tensor([2.4000 + 3.5000j, 4.2000 + 5.3000j], dtype=torch.complex64, device=device)
+        self.assertEqual(res, expected)
+
+        # add complex numbers with complex alpha
+        res = torch.add(m1, m2, alpha=complex(0.1, 0.2))
+        expected = torch.tensor([1.4000 + 4.3000j, 3.6000 + 5.7000j], dtype=torch.complex64, device=device)
+        self.assertEqual(res, expected)
+
+        # add complex numbers with integer alpha
+        res = torch.add(m1, m2, alpha=2)
+        expected = torch.tensor([10. + 13.j, 8. + 11.j], dtype=torch.complex64, device=device)
+        self.assertEqual(res, expected)
+
         # mismatched alpha
         m1 = torch.tensor([1], dtype=torch.int8, device=device)
         m2 = torch.tensor([2], dtype=torch.int8, device=device)
@@ -11668,6 +11686,15 @@ class TestTorchDeviceType(TestCase):
         self.assertRaisesRegex(RuntimeError,
                                r"For integral input tensors, argument alpha must not be a floating point number\.",
                                lambda: torch.add(m1, m2, alpha=1.0))
+
+        # mismatched alpha, float / double tensor and complex alpha
+        m1 = torch.tensor([3., 4.], device=device)
+        m2 = torch.tensor([4., 3.], device=device)
+        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
+
+        m1 = torch.tensor([3., 4.], dtype=torch.double, device=device)
+        m2 = torch.tensor([4., 3.], dtype=torch.double, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
 
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
