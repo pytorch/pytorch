@@ -92,6 +92,39 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 }
 
 // --------------------------------------------------------------------
+// Template unary op implementations
+// --------------------------------------------------------------------
+
+using FuncSig = Tensor& (Tensor::*)() const;
+
+template<FuncSig F>
+SparseTensor& nonlinmap_unary_op_impl_out_sparse(SparseTensor& r, const SparseTensor& t, const std::string & err_msg)
+{
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  if (is_same_tensor(r, t)) {    
+    TORCH_CHECK(r.is_coalesced(), err_msg);
+  } else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  (r._values().*F)();
+  return r;
+}
+
+
+template<FuncSig F>
+SparseTensor& linmap_unary_op_impl_out_sparse(SparseTensor& r, const SparseTensor& t)
+{
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
+  (r._values().*F)();
+  return r;
+}
+
+// --------------------------------------------------------------------
 // log1p(SparseTensor)
 // --------------------------------------------------------------------
 
@@ -100,18 +133,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 // and log1p(summed_value) != log1p(v1) + log1p(v2)
 
 SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
-    TORCH_CHECK(r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported");
-  }
-  else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().log1p_();
-  return r;
+  return nonlinmap_unary_op_impl_out_sparse<&Tensor::log1p_>(r, t, "log1p: in-place on uncoalesced tensors is not supported");
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
@@ -127,22 +149,10 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 // and abs(summed_value) != abs(v1) + abs(v2)
 
 SparseTensor& abs_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place abs for uncoalesced input because coalesce() is not in-place, see above comment
-    TORCH_CHECK(r.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
-  }
-  else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().abs_();
-  return r;
+  return nonlinmap_unary_op_impl_out_sparse<&Tensor::abs_>(r, t, "abs: in-place on uncoalesced tensors is not supported");
 }
 
 SparseTensor& abs_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
   return abs_out_sparse(t, t);
 }
 
@@ -154,24 +164,11 @@ SparseTensor& abs_sparse_(SparseTensor& t) {
 // as in uncoalesced format tensor the values corresponding to the same indices are summed
 // and sign(summed_value) != sign(v1) + sign(v2)
 
-
 SparseTensor& sign_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place sign for uncoalesced input because coalesce() is not in-place, see above comment
-    TORCH_CHECK(r.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported");
-  }
-  else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().sign_();
-  return r;
+  return nonlinmap_unary_op_impl_out_sparse<&Tensor::sign_>(r, t, "sign: in-place on uncoalesced tensors is not supported");
 }
 
 SparseTensor& sign_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported");
   return sign_out_sparse(t, t);
 }
 
@@ -180,13 +177,7 @@ SparseTensor& sign_sparse_(SparseTensor& t) {
 // --------------------------------------------------------------------
 
 SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
-
-  // copy_sparse_ does not perform the copy if it is the same tensor
-  copy_sparse_to_sparse_(r, t);
-  r._values().neg_();
-  return r;
+  return linmap_unary_op_impl_out_sparse<&Tensor::neg_>(r, t);
 }
 
 SparseTensor& neg_sparse_(SparseTensor& t) {
@@ -202,17 +193,7 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 // and asin(summed_value) != asin(v1) + asin(v2)
 
 SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
-    TORCH_CHECK(r.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
-  } else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().asin_();
-  return r;
+  return nonlinmap_unary_op_impl_out_sparse<&Tensor::asin_>(r, t, "asin: in-place on uncoalesced tensors is not supported");
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {
