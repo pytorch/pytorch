@@ -191,6 +191,14 @@ void testConstantFoldIntrinsics() {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
+void testConstantFoldCastToBool() {
+  KernelScope kernel_scope;
+  ExprHandle f = Cast::make(kBool, IntImm::make(0));
+  ExprHandle newF = IRSimplifier::simplify(f);
+  SimpleIRExprEval eval(newF);
+  ASSERT_EQ(eval.value<bool>(), false);
+}
+
 void testConstantFoldWithVar() {
   KernelScope kernel_scope;
   {
@@ -3228,6 +3236,732 @@ void testDontSimplifyRand() {
     IS_RAND(mul->lhs());
     IS_RAND(mul->rhs());
   }
+}
+
+void testSimplifyReorderForCond() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {4}, kInt));
+  Buffer b(BufHandle("B", {1}, kInt));
+  Buffer c(BufHandle("C", {4}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  {
+    // for ( if ( ... ) ) => if ( for ( ... ) ).
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Can't reorder if condition is dependent on the loop var.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(c, {i}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Can't reorder if condition is dependent on a var that is modified inside
+    // the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition based on buffer not referenced in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(b, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition based on buffer read only in body. Can reorder here.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+
+  {
+    // Condition depends on Let in the loop. Cannot reorder.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Block::make(
+            {Let::make(j, 3),
+             Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                 nullptr)}));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Let, loop->body()->front(), let);
+    IS_NODE_WITH_NAME(Cond, loop->body()->back(), cond);
+  }
+
+  {
+    // Multi level Ifs where all conditions are distinct. Move BOTH Cond
+    // statements outside the loop.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(j, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(Cond, true_block->front(), cond2);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_block2);
+    IS_NODE_WITH_NAME(For, true_block2->front(), loop);
+  }
+
+  {
+    // Multi level Ifs where the inner condition does depend on a loop var,
+    // reorder only the first Cond.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(a, {0}, mask), 10, CompareSelectOperation::kLT),
+            Cond::make(
+                CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
+                Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+                nullptr),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+    IS_NODE_WITH_NAME(Block, loop->body(), loop_body);
+    IS_NODE_WITH_NAME(Cond, loop_body->front(), cond2);
+  }
+
+  {
+    // Don't reorder if there's an else block of the Cond.
+    // We could, but is it much better?
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(c, {0}, Load::make(a, {i}, mask), mask),
+            Store::make(c, {0}, 0, mask)));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+
+  {
+    // Condition uses distinct region of Tensor.
+    // We could reorder here wih better analysis, but we don't. Included for
+    // completeness.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Cond::make(
+            CompareSelect::make(
+                Load::make(c, {0}, mask), 10, CompareSelectOperation::kLT),
+            Store::make(c, {1}, Load::make(a, {i}, mask), mask),
+            nullptr));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(For, simplified, loop);
+    IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
+  }
+}
+
+void testSimplifyFuseConditions() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {2}, kInt));
+  Buffer b(BufHandle("B", {2}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  {
+    // Can fuse since the conditions are identical.
+    // if (A) { X }; if (A) { Y }; => if (A) { X; Y }
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, conditions are not identical in lhs (i != j).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+  {
+    // Can't fuse, conditions are not identical in rhs (10 != 11).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 11, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, conditions are not identical in operation (LT vs GT).
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kGT),
+             Store::make(a, {1}, i, mask),
+             nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse, CompareSelect results are different.
+    // Actually we totally could if we normalized CompareSelect results, but
+    // TODO for later.
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i,
+                                     10,
+                                     new IntImm(1),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     j,
+                                     10,
+                                     new IntImm(2),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+
+    IS_NODE_WITH_NAME(Block, cond1->true_stmt(), true_stmt1);
+    IS_NODE_WITH_NAME(Block, cond2->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt1->nstmts(), 1);
+    ASSERT_EQ(true_stmt2->nstmts(), 1);
+
+    ASSERT_EQ(cond1->false_stmt(), nullptr);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse with false stmt only.
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(a, {0}, i, mask)),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(a, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->false_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->true_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse with both true and false stmt.
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             Store::make(b, {0}, i, mask)),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {1}, i, mask),
+             Store::make(b, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 2);
+  }
+
+  {
+    // Can fuse with mismatched true / false stmt existing
+    auto body = Block::make(
+        {Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             Store::make(a, {0}, i, mask),
+             nullptr),
+         Cond::make(
+             CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+             nullptr,
+             Store::make(b, {1}, i, mask))});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 1);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), false_stmt);
+    ASSERT_EQ(false_stmt->nstmts(), 1);
+  }
+
+  {
+    // Can fuse partial block contents, ie when there are non fused stmts before
+    // and after.
+    // before:
+    // if (j < 10) { A[0] = j; }
+    // if (i < 10) { A[0] = i; }
+    // if (i < 10) { A[1] = i; }
+    // if (i < 11) { A[1] = j; }
+    //
+    // after:
+    //
+    // if (j < 10) { A[0] = j; }
+    // if (i < 10) {
+    //   A[0] = i;
+    //   A[1] = i;
+    // }
+    // if (i < 11) { A[1] = j; }
+
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 11, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    auto it = block->begin();
+    it++;
+    IS_NODE_WITH_NAME(Cond, *it, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse longer sequences of identical conditions.
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 4);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can't fuse through a non condition.
+    auto body = Block::make({
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, j, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {0}, i, mask),
+            nullptr),
+        Store::make(b, {1}, i + j, mask),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, i, mask),
+            nullptr),
+        Cond::make(
+            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            Store::make(a, {1}, j, mask),
+            nullptr),
+    });
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt2);
+    ASSERT_EQ(true_stmt2->nstmts(), 2);
+    ASSERT_EQ(cond2->false_stmt(), nullptr);
+
+    auto it = block->begin();
+    it++;
+    IS_NODE_WITH_NAME(Store, *it, middle);
+  }
+
+  {
+    // Can fuse if the conditions simplify to the same thing.
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(87) % ExprHandle(11),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(300) / ExprHandle(30),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Can fuse non-CompareSelects.
+    // if (i) { X } if (i) { Y } => if (i) { X; Y }
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(i, Store::make(a, {1}, i, mask), nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_stmt);
+    ASSERT_EQ(true_stmt->nstmts(), 2);
+    ASSERT_EQ(cond->false_stmt(), nullptr);
+  }
+
+  {
+    // Sanity check wont fuse different non-CompareSelects.
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(j, Store::make(a, {1}, i, mask), nullptr)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Cond, block->front(), cond1);
+    IS_NODE_WITH_NAME(Cond, block->back(), cond2);
+  }
+
+  {
+    // Sanity check constant condition elimination still occurs when merging is
+    // possible.
+    auto body =
+        Block::make({Cond::make(1, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(1, Store::make(a, {1}, i, mask), nullptr)});
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 2);
+    IS_NODE_WITH_NAME(Store, block->front(), store1);
+    IS_NODE_WITH_NAME(Store, block->back(), store2);
+  }
+
+  {
+    // Sanity check for-cond reordering occurs after fusing.
+    auto body = For::make(
+        i,
+        0,
+        4,
+        Block::make(
+            {Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(a, {1}, Load::make(b, {0}, mask), mask),
+                 nullptr),
+             Cond::make(
+                 CompareSelect::make(j, 10, CompareSelectOperation::kLT),
+                 Store::make(a, {2}, Load::make(b, {0}, mask), mask),
+                 nullptr)}));
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Cond, simplified, cond);
+    IS_NODE_WITH_NAME(Block, cond->true_stmt(), true_block);
+    IS_NODE_WITH_NAME(For, true_block->front(), loop);
+  }
+}
+
+void testSimplifySyncThreads() {
+  KernelScope kernel_scope;
+  Buffer a(BufHandle("A", {4}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+
+  {
+    // Merge two inner SyncThreads.
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+
+  {
+    // Eliminate outer SyncThreads.
+    auto body = Block::make(
+        {new SyncThreads(), Store::make(a, {1}, 0, 1), new SyncThreads()});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    auto it = block->begin();
+    IS_NODE(Store, *it);
+  }
+
+  {
+    // Merge many inner SyncThreads.
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 3);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+
+  {
+    // Merge multiple outer SyncThreads.
+    auto body = Block::make({new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads()});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 1);
+    auto it = block->begin();
+    IS_NODE(Store, *it);
+  }
+
+  {
+    // Merge multiple sections;
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             Store::make(a, {2}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {3}, 0, 1)});
+
+    Stmt* simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 6);
+    auto it = block->begin();
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+    IS_NODE(Store, *it++);
+    IS_NODE(SyncThreads, *it++);
+    IS_NODE(Store, *it++);
+  }
+}
+
+void testSimplifyRampSubBroadcast() {
+  KernelScope kernel_scope;
+  int num_lanes = 4;
+  ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
+  ExprHandle broadcast = Broadcast::make(ExprHandle(-5), num_lanes);
+  ExprHandle simplified = IRSimplifier::simplify(ramp - broadcast);
+  Ramp* newRamp = simplified.AsNode<Ramp>();
+  IS_NODE_WITH_NAME(IntImm, newRamp->base(), base);
+  ASSERT_EQ(base->value(), 5);
+  IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
+  ASSERT_EQ(stride->value(), 6);
+  ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
 } // namespace jit

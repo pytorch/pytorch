@@ -4,6 +4,7 @@ from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
 import keyword
+import re
 
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist
@@ -66,8 +67,20 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
 
 class Graph:
     def __init__(self):
-        self.nodes : List[Node] = []
+        self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
+
+    @property
+    def nodes(self):
+        return tuple(self._nodes)
+
+    def graph_copy(self, g : 'Graph'):
+        """
+        Append all nodes from graph `g` to this graph
+        """
+        val_map : Dict[Node, Node] = {}
+        for node in g._nodes:
+            val_map[node] = self.node_copy(node, lambda n : val_map[n])
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -79,36 +92,36 @@ class Graph:
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None) -> Node:
-        assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
+        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        self.nodes.append(n)
+        self._nodes.append(n)
         return n
 
     # sugar for above when you know the op
     def placeholder(self, name: str) -> Node:
         return self.create_node('placeholder', name)
 
-    def get_param(self, name: str) -> Node:
-        return self.create_node('get_param', name)
+    def get_attr(self, name: str) -> Node:
+        return self.create_node('get_attr', name)
 
-    def call_module(self, 
-                    module_name: str, 
+    def call_module(self,
+                    module_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_module', module_name, args, kwargs)
 
-    def call_method(self, 
-                    method_name: str, 
+    def call_method(self,
+                    method_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_method', method_name, args, kwargs)
 
-    def call_function(self, 
-                      the_function: Callable[..., Any], 
+    def call_function(self,
+                      the_function: Callable[..., Any],
                       args: Optional[Tuple[Argument, ...]] = None,
                       kwargs: Optional[Dict[str, Argument]] = None) -> Node:
         return self.create_node('call_function', the_function, args, kwargs)
@@ -140,8 +153,11 @@ class Graph:
             if _is_magic(op):
                 op = op[2:-2]
         op = op.replace('.', '_')
-        op = op.replace('*', '')
+        # delete all characters that are illegal in a Python identifier
+        op = re.sub('[^0-9a-zA-Z_]+', '_', op)
         op = snake_case(op)
+        if op[0].isdigit():
+            op = f'_{op}'
 
         if op not in self._used_names:
             self._used_names[op] = 0
@@ -157,7 +173,7 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
-        for node in self.nodes:
+        for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
@@ -192,7 +208,7 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
                 continue
-            elif node.op == 'get_param':
+            elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
@@ -226,14 +242,14 @@ class Graph:
                 assert isinstance(n.target, str)
                 placeholder_names.append(n.target)
                 return None
-            elif n.op == 'get_param':
+            elif n.op == 'get_attr':
                 return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
-        node_strs = [format_node(node) for node in self.nodes]
+        node_strs = [format_node(node) for node in self._nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}):'
         for node_str in node_strs:
