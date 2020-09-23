@@ -1,6 +1,7 @@
 import concurrent.futures
 import contextlib
 import json
+import logging
 import sys
 from threading import Lock
 import time
@@ -474,6 +475,14 @@ class AsyncExecutionClass:
 
 def return_future():
     return torch.futures.Future()
+
+
+class FooBackendOptions(rpc.RpcBackendOptions):
+    def __init__(self, init_method):
+        # Must call the __init__ of the superclass (and do so directly,
+        # without using super()) because... pybind.
+        rpc.RpcBackendOptions.__init__(self)
+        self.init_method = init_method
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1470,21 +1479,21 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
-    @dist_init
-    def test_profiler_with_sync_rpc_udf(self):
+    def _run_test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
+
+    @dist_init
+    def test_profiler_with_sync_rpc_udf(self):
+        self._run_test_profiler_with_sync_rpc_udf()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_udf_single_threaded(self):
-        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
-                                     use_record_function=True)
+        self._run_test_profiler_with_sync_rpc_udf()
 
-    @dist_init
-    def test_profiler_with_sync_rpc_builtin(self):
+    def _run_test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1492,33 +1501,30 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
+
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin(self):
+        self._run_test_profiler_with_sync_rpc_builtin()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_builtin_single_threaded(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
-            use_record_function=True
-        )
+        self._run_test_profiler_with_sync_rpc_builtin()
 
-    @dist_init
-    def test_profiler_with_async_rpc_udf(self):
+    def _run_test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
+    @dist_init
+    def test_profiler_with_async_rpc_udf(self):
+        self._run_test_profiler_with_async_rpc_udf()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_udf_single_threaded(self):
-        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
-                                     use_record_function=True)
+        self._run_test_profiler_with_async_rpc_udf()
 
-    @dist_init
-    def test_profiler_with_async_rpc_builtin(self):
+    def _run_test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1526,78 +1532,61 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
+
+    @dist_init
+    def test_profiler_with_async_rpc_builtin(self):
+        self._run_test_profiler_with_async_rpc_builtin()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_builtin_single_threaded(self):
+        self._run_test_profiler_with_async_rpc_builtin()
+
+    def _run_test_profiler_with_remote_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
         )
+        # test remote to self
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
-            use_record_function=True
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
         )
 
     @dist_init
     def test_profiler_with_remote_udf(self):
-        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
-        )
+        self._run_test_profiler_with_remote_udf()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_udf_single_threaded(self):
-        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+        self._run_test_profiler_with_remote_udf()
+
+    def _run_test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
         )
         # test remote to self
         self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
+            RPCExecMode.REMOTE,
+            torch.mul,
+            args=(torch.ones(1), torch.ones(1)),
+            dst=self.rank,
         )
 
     @dist_init
     def test_profiler_with_remote_builtin(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1)),
-            use_record_function=True
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            torch.mul,
-            args=(torch.ones(1), torch.ones(1)),
-            dst=self.rank,
-        )
+        self._run_test_profiler_with_remote_builtin()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_builtin_single_threaded(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1)),
-            use_record_function=True
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            torch.mul,
-            args=(torch.ones(1), torch.ones(1)),
-            dst=self.rank,
-        )
+        self._run_test_profiler_with_remote_builtin()
 
-    @dist_init
-    def test_profiler_with_script_async_rpc(self):
+    def _run_test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
         )
@@ -1608,14 +1597,21 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    @dist_init
+    def test_profiler_with_script_async_rpc(self):
+        self._run_test_profiler_with_script_async_rpc()
+
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_async_rpc_single_threaded(self):
+        self._run_test_profiler_with_script_async_rpc()
+
+    def _run_test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
+            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
         )
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC,
+            RPCExecMode.SYNC,
             my_script_func,
             args=(torch.tensor(1),),
             use_record_function=True,
@@ -1623,62 +1619,36 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_profiler_with_script_sync_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.SYNC,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
+        self._run_test_profiler_with_script_sync_rpc()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_sync_rpc_single_threaded(self):
+        self._run_test_profiler_with_script_sync_rpc()
+
+    def _run_test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
         )
         self._profiler_test_with_rpc(
-            RPCExecMode.SYNC,
+            RPCExecMode.REMOTE,
             my_script_func,
             args=(torch.tensor(1),),
             use_record_function=True,
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
         )
 
     @dist_init
     def test_profiler_with_script_remote_rpc(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
-        )
+        self._run_test_profiler_with_script_remote_rpc()
 
     @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_remote_rpc_single_threaded(self):
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
-        )
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE,
-            my_script_func,
-            args=(torch.tensor(1),),
-            use_record_function=True,
-        )
-        # test remote to self
-        self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
-        )
-
+        self._run_test_profiler_with_script_remote_rpc()
 
     def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
         top_level_event_names = []
@@ -3497,8 +3467,97 @@ class RpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
+    def test_wrong_types(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument backend must be a member of BackendType",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="TENSORPIPE",
+            )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument rpc_backend_options must be an instance of RpcBackendOptions",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=self.rpc_backend,
+                rpc_backend_options={"init_method": self.init_method}
+            )
+
+    def test_cannot_infer_backend_from_options(self):
+        # An exception should be raised if the backend isn't specified but
+        # options are given which are not an instance of any of the known
+        # agents' option classes.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(TypeError, "Could not infer backend for options"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
+
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # ProcessGroupRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+        self.assertIn(
+            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
+            "\n".join(cm.output),
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
+
+    def test_logs_deprecation_warning(self):
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+        self.assertIn(
+            "It is recommended to migrate to the TENSORPIPE backend.",
+            "\n".join(cm.output),
+        )
 
     @skip_if_lt_x_gpu(2)
     @dist_init
@@ -4093,6 +4152,37 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
+
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # TensorPipeRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.TENSORPIPE,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.TensorPipeAgent)
 
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
