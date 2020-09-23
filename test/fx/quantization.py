@@ -222,7 +222,7 @@ class Quantizer:
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
-            elif node.op == 'get_param':
+            elif node.op == 'get_attr':
                 result = self.state_dict[node.target]
             elif node.op == 'call_function':
                 result = node.target(*load_arg(node.args), **load_arg(node.kwargs))

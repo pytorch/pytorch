@@ -96,6 +96,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::VmapMode:
       return "VmapMode";
 
+    case DispatchKey::Math:
+      return "Math";
+
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
 
@@ -129,25 +132,5 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradOther;
   }
 }
-
-DispatchKey getBackendKeyFromAutograd(DispatchKey t) {
-  switch (t) {
-    case DispatchKey::AutogradCPU:
-      return DispatchKey::CPU;
-    case DispatchKey::AutogradCUDA:
-      return DispatchKey::CUDA;
-    case DispatchKey::AutogradXLA:
-      return DispatchKey::XLA;
-    case DispatchKey::AutogradPrivateUse1:
-      return DispatchKey::PrivateUse1;
-    case DispatchKey::AutogradPrivateUse2:
-      return DispatchKey::PrivateUse2;
-    case DispatchKey::AutogradPrivateUse3:
-      return DispatchKey::PrivateUse3;
-    default:
-      return DispatchKey::Undefined;
-  }
-}
-
 
 } // namespace c10

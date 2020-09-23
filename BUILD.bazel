@@ -1727,13 +1727,16 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
-        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
             ":aten_cuda",
+            "@tensorpipe//:tensorpipe_cuda",
         ],
-        [":aten"],
+        [
+            ":aten",
+            "@tensorpipe",
+        ],
     ),
     alwayslink = True,
 )
@@ -1764,7 +1767,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
-        "@tensorpipe",
+        "@tensorpipe//:tensorpipe_cuda",
     ],
     alwayslink = True,
 )
