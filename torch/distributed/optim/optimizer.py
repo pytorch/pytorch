@@ -2,12 +2,31 @@ from typing import List, Optional
 
 import torch.distributed.rpc as rpc
 import torch.optim as optim
+import torch.jit as jit
+from torch import Tensor
 from .adagrad import FunctionalAdagrad
 import torch.distributed.autograd as dist_autograd
 
 
 from collections import defaultdict
 from threading import Lock
+
+
+# XXX: we define a ScriptModuleHolder here to explicitly
+# compile the FunctionalOptimizer class into TorchScript
+# This is because ScriptClass instance still lives in
+# python unless you explictly compile it as an attribute
+# in ScriptModule or pass it to a ScriptFunction
+# TODO (wanchaol): remove this once we added TorchScript
+# class reference semantics
+class _ScriptOptimizerHolder(jit.ScriptModule):
+    def __init__(self, optim_ins):
+        super().__init__()
+        self.optim = optim_ins
+
+    @jit.script_method
+    def step(self, grads: List[Optional[Tensor]]):
+        self.optim.step(grads)
 
 
 class _LocalOptimizer(object):
@@ -28,10 +47,17 @@ class _LocalOptimizer(object):
         optim_ctor = _LocalOptimizer.functional_optim_map.get(optim_cls, optim_cls)
         self.is_functional_optim = (optim_ctor != optim_cls)
         self._local_params = [rref.local_value() for rref in local_params_rref]
-        self.optim = optim_ctor(
-            self._local_params,
-            *args,
-            **kwargs)
+        if self.is_functional_optim:
+            self.optim = _ScriptOptimizerHolder(optim_ctor(
+                self._local_params,
+                *args,
+                **kwargs
+            ))
+        else:
+            self.optim = optim_ctor(
+                self._local_params,
+                *args,
+                **kwargs)
 
     def step(self, autograd_ctx_id):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
