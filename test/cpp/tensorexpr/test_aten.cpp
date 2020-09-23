@@ -35,8 +35,8 @@ void testATen_cast_Float() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), static_cast<float>(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), static_cast<float>(i));
   }
 }
 
@@ -63,8 +63,8 @@ void testATennegInt() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), -static_cast<float>(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), -static_cast<float>(i));
   }
 }
 
@@ -91,8 +91,8 @@ void testATennegFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), -i, "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), -i);
   }
 }
 
@@ -126,10 +126,10 @@ void testATenaddInt() {
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), a_v(i) + b_v(i) * c_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), a_v(i) + b_v(i) * c_v(i));
   }
 }
 
@@ -163,10 +163,10 @@ void testATenaddFloat() {
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), a_v(i) + b_v(i) * c_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), a_v(i) + b_v(i) * c_v(i));
   }
 }
 
@@ -200,10 +200,10 @@ void testATensubInt() {
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), a_v(i) - b_v(i) * c_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), a_v(i) - b_v(i) * c_v(i));
   }
 }
 
@@ -237,10 +237,10 @@ void testATensubFloat() {
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), a_v(i) - b_v(i) * c_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), a_v(i) - b_v(i) * c_v(i));
   }
 }
 
@@ -275,10 +275,10 @@ void testATenlerp() {
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), a_v(i) + c_v(i) * (b_v(i) - a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), a_v(i) + c_v(i) * (b_v(i) - a_v(i)));
   }
 }
 
@@ -317,11 +317,11 @@ void testATenaddcmulInt() {
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), 5 * i + 3, "index: ", i);
-    ASSERT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), 5 * i + 3);
+    ASSERT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i));
   }
 }
 
@@ -360,11 +360,11 @@ void testATenaddcmulFloat() {
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), 3 * i + 2, "index: ", i);
-    ASSERT_EQ(d_v(i), 5 * i + 3, "index: ", i);
-    ASSERT_FLOAT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), 3 * i + 2);
+    ASSERT_EQ(d_v(i), 5 * i + 3);
+    ASSERT_FLOAT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i));
   }
 }
 
@@ -394,9 +394,9 @@ void testATenmulInt() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), a_v(i) * b_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), a_v(i) * b_v(i));
   }
 }
 
@@ -426,9 +426,9 @@ void testATenmulFloat() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), a_v(i) * b_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), a_v(i) * b_v(i));
   }
 }
 
@@ -458,9 +458,9 @@ void testATendivInt() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(b_v(i), i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), a_v(i) / b_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), 2 * i + 1);
+    ASSERT_EQ(b_v(i), i + 1);
+    ASSERT_EQ(c_v(i), a_v(i) / b_v(i));
   }
 }
 
@@ -490,9 +490,9 @@ void testATendivFloat() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(b_v(i), i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), a_v(i) / b_v(i), "index: ", i);
+    ASSERT_EQ(a_v(i), 2 * i + 1);
+    ASSERT_EQ(b_v(i), i + 1);
+    ASSERT_EQ(c_v(i), a_v(i) / b_v(i));
   }
 }
 
@@ -523,9 +523,9 @@ void testATenmaxInt() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), std::max(a_v(i), b_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), std::max(a_v(i), b_v(i)));
   }
 }
 
@@ -556,9 +556,9 @@ void testATenmaxFloat() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), std::fmax(a_v(i), b_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), std::fmax(a_v(i), b_v(i)));
   }
 }
 
@@ -589,9 +589,9 @@ void testATenminInt() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), std::min(a_v(i), b_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), std::min(a_v(i), b_v(i)));
   }
 }
 
@@ -622,9 +622,9 @@ void testATenminFloat() {
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 2 * i + 1, "index: ", i);
-    ASSERT_EQ(c_v(i), std::fmin(a_v(i), b_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 2 * i + 1);
+    ASSERT_EQ(c_v(i), std::fmin(a_v(i), b_v(i)));
   }
 }
 
@@ -650,8 +650,8 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i, "index: ", i);
-    ASSERT_EQ(b_v(i), 1.0f / i, "index: ", i);
+    ASSERT_EQ(a_v(i), i);
+    ASSERT_EQ(b_v(i), 1.0f / i);
   }
 }
 
@@ -677,8 +677,8 @@ void testATenreluInt() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i - 64, "index: ", i);
-    ASSERT_EQ(b_v(i), std::max(a_v(i), 0), "index: ", i);
+    ASSERT_EQ(a_v(i), i - 64);
+    ASSERT_EQ(b_v(i), std::max(a_v(i), 0));
   }
 }
 
@@ -708,8 +708,8 @@ void testATenreluFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i - 64, "index: ", i);
-    ASSERT_EQ(b_v(i), std::fmax(a_v(i), 0), "index: ", i);
+    ASSERT_EQ(a_v(i), i - 64);
+    ASSERT_EQ(b_v(i), std::fmax(a_v(i), 0));
   }
 }
 
@@ -735,8 +735,8 @@ void testATenlogFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i + 10, "index: ", i);
-    ASSERT_EQ(b_v(i), std::log(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i + 10);
+    ASSERT_EQ(b_v(i), std::log(a_v(i)));
   }
 }
 
@@ -762,8 +762,8 @@ void testATenlog10Float() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i + 10, "index: ", i);
-    ASSERT_EQ(b_v(i), std::log10(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i + 10);
+    ASSERT_EQ(b_v(i), std::log10(a_v(i)));
   }
 }
 
@@ -789,8 +789,8 @@ void testATenlog2Float() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i + 10, "index: ", i);
-    ASSERT_EQ(b_v(i), std::log2(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i + 10);
+    ASSERT_EQ(b_v(i), std::log2(a_v(i)));
   }
 }
 
@@ -816,8 +816,8 @@ void testATenexpFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i / 10.0f, "index: ", i);
-    ASSERT_EQ(b_v(i), std::exp(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i / 10.0f);
+    ASSERT_EQ(b_v(i), std::exp(a_v(i)));
   }
 }
 
@@ -843,8 +843,8 @@ void testATenerfFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i / 10.0f, "index: ", i);
-    ASSERT_EQ(b_v(i), std::erf(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i / 10.0f);
+    ASSERT_EQ(b_v(i), std::erf(a_v(i)));
   }
 }
 
@@ -870,8 +870,8 @@ void testATencosFloat() {
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
-    ASSERT_EQ(a_v(i), i / 10.0f, "index: ", i);
-    ASSERT_EQ(b_v(i), std::cos(a_v(i)), "index: ", i);
+    ASSERT_EQ(a_v(i), i / 10.0f);
+    ASSERT_EQ(b_v(i), std::cos(a_v(i)));
   }
 }
 

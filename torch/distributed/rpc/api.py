@@ -196,15 +196,20 @@ def _all_gather(obj):
                 timeout=timeout
             )
             worker_name_to_response_future_dict[follower_name] = fut
+
+        errors = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                logger.error(
-                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_name, timeout=timeout
-                    )
-                )
+                errors.append((follower_name, ex))
+
+        if errors:
+            raise RuntimeError(
+                f"Followers {[e[0] for e in errors]} timed out in _all_gather "
+                f"after {timeout} seconds. The first exception is {errors[0][1]}"
+            )
+
     return states.gathered_objects
 
 
@@ -217,7 +222,12 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    _all_gather(None)
+    try:
+        _all_gather(None)
+    except RuntimeError as ex:
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 
 @_require_initialized

@@ -315,16 +315,28 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
-        gradient_as_bucket_view: when set to ``True``, gradients will be views
-                      pointing to different offsets of allreduce communication
-                      buckets. This can reduce peak memory usage, where the
-                      saved memory size will be equal to the total grads size.
-                      Moreover, it avoids the overhead of copying between gradients
-                      and allreduce communication buckets.
+        gradient_as_bucket_view: this is a prototype feature. When set to ``True``,
+                      gradients will be views pointing to different offsets of
+                      allreduce communication buckets. This can reduce peak memory
+                      usage, where the saved memory size will be equal to the total
+                      grads size. Moreover, it avoids the overhead of copying
+                      between gradients and allreduce communication buckets.
                       When gradients are views, "detach_()" cannot be called on the
                       gradients. If hitting such errors, please fix it by referring to
                       the :meth:torch.optim.Optimizer.zero_grad function in
                       "torch/optim/optimizer.py" as the solution.
+                      Warning! It is also found that 'gradient_as_bucket_view = true'
+                      does not work as expected when apex.amp is used for
+                      mixed precision training. apex.amp maintained stashed gradients
+                      that are used for unscaling gradients. These stashed gradients
+                      are pointed to gradients (will be communication buckets when
+                      'gradient_as_bucket_view = true') before starting new iteration.
+                      In new iteration, the communication buckets are mutated and thus
+                      these stashed gradients will be unexpectedly mutated as well,
+                      the unexpectedly muated stached gradients may result in wrong
+                      results. To fix it, these stashed gradients should not be pointed
+                      to gradients, instead they should be copied from gradients when
+                      'gradient_as_bucket_view = true'.
 
     Attributes:
         module (Module): the module to be parallelized
@@ -594,7 +606,7 @@ class DistributedDataParallel(Module):
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, ones, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_join_divide_by_initial_world_size
             )
 
         # Calling _rebuild_buckets before forward compuation,
@@ -828,7 +840,6 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                buckets_rebuilt = False
                 # Schedules allreduce to match fwd pass allreduce in non-joined procs
                 while not all_procs_joined:
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
@@ -838,11 +849,8 @@ class DistributedDataParallel(Module):
                         # Some DDP process still needs to be joined.
                         if is_last_joiner:
                             is_last_joiner = False
-                        # If buckets not rebuilt, will push original bucket
-                        # indices to simulate a rebuild.
-                        if not buckets_rebuilt and not self.find_unused_parameters:
-                            self.reducer._push_all_rebuilt_params()
-                            buckets_rebuilt = self.reducer._rebuild_buckets()
+                        # It will rebuild buckets only once during training period
+                        self.reducer._rebuild_buckets()
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
@@ -868,6 +876,8 @@ class DistributedDataParallel(Module):
                         # Check if we need to allreduce locally unused params.
                         if self.find_unused_parameters:
                             self._match_unused_params_allreduce()
+                        # It will push rebuilt params only once during training period
+                        self.reducer._push_all_rebuilt_params()
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
