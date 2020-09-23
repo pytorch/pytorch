@@ -621,7 +621,7 @@ class TestForeach(TestCase):
 
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
-            
+
             if dtype in [torch.bfloat16, torch.bool, torch.float16]:
                 tensors2 = [torch.zeros(N, N, device=device, dtype=dtype).add(2) for _ in range(N)]
             else:
