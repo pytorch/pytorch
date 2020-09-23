@@ -323,9 +323,9 @@ def test_distributed(test_module, test_directory, options):
             os.environ.update(env_vars)
             if with_init_file:
                 if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
-                    init_method = '{}{}/'.format(FILE_SCHEMA, tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
-                    init_method = '{}{}/shared_init_file'.format(FILE_SCHEMA, tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))

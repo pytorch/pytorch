@@ -460,10 +460,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            if sys.platform == 'win32':
-                url = 'file:///%s?world_size=%d' % (file.name.replace("\\", "/"), 2)
-            else:
-                url = 'file://%s?world_size=%d' % (file.name, 2)
+            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
