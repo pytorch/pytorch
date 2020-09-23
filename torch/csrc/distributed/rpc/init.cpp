@@ -49,6 +49,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
