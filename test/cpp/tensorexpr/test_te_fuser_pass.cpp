@@ -151,7 +151,7 @@ void testFuserPass_UnknownShapes() {
           %y : Tensor):
       %a : Tensor = aten::mul(%x, %y)
       %b : Tensor = aten::mul(%x, %a)
-      return (%a))IR";
+      return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
 
@@ -309,6 +309,25 @@ void testFuserPass_MergeGroups() {
       .check("= prim::TensorExprGroup_")
       ->check_not("= prim::TensorExprGroup_")
       ->run(*g);
+}
+
+void testFuserPass_UnknownShapesIgnored() {
+  WithCPUFuser cf;
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(device=cpu),
+          %y : Float(device=cpu)):
+      %a : Float(device=cpu) = aten::mul(%x, %y)
+      %b : Float(device=cpu) = aten::mul(%x, %a)
+      return (%b))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2, /* disable_shape_checks= */ true);
+
+  // Test that we are generating fusion groups even though shapes are not known
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
 } // namespace jit

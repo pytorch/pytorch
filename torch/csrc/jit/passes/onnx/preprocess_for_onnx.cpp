@@ -52,8 +52,8 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 //   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3
 //      representing the number of outputs.
 //   %14 : Float(2, 4, 3, strides=[12, 3, 1]), %15 : Float(1, 4, 3, strides=[12,
-//   3, 1]), %16 : Float(2, 4, 3, strides=[12, 3, 1] =
-//   aten::split_with_sizes(%input, %13, %7, %8) return (%14, %15, %16)
+//      3, 1]), %16 : Float(2, 4, 3, strides=[12, 3, 1] =
+//      aten::split_with_sizes(%input, %13, %7, %8) return (%14, %15, %16)
 void FuseWithListUnpack(Node* n) {
   auto found_listUnpack = FindFusibleListUnpack(n);
   if (!found_listUnpack) {
