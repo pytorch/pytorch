@@ -11,10 +11,7 @@ def _make_sparse(grad, grad_indices, values):
     if grad_indices.numel() == 0 or values.numel() == 0:
         return torch.empty_like(grad)
     return torch.sparse_coo_tensor(grad_indices, values, size)
-    # constructor = grad.new
-    # if grad_indices.dim() == 0 or values.dim() == 0:
-    #     return constructor().resize_as_(grad)
-    # return constructor(grad_indices, values, size)
+
 
 def adagrad(params: List[Tensor],
             grads: List[Tensor],
