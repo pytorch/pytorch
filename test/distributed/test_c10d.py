@@ -2064,12 +2064,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    def _test_gloo_backend(self, devices, device_ids, multi_device=False):
+    def _test_gloo_backend(self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
+        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device, gradient_as_bucket_view)
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
