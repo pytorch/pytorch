@@ -137,7 +137,22 @@ def _init_process_group(store, rank, world_size):
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    from torch._C._distributed_rpc import ProcessGroupAgent
+    from torch._C._distributed_rpc import (
+      ProcessGroupAgent,
+      ProcessGroupRpcBackendOptions
+    )
+
+    if not isinstance(store, dist.Store):
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, ProcessGroupRpcBackendOptions
+    ):
+        raise TypeError(
+            "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
 
     group = _init_process_group(store, rank, world_size)
 
