@@ -126,6 +126,10 @@ class Graph:
         return n
 
     def find_all_uses_of(self, to_find : Node) -> List[Node]:
+        """
+        Find all nodes that use `to_find` in their args or kwargs
+        """
+        # TODO: computationally inefficient
         def find_use(arg : Any) -> bool:
             if isinstance(arg, (tuple, list)):
                 return any(find_use(elem) for elem in arg)
@@ -138,6 +142,7 @@ class Graph:
             else:
                 return False
 
+        # TODO: can't represent a use at the output!
         return [node for node in self._nodes if find_use(node.args) or find_use(node.kwargs)]
 
     def replace_all_uses_with(self, to_replace : Node, replace_with : Node):

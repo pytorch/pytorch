@@ -673,6 +673,20 @@ class TestFX(JitTestCase):
         for node, expected in zip(uses_of_x, expected_ops):
             assert expected in node.name
 
+    def test_multi_insert_point(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+        relu = torch.relu(x)
+
+        with torch.fx.graph.WithInsertPoint(relu.node):
+            y = torch.neg(x)
+            z = torch.tanh(y)
+
+        graph.output((relu.node, z.node))
+
+        expected_ops = ['x', 'neg', 'tanh', 'relu']
+        for node, expected in zip(graph.nodes, expected_ops):
+            assert expected in node.name
 
 if __name__ == '__main__':
     run_tests()
