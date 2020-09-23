@@ -132,6 +132,7 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         if isinstance(root, torch.nn.Module):
+            self.__dict__ = root.__dict__
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:

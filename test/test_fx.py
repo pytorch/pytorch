@@ -502,6 +502,13 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(baz)
         copied = copy.deepcopy(traced)
 
+    def test_deepcopy_preserve_attributes(self):
+        m = symbolic_trace(torch.nn.Conv2d(1, 1, 1))
+        m.attr = 3
+        self.assertTrue(hasattr(m, 'attr'))
+        m = copy.deepcopy(m)
+        self.assertTrue(hasattr(m, 'attr'))
+
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
             def forward(self, a, b):
