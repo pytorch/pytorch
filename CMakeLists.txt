@@ -201,6 +201,7 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
+option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -360,7 +361,7 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
 endif(MSVC)
 
 list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
@@ -513,6 +514,10 @@ if(USE_VULKAN_SHADERC_RUNTIME)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
+if(USE_VULKAN_RELAXED_PRECISION)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+endif()
+
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 
@@ -614,6 +619,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
+  float a[] = {1.0, 1.0};
   float32x4x2_t v;
   v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
   v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));

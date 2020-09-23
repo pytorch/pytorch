@@ -75,7 +75,39 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def blocked_autorange(self, callback=None, min_run_time=0.2):
+    def _threaded_measurement_loop(self, number, time_hook, stop_hook, min_run_time: float,
+                                   max_run_time: Optional[float] = None, callback=None):
+        total_time = 0.0
+        can_stop = False
+        times = []
+        with common.set_torch_threads(self._num_threads):
+            while (total_time < min_run_time) or (not can_stop):
+                time_spent = time_hook()
+                times.append(time_spent)
+                total_time += time_spent
+                if callback:
+                    callback(number, time_spent)
+                can_stop = stop_hook(times)
+                if max_run_time and total_time > max_run_time:
+                    break
+        return times
+
+    def adaptive_autorange(self, threshold=0.1, max_run_time=10, callback=None, min_run_time=0.01):
+        number = self._estimate_block_size(min_run_time=0.05)
+
+        def time_hook():
+            return self._timer.timeit(number)
+
+        def stop_hook(times):
+            if len(times) > 3:
+                measure = self._construct_measurement(number, times)
+                return measure.meets_confidence(threshold=threshold)
+            return False
+        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
+        measure = self._construct_measurement(number, times)
+        return measure
+
+    def _estimate_block_size(self, min_run_time):
         with common.set_torch_threads(self._num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
@@ -89,15 +121,16 @@ class Timer(object):
                 if time_taken > min_run_time:
                     break
                 number *= 10
+        return number
 
-            total_time = 0.0
-            times = []
+    def blocked_autorange(self, callback=None, min_run_time=0.2):
+        number = self._estimate_block_size(min_run_time)
 
-            while total_time < min_run_time:
-                time_taken = self._timer.timeit(number)
-                total_time += time_taken
-                if callback:
-                    callback(number, time_taken)
-                times.append(time_taken)
+        def time_hook():
+            return self._timer.timeit(number)
 
-            return self._construct_measurement(number_per_run=number, times=times)
+        def stop_hook(times):
+            return True
+        times = self._threaded_measurement_loop(number, time_hook, stop_hook, min_run_time=min_run_time,
+                                                callback=callback)
+        return self._construct_measurement(number_per_run=number, times=times)
