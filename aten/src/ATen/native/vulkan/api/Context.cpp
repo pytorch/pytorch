@@ -93,9 +93,9 @@ Context::Context(const Adapter& adapter)
           Deleter{}),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
       command_(gpu()),
-      descriptor_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
+      descriptor_(gpu()),
       resource_(gpu()) {
 }
 

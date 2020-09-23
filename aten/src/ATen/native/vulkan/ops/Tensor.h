@@ -202,6 +202,7 @@ class C10_EXPORT vTensor final {
   api::Resource::Image image_;
   api::Resource::Buffer buffer_;
   api::Resource::Buffer staging_;
+  api::Resource::Fence fence_;
 
   mutable struct {
     uint32_t image : 1u;

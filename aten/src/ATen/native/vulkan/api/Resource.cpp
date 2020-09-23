@@ -59,48 +59,17 @@ VmaAllocationCreateInfo create_allocation_create_info(
   };
 }
 
-void release_buffer(const Resource::Buffer& buffer) {
-  // Safe to pass null as buffer or allocation.
-  vmaDestroyBuffer(
-      buffer.memory.allocator,
-      buffer.object.handle,
-      buffer.memory.allocation);
-}
-
-void release_image(const Resource::Image& image) {
-  // Sampler lifetime managed through the sampler cache.
-
-  if (VK_NULL_HANDLE != image.object.view) {
-    VmaAllocatorInfo allocator_info{};
-    vmaGetAllocatorInfo(image.memory.allocator, &allocator_info);
-    vkDestroyImageView(allocator_info.device, image.object.view, nullptr);
-  }
-
-  // Safe to pass null as image or allocation.
-  vmaDestroyImage(
-      image.memory.allocator,
-      image.object.handle,
-      image.memory.allocation);
-}
-
-void release_fence(Resource::Fence& fence) {
-  if (fence) {
-    fence.wait();
-    vkDestroyFence(fence.device, fence.handle, nullptr);
-  }
-}
-
 } // namespace
 
-void* map(const Resource::Memory& memory) {
+void* Resource::Memory::map() const {
   // Call will be ignored by implementation if the memory type this allocation
   // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
   // we want.
   VK_CHECK(vmaInvalidateAllocation(
-      memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
+      allocator_, allocation_, 0u, VK_WHOLE_SIZE));
 
   void* data = nullptr;
-  VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));
+  VK_CHECK(vmaMapMemory(allocator_, allocation_, &data));
 
   return data;
 }
@@ -186,20 +155,14 @@ Resource::Image::Sampler::Factory::operator()(
 
 void Resource::Fence::wait(
     const uint64_t timeout_nanoseconds) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      handle,
-      "Invalid Vulkan fence!");
-
-  VK_CHECK(vkWaitForFences(
-      device,
-      1u,
-      &handle,
-      VK_TRUE,
-      timeout_nanoseconds));
+  if (used_) {
+    VK_CHECK(vkWaitForFences(
+        device_,
+        1u,
+        &handle_,
+        VK_TRUE,
+        timeout_nanoseconds));
+  }
 }
 
 Resource::Pool::Pool(const GPU& gpu)
@@ -259,7 +222,6 @@ Resource::Buffer Resource::Pool::buffer(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_buffer);
@@ -349,7 +311,6 @@ Resource::Image Resource::Pool::image(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_image);
@@ -417,6 +378,35 @@ void Resource::Pool::purge() {
   fence_.free.clear();
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::release_buffer(const Resource::Buffer& buffer) {
+  // Safe to pass null as buffer or allocation.
+  vmaDestroyBuffer(
+      buffer.memory().allocator_,
+      buffer.object().handle(),
+      buffer.memory().allocation_);
+}
+
+void Resource::Pool::release_image(const Resource::Image& image) {
+  // Sampler lifetime managed through the sampler cache.
+
+  if (VK_NULL_HANDLE != image.object().view()) {
+    VmaAllocatorInfo allocator_info{};
+    vmaGetAllocatorInfo(image.memory().allocator_, &allocator_info);
+    vkDestroyImageView(allocator_info.device, image.object().view(), nullptr);
+  }
+
+  // Safe to pass null as image or allocation.
+  vmaDestroyImage(
+      image.memory().allocator_,
+      image.object().handle(),
+      image.memory().allocation_);
+}
+
+void Resource::Pool::release_fence(Resource::Fence& fence) {
+  fence.wait();
+  vkDestroyFence(fence.device_, fence.handle_, nullptr);
 }
 
 } // namespace api
