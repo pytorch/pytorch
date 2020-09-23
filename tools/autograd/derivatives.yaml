@@ -159,7 +159,7 @@
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
-  self: grad * self.sign()
+  self: grad * self.sgn()
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
@@ -397,11 +397,11 @@
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
 # Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad / other
-  other: -grad * (self / other) / other
+  self: div_tensor_self_backward(grad, other, self.scalar_type())
+  other: div_tensor_other_backward(grad, self, other)
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad / other
+  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor
@@ -927,6 +927,9 @@
 
 - name: sign(Tensor self) -> Tensor
   self: zeros_like(grad)
+
+- name: sgn(Tensor self) -> Tensor
+  self: sgn_backward(result, grad, self)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()
