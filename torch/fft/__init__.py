@@ -863,7 +863,7 @@ Note:
 Note:
     For even lengths, the Nyquist frequency at ``f[n/2]`` can be thought of as
     either negative or positive. Unlike :func:`~torch.fft.fftfreq`,
-    :func:`~torch.fft.rfftfreq` always returns is as positive.
+    :func:`~torch.fft.rfftfreq` always returns it as positive.
 
 
 Args:
@@ -898,7 +898,8 @@ Example:
 fftshift = _add_docstr(_fft.fft_fftshift, r"""
 fftshift(input, dim=None) -> Tensor
 
-Reorder n-dimensional FFT output to have negative frequency terms first. 
+Reorders n-dimensional FFT output to have negative frequency terms first, by a
+:func:`~torch.roll` operation.
 
 Note:
     By convention, the FFT returns positive frequency terms first, followed by
@@ -917,7 +918,7 @@ Args:
     dim (int, Tuple[int], optional): The dimensions to rearrange.
         Only dimensions specified here will be rearranged, any other dimensions
         will be left in their original order.
-        Default: All dimensions of :attr:`x`.
+        Default: All dimensions of :attr:`input`.
 
 Example:
 
@@ -929,7 +930,7 @@ Example:
     >>> torch.fftshift(f)
     tensor([-0.5000, -0.2500, 0.0000, 0.2500])
 
-    Also notice that the Nyquist frequency at `f[2]` was considered negative
+    Also notice that the Nyquist frequency at ``f[2]`` was considered negative
     and so was moved to the beginning of the tensor.
 
     This also works for multi-dimensional transforms:
@@ -964,7 +965,7 @@ Args:
     dim (int, Tuple[int], optional): The dimensions to rearrange.
         Only dimensions specified here will be rearranged, any other dimensions
         will be left in their original order.
-        Default: All dimensions of :attr:`x`.
+        Default: All dimensions of :attr:`input`.
 
 Example:
 
