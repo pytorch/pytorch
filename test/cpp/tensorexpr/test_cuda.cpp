@@ -762,6 +762,25 @@ void testCudaSharedMemReduce_1() {
 
   // TODO: check the generated code for correctness.
   CudaCodeGen cuda_cg(loop_k1, a, b);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Check the c write is not masked, but the d write is.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: c_ = 0
+# CHECK: for (int m = 0; m < 128
+# CHECK:   c_ = c_ +
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<1
+# CHECK:   b[blockIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: atomicAdd(&b[blockIdx.x], c_)
+)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   PaddedBuffer<float> a_v(1, M, N, "a_v");
   PaddedBuffer<float> b_v(1, "b_v");
   PaddedBuffer<float> b_ref(1, "b_ref");

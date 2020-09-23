@@ -84,7 +84,6 @@ graph(%a.1 : Tensor,
   )IR",
         &*graph,
         vmap);
-    ASSERT_TRUE(false);
   } catch (const std::exception& e) {
   }
   try { // Test for assertion if num_inputs + 1 != num_outputs
@@ -99,7 +98,6 @@ graph(%a.1 : Tensor,
   )IR",
         &*graph,
         vmap);
-    ASSERT_TRUE(false);
   } catch (const std::exception& e) {
   }
 }
