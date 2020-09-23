@@ -6603,6 +6603,31 @@ Example::
     tensor([ False, True,  False,  False])
 """.format(**common_args))
 
+add_docstr(torch.sgn,
+           r"""
+sgn(input, *, out=None) -> Tensor
+
+For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
+elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
+returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+
+:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
+:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> x.sgn()
+    tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
