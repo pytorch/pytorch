@@ -425,11 +425,9 @@ std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
 
 void Reducer::set_forward_pass_work_handle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-    at::Tensor& tensor,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
-  forwardPassWorkHandle_.resultTensor = tensor;
   forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
@@ -573,12 +571,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (divFactor_ == kUnsetDivFactor) {
     divFactor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
-    if (workHandle) {
-      if (!forwardPassWorkHandle_.useStaticWorldSize) {
-        workHandle->wait();
-        at::Tensor& res = forwardPassWorkHandle_.resultTensor;
-        divFactor_ = res.item().to<int>();
-      }
+    if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
+      workHandle->wait();
+      auto results = workHandle->result();
+      // Guard against the results being empty
+      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      at::Tensor& res = results.front();
+      divFactor_ = res.item().to<int>();
     }
   }
 
