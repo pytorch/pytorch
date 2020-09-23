@@ -12,7 +12,9 @@ ROCM_VERSIONS = [
     "3.8",
 ]
 
-GPU_VERSIONS = [None] + ["cuda" + v for v in CUDA_VERSIONS] + ["rocm" + v for v in ROCM_VERSIONS]
+ROCM_VERSION_LABELS = ["rocm" + v for v in ROCM_VERSIONS]
+
+GPU_VERSIONS = [None] + ["cuda" + v for v in CUDA_VERSIONS] + ROCM_VERSION_LABELS
 
 STANDARD_PYTHON_VERSIONS = [
     "3.6",
