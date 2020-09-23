@@ -115,6 +115,35 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void floordiv_kernel(TensorIterator& iter) {
+  // In the special case of unsigned integer division, floor division
+  //   is equivalent to truncation division (since the signs of
+  //   the divisor and dividend are always the same)
+  if (iter.common_dtype() == c10::ScalarType::Byte) {
+    cpu_kernel(iter, [](uint8_t a, uint8_t b) -> uint8_t {
+      TORCH_CHECK(b != 0, "ZeroDivisionError");
+      return a / b;
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "floordiv_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
+        if ((a < 0) != (b < 0)) {
+          // Subtracts one from the results of truncation division
+          //   if the divisor and dividend have different sign(bit)s
+          //   and the remainder of the division is nonzero
+          const auto div_result = std::div(a, b);
+          return (div_result.rem == 0) ? div_result.quot : div_result.quot - 1;
+        } else {
+          // When the sign(bit)s of the divisor and dividend are the same
+          //   truncation division is equivalent to floor division
+          return a / b;
+        }
+      });
+    });
+  }
+}
+
 void remainder_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cpu", [&]() {
@@ -779,6 +808,7 @@ REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(floordiv_stub, &floordiv_kernel);
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);

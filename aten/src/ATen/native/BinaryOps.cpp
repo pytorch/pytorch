@@ -197,22 +197,6 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.div_(divisor);
 }
 
-Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor remainder(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, self, other);
-}
 
 // NOTE: integer floor division != C++ integer division. Integer division in
 //   C++ is equivalent to torch.trunc(torch.true_divide(a, b)), while
@@ -223,13 +207,13 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 //   to a float type. This requires special dtype handling.
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
   // Computes the output dtype
-  auto result_dtype = at::native::result_type(TensorList{self, other});
+  auto computation_dtype = at::native::result_type(TensorList{self, other});
 
-  TORCH_CHECK(result_dtype != ScalarType::Bool,
+  TORCH_CHECK(computation_dtype != ScalarType::Bool,
     "torch.floor_divide is not implemented for scalar type bool!");
 
   // NOTE: floordiv_stub handles the special case of integer floor division
-  if (c10::isIntegralType(result_dtype, /*include_bool=*/false)) {
+  if (c10::isIntegralType(computation_dtype, /*include_bool=*/false)) {
     auto iter = TensorIterator::binary_op(result, self, other);
     floordiv_stub(iter.device_type(), iter);
     return result;
@@ -240,13 +224,13 @@ Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
   // Computes the output dtype
-  auto result_dtype = at::native::result_type(TensorList{self, other});
+  auto computation_dtype = at::native::result_type(TensorList{self, other});
 
-  TORCH_CHECK(result_dtype != ScalarType::Bool,
+  TORCH_CHECK(computation_dtype != ScalarType::Bool,
     "torch.floor_divide is not implemented for scalar type bool!");
 
   // NOTE: floordiv_stub handles the special case of integer floor division
-  if (c10::isIntegralType(result_dtype, /*include_bool=*/false)) {
+  if (c10::isIntegralType(computation_dtype, /*include_bool=*/false)) {
     Tensor result;
     auto iter = TensorIterator::binary_op(result, self, other);
     floordiv_stub(iter.device_type(), iter);
@@ -266,6 +250,23 @@ Tensor floor_divide(const Tensor& self, Scalar other) {
 
 Tensor& floor_divide_(Tensor& self, Scalar other) {
   return self.floor_divide_(wrapped_scalar_tensor(other));
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {

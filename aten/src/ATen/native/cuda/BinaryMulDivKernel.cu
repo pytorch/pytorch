@@ -33,6 +33,34 @@ void div_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void floordiv_kernel_cuda(TensorIterator& iter) {
+  // In the special case of unsigned integer division, floor division
+  //   is equivalent to truncation division (since the signs of
+  //   the divisor and dividend are always the same)
+  if (iter.common_dtype() == c10::ScalarType::Byte) {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a / b;
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "floordiv_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if ((a < 0) != (b < 0)) {
+          // Subtracts one from the results of truncation division
+          //   if the divisor and dividend have different sign(bit)s
+          //   and the remainder of the division is nonzero
+          const auto quot = a / b;
+          const auto rem = a % b;
+          return rem ? quot - 1 : quot;
+        } else {
+          // When the sign(bit)s of the divisor and dividend are the same
+          //   truncation division is equivalent to floor division
+          return a / b;
+        }
+      });
+    });
+  }
+}
+
 void mul_kernel_cuda(TensorIterator& iter) {
   if (iter.common_dtype() == ScalarType::Bool) {
     // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
@@ -63,6 +91,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
+REGISTER_DISPATCH(floordiv_stub, &floordiv_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 
 }} // namespace at::native

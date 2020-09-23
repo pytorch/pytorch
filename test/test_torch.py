@@ -59,7 +59,7 @@ if TEST_SCIPY:
 
 SIZE = 100
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -12657,7 +12657,7 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm            
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))
@@ -14219,69 +14219,254 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(y1.device, device_obj)
                     self.assertEqual(y0, y1)
 
-    # Tests that CPU scalars (including zero dim tensors) can be used in
-    # binary operations with CUDA tensors, and that the results are
-    # consistent with Python's operators.
+    def test_div_and_floordiv_vs_python(self, device):
+        # Tests torch division ops which can handle both arguments being
+        #   scalars
+        def _scalar_helper(python_op, torch_op):
+            for a, b in product(range(-10, 10), range(-10, 10)):
+                for op in (lambda x: x * .5, lambda x: math.floor(x)):
+                    a = op(a)
+                    b = op(b)
+
+                    # Skips zero divisors
+                    if b == 0:
+                        continue
+
+                    expected = python_op(a, b)
+
+                    for op in (operator.truediv, torch.true_divide):
+                        actual_scalar = torch_op(a, b)
+
+                        a_t = torch.tensor(a, device=device)
+                        b_t = torch.tensor(b, device=device)
+
+                        actual_tensor = torch_op(a_t, b_t)
+                        actual_first_tensor = torch_op(a_t, b)
+                        actual_second_tensor = torch_op(a, b_t)
+
+                        self.assertEqual(actual_scalar, expected_div)
+                        self.assertEqual(actual_tensor.item(), expected_div)
+                        self.assertEqual(actual_first_tensor, actual_tensor)
+                        self.assertEqual(actual_second_tensor, actual_tensor)
+
+            _scalar_helper(operator.truediv, operator.truediv)
+            _scalar_helper(operator.truediv, torch.true_divide)
+            _scalar_helper(operator.floordiv, operator.floordiv)
+            _scalar_helper(operator.floordiv, torch.floor_divide)
+
+    def test_div_and_floordiv_script_vs_python(self, device):
+        # Creates jitted functions of two tensors
+        def _wrapped_div(a, b):
+            return a / b
+
+        def _wrapped_floordiv(a, b):
+            return a // b
+
+        scripted_div = torch.jit.script(_wrapped_div)
+        scripted_floordiv = torch.jit.script(_wrapped_floordiv)
+        for a, b in product(range(-10, 10), range(-10, 10)):
+            for op in (lambda x: x * .5, lambda x: math.floor(x)):
+                a = op(a)
+                b = op(b)
+
+                # Skips zero divisors
+                if b == 0:
+                    continue
+
+                expected_div = a / b
+                expected_floordiv = a // b
+                a_t = torch.tensor(a, device=device)
+                b_t = torch.tensor(b, device=device)
+
+                self.assertEqual(scripted_div(a_t, b_t), expected_div)
+                self.assertEqual(scripted_floordiv(a_t, b_t), expected_floordiv)
+
+        # Creates jitted functions of one tensor
+        def _wrapped_div_scalar(a):
+            return a / 5
+
+        # NOTE: this will fail when given an integer input, since
+        #   the JIT implements division as
+        #   torch.reciprocal(a) * 5, and reciprocal is only
+        #   implemented for float types.
+        def _wrapped_rdiv_scalar(a):
+            return 5 / a
+
+        def _wrapped_floordiv_scalar(a):
+            return a // 5
+
+        # NOTE: this fails if the input is not an integer tensor
+        # See https://github.com/pytorch/pytorch/issues/45199
+        def _wrapped_rfloordiv_scalar(a):
+            return 5 // a
+
+        scripted_div_scalar = torch.jit.script(_wrapped_div_scalar)
+        scripted_rdiv_scalar = torch.jit.script(_wrapped_rdiv_scalar)
+        scripted_floordiv_scalar = torch.jit.script(_wrapped_floordiv_scalar)
+        scripted_rfloordiv_scalar = torch.jit.script(_wrapped_rfloordiv_scalar)
+
+        for a in range(-10, 10):
+            for op in (lambda x: x * .5, lambda x: math.floor(x)):
+                a = op(a)
+
+                a_t = torch.tensor(a, device=device)
+
+                self.assertEqual(a / 5, scripted_div_scalar(a_t))
+                self.assertEqual(a // 5, scripted_floordiv_scalar(a_t))
+
+                # Skips zero divisors
+                if a == 0:
+                    continue
+
+                if a_t.is_floating_point():
+                    self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
+                else:
+                    with self.assertRaises(RuntimeError):
+                        scripted_rdiv_scalar(a_t)
+
+
+                # Handles Issue 45199 (see comment above)
+                if a_t.is_floating_point():
+                    with self.assertRaises(RuntimeError):
+                        scripted_rfloordiv_scalar(a_t)
+                else:
+                    self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
+
+    def test_idiv_and_ifloordiv_vs_python(self, device):
+        def _wrapped_idiv_tensor(a, b):
+            a /= b
+            return a
+
+        def _wrapped_idiv_scalar(a):
+            a /= 5
+            return a
+
+        def _wrapped_true_divide__tensor(a, b):
+            a.true_divide_(b)
+            return a
+
+        def _wrapped_true_divide__scalar(a):
+            a.true_divide_(5)
+            return a
+
+        def _wrapped_floor_divide__tensor(a, b):
+            a.floor_divide_(b)
+            return a
+
+        def _wrapped_floor_divide__scalar(a):
+            a.floor_divide_(5)
+            return a
+
+        # The following functions are unsupported by the JIT
+        def _wrapped_ifloordiv_tensor(a, b):
+            a //= b
+            return a
+
+        def _wrapped_ifloordiv_scalar(a):
+            a //= 5
+            return a
+
+        with self.assertRaises(torch.jit.frontend.NotSupportedError):
+            scripted_ifloordiv_tensor = torch.jit.script(_wrapped_ifloordiv_tensor)
+
+        with self.assertRaises(torch.jit.frontend.NotSupportedError):
+            scripted_ifloordiv_scalar = torch.jit.script(_wrapped_ifloordiv_scalar)
+
+        scripted_idiv_tensor = torch.jit.script(_wrapped_idiv_tensor)
+        scripted_idiv_scalar = torch.jit.script(_wrapped_idiv_scalar)
+        scripted_true_divide__tensor = torch.jit.script(_wrapped_true_divide__tensor)
+        scripted_true_divide__scalar = torch.jit.script(_wrapped_true_divide__scalar)
+        scripted_floor_divide__tensor = torch.jit.script(_wrapped_floor_divide__tensor)
+        scripted_floor_divide__scalar = torch.jit.script(_wrapped_floor_divide__scalar)
+
+        for a, b in product(range(-10, 10), range(-10, 10)):
+            for op in (lambda x: x * .5, lambda x: math.floor(x)):
+                a = op(a)
+                b = op(b)
+
+                # Skips zero divisors
+                if b == 0:
+                    continue
+
+                expected_idiv = a / b
+                expected_ifloordiv = a // b
+
+                a_t = torch.tensor(a, device=device)
+                b_t = torch.tensor(b, device=device)
+
+                if a_t.is_floating_point():
+                    tmp0 = a_t.clone()
+                    tmp0 /= b
+
+                    tmp1 = a_t.clone()
+                    tmp1 /= b_t
+
+                    self.assertEqual(tmp0.item(), expected_idiv)
+                    self.assertEqual(tmp1.item(), expected_idiv)
+                    self.assertEqual(scripted_true_divide__tensor(a_t.clone(), b_t).item(), expected_idiv)
+                    self.assertEqual(scripted_true_divide__scalar(a_t.clone()).item(), a / 5)
+                else:
+                    tmp = a_t.clone()
+                    with self.assertRaises(RuntimeError):
+                        tmp /= b
+                    with self.assertRaises(RuntimeError):
+                        tmp /= b_t
+                    with self.assertRaises(RuntimeError):
+                        scripted_true_divide__tensor(tmp, b_t)
+                    with self.assertRaises(RuntimeError):
+                        scripted_true_divide__scalar(tmp)
+
+
+                if not a_t.is_floating_point() and b_t.is_floating_point():
+                    # Inplace modification fails because a float tensor is required
+                    #   if the divisor is a float tensor
+                    with self.assertRaises(RuntimeError):
+                        a_t.clone().floor_divide_(b_t)
+                    with self.assertRaises(RuntimeError):
+                        scripted_floor_divide_tensor(a_t.clone(), b_t)
+                    tmp = a_t.clone()
+                    with self.assertRaises(RuntimeError):
+                        tmp //= b_t
+                else:
+                    # Inplace modification is OK when both or neither tensor is
+                    #   a float tensor
+                    self.assertEqual(a_t.clone().floor_divide_(b_t).item(), expected_ifloordiv)
+                    self.assertEqual(scripted_floor_divide__tensor(a_t.clone(), b_t).item(), expected_ifloordiv)
+                    tmp = a_t.clone()
+                    tmp //= b_t
+                    self.assertEqual(tmp.item(), expected_ifloordiv)
+
+                self.assertEqual(scripted_floor_divide__scalar(a_t), a // 5)
+
+    # Tests binary op equivalence with Python ops
+    # NOTE: division ops are tested separately above
     @onlyCUDA
-    def test_cuda_cpu_scalar_binary_ops(self, device):
-        val_scalar = math.pi
-        val_tensor = torch.tensor(val_scalar)
+    def test_binary_ops_with_scalars(self, device):
         for ops in ((operator.add, torch.add),
                     (operator.sub, torch.sub),
-                    (operator.mul, torch.mul),
-                    (operator.truediv, torch.true_divide),
-                    (operator.floordiv, torch.floor_divide)):
+                    (operator.mul, torch.mul)):
             python_op, torch_op = ops
 
-            for _ in range(30):
-                # Samples values and ensures no zeros to avoid division by
-                #   zero errors. Further, because Python math is
-                #   so precise this rounds to only 3 decimal places to compare
-                #   with PyTorch. torch.floor_divide is especially sensitive
-                #   to very small division computation errors.
-                a = round(random.uniform(-15, 15))
-                b = round(random.uniform(-15, 15))
-                a = a if a != 0 else 1
-                b = b if b != 0 else 1
+            for a, b in product(range(-10, 10), range(-10, 10)):
+                for op in (lambda x: x * .5, lambda x: math.floor(x)):
+                    a = op(a)
+                    b = op(b)
 
-                # Computes in double since Python math is high precision
-                a_tensor = torch.tensor(a, device=device, dtype=torch.double)
-                b_tensor = torch.tensor(b, device=device, dtype=torch.double)
+                    a_tensor = torch.tensor(a, device=device)
+                    b_tensor = torch.tensor(b, device=device)
+                    a_tensor_cpu = a_tensor.cpu()
+                    b_tensor_cpu = b_tensor.cpu()
+                    vals = (a, b, a_tensor, b_tensor, a_tensor_cpu, b_tensor_cpu)
 
-                a_tensor_cpu = a_tensor.cpu()
-                b_tensor_cpu = b_tensor.cpu()
+                    for args in product(vals, vals):
+                        first, second = args
 
-                vals = (a, b, a_tensor, b_tensor, a_tensor_cpu, b_tensor_cpu)
+                        first_scalar = first if not isinstance(first, torch.Tensor) else first.item()
+                        second_scalar = second if not isinstance(second, torch.Tensor) else second.item()
+                        expected = python_op(first_scalar, second_scalar)
 
-                for args in product(vals, vals):
-                    first, second = args
-
-                    first_scalar = first if not isinstance(first, torch.Tensor) else first.item()
-                    second_scalar = second if not isinstance(second, torch.Tensor) else second.item()
-                    expected = python_op(first_scalar, second_scalar)
-
-                    # Skips floor division where division is inaccurate
-                    # NOTE: division is Python is very accurate,
-                    #   compared to division in PyTorch. For example,
-                    #   torch.tensor(6.247, device='cuda', dtype=torch.float64) / 6.247
-                    #   produces
-                    #   tensor(0.99999999999999988898, device='cuda:0', dtype=torch.float64)
-                    #   on Colab. When reviewing floor division, this is an absolute error
-                    #   of 1, since PyTorch's floor division result will be zero
-                    #   and Python's will be 1.
-                    #   This block of code detects when Python and
-                    #   PyTorch's division disagree on their results' floors and
-                    #   skips testing floor division in those cases.
-                    if torch_op is torch.floor_divide:
-                        expected_div = first_scalar / second_scalar
-                        actual_div = first / second
-                        if isinstance(actual_div, torch.Tensor):
-                            actual_div = actual_div.item()
-                        if math.floor(expected_div) != math.floor(actual_div):
-                            continue
-
-                    self.assertEqual(expected, python_op(first, second))
-                    self.assertEqual(expected, torch_op(first, second))
+                        self.assertEqual(expected, python_op(first, second))
+                        self.assertEqual(expected, torch_op(first, second))
 
     @onlyCUDA
     def test_ceil_out_mismatch(self, device):
@@ -16968,7 +17153,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if dtype.is_floating_point or dtype.is_complex:
             z = torch.tensor([30 / v.item() for v in x], dtype=dtype, device=device)
         else:
-            z = torch.tensor([math.trunc(30. / v.item()) for v in x], dtype=dtype, device=device)
+            z = torch.tensor([30 / v.item() for v in x],
+                             dtype=torch.get_default_dtype(), device=device)
         self.assertEqual(y, z)
 
     @onlyCPU
@@ -19901,7 +20087,7 @@ tensor_op_tests = [
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
         True, [tf32_on_and_off(0.005)], 0, True),
     ('addmv', 'scalar', _medium_1d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4, 
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
@@ -20151,7 +20337,7 @@ tensor_op_tests = [
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, 
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,
         torch.testing.get_all_fp_dtypes() + _complex_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
