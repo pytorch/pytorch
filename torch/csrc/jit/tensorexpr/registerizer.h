@@ -96,6 +96,10 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
 
   void visit(const Load* v) override;
 
+  void visit(const IfThenElse* v) override;
+
+  void visit(const Cond* v) override;
+
 #define STMT_ON_STACK(Op)                    \
   virtual void visit(const Op* v) override { \
     stmtStack_.push_front(v);                \
@@ -107,7 +111,6 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
   STMT_ON_STACK(Allocate);
   STMT_ON_STACK(Free);
   STMT_ON_STACK(Let);
-  STMT_ON_STACK(Cond);
 
 #undef STMT_ON_STACK
 
@@ -124,6 +127,8 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
   std::deque<const Stmt*> stmtStack_;
   const Block* enclosingBlock_;
   HashProvider hasher_;
+
+  size_t nested_conditions_{0};
 };
 
 // Walks the IR an replaces a single Acccess with a local scalar Var.
