@@ -340,7 +340,7 @@ class PackageImporter:
         if last == '__init__.py':
             package.source_file = filename
         elif last.endswith('.py'):
-            package_name = last.rstrip('.py')
+            package_name = last[:-len('.py')]
             package.children[package_name] = _ModuleNode(filename)
 
     def _add_extern(self, extern_name: str):
