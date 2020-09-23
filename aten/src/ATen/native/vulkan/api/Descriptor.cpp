@@ -10,7 +10,7 @@ VkDescriptorPool create_descriptor_pool(
     const VkDevice device) {
   const struct {
     uint32_t capacity;
-    c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
+    c10::SmallVector<VkDescriptorPoolSize, 8u> sizes;
   } descriptor {
     1024u,
     {
@@ -27,11 +27,11 @@ VkDescriptorPool create_descriptor_pool(
 
         {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          256u,
+          768u,
         },
         {
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          256u,
+          768u,
         },
 
         /*
@@ -40,11 +40,11 @@ VkDescriptorPool create_descriptor_pool(
 
         {
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          256u,
+          768u,
         },
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          256u,
+          768u,
         },
       },
     },
@@ -125,6 +125,132 @@ Descriptor::Set::Set(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor_set_,
       "Invalid Vulkan descriptor set!");
+}
+
+void Descriptor::Set::update(const Stream& source) {
+  const auto stream_itr = std::find_if(
+      bindings_.streams.begin(),
+      bindings_.streams.end(),
+      [binding = source.binding](const Stream& destination) {
+        return destination.binding == binding;
+      });
+
+  if (bindings_.streams.end() == stream_itr) {
+     bindings_.streams.emplace_back(source);
+  }
+  else {
+    *stream_itr = source;
+  }
+
+  bindings_.dirty = true;
+}
+
+Descriptor::Set& Descriptor::Set::bind(
+    const uint32_t binding,
+    const VkDescriptorType type,
+    const Resource::Buffer::Object& buffer) {
+  update(Stream{
+      binding,
+      type,
+      {
+        .buffer = {
+          buffer.handle,
+          buffer.offset,
+          buffer.range,
+        },
+      },
+    });
+
+  return *this;
+}
+
+Descriptor::Set& Descriptor::Set::bind(
+    const uint32_t binding,
+    const VkDescriptorType type,
+    const Resource::Image::Object& image) {
+  update(Stream{
+      binding,
+      type,
+      {
+        .image = {
+          image.sampler,
+          image.view,
+          image.layout
+        },
+      },
+    });
+
+  return *this;
+}
+
+VkDescriptorSet Descriptor::Set::handle() const {
+  if (bindings_.dirty) {
+    const auto is_buffer = [](const VkDescriptorType type) {
+      switch (type) {
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+          return true;
+
+        default:
+          return false;
+      }
+    };
+
+    const auto is_image = [](const VkDescriptorType type) {
+      switch (type) {
+        case VK_DESCRIPTOR_TYPE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+          return true;
+
+        default:
+          return false;
+      }
+    };
+
+    c10::SmallVector<VkWriteDescriptorSet, 8u> write_descriptor_sets;
+
+    for (const Stream& stream : bindings_.streams) {
+      VkWriteDescriptorSet write{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        descriptor_set_,
+        stream.binding,
+        0u,
+        1u,
+        stream.type,
+        nullptr,
+        nullptr,
+        nullptr,
+      };
+
+      if (is_buffer(stream.type)) {
+        write.pBufferInfo = &stream.info.buffer;
+      }
+      else if (is_image(stream.type)) {
+        write.pImageInfo = &stream.info.image;
+      }
+
+      write_descriptor_sets.emplace_back(write);
+    }
+
+    vkUpdateDescriptorSets(
+        device_,
+        write_descriptor_sets.size(),
+        write_descriptor_sets.data(),
+        0u,
+        nullptr);
+
+    bindings_.dirty = false;
+  }
+
+  return descriptor_set_;
 }
 
 Descriptor::Pool::Pool(const GPU& gpu)
