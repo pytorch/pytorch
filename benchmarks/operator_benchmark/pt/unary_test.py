@@ -91,6 +91,7 @@ unary_ops_list = op_bench.op_list(
         ['sigmoid', torch.sigmoid],
         ['sigmoid_', torch.sigmoid_],
         ['sign', torch.sign],
+        ['sgn', torch.sgn],
         ['sin', torch.sin],
         ['sin_', torch.sin_],
         ['sinh', torch.sinh],
