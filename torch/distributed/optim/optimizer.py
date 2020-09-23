@@ -38,9 +38,13 @@ class _LocalOptimizer(object):
     # trainer will create its own instance of _LocalOptimizer but
     # they will all optimize the same parameters on each worker)
     global_lock = Lock()
+
+    # dict to map a user passed in optimizer class to a functional
+    # optimizer class if we have already defined it inside
+    # distributed.optim package, this is so that we hide the
+    # functional optimizer to user and still provide the same API.
     functional_optim_map = {
         optim.Adagrad: FunctionalAdagrad,
-        # torch.optim.Adam: torch.distributed.optim.Adam
     }
 
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
