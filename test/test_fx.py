@@ -603,6 +603,50 @@ class TestFX(JitTestCase):
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
 
+    @skipIfNoTorchVision
+    def test_replace_uses(self):
+        rn18 = resnet18()
+
+        class LowerReluTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m : torch.nn.Module, qualname : str):
+                if isinstance(m, torch.nn.ReLU):
+                    return False
+                return super().is_leaf_module(m, qualname)
+
+        rn18_traced = LowerReluTracer().trace(rn18)
+
+        to_erase = []
+        for node in rn18_traced.graph.nodes:
+            if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
+                kwargs = node.kwargs
+                # Neg doesn't have in-place
+                kwargs.pop('inplace')
+                with torch.fx.graph.WithInsertPoint(node):
+                    new_node = rn18_traced.graph.call_function(
+                        the_function=torch.neg, args=node.args, kwargs=node.kwargs)
+                rn18_traced.graph.replace_all_uses_with(to_replace=node, replace_with=new_node)
+                to_erase.append(node)
+
+        for node in to_erase:
+            rn18_traced.graph.erase_node(node)
+
+        rn18_traced.graph = rn18_traced.graph
+
+        # Patch up original resnet18 to test the behavior matches
+        class Neg(torch.nn.ReLU):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return torch.neg(input)
+        for k, v in rn18.named_modules():
+            if isinstance(v, torch.nn.ReLU):
+                atoms = k.split('.')
+                mod_itr = rn18
+                for atom in atoms[:-1]:
+                    mod_itr = getattr(mod_itr, atom)
+                setattr(mod_itr, atoms[-1], Neg())
+
+        input = torch.randn(1, 3, 224, 224)
+        self.assertEqual(rn18_traced(input), rn18(input))
+
 
 if __name__ == '__main__':
     run_tests()

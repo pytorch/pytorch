@@ -65,10 +65,22 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     else:
         return a
 
+class WithInsertPoint:
+    def __init__(self, n : Node):
+        self.n = n
+
+    def __enter__(self):
+        self.orig_insert_point = self.n.graph._insert_point
+        self.n.graph._insert_point = self.n
+
+    def __exit__(self, type, value, tb):
+        self.n.graph._insert_point = self.orig_insert_point
+
 class Graph:
     def __init__(self):
         self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
+        self._insert_point : Optional[Node] = None
 
     @property
     def nodes(self):
@@ -98,8 +110,34 @@ class Graph:
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        self._nodes.append(n)
+        if self._insert_point:
+            self.insert_node_before(n=n, before=self._insert_point)
+        else:
+            self._nodes.append(n)
         return n
+
+    def insert_node_before(self, n : Node, before : Node) -> Node:
+        # TODO: computationally inefficient
+        before_idx = self._nodes.index(before)
+        self._nodes.insert(before_idx, n)
+        return n
+
+    def replace_all_uses_with(self, to_replace : Node, replace_with : Node):
+        def replace_node(n : Node):
+            if n is to_replace:
+                return replace_with
+            else:
+                return n
+
+        # TODO: computationally inefficient
+        for node in self._nodes:
+            node.args = map_arg(node.args, replace_node)
+            node.kwargs = map_arg(node.kwargs, replace_node)
+
+    def erase_node(self, to_erase : Node):
+        node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
+        for idx in reversed(node_indices):
+            self._nodes.pop(idx)
 
     # sugar for above when you know the op
     def placeholder(self, name: str) -> Node:
