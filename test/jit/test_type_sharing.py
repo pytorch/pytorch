@@ -242,14 +242,11 @@ class TestTypeSharing(JitTestCase):
         """
         Attributes whose type cannot be inferred should fail cleanly with nice hints
         """
-        class NotScriptable(object):
-            pass
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
                 # assign a type we know can't be converted to TorchScript
-                self.foo = NotScriptable()
+                self.foo = object
 
             def forward(self):
                 # try to use it in forward
