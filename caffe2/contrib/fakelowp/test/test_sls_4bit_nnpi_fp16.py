@@ -79,7 +79,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=max_segments,
-            max_seq_size=max_segments * max_segment_length,
+            max_seq_size=max_segment_length,
             debug=True,
             adjust_batch=True,
             use_onnx=False

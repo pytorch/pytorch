@@ -19,15 +19,14 @@ namespace native {
 
 namespace {
 
+// Finds the rank k element, and its index, of the values along dimension dim
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherKthValue(
     cuda::detail::TensorInfo<scalar_t, index_t> input,
     index_t inputSliceSize,
     index_t k,
-
     index_t numInputSlices,
     index_t inputWithinSliceStride,
-
     cuda::detail::TensorInfo<scalar_t, index_t> kthValue,
     cuda::detail::TensorInfo<int64_t, index_t> indices) {
   // Indices are limited to integer fp precision, so counts can fit in
@@ -90,6 +89,7 @@ __global__ void gatherKthValue(
   }
 }
 
+// Finds the median, and its index, of the values along dimension dim
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherMedian(
     cuda::detail::TensorInfo<scalar_t, index_t> values,
@@ -108,7 +108,7 @@ __global__ void gatherMedian(
     return;
   }
 
-  // Find the start offset for our slice
+  // Finds the start offset for our slice
   index_t valuesSliceStartIndex =
       cuda::detail::IndexToOffset<scalar_t, index_t, Dim>::get(slice, values);
   index_t indicesSliceStartIndex =
@@ -126,15 +126,19 @@ __global__ void gatherMedian(
     nan_count += THCNumerics<scalar_t>::isnan(val) ? 1 : 0;
   }
 
+  // Counts number of nan values
   __shared__ int64_t num_nan;
   if (threadIdx.x == 0) {
     num_nan = 0;
   }
   __syncthreads();
-
-  atomicAdd(&num_nan, nan_count);
+  if (nan_count > 0) {
+    atomicAdd(&num_nan, nan_count);
+  }
   __syncthreads();
 
+  // For torch.median, if we found nan set k to last index so the computed value
+  // is nan, otherwise set k to the middle element of the non-nan values
   index_t k = (!ignore_nan && num_nan > 0) ? inputSliceSize - 1
                                            : (inputSliceSize - num_nan - 1) / 2;
 
@@ -154,7 +158,7 @@ __global__ void gatherMedian(
 
   valuesSliceStart[0] = median;
 
-  // Find the median index
+  // Find the index of the median value in the slice
   for (index_t i = threadIdx.x; i < inputSliceSize; i += blockDim.x) {
     scalar_t val = doLdg(&inputSliceStart[i * inputWithinSliceStride]);
     if (val == median ||
@@ -304,7 +308,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> median_out_impl(
+std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -314,7 +318,13 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  TORCH_CHECK(self.numel() > 0, "median() input tensor cannot be empty");
+  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+
+  int64_t size = in.size(dim);
+  TORCH_CHECK(
+      size > 0,
+      "median() operation does not have an identity for empty input tensor");
+
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
@@ -337,24 +347,27 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
   values.resize_(out_shape);
   indices.resize_(out_shape);
 
-  Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
-  Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
-  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  // Only launch kernel for non-empty tensors
+  if (self.numel() > 0) {
+    // Ensure #dim is the same for all tensors required for reduction
+    Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
+    Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
 
-  AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.scalar_type(), "median_out_impl", [&] {
-        if (cuda::detail::canUse32BitIndexMath(vals) &&
-            cuda::detail::canUse32BitIndexMath(inds) &&
-            cuda::detail::canUse32BitIndexMath(in)) {
-          run_launcher<scalar_t, uint32_t>(
-              vals, inds, in, dim, MedianLauncher(ignore_nan));
-        } else {
-          run_launcher<scalar_t, uint64_t>(
-              vals, inds, in, dim, MedianLauncher(ignore_nan));
-        }
-      });
+    AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, self.scalar_type(), "median_out_impl", [&] {
+          if (cuda::detail::canUse32BitIndexMath(vals) &&
+              cuda::detail::canUse32BitIndexMath(inds) &&
+              cuda::detail::canUse32BitIndexMath(in)) {
+            run_launcher<scalar_t, uint32_t>(
+                vals, inds, in, dim, MedianLauncher(ignore_nan));
+          } else {
+            run_launcher<scalar_t, uint64_t>(
+                vals, inds, in, dim, MedianLauncher(ignore_nan));
+          }
+        });
 
-  AT_CUDA_CHECK(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
+  }
 
   guard.reset();
   namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
@@ -365,13 +378,20 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
 
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
+
   int64_t size = self.numel();
   TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+
+  // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());
+
   if (!ignore_nan) {
+    // For torch.median return either the middle element or nan (sorted as
+    // largest) if there are any
     int64_t k = (size - 1) / 2;
     return at::where(sorted[-1].isnan(), sorted[-1], sorted[k]);
   } else {
+    // For torch.nanmedian return the middle element among the non-nan values
     Tensor k = ((size - 1) - sorted.isnan().sum()) / 2;
     return sorted[k.toType(kLong)];
   }
@@ -405,7 +425,7 @@ std::tuple<Tensor&, Tensor&> median_out_cuda(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_out_impl(
+  return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
 
@@ -419,7 +439,7 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cuda(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_out_impl(
+  return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/true);
 }
 

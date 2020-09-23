@@ -41,7 +41,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, _get_torch_cuda_version, TEST_MAGMA
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, \
+    _get_torch_cuda_version, TEST_MAGMA
+
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -56,6 +58,8 @@ if TEST_SCIPY:
     from scipy import signal
 
 SIZE = 100
+
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -6304,16 +6308,6 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor(a_, dtype=dtypes[0], device=device)
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-        # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-        # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
-        # CUDA as long as the two tensors are promoted to a supported type.
-        # TODO: Remove this once logical operators are improved to take care of bfloat16.
-        if self.device_type == 'cuda' and torch.bfloat16 in dtypes:
-            if torch.promote_types(dtypes[0], dtypes[1]) == torch.bfloat16:
-                with self.assertRaises(RuntimeError):
-                    getattr(a, op)(b)
-                return
-
         if dtypes[0].is_complex or dtypes[1].is_complex:
             with self.assertRaises(RuntimeError):
                 getattr(a, op)(b)
@@ -6329,12 +6323,6 @@ class TestTorchDeviceType(TestCase):
         # in-place
         # TODO: remove when different dtypes as operands are supported
         if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
-        # TODO: remove when logical ops support bfloat16 on CUDA.
-        if self.device_type == 'cuda' and dtypes[0] == torch.bfloat16:
             with self.assertRaises(RuntimeError):
                 getattr(a, op + '_')(b)
             return
@@ -10349,37 +10337,107 @@ class TestTorchDeviceType(TestCase):
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
             run_test(tensor_dims, some)
 
-    def _test_median(self, device, dtype, inputs):
-        for a, op in product(inputs, [torch.median, torch.nanmedian]):
-            t = torch.tensor(a, device=device, dtype=dtype)
-            sorted_vals, _ = t.flatten().sort()
-            num_nan = t.isnan().sum().item()
-            k = int((t.numel() - num_nan - 1) / 2)
-            if op == torch.median and num_nan > 0:
-                k = t.numel() - 1
-            self.assertEqual(op(t), sorted_vals[k], atol=0, rtol=0)
+    @dtypes(torch.int, torch.long, torch.float, torch.double)
+    @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
+    def test_median_real_values(self, device, dtype):
+        # Generate random 0-3D sizes
+        sizes = [torch.randint(1, 32, (i,)) for i in range(4) for _ in range(2)]
+        for size in sizes:
+            # Create random input tensor
+            t = torch.randn(size.tolist(), device=device).type(dtype)
+            t_numpy = t.cpu().numpy() if TEST_NUMPY else None
+            res = t.median()
+            self.assertEqual(res, t.nanmedian())
+            k = int((t.numel() - 1) / 2)
+            self.assertEqual(res, t.view(-1).sort()[0][k])
+            if TEST_NUMPY and t.numel() % 2 == 1:
+                # We can only test agains numpy for odd reductions because numpy
+                # returns the mean of the two medians and torch returns the lower
+                self.assertEqual(res.cpu().numpy(), np.median(t_numpy))
             for dim in range(t.ndim):
-                res_vals, res_inds = op(t, dim, keepdim=True)
-                sorted_vals, sorted_inds = t.sort(dim)
-                num_nan = t.isnan().sum(dim, keepdim=True)
-                k = ((t.size(dim) - num_nan - 1) / 2).type(torch.long)
-                if op == torch.median:
-                    k.masked_fill_(num_nan > 0, t.size(dim) - 1)
-                self.assertEqual(res_vals, sorted_vals.gather(dim, k), atol=0, rtol=0)
-                self.assertEqual(res_vals, t.gather(dim, res_inds), atol=0, rtol=0)
+                res = t.median(dim, True)
+                self.assertEqual(res, t.nanmedian(dim, True))
+                size = t.size(dim) if t.ndim > 0 else 1
+                k = int((size - 1) / 2)
+                self.assertEqual(res[0], (t.sort(dim)[0]).select(dim, k).unsqueeze_(dim))
+                self.assertEqual(res[0], t.gather(dim, res[1]))
+                if TEST_NUMPY and size % 2 == 1:
+                    # We can only test agains numpy for odd reductions because numpy
+                    # returns the mean of the two medians and torch returns the lower
+                    self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True))
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    def test_median_float(self, device, dtype):
-        inputs = [1, np.nan, [1], [np.nan], [2, 1], [np.nan, 1], [np.nan, np.nan],
-                  [[np.nan, 1], [2, np.nan]], torch.rand(155, 155), torch.randint(10, (156, 156)).type(dtype)]
-        inputs[-1].masked_fill_(inputs[-1] == 0, np.nan)
-        self._test_median(device, dtype, inputs)
+    def test_median_nan_values(self, device, dtype):
+        # Generate random 0-3D sizes
+        sizes = [torch.randint(1, 32, (i,)) for i in range(4) for _ in range(2)]
+        for size in sizes:
+            # Create random input tensor with nan values
+            t = torch.rand(size.tolist(), device=device, dtype=dtype)
+            t.masked_fill_(t < 0.1, float('nan'))
+            t_numpy = t.cpu().numpy() if TEST_NUMPY else None
+            for op in [torch.median, torch.nanmedian]:
+                res = op(t)
+                num_nan = t.isnan().sum()
+                if op == torch.median and num_nan > 0:
+                    k = t.numel() - 1
+                else :
+                    k = int((t.numel() - num_nan - 1) / 2)
+                self.assertEqual(res, t.view(-1).sort()[0][k])
+                if TEST_NUMPY and (t.numel() - num_nan) % 2 == 1:
+                    # We can only test agains numpy for odd reductions because numpy
+                    # returns the mean of the two medians and torch returns the lower
+                    numpy_op = np.median if op == torch.median else np.nanmedian
+                    self.assertEqual(res.item(), numpy_op(t.cpu().numpy()))
+                for dim in range(t.ndim):
+                    res = op(t, dim, True)
+                    size = t.size(dim) if t.ndim > 0 else 1
+                    num_nan = t.isnan().sum(dim, True)
+                    if op == torch.median:
+                        k = torch.where(num_nan > 0, size - 1, int((size - 1) / 2))
+                    else:
+                        k = ((size - num_nan - 1) / 2).type(torch.long)
+                    self.assertEqual(res[0], (t.sort(dim)[0]).gather(dim, k))
+                    self.assertEqual(res[0], t.gather(dim, res[1]))
+                    if TEST_NUMPY:
+                        # We can only test agains numpy for odd reductions because numpy
+                        # returns the mean of the two medians and torch returns the lower
+                        numpy_op = np.median if op == torch.median else np.nanmedian
+                        mask = (size - num_nan) % 2 == 1
+                        res = res[0].masked_select(mask).cpu()
+                        ref = numpy_op(t_numpy, dim, keepdims=True)[mask.cpu().numpy()]
+                        self.assertEqual(res, torch.from_numpy(ref))
 
-    @dtypes(torch.int, torch.long)
-    def test_median_int(self, device, dtype):
-        inputs = [1, [1], torch.rand(155, 155), torch.rand(156, 156)]
-        self._test_median(device, dtype, inputs)
+    def test_median_corner_cases(self, device):
+        def check(op, a, args, key):
+            t = torch.tensor(a, device=device)
+            res = op(t, *args)
+            if not args:
+                key = torch.tensor(key, device=device)
+            else:
+                if len(key) == 1:
+                    key = torch.tensor(key[0], device=device)
+                    res = res[0]
+                else :
+                    key = (torch.tensor(key[0], device=device), torch.tensor(key[1], device=device))
+            self.assertEqual(res, key)
+
+        nan = float('nan')
+        check(torch.median, nan, [], nan)
+        check(torch.nanmedian, nan, [], nan)
+        check(torch.median, nan, [0], [nan, 0])
+        check(torch.nanmedian, nan, [0], [nan, 0])
+        check(torch.median, [nan], [0, True], [[nan], [0]])
+        check(torch.nanmedian, [nan], [0, True], [[nan], [0]])
+        check(torch.median, [nan], [0, True], [[nan], [0]])
+        check(torch.nanmedian, [nan], [0, True], [[nan], [0]])
+
+        # Indices are not deterministic here so can only check values
+        check(torch.median, [[nan, nan], [1, 2]], [0], [[nan, nan]])
+        check(torch.nanmedian, [[nan, nan], [1, 2]], [0], [[1, 2.]])
+        check(torch.median, [[nan, nan], [1, 2]], [1], [[nan, 1]])
+        check(torch.nanmedian, [[nan, nan], [1, 2]], [1], [[nan, 1.]])
+
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
@@ -11270,6 +11328,19 @@ class TestTorchDeviceType(TestCase):
             torch.signbit(t)
         with self.assertRaisesRegex(RuntimeError, 'signbit is not implemented for complex tensors.'):
             torch.signbit(t, out=out)
+
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sgn(self, device, dtype):
+        x = torch.randn(100, dtype=dtype)
+        angle = x.angle()
+        out = x.sgn()
+        self.assertEqual(out.angle(), angle)
+        self.assertEqual(out.abs(), torch.ones_like(x).real)
+
+        x_out = torch.empty_like(x)
+        torch.sgn(x, out=x_out)
+        self.assertEqual(x_out.angle(), angle)
+        self.assertEqual(x_out.abs(), torch.ones_like(x).real)
 
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
     def test_signbit_non_boolean_output(self, device, dtype):
@@ -14692,6 +14763,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.logit_(1e-6),
                 lambda x, y: x.sign(),
                 lambda x, y: x.sign_(),
+                lambda x, y: x.sgn(),
+                lambda x, y: x.sgn_(),
                 lambda x, y: x.sin(),
                 lambda x, y: x.sin_(),
                 lambda x, y: x.sinh(),
@@ -16368,7 +16441,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmv(self, device, dtype):
@@ -16436,7 +16509,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmm(self, device, dtype):
@@ -19610,8 +19683,6 @@ _float_types_no_half = [torch.float, torch.double]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
-_complex_and_float_types2 = _float_types2 + _complex_types
-
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -19782,20 +19853,21 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
+        _cpu_types, True, [tf32_on_and_off(0.005)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _complex_and_float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
@@ -19813,26 +19885,27 @@ tensor_op_tests = [
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
         1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
-    ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
+    ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM),
+        _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
     ('addmm', 'scalar', _medium_2d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
-    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types,
+    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
         True, [tf32_on_and_off(0.005)], 0, True),
     ('addmv', 'scalar', _medium_1d,
-        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4, 
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
+        torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
@@ -20070,19 +20143,20 @@ tensor_op_tests = [
     ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
+    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
-    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
-    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
+    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, 
+        torch.testing.get_all_fp_dtypes() + _complex_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
+    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('erfinv', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),

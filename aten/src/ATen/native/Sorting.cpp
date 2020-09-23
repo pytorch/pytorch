@@ -12,6 +12,7 @@
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
 
 namespace {
@@ -267,7 +268,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> median_out_impl(
+// Computes both the median and its index along dimension dim of the input
+std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -275,9 +277,13 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
     bool keepdim,
     bool ignore_nan) {
   NoNamesGuard guard;
-
   dim = at::maybe_wrap_dim(dim, self.dim());
-  TORCH_CHECK(self.numel() > 0, "median() input tensor cannot be empty");
+
+  int64_t size = self.dim() > 0 ? self.size(dim) : 1;
+  TORCH_CHECK(
+      size > 0,
+      "median() operation does not have an identity for empty input tensor");
+
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
@@ -294,15 +300,25 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
   resize_output(values, out_shape);
   resize_output(indices, out_shape);
 
-  Tensor vals = keepdim ? values : values.unsqueeze(dim);
-  Tensor inds = keepdim ? indices : indices.unsqueeze(dim);
+  // Ensure #dim is the same for all tensors required for dim_apply
+  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median_out", [&] {
-    dim_apply({self, vals, inds}, dim, [ignore_nan](int64_t it, TensorList tl) {
-      Tensor in = tl[0].contiguous();
-      scalar_t* ip = in.data_ptr<scalar_t>();
-      int64_t size = in.numel();
+  // Make dim to reduce contiguous (stride=1)
+  if (in.stride(dim) > 1) {
+    in = in.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim).contiguous();
+    vals = vals.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
+    inds = inds.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
+    dim = in.dim() - 1;
+  }
 
+  AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_out", [&] {
+    dim_apply({in, vals, inds}, dim, [&](int64_t it, TensorList tl) {
+      // Make the current row to be reduced contiguous
+      scalar_t* ip = tl[0].data_ptr<scalar_t>();
+
+      // For torch.median, search for NaN and return it if found
       if (!ignore_nan) {
         scalar_t* nanp = std::find_if(ip, ip + size, _isnan<scalar_t>);
         if (nanp != ip + size) {
@@ -312,18 +328,24 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
         }
       }
 
+      // Vector of indices for indirectly partitioning input around median
       std::vector<int64_t> idx(size);
       auto first = idx.begin();
       auto last = idx.end();
       std::iota(first, last, 0);
 
+      // We partition the input around the median indirectly using the indices
+      // vector so that nth points to the index of the median in the unmodified
+      // input tensor.
       auto nth = first;
       if (!ignore_nan) {
+        // If we got here, there are no nan values
         nth += (size - 1) / 2;
         std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
           return ip[i] < ip[j] || (ip[i] == ip[j] && i < j);
         });
       } else {
+        // For torch.nanmedian, compute median of non-nan values only
         int64_t num_nan = std::count_if(ip, ip + size, _isnan<scalar_t>);
         nth += (size - num_nan - 1) / 2;
         std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
@@ -344,12 +366,16 @@ std::tuple<Tensor&, Tensor&> median_out_impl(
   return std::forward_as_tuple(values, indices);
 }
 
+// Computes the median of all values in the input
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
   int64_t size = self.numel();
-  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+  TORCH_CHECK(
+      size > 0,
+      "median() operation does not have an identity for empty input tensor");
 
+  // Clone the input tensor so we can partition it around the median value
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
 
@@ -358,6 +384,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
     scalar_t* first = in.data_ptr<scalar_t>();
     scalar_t* last = first + size;
 
+    // For torch.median, if there are nan values return nan
     if (!ignore_nan && std::any_of(first, last, _isnan<scalar_t>)) {
       *op = std::numeric_limits<scalar_t>::quiet_NaN();
       return;
@@ -365,9 +392,11 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
     scalar_t* median = first;
     if (!ignore_nan) {
+      // If we got here, there are no nan values
       median += (size - 1) / 2;
       std::nth_element(first, median, last);
     } else {
+      // For torch.nanmedian, compute median of non-nan values only
       int64_t num_nan = std::count_if(first, last, _isnan<scalar_t>);
       median += (size - num_nan - 1) / 2;
       std::nth_element(first, median, last, [](scalar_t a, scalar_t b) {
@@ -382,8 +411,6 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 }
 
 } // namespace
-
-// MARK : quantile
 
 Tensor& quantile_out(
     Tensor& out,
@@ -479,8 +506,6 @@ Tensor nanquantile(
       self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
 }
 
-// MARK : kthvalue
-
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -526,8 +551,6 @@ std::tuple<Tensor, Tensor> kthvalue(
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
-// MARK : topk
-
 std::tuple<Tensor&, Tensor&> topk_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -565,15 +588,13 @@ std::tuple<Tensor, Tensor> topk(
   return std::make_tuple(values, indices);
 }
 
-// MARK : median
-
 std::tuple<Tensor&, Tensor&> median_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_out_impl(
+  return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
 
@@ -614,7 +635,7 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_out_impl(
+  return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/true);
 }
 
@@ -647,6 +668,35 @@ std::tuple<Tensor, Tensor> nanmedian(
 
 Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
+}
+
+std::tuple<Tensor&, Tensor&> sort_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  values.resize_(self.sizes()).copy_(self);
+  indices.resize_(self.sizes());
+
+  // check if self is scalar
+  if (self.dim() == 0 && self.numel() == 1) {
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  sort_stub(kCPU, values, indices, dim, descending);
+
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> sort_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return sort_out_cpu(values, indices, self, dim, descending);
 }
 
 } // namespace native

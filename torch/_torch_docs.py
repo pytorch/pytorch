@@ -4556,13 +4556,12 @@ add_docstr(torch.median,
            r"""
 median(input) -> Tensor
 
-Returns the median value of all elements in the :attr:`input` tensor.
+Computes the median of the values in :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
     of elements. In this case the lower of the two medians is returned. To
-    compute the mean of both medians in :attr:`input`, use :func:`torch.quantile`
-    with ``q=0.5`` instead.
+    compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
     This function produces deterministic (sub)gradients unlike ``median(dim=0)``
@@ -4610,7 +4609,8 @@ Args:
     {keepdim}
 
 Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
+    out ((Tensor, LongTensor), optional): The first tensor will be populated with the median values and the second tensor
+                                          with their indices in the dimension :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -4628,10 +4628,12 @@ add_docstr(torch.nanmedian,
            r"""
 nanmedian(input) -> Tensor
 
-This is a variant of :func:`torch.median` that "ignores" ``NaN`` values,
-computing the median as if ``NaN`` values in :attr:`input` did not exist.
-If all values are ``NaN`` then the median will be ``NaN``. See the 
-documentation for :func:`torch.median`.
+Computes the median of the values in :attr:`input`, ignoring ``NaN``s.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in :attr:`input`.
+When :attr:`input` has one or more ``NaN`` values, :func:`torch.median` will always return ``NaN``,
+while this function will return the median of the non-``NaN`` elements in :attr:`input`.
+If all the elements in :attr:`input` are ``NaN`` it will also return ``NaN``.
 
 Args:
     {input}
@@ -4646,10 +4648,11 @@ Example::
 
 .. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
-This is a variant of :func:`torch.median` that "ignores" ``NaN`` values,
-computing the median as if ``NaN`` values in :attr:`input` did not exist.
-If all values in a reduced row are ``NaN`` then the median for that reduction
-will be ``NaN``. See the documentation for :func:`torch.median`.
+Computes the median of the values, and its index, along dimension :attr:`dim` of :attr:`input`, ignoring ``NaN``s.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in a reduced row. When a reduced row has
+one or more ``NaN`` values, :func:`torch.median` will always reduce it to ``NaN``, while this function will reduce it to the
+median of the non-``NaN`` elements. If all the elements in a reduced row are ``NaN`` then it will be reduced to ``NaN``, too.
 
 Args:
     {input}
@@ -4657,7 +4660,8 @@ Args:
     {keepdim}
 
 Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
+    out ((Tensor, LongTensor), optional): The first tensor will be populated with the median values and the second tensor
+                                          with their indices in the dimension :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -6647,6 +6651,31 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
+""".format(**common_args))
+
+add_docstr(torch.sgn,
+           r"""
+sgn(input, *, out=None) -> Tensor
+
+For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
+elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
+returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+
+:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
+:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> x.sgn()
+    tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
 add_docstr(torch.sin,

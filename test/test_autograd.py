@@ -1001,6 +1001,53 @@ class TestAutograd(TestCase):
             for _ in gen_enable_grad():
                 self.assertEqual(torch.is_grad_enabled(), False)
 
+    def test_set_grad_generator_functions_recursive(self):
+        # enable_grad_decorator_recursive and no_grad_decorator_recursive call each other
+        # recursively, to ensure that the decorators preserve the caller's setting
+        @torch.enable_grad()
+        def enable_grad_decorator_recursive(depth):
+            self.assertTrue(torch.is_grad_enabled())
+            if depth > 0:
+                no_grad_decorator_recursive(depth - 1)
+                self.assertTrue(torch.is_grad_enabled())
+
+        @torch.no_grad()
+        def no_grad_decorator_recursive(depth):
+            self.assertFalse(torch.is_grad_enabled())
+            if depth > 0:
+                enable_grad_decorator_recursive(depth - 1)
+                self.assertFalse(torch.is_grad_enabled())
+
+        # enable_grad_context_manager_recursive and no_grad_context_manager_recursive call
+        # each other recursively, to ensure that the decorators preserve the caller's setting
+        def enable_grad_context_manager_recursive(depth):
+            with torch.enable_grad():
+                self.assertTrue(torch.is_grad_enabled())
+                if depth > 0:
+                    no_grad_context_manager_recursive(depth - 1)
+                    self.assertTrue(torch.is_grad_enabled())
+
+        def no_grad_context_manager_recursive(depth):
+            with torch.no_grad():
+                self.assertFalse(torch.is_grad_enabled())
+                if depth > 0:
+                    enable_grad_context_manager_recursive(depth - 1)
+                    self.assertFalse(torch.is_grad_enabled())
+
+        with torch.enable_grad():
+            self.assertTrue(torch.is_grad_enabled())
+            enable_grad_decorator_recursive(10)
+            self.assertTrue(torch.is_grad_enabled())
+            enable_grad_context_manager_recursive(10)
+            self.assertTrue(torch.is_grad_enabled())
+
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            enable_grad_decorator_recursive(10)
+            self.assertFalse(torch.is_grad_enabled())
+            enable_grad_context_manager_recursive(10)
+            self.assertFalse(torch.is_grad_enabled())
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -4692,7 +4739,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn'] + separate_complex_tests
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']

@@ -73,4 +73,8 @@ TORCH_LIBRARY(aten, m) {
   m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
 }
 
+TORCH_LIBRARY_IMPL(aten, Math, m) {
+  ${math_function_registrations};
+}
+
 }  // namespace at
