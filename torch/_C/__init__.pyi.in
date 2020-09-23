@@ -224,6 +224,7 @@ def _jit_script_compile(
 def _jit_script_class_compile(
     qual_name: str,
     definition: ClassDef,
+    defaults: Dict[str, Dict[str, Any]],
     rcb: ResolutionCallback,
 ): ...
 def _parse_source_def(src: str) -> Def: ...
