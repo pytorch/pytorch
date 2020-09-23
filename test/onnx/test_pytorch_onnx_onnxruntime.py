@@ -3110,6 +3110,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Full(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_list(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return torch.cat([x.add_(3), y.fill_(0)])
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Arithmetic(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
             def forward(self, x):
