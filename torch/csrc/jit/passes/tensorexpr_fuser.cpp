@@ -279,8 +279,13 @@ void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
 
 class TensorExprFuser {
  public:
-  TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
-      : graph_(std::move(graph)), min_group_size_(min_group_size) {}
+  TensorExprFuser(
+      std::shared_ptr<Graph> graph,
+      size_t min_group_size,
+      bool disable_shape_checks)
+      : graph_(std::move(graph)),
+        min_group_size_(min_group_size),
+        disable_shape_checks_(disable_shape_checks) {}
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
@@ -300,69 +305,13 @@ class TensorExprFuser {
   }
 
  private:
-  // Merges `to_merge` into a subgraph by executing merge_fn.
-  // merge_fn takes in map that will be filled with the mapping b/w
-  // to_merge's outputs and the corresponding values in the subgraph.
-  // merge_fn returns the merged-into subgraph
-  Node* aliasingSafeSubgraphMerge(
-      Node* to_merge,
-      const std::function<Node*(std::unordered_map<Value*, Value*>&)>&
-          merge_fn) {
-    // When we merge a node into a subgraph, the new subgraph outputs
-    // have the same aliasing properties as the original node's outputs.
-    // Here we create a placeholder node, transfer the aliasing properties
-    // to the placeholder, execute the merge, and transfer the aliasing
-    // properties to the appropriate fusion group outputs
-    Node* placeholder_node =
-        graph_->insertNode(graph_->create(prim::Uninitialized, 0));
-    std::vector<Value*> existing_values;
-    for (size_t i = 0; i < to_merge->outputs().size(); ++i) {
-      Value* existing = to_merge->outputs().at(i);
-      Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
-          to_merge->outputs().at(i));
-      aliasDb_->replaceWithNewValue(existing, new_value);
-      existing_values.push_back(existing);
-    }
-    std::unordered_map<Value*, Value*> vmap;
-    Node* fusion_group = merge_fn(vmap);
-    for (size_t i = 0; i < existing_values.size(); ++i) {
-      TORCH_INTERNAL_ASSERT(vmap.count(existing_values.at(i)));
-      Value* subgraph_value = vmap[existing_values.at(i)];
-      auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-      size_t subgraph_output_index = 0;
-      for (; subgraph_output_index < subgraph->outputs().size();
-           ++subgraph_output_index) {
-        if (subgraph->outputs().at(subgraph_output_index) == subgraph_value) {
-          break;
-        }
-      }
-      if (subgraph_output_index != subgraph->outputs().size()) {
-        aliasDb_->replaceWithNewValue(
-            placeholder_node->outputs().at(i),
-            fusion_group->outputs().at(subgraph_output_index));
-      }
-    }
-    placeholder_node->destroy();
-    return fusion_group;
-  }
-
   Node* getOrCreateTensorExprSubgraph(Node* n) {
     if (n->hasAttribute(attr::Subgraph) && n->kind() == prim::TensorExprGroup) {
       return n;
     }
     GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
-    return aliasingSafeSubgraphMerge(
-        n, [&](std::unordered_map<Value*, Value*>& vmap) {
-          return SubgraphUtils::createSingletonSubgraph(
-              n, prim::TensorExprGroup, vmap);
-        });
-  }
-
-  void mergeNodeIntoSubgraphAndUpdateAliasing(Node* n, Node* subgraph) {
-    aliasingSafeSubgraphMerge(n, [&](std::unordered_map<Value*, Value*>& vmap) {
-      SubgraphUtils::mergeNodeIntoSubgraph(n, subgraph, vmap);
-      return subgraph;
-    });
+    return SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
+        n, prim::TensorExprGroup, *aliasDb_);
   }
 
   value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
@@ -557,7 +506,8 @@ class TensorExprFuser {
 
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
-      mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
+      SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
+          n, fusion_group, *aliasDb_);
     }
     return fusion_group;
   }
@@ -611,7 +561,7 @@ class TensorExprFuser {
 
   bool canHandle(Node* node) {
     REQ(node->kind() != prim::Constant);
-    REQ(allShapesAreKnown(node));
+    REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
 
     // Don't include nodes whose inputs are tensor constants - we cannot handle
@@ -841,9 +791,14 @@ class TensorExprFuser {
 
   // Minimal size of a fusion group
   size_t min_group_size_;
+  // If true, shapes are ignored
+  bool disable_shape_checks_;
 };
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
+void FuseTensorExprs(
+    std::shared_ptr<Graph>& graph,
+    size_t min_group_size,
+    bool disable_shape_checks) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -854,7 +809,7 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size);
+  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
