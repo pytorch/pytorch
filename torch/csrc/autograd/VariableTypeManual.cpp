@@ -270,9 +270,9 @@ Tensor & detach_(Tensor & self) {
                    "`unsafe_` version of the function that produced it.");
     } else {
       AT_ERROR("If you are using DistributedDataParallel (DDP) for training, "
-               "and grad_is_view is set as True, gradients are views of DDP "
-               "buckets, and hence detach_() cannot be called on these "
-               "gradients. To fix this error, please refer to the "
+               "and gradient_as_bucket_view is set as True, gradients are "
+               "views of DDP buckets, and hence detach_() cannot be called "
+               "on these gradients. To fix this error, please refer to the "
                "Optimizer.zero_grad() function in torch/optim/optimizer.py "
                "as the solution.");
     }
