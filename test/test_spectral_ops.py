@@ -116,6 +116,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @precisionOverride({torch.complex64: 1e-4, torch.float: 1e-4})
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -352,6 +353,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @precisionOverride({torch.complex64: 1e-4, torch.float: 1e-4})
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -438,6 +440,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double
     def test_fftn_backward(self, device, dtype):
         # input_ndim, s, dim
