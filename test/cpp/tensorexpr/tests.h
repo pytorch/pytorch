@@ -55,6 +55,7 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(ExprSplitWithMaskRepeatedNoMask)        \
   _(SplitWithTailWithLoopOptions)           \
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
@@ -216,6 +217,7 @@ namespace jit {
   _(SimplifyReorderForCond)                 \
   _(SimplifyFuseConditions)                 \
   _(SimplifySyncThreads)                    \
+  _(SimplifyRampSubBroadcast)               \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -291,6 +293,7 @@ namespace jit {
   _(FuserPass_0DimInput)                    \
   _(FuserPass_UnfusibleDevice)              \
   _(FuserPass_UnknownShapes)                \
+  _(FuserPass_UnknownShapesIgnored)         \
   _(FuserPass_Multidevice)                  \
   _(FuserPass_MergeGroups)                  \
   _(TrainBasic)

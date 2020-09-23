@@ -84,9 +84,11 @@ namespace jit {
   _(DefaultArgTypeHinting)                        \
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
+  _(ProfilerDisableInCallback)                    \
   _(MobileTypeParser)                             \
   _(LiteInterpreterBuiltinFunction)               \
   _(LiteInterpreterPrim)                          \
+  _(LiteInterpreterPrimScalar)                    \
   _(LiteInterpreterLoadOrigJit)                   \
   _(LiteInterpreterWrongMethodName)               \
   _(LiteInterpreterParams)                        \
@@ -113,8 +115,6 @@ namespace jit {
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
-  _(ArgumentSpec)                                   \
-  _(CompleteArgumentSpec)                           \
   _(Fusion)                                         \
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
@@ -220,8 +220,6 @@ namespace jit {
   _(GPU_FusionThreadPredicate)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
-  _(ArgumentSpec)               \
-  _(CompleteArgumentSpec)       \
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \

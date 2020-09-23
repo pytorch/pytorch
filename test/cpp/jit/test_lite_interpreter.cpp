@@ -204,6 +204,32 @@ void testLiteInterpreterPrim() {
   AT_ASSERT(resi == refi);
 }
 
+void testLiteInterpreterPrimScalar() {
+  Module m("m");
+  m.define(R"JIT(
+        def forward(self, x):
+            return int(x.item())
+  )JIT");
+
+  std::vector<IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.get_method("forward")(bcinputs);
+  }
+
+  auto resi = res.toInt();
+  auto refi = ref.toInt();
+  AT_ASSERT(resi != refi);
+}
+
 void testLiteInterpreterLoadOrigJit() {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
