@@ -362,9 +362,9 @@ TorchScript Enums
 Python enums can be used in TorchScript without any extra annotation or code:
 
 ::
+
     from enum import Enum
 
-    global Color
 
     class Color(Enum):
         RED = 1
@@ -378,6 +378,7 @@ After an enum is defined, it can be used in both TorchScript and Python intercha
 like any other TorchScript type:
 
 ::
+
     from enum import Enum
 
     class Color(Enum):
@@ -385,29 +386,29 @@ like any other TorchScript type:
         GREEN = 2
 
     @torch.jit.script
-    def enum_comp(x: Color, y: Color) -> bool:
-        return x == y
+    def return_enum(cond: bool):
+        if cond:
+            return Color.RED
+        else:
+            return Color.GREEN
 
-    p = Color.RED
-    q = Color.GREEN
-    print(enum_comp(p, q))
+    self.assertEqual(return_enum(True), Color.RED)
+    self.assertEqual(return_enum(False), Color.GREEN)
 
 The type of the values of an enum must be ``int``, ``float``, or ``str``:
 
 ::
+
     from enum import Enum
 
-    global IntEnum
     class IntEnum(Enum):
         FOO = 1
         BAR = 2
 
-    global FloatEnum
     class FloatEnum(Enum):
         FOO = 1.2
         BAR = 2.3
 
-    global StringEnum
     class StringEnum(Enum):
         FOO = "foo as in foo bar"
         BAR = "bar as in foo bar"
