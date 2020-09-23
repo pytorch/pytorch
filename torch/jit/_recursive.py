@@ -38,7 +38,8 @@ ignored_attributes = [
 def _compile_and_register_class(obj, rcb, qualified_name):
     if not _get_script_class(qualified_name):
         ast = get_jit_class_def(obj, obj.__name__)
-        torch._C._jit_script_class_compile(qualified_name, ast, rcb)
+        defaults = torch.jit.frontend.get_default_args_for_class(obj)
+        torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
         _add_script_class(obj, qualified_name)
 
 def make_stub(func, name):
@@ -254,7 +255,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # to infer the type.
         attr_py_type = type(value)
         if attr_py_type.__module__ != "builtins" and attr_py_type is not torch.Tensor and attr_py_type is not torch.jit.Attribute and attr_py_type is not torch._C.ScriptObject and not issubclass(attr_py_type, Enum) and attr_py_type is not torch.qscheme and attr_py_type is not torch.device and attr_py_type is not torch.dtype:
-            print(attr_py_type)
             torch.jit.script(type(value))
 
         attr_type = infer_type(name, value)
