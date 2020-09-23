@@ -598,4 +598,4 @@ def Assert(condition, message):
     """
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
         return handle_torch_function(Assert, (condition,), condition, message)
-    torch._C.Assert(condition, message)
+    assert condition, message

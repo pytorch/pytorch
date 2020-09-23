@@ -613,7 +613,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(m)
         # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
-        with self.assertRaisesRegex(RuntimeError, message):
+        with self.assertRaisesRegex(AssertionError, message):
             traced(torch.rand(4, 3))
 
 

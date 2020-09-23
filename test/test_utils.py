@@ -673,14 +673,10 @@ class TestBenchmarkUtils(TestCase):
 
 class TestAssert(TestCase):
     def test_assert_true(self):
-        # verify assertion on model works correctly at runtime
+        # verify assertions work as expected
         torch.Assert(True, "foo")
-        with self.assertRaisesRegex(RuntimeError, "bar"):
+        with self.assertRaisesRegex(AssertionError, "bar"):
             torch.Assert(False, "bar")
-        # verify type checks
-        type_error_msg = "expected types bool, string, but got int, int"
-        with self.assertRaisesRegex(RuntimeError, type_error_msg):
-            torch.Assert(1, 2)
 
 
 if __name__ == '__main__':
