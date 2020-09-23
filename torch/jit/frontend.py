@@ -178,6 +178,16 @@ def get_jit_class_def(cls, self_name):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
+def check_and_indent_multiline_strings(sourcelines):
+    indices = [index for index, source in enumerate(sourcelines) if '\"\"\"' in source]
+    for i in range(0, len(indices), 2):
+        start = indices[i]
+        end = indices[i + 1]
+        leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
+        for lines in range(start + 1, end + 1):
+            sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
+    return sourcelines
+
 
 def get_jit_def(fn, def_name, self_name=None):
     """
@@ -195,6 +205,7 @@ def get_jit_def(fn, def_name, self_name=None):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines = check_and_indent_multiline_strings(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
