@@ -17,6 +17,9 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
+from tools.codegen.selective_build.selector import SelectiveBuildBase
+from tools.codegen.selective_build.selector import SelectiveBuildSelectorFactory
+from tools.codegen.selective_build.selector import SelectiveBuildNotSelective
 
 try:
     # use faster C loader if available
@@ -182,9 +185,9 @@ Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 def compute_type_method(
     dispatch: Optional[str], *,
     target: Target,
-    # Which operators to actually generate code for.  If None, generate
-    # code for all operators
-    op_registration_whitelist: Optional[Set[str]],
+    # Selector object to determine which operators to generate
+    # registration code for.
+    selector: SelectiveBuildBase,
     # Only valid for generating registrations.  If True, only generate
     # def() invocations (for schema registration); do not generate
     # any impl() invocations for, e.g., catch-all kernels
@@ -203,8 +206,12 @@ def compute_type_method(
             if f.dispatch is not None and target is not Target.REGISTRATION:
                 return None
 
-        if op_registration_whitelist is not None and \
-                f"aten::{f.func.name.name}" not in op_registration_whitelist and target is Target.REGISTRATION:
+        # Why do we comvert an OperatorName object (f.func.name) into a string, and
+        # then back into an OperatorName object? Because f.func.name doesn't have the
+        # aten:: prefix, and we want it for the purposes of selective build.
+        op_name = f"aten::{f.func.name}"
+        op_obj = OperatorName.parse(op_name)
+        if target is Target.REGISTRATION and not selector.is_operator_selected(op_obj):
             return None
 
         name = legacy_dispatcher.name(f.func)
@@ -931,6 +938,12 @@ def main() -> None:
     else:
         op_registration_whitelist = None
 
+    selector: SelectiveBuildBase = SelectiveBuildNotSelective()
+    if op_registration_whitelist is not None:
+        selector = SelectiveBuildSelectorFactory.create_from_legacy_op_registration_allow_list(
+            op_registration_whitelist
+        )
+
     native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
 
     template_dir = os.path.join(options.source_path, "templates")
@@ -986,7 +999,7 @@ def main() -> None:
             'Type': f'{dispatch}Type',
             'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
             'type_derived_method_declarations': list(mapMaybe(
-                compute_type_method(dispatch, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+                compute_type_method(dispatch, target=Target.DECLARATION, selector=selector),
                 native_functions
             )),
         })
@@ -1004,12 +1017,12 @@ def main() -> None:
                 '',
             'Backend': dispatch,
             'type_derived_method_definitions': list(mapMaybe(
-                compute_type_method(dispatch, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+                compute_type_method(dispatch, target=Target.DEFINITION, selector=selector),
                 native_functions
             )),
             'function_registrations': list(mapMaybe(
                 compute_type_method(
-                    dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+                    dispatch, target=Target.REGISTRATION, selector=selector),
                 native_functions
             )) if not options.per_op_registration else [],
         })
@@ -1017,15 +1030,15 @@ def main() -> None:
 
     cpu_fm.write('TypeDefault.h', lambda: {
         'type_method_declarations': list(mapMaybe(
-            compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+            compute_type_method(None, target=Target.DECLARATION, selector=selector),
             native_functions)),
     })
     cpu_fm.write('TypeDefault.cpp', lambda: {
         'type_method_definitions': list(mapMaybe(
-            compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            compute_type_method(None, target=Target.DEFINITION, selector=selector),
             native_functions)),
         'function_registrations': list(mapMaybe(
-            compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            compute_type_method(None, target=Target.REGISTRATION, selector=selector),
             native_functions)) if not options.per_op_registration else [],
     })
     cpu_fm.write('Functions.h', lambda: {
@@ -1056,7 +1069,7 @@ def main() -> None:
     if options.force_schema_registration:
         def computeSchemaRegister() -> Dict[str, object]:
             schema_registrations = list(mapMaybe(
-                compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=None, def_only=True),
+                compute_type_method(None, target=Target.REGISTRATION, selector=SelectiveBuildNotSelective(), def_only=True),
                 native_functions))
             # See Note [Byte-for-byte compatibility]
             schema_registrations.sort()
@@ -1094,7 +1107,7 @@ def main() -> None:
                     # contextually clear
                     registrations.extend(
                         mapMaybe(
-                            compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None),
+                            compute_type_method(mb_dispatch, target=Target.REGISTRATION, selector=SelectiveBuildNotSelective()),
                             fs))
                 return {
                     'extra_headers': extra_headers,
