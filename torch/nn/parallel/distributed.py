@@ -581,7 +581,7 @@ class DistributedDataParallel(Module):
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, ones, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_join_divide_by_initial_world_size
             )
 
         # Calling _rebuild_buckets before forward compuation,
