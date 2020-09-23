@@ -293,8 +293,11 @@ The RRef design note covers the design of the :ref:`rref` (Remote REFerence) pro
 
 Tutorials
 ---------
-The RPC tutorial introduces users to the RPC framework and provides two example applications using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs.
+The RPC tutorials introduce users to the RPC framework, provide several example applications
+using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
+to use :ref:`torch.autograd.profiler` to profile RPC-based workloads.
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
 -  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Profiling RPC-based Worklads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
