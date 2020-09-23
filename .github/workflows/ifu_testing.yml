@@ -1,10 +1,10 @@
-name: IntegrateFromUpstream_rocm38_internal_testing
+name: IntegrateFromUpstream_internal_testing_branch
 on:
   schedule:
     # verified via crontab.guru website. “At 01:00 on Monday.”
     - cron: '0 1 * * 1'
 jobs:
-  IntegrateFromUpstream_rocm38_internal_testing:
+  IntegrateFromUpstream_internal_testing_branch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -15,7 +15,7 @@ jobs:
         run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
       - name: Fetch and Merge
         run: |
-          git checkout rocm3.8_internal_testing
+          git checkout rocm3.9_internal_testing
           git config user.name github-actions
           git config user.email github-actions@github.com
           git remote add upstream https://github.com/pytorch/pytorch
@@ -24,7 +24,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v3
         with:
-          branch: IFU-rocm38-${{ steps.date.outputs.date }}
-          title: IFU-rocm38-${{ steps.date.outputs.date }}
+          branch: IFU-rocm39-${{ steps.date.outputs.date }}
+          title: IFU-rocm39-${{ steps.date.outputs.date }}
           assignees: jeffdaily
           reviewers: jeffdaily
