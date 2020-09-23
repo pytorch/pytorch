@@ -120,18 +120,18 @@ if is_available():
                 raise TypeError(
                     f"Could not infer backend for options {rpc_backend_options}"
                 )
-            if backend != BackendType.TENSORPIPE:
+            if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "
+                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
                     f"corresponding to {backend}, hence that backend will be used "
                     f"instead of the default {BackendType.TENSORPIPE}. To silence this "
                     f"warning pass `backend={backend}` explicitly."
                 )
 
         if backend is None:
-            backend = BackendType.TENSORPIPE
+            backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
-        if backend == BackendType.PROCESS_GROUP:
+        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
             logger.warning(
                 "RPC was initialized with the PROCESS_GROUP backend which is "
                 "deprecated and slated to be removed and superseded by the TENSORPIPE "
