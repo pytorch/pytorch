@@ -1152,7 +1152,7 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
