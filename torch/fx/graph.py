@@ -117,12 +117,34 @@ class Graph:
         return n
 
     def insert_node_before(self, n : Node, before : Node) -> Node:
+        """
+        Insert node `n` directly before `before` in the topological ordering of nodes
+        """
         # TODO: computationally inefficient
         before_idx = self._nodes.index(before)
         self._nodes.insert(before_idx, n)
         return n
 
+    def find_all_uses_of(self, to_find : Node) -> List[Node]:
+        def find_use(arg : Any) -> bool:
+            if isinstance(arg, (tuple, list)):
+                return any(find_use(elem) for elem in arg)
+            elif isinstance(arg, dict):
+                return any(find_use(v) for k, v in arg.items())
+            elif isinstance(arg, slice):
+                return any(find_use(arg.start), find_use(arg.stop), find_use(arg.step))
+            elif isinstance(arg, Node):
+                return arg is to_find
+            else:
+                return False
+
+        return [node for node in self._nodes if find_use(node.args) or find_use(node.kwargs)]
+
     def replace_all_uses_with(self, to_replace : Node, replace_with : Node):
+        """
+        Find all uses of the value produced by `to-replace` and swap out those references for the value produced
+        by `replace_with`. Does not delete `to_replace`.
+        """
         def replace_node(n : Node):
             if n is to_replace:
                 return replace_with
@@ -135,6 +157,21 @@ class Graph:
             node.kwargs = map_arg(node.kwargs, replace_node)
 
     def erase_node(self, to_erase : Node):
+        """
+        Erases the node `to_erase` from the `Graph`. Throws an exception if
+        there are still uses of that node in the graph.
+        """
+        # Assert there are no uses of this Node
+        def check_for_use(arg : Node):
+            if arg is to_erase:
+                raise RuntimeError(f'Trying to erase node {to_erase} but it still has uses!')
+        for node in self._nodes:
+            map_arg(node.args, check_for_use)
+            map_arg(node.kwargs, check_for_use)
+        if self.result:
+            map_arg(self.result, check_for_use)
+
+        # TODO: computationally inefficient
         node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
         for idx in reversed(node_indices):
             self._nodes.pop(idx)

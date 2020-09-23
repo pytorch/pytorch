@@ -648,5 +648,31 @@ class TestFX(JitTestCase):
         self.assertEqual(rn18_traced(input), rn18(input))
 
 
+    def test_erase_node_error(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        for node in traced.graph.nodes:
+            # Test deleting with uses both in another Node and at the output
+            if node.target in [operator.add, torch.relu]:
+                with self.assertRaisesRegex(RuntimeError, 'but it still has uses!'):
+                    traced.graph.erase_node(node)
+
+    def test_find_uses(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+
+        y = torch.relu(x)
+        z = x + x
+        u = torch.neg(x)
+        graph.output((y + z + u).node)
+
+        uses_of_x = graph.find_all_uses_of(x.node)
+        self.assertEqual(len(uses_of_x), 3)
+        expected_ops = ['relu', 'add', 'neg']
+        for node, expected in zip(uses_of_x, expected_ops):
+            assert expected in node.name
+
+
 if __name__ == '__main__':
     run_tests()
