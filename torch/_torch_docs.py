@@ -5290,7 +5290,7 @@ is replaced with the least finite value representable by :attr:`input`'s dtype.
 
 Args:
     {input}
-    nan (Number, optional): the value to replace :literal:`NaN`s with. Default is zero.
+    nan (Number, optional): the value to replace :literal:`NaN`\s with. Default is zero.
     posinf (Number, optional): if a Number, the value to replace positive infinity values with.
         If None, positive infinity is replaced with the greatest finite value representable by :attr:`input`'s dtype.
         Default is None.
