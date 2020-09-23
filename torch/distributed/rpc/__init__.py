@@ -1,6 +1,7 @@
 
 from torch.autograd import ProfilerConfig, ProfilerState
 from datetime import timedelta
+from typing import Generator, Tuple
 import torch
 import torch.distributed as dist
 import threading
@@ -14,7 +15,6 @@ def is_available():
 
 if is_available() and not torch._C._rpc_init():
     raise RuntimeError("Failed to initialize torch.distributed.rpc")
-
 
 
 if is_available():
@@ -36,6 +36,7 @@ if is_available():
         ProcessGroupAgent,
         WorkerInfo,
     )  # noqa: F401
+    from torch._C._distributed_c10d import Store
     from .api import *  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
@@ -44,6 +45,8 @@ if is_available():
     import torch.distributed.autograd as dist_autograd
 
     import numbers
+
+    rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
     def init_rpc(
         name,
@@ -93,10 +96,10 @@ if is_available():
         # finishing handshaking. To avoid that issue, we make it global to
         # keep it alive.
         global rendezvous_iterator
-        rendezvous_iterator = torch.distributed.rendezvous(  # type: ignore
+        rendezvous_iterator = torch.distributed.rendezvous(
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
-        store, _, _ = next(rendezvous_iterator)  # type: ignore
+        store, _, _ = next(rendezvous_iterator)
 
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:

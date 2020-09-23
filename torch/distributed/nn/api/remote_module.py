@@ -51,7 +51,7 @@ def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=
 
 
 def _param_rrefs(module_rref, recurse):
-    ret = []
+    ret: List[rpc.RRef[Parameter]] = []
     for param in module_rref.local_value().parameters(recurse):
         ret.append(rpc.RRef(param))
     return ret
@@ -189,7 +189,7 @@ class _RemoteModule(nn.Module):
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:  # type: ignore
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         r"""Returns a list of RRefs of remote module parameters.
         This is typically passed to a distributed optimizer.
         Args:
@@ -207,7 +207,7 @@ class _RemoteModule(nn.Module):
     ) -> None:  # type: ignore[return]
         _raise_not_supported(self.register_buffer.__name__)
 
-    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:  # type: ignore
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:  # type: ignore[return]
         _raise_not_supported(self.register_parameter.__name__)
 
     def add_module(self, name: str, module: Optional["Module"]) -> None:  # type: ignore[return]
@@ -217,7 +217,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.apply.__name__)
 
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
-        _raise_not_supported(self.cuda.__name__)  # type: ignore
+        _raise_not_supported(self.cuda.__name__)
 
     def cpu(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.cpu.__name__)

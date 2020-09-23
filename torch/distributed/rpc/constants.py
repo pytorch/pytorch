@@ -9,7 +9,7 @@ from torch._C._distributed_rpc import (
 )
 
 # For any RpcAgent.
-DEFAULT_RPC_TIMEOUT_SEC: timedelta = _DEFAULT_RPC_TIMEOUT_SEC
+DEFAULT_RPC_TIMEOUT_SEC: float = _DEFAULT_RPC_TIMEOUT_SEC
 DEFAULT_INIT_METHOD: str = _DEFAULT_INIT_METHOD
 
 # For ProcessGroupAgent.
@@ -20,4 +20,4 @@ DEFAULT_NUM_WORKER_THREADS: int = _DEFAULT_NUM_WORKER_THREADS
 # any operations against the underlying ProcessGroup.
 DEFAULT_PROCESS_GROUP_TIMEOUT = timedelta(milliseconds=2 ** 31 - 1)
 # Value indicating that timeout is not set for RPC call, and the default should be used.
-UNSET_RPC_TIMEOUT = _UNSET_RPC_TIMEOUT
+UNSET_RPC_TIMEOUT: float = _UNSET_RPC_TIMEOUT

@@ -353,7 +353,7 @@ GenericWithOneTypeVar = Generic[T]
 try:
     # Combine the implementation class and the type class.
     # Ignore mypy type error for https://github.com/python/mypy/issues/7791
-    class RRef(PyRRef, GenericWithOneTypeVar):  # type: ignore
+    class RRef(PyRRef, Generic[T]):  # type: ignore
         pass
 except TypeError as exc:
     # TypeError: metaclass conflict: the metaclass of a derived class
@@ -540,6 +540,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             dst_worker_info.name,
         )
         RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
+        # Mypy doesn't support re-def of a variable not in the same block (#1174)
         ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)  # type: ignore[assignment]
 
     with ctx_manager as rf:
@@ -615,6 +616,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             dst_worker_info.name,
         )
         RemoteProfilerManager.set_current_profiling_key(rpc_profiling_key)
+        # Mypy doesn't support re-def of a variable not in the same block (#1174)
         ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)  # type: ignore[assignment]
 
     with ctx_manager as rf:
