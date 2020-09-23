@@ -67,7 +67,7 @@ class Adagrad(Optimizer):
             params_with_grad = []
             grads = []
             state_sums = []
-            state_step = 0
+            state_steps = []
 
             for p in group['params']:
                 if p.grad is not None:
@@ -77,13 +77,13 @@ class Adagrad(Optimizer):
                     state_sums.append(state['sum'])
                     # update the steps for each param group update
                     state['step'] += 1
-                    # record the step that associate with the param group
-                    state_step = state['step']
+                    # record the step after step update
+                    state_steps.append(state['step'])
 
             F.adagrad(params_with_grad,
                       grads,
                       state_sums,
-                      state_step,
+                      state_steps,
                       group['lr'],
                       group['weight_decay'],
                       group['lr_decay'],

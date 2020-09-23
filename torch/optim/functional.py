@@ -7,17 +7,17 @@ from typing import List
 def adagrad(params: List[Tensor],
             grads: List[Tensor],
             state_sums: List[Tensor],
-            step: int,
+            state_steps: List[int],
             lr: float,
             weight_decay: float,
             lr_decay: float,
-            eps: float): 
+            eps: float):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
     """
 
-    for (param, grad, state_sum) in zip(params, grads, state_sums):
+    for (param, grad, state_sum, step) in zip(params, grads, state_sums, state_steps):
         if weight_decay != 0:
             if grad.is_sparse:
                 raise RuntimeError("weight_decay option is not compatible with sparse gradients")
