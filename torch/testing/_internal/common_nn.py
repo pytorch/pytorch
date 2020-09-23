@@ -4924,8 +4924,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             # check if the inplace variant of the module gives the same result
             # as the out-of-place
 
-            # check_inplace doesn't support multiple input tensors, since we don't know
-            # which of the multiple tensor arguments is actually being operated in-place
+            # check_inplace doesn't support multiple input tensors, since we don't have any modules
+            # that modify the inputs in-place and that accept more than one input
             assert len(input_tuple) == 1
             input = input_tuple[0]
 
@@ -4948,43 +4948,40 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
 
-        if any(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_CUDA:
+        def test_module_parameters(dtype, device_id=None):
+            for p in module.parameters():
+                test_case.assertIsInstance(p, dtype)
+                if device_id is not None:
+                    test_case.assertEqual(p.get_device(), device_id)
+
+        if all(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_CUDA:
             # check that cuda() moves module parameters to correct GPU device,
             # and that float() casts parameters correctly
             input_tuple = tuple(t.cuda() for t in input_tuple)
             module.float().cuda()
             module(*input_tuple)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                test_case.assertEqual(p.get_device(), 0)
+            test_module_parameters(torch.cuda.FloatTensor, 0)
 
             if torch.cuda.device_count() > 1:
                 input_tuple = tuple(t.cuda(1) for t in input_tuple)
                 module.cuda(1)
                 with torch.cuda.device(1):
                     module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 1)
+                test_module_parameters(torch.cuda.FloatTensor, 1)
         else:
             # check that float()/double() casters work correctly
 
             # to float
-            if all(not isinstance(t, torch.LongTensor) for t in input_tuple):
-                # to float
-                input_tuple = tuple(t.float() for t in input_tuple)
+            input_tuple = tuple(t.float() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            module.float()
+            module(*input_tuple)
+            test_module_parameters(torch.FloatTensor)
 
-                module.float()
-                module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.FloatTensor)
-
-                # and back to double
-                input_tuple = tuple(t.double() for t in input_tuple)
-                module.double()
-                module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.DoubleTensor)
+            # and back to double
+            input_tuple = tuple(t.double() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            module.double()
+            module(*input_tuple)
+            test_module_parameters(torch.DoubleTensor)
 
             if TEST_CUDA and self.should_test_cuda:
                 # check that cuda() moves module parameters to correct GPU device,
@@ -4994,32 +4991,25 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 input_tuple = tuple(t.float().cuda() for t in input_tuple)
                 module.float().cuda()
                 module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                test_module_parameters(torch.cuda.FloatTensor, 0)
 
                 # to CPU
                 input_tuple = tuple(t.cpu() for t in input_tuple)
                 module.cpu()
                 module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.FloatTensor)
+                test_module_parameters(torch.FloatTensor)
 
                 # back to GPU0
                 input_tuple = tuple(t.cuda() for t in input_tuple)
                 module.cuda()
                 module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                test_module_parameters(torch.cuda.FloatTensor, 0)
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
                     with torch.backends.cudnn.flags(enabled=False):
                         module(*input_tuple)
-                        for p in module.parameters():
-                            test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                            test_case.assertEqual(p.get_device(), 0)
+                        test_module_parameters(torch.cuda.FloatTensor, 0)
 
                 if torch.cuda.device_count() >= 2:
                     # test cross-GPU transfer works
@@ -5028,26 +5018,20 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     module.cuda(1)
                     with torch.cuda.device(1):
                         module(*input_tuple)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                        test_case.assertEqual(p.get_device(), 1)
+                    test_module_parameters(torch.cuda.FloatTensor, 1)
 
                 if not self.skip_double:
                     # test double()
                     input_tuple = tuple(t.double().cuda() for t in input_tuple)
                     module.double().cuda()
                     module(*input_tuple)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
-                        test_case.assertEqual(p.get_device(), 0)
+                    test_module_parameters(torch.cuda.DoubleTensor, 0)
 
                 # test half()
                 input_tuple = tuple(t.half().cuda() for t in input_tuple)
                 module.half().cuda()
                 module(*input_tuple)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.HalfTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                test_module_parameters(torch.cuda.HalfTensor, 0)
         torch.set_num_threads(num_threads)
 
     def _get_target(self):
