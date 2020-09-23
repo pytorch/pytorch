@@ -19,6 +19,12 @@ from torch.quantization import (
 from ..quantization_mappings import (
     get_qat_module_mappings,
 )
+from ..custom_module_class_mappings import (
+    is_custom_module_class,
+    get_observed_custom_module_class,
+    mark_observed_custom_module,
+    is_observed_custom_module,
+)
 
 from ..quantize import _remove_qconfig
 
@@ -28,7 +34,11 @@ from .pattern_utils import (
     get_dynamic_quant_patterns,
 )
 
-from .custom_module import is_custom_module
+from .traceable_custom_module import (
+    is_traceable_custom_module,
+    mark_observed_traceable_custom_module,
+    is_observed_traceable_custom_module
+)
 
 from .quantization_patterns import *
 
@@ -129,6 +139,10 @@ def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
             isinstance(module, torch.quantization.FakeQuantize))
 
+def is_submodule_of_fake_quant(name, module, named_modules):
+    parent_name, _ = _parent_name(name)
+    return is_activation_post_process(named_modules[parent_name])
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -180,7 +194,7 @@ class Quantizer:
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
-            if node.op == 'get_param':
+            if node.op == 'get_attr':
                 parent, _ = _parent_name(node.target)
                 self.qconfig_map[node.name] = get_qconfig(self.modules[parent])
             elif node.op == 'call_function':
@@ -196,7 +210,6 @@ class Quantizer:
         if not inplace:
             model = copy.deepcopy(model)
         self.is_dynamic_quant = is_dynamic_quant
-        # TODO: allow user specified patterns
         if self.is_dynamic_quant:
             self.patterns = get_dynamic_quant_patterns()
         else:
@@ -227,17 +240,13 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        custom_module_nodes = []
         # swap custom modules to observed custom modules
         for node in model.graph.nodes:
             if node.op == 'call_module' and \
-               is_custom_module(self.modules[node.target]):
+               is_traceable_custom_module(self.modules[node.target]):
                 # add node to matched nodes
                 custom_module_qconfig = self.qconfig_map[node.name]
-                custom_module_nodes.append(node.name)
                 matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
-
-        print('custom module nodes:', custom_module_nodes)
 
         # indexes for the inputs that needs to be observed
         observed_input_idxs = []
@@ -257,6 +266,10 @@ class Quantizer:
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
+                env[node.name] = observed_graph.node_copy(node, load_arg)
+                if qconfig is None:
+                    continue
+
                 def insert_observer(node, observer, device):
                     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                     observer_name = get_new_observer_name(model)
@@ -267,9 +280,20 @@ class Quantizer:
                     if device:
                         getattr(model, observer_name).to(device)
 
+                if isinstance(obj, CustomModuleQuantizeHandler):
+                    custom_module = self.modules[node.target]
+                    observed_custom_module_class = \
+                        get_observed_custom_module_class(type(custom_module))
+                    observed_custom_module = \
+                        observed_custom_module_class.from_float(custom_module)
+                    mark_observed_custom_module(observed_custom_module, type(custom_module))
+                    parent_name, name = _parent_name(node.target)
+                    setattr(self.modules[parent_name], name, observed_custom_module)
+
                 # index for input of custom module that needs to be observed in parent
                 child_module_input_idxs = None
-                if node.name in custom_module_nodes:
+                if node.op == 'call_module' and \
+                   is_traceable_custom_module(self.modules[node.target]):
                     # observe custom module
                     custom_module = self.modules[node.target]
                     traced_custom_module = symbolic_trace(custom_module)
@@ -279,19 +303,17 @@ class Quantizer:
                         prepare = torch.quantization.prepare_child_module_fx
                     observed_custom_module = prepare(traced_custom_module, {'': qconfig})
                     observed_custom_module.qconfig = qconfig
-                    observed_custom_module._is_custom_module = True
-                    print('observed custom module:', observed_custom_module)
-                    print('hasattr:', hasattr(observed_custom_module, '_is_custom_module'))
-                    print('id:', id(observed_custom_module))
+                    mark_observed_traceable_custom_module(observed_custom_module)
                     child_module_input_idxs = observed_custom_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
 
-                env[node.name] = observed_graph.node_copy(node, load_arg)
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
                     continue
 
+                # inserting observers for output of observed module, or mark the output
+                # as observed
                 if isinstance(obj, CopyNode):
                     assert node.op in [
                         'call_module',
@@ -424,19 +446,14 @@ class Quantizer:
         self.modules = dict(model.named_modules())
 
         matches = self._find_matches(model.graph, self.modules, self.patterns)
+
         quants = self._find_quants(model.graph, matches)
 
         # add custom modules to the match
         for node in model.graph.nodes:
-            if node.op == 'call_module':
-                print('modules:', self.modules[node.target])
-                print('id:', id(self.modules[node.target]))
-                print(hasattr(self.modules[node.target], '_is_custom_module'))
             if node.op == 'call_module' and \
-               hasattr(self.modules[node.target], '_is_custom_module') and \
-               self.modules[node.target]._is_custom_module:
+               is_observed_traceable_custom_module(self.modules[node.target]):
                 custom_module_qconfig = self.qconfig_map[node.name]
-                print('matched custom module:', node.name)
                 matches[node.name] = (node, [node], TraceableCustomModuleHandler(self, node), custom_module_qconfig)
 
         self.quantized_graph = Graph()
@@ -531,7 +548,7 @@ class Quantizer:
                     quantized = False
                 else:
                     result = obj.convert(self, node, load_arg)
-                    if node.op == 'call_module' and is_custom_module(self.modules[node.target]):
+                    if node.op == 'call_module' and is_observed_traceable_custom_module(self.modules[node.target]):
                         quantized = self.modules[node.target]._output_is_observed
                     else:
                         quantized = True
@@ -612,11 +629,11 @@ class Quantizer:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
         act_post_process_removed_graph.output(map_arg(self.quantized_graph.result, load_arg))
 
+        module_dict = dict(model.named_modules())
         to_be_removed = []
         for name, module in model.named_modules():
-            if is_activation_post_process(module):
+            if is_activation_post_process(module) and not is_submodule_of_fake_quant(name, module, module_dict):
                 to_be_removed.append(name)
-        print('model:', model)
         for n in to_be_removed:
             delattr(model, n)
         _remove_qconfig(model)
@@ -661,7 +678,7 @@ class Quantizer:
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
                 env[node.name] = folded_graph.create_node(
-                    'get_param', packed_weight_name, (), {})
+                    'get_attr', packed_weight_name, (), {})
             elif prepack_node is not None:
                 # remove the foled node
                 continue
@@ -723,6 +740,16 @@ class Quantizer:
                             all_matched.add(n.name)
                         # break after finding the first match
                         break
+
+        # add custom module instances to the match result
+        for node in graph.nodes:
+            if node.op == 'call_module' and \
+               (is_custom_module_class(type(self.modules[node.target])) or
+                    is_observed_custom_module(self.modules[node.target])):
+                custom_module_qconfig = self.qconfig_map[node.name]
+                match_map[node.name] = (
+                    node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+
         return match_map
 
     def _find_quants(self, graph, matches):
@@ -769,7 +796,7 @@ class Quantizer:
                     map_arg(matched[-1].kwargs, visit(matched[-1], qconfig))
                     # output
                     if node.op == 'call_module' and \
-                       is_custom_module(self.modules[node.target]):
+                       is_traceable_custom_module(self.modules[node.target]):
                         # we don't insert observer for output of custom
                         # module
                         continue
