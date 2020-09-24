@@ -201,7 +201,7 @@ class SpawnTest(TestCase, _TestMultiProcessing):
         context = mp.spawn(test_infinite_task, args=(), nprocs=1, join=False)
         for pid in context.pids():
             os.kill(pid, signal.SIGTERM)
-        with self.assertRaises(mp.ProcessSignaledException):
+        with self.assertRaises(mp.ProcessExitedException):
             context.join()
 
     def test_process_exited(self):

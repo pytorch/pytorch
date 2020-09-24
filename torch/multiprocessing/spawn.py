@@ -1,4 +1,5 @@
 
+from typing import Optional
 import multiprocessing
 import multiprocessing.connection
 import signal
@@ -27,24 +28,16 @@ class ProcessRaisedException(ProcessException):
         super().__init__(msg, error_index, error_pid)
 
 
-class ProcessSignaledException(ProcessException):
-    __slots__ = ["signal_name"]
-
-    def __init__(
-        self, msg: str, error_index: int, error_pid: int, signal_name: str
-    ):
-        super().__init__(msg, error_index, error_pid)
-        self.signal_name = signal_name
-
-
 class ProcessExitedException(ProcessException):
     __slots__ = ["exit_code"]
 
     def __init__(
-        self, msg: str, error_index: int, error_pid: int, exit_code: int
+            self, msg: str, error_index: int, error_pid: int,
+            exit_code: int, signal_name: Optional[str] = None
     ):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
+        self.signal_name = signal_name
 
 
 def _wrap(fn, i, args, error_queue):
@@ -142,11 +135,12 @@ class ProcessContext:
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 name = signal.Signals(-exitcode).name
-                raise ProcessSignaledException(
+                raise ProcessExitedException(
                     "process %d terminated with signal %s" %
                     (error_index, name),
                     error_index=error_index,
                     error_pid=failed_process.pid,
+                    exit_code=exitcode,
                     signal_name=name
                 )
             else:
