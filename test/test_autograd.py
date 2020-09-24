@@ -4922,6 +4922,7 @@ def add_test(
             setattr(TestAutogradDeviceType, test_name, do_test)
 
 class TestAutogradComplex(TestCase):
+    @skipIfNoLapack
     def test_complex_cholesky(self):
         def func(x, upper):
             x = 0.5 * (x + x.transpose(-1, -2).conj())
