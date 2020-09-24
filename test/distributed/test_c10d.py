@@ -2143,13 +2143,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_nccl_backend(devices, [], multi_device=True)
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(8)
-    def test_nccl_backend_4gpu_module_grad_is_view(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_nccl_backend(devices, [], multi_device=True, gradient_as_bucket_view=True)
-
-    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_ddp_multi_device_module_config(self):
         gpus = gpus_for_rank(self.world_size)[self.rank]
@@ -2374,7 +2367,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # trigger an error when `backward` is called (because fc3 is an unused
         # parameter and will therefore be marked ready twice).
         try:
-            test_find_unused_parameters(True, gradient_as_bucket_view)
+            test_find_unused_parameters(True, gradient_as_bucket_view=gradient_as_bucket_view)
         except Exception as ex:
             self.assertTrue(
                 str(ex).startswith("Expected to mark a variable ready only once."))
@@ -2384,7 +2377,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Then test that the default behavior can be overridden by setting
         # `find_unused_parameters=False`.
         try:
-            test_find_unused_parameters(False, gradient_as_bucket_view)
+            test_find_unused_parameters(False, gradient_as_bucket_view=gradient_as_bucket_view)
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 

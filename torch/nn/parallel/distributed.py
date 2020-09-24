@@ -323,7 +323,7 @@ class DistributedDataParallel(Module):
                       between gradients and allreduce communication buckets.
                       When gradients are views, ``detach_()`` cannot be called on the
                       gradients. If hitting such errors, please fix it by referring to
-                      the :meth:torch.optim.Optimizer.zero_grad function in
+                      the :meth:`torch.optim.Optimizer.zero_grad` function in
                       ``torch/optim/optimizer.py`` as the solution.
                       Warning! It is also found that ``gradient_as_bucket_view = true``
                       does not work as expected when ``apex.amp`` is used for
