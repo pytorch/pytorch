@@ -587,8 +587,6 @@ class DistributedTest:
             p2p_op_list = []
 
             for src in range(0, dist.get_world_size()):
-                if src == rank:
-                    continue
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
                 recv_op = dist.P2POp(dist.irecv, recv_tensor, src)

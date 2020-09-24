@@ -768,14 +768,16 @@ def recv(tensor,
 
 class P2POp(object):
     """
-    A class to save point-to-point operations for ``batch_isend_irecv``.
+    A class to build point-to-point operations for ``batch_isend_irecv``.
 
-    This calss saves the type of P2P operation, communication buffer, peer rank,
+    This class builds the type of P2P operation, communication buffer, peer rank,
     Process Group group, and tag. Instances of this class will be passed to
     ``batch_isend_irecv`` for point-to-point communications.
 
     Arguments:
         op (callable): A function to send data to or receive data from a peer process.
+            The type of ``op`` is either ``torch.distributed.isend`` or
+            ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
         peer (int): Destination or source rank.
         group (ProcessGroup, optional): The process group to work on.
@@ -807,16 +809,16 @@ def _batch_p2p_manager(backend):
 
 def batch_isend_irecv(p2p_op_list):
     """
-    Send or Receive tensors asynchronously and return a list of requests.
+    Send or Receive a batch of tensors asynchronously and return a list of requests.
 
     Process each of the operations in p2p_op_list and return the corresponding
     requests. NCCL and Gloo backend are currently supported.
 
     Arguments:
         p2p_op_list: A list of point-to-point operations(type of each operator is
-        ``torch.distributed.P2POp``. The order of the isend/irecv in the list
-        matters and it needs to match with corresponding isend/irecv on the
-        remote end.
+            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
+            matters and it needs to match with corresponding isend/irecv on the
+            remote end.
 
     Returns:
         A list of distributed request objects returned by calling the corresponding
