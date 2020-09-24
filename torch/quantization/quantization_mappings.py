@@ -21,6 +21,8 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
+    nn.ConvTranspose1d: nnq.ConvTranspose1d,
+    nn.ConvTranspose2d: nnq.ConvTranspose2d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.LayerNorm: nnq.LayerNorm,

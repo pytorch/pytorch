@@ -4,6 +4,7 @@ import itertools
 import os
 import inspect
 import logging
+import warnings
 
 import torch
 
@@ -431,7 +432,6 @@ class DistributedDataParallel(Module):
 
         if self.device_ids and len(self.device_ids) > 1:
 
-            import warnings
             warnings.warn(
                 "Single-Process Multi-GPU is not the recommended mode for "
                 "DDP. In this mode, each DDP instance operates on multiple "
@@ -581,7 +581,7 @@ class DistributedDataParallel(Module):
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, ones, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_join_divide_by_initial_world_size
             )
 
         # Calling _rebuild_buckets before forward compuation,
@@ -815,8 +815,20 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                # Schedules allreduce to match fwd pass allreduce in non-joined procs
+                i = 0
+                WARN_THRESHOLD = 1000
+                warnings.simplefilter("once")
                 while not all_procs_joined:
+                    if i > WARN_THRESHOLD:
+                        my_rank = dist.get_rank(self.process_group)
+                        warnings.warn(
+                            "Detected uneven input skew of greater "
+                            f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
+                            f"has at least {WARN_THRESHOLD} fewer inputs than "
+                            "other currently active ranks. This level of skew could "
+                            "lead to performance degradation during training."
+                        )
+                    # Schedules allreduce to match fwd pass allreduce in non-joined procs
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
                         all_procs_joined = True
@@ -853,6 +865,7 @@ class DistributedDataParallel(Module):
                             self._match_unused_params_allreduce()
                         # It will push rebuilt params only once during training period
                         self.reducer._push_all_rebuilt_params()
+                        i += 1
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)

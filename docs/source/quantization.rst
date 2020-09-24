@@ -121,29 +121,29 @@ Diagram::
 
 API example::
 
-	import torch
+    import torch
 
-	# define a floating point model
-	class M(torch.nn.Module):
-	    def __init__(self):
-	        super(M, self).__init__()
-	        self.fc = torch.nn.Linear(4, 4)
+    # define a floating point model
+    class M(torch.nn.Module):
+        def __init__(self):
+            super(M, self).__init__()
+            self.fc = torch.nn.Linear(4, 4)
 
-	    def forward(self, x):
-	        x = self.fc(x)
-	        return x
+        def forward(self, x):
+            x = self.fc(x)
+            return x
 
-	# create a model instance
-	model_fp32 = M()
-	# create a quantized model instance
-	model_int8 = torch.quantization.quantize_dynamic(
-	    model_fp32,  # the original model
-	    {torch.nn.Linear},  # a set of layers to dynamically quantize
-	    dtype=torch.qint8)  # the target dtype for quantized weights
+    # create a model instance
+    model_fp32 = M()
+    # create a quantized model instance
+    model_int8 = torch.quantization.quantize_dynamic(
+        model_fp32,  # the original model
+        {torch.nn.Linear},  # a set of layers to dynamically quantize
+        dtype=torch.qint8)  # the target dtype for quantized weights
 
-	# run the model
-	input_fp32 = torch.randn(4, 4, 4, 4)
-	res = model_int8(input_fp32)
+    # run the model
+    input_fp32 = torch.randn(4, 4, 4, 4)
+    res = model_int8(input_fp32)
 
 To learn more about dynamic quantization please see our `end to end tutorial
 <https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
@@ -160,15 +160,15 @@ known as Post Training Quantization or PTQ.
 
 Diagram::
 
-	# original model
-	# all tensors and computations are in floating point
-	previous_layer_fp32 -- linear_fp32 -- activation_fp32 -- next_layer_fp32
+    # original model
+    # all tensors and computations are in floating point
+    previous_layer_fp32 -- linear_fp32 -- activation_fp32 -- next_layer_fp32
                         /
-	    linear_weight_fp32
+        linear_weight_fp32
 
-	# statically quantized model
-	# weights and activations are in int8
-	previous_layer_int8 -- linear_with_activation_int8 -- next_layer_int8
+    # statically quantized model
+    # weights and activations are in int8
+    previous_layer_int8 -- linear_with_activation_int8 -- next_layer_int8
                         /
       linear_weight_int8
 
