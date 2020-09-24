@@ -586,17 +586,19 @@ class DistributedTest:
             device_id = rank_to_GPU[rank][0]
             p2p_op_list = []
 
-            for src in range(0, dist.get_world_size()):
-                send_tensor = _build_tensor(rank + 1, device_id=device_id)
-                recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
-                p2p_op_list.append(recv_op)
-                send_op = dist.P2POp(dist.isend, send_tensor, src)
-                p2p_op_list.append(send_op)
+            for val in ["1", "0"]:
+                os.environ["NCCL_BLOCKING_WAIT"] = val
+                for src in range(0, dist.get_world_size()):
+                    send_tensor = _build_tensor(rank + 1, device_id=device_id)
+                    recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
+                    recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
+                    p2p_op_list.append(recv_op)
+                    send_op = dist.P2POp(dist.isend, send_tensor, src)
+                    p2p_op_list.append(send_op)
 
-            reqs = dist.batch_isend_irecv(p2p_op_list)
-            for req in reqs:
-                req.wait()
+                reqs = dist.batch_isend_irecv(p2p_op_list)
+                for req in reqs:
+                    req.wait()
 
             self._barrier()
 
