@@ -154,12 +154,14 @@ class Graph:
     def output(self, result: Argument):
         assert len(self._nodes) != 0
         assert self._nodes[-1].op == 'return'
-        self._nodes[-1].args = result
+        # Indiscriminately dumping everything into a tuple here. The user-provided
+        # `result` value will always be result.args[0]
+        self._nodes[-1].args = (result,)
 
     @property
     def result(self):
         assert self._nodes[-1].op == 'return'
-        return self.nodes[-1].args
+        return self.nodes[-1].args[0]
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -236,7 +238,7 @@ class Graph:
         src = ''.join(body)
         return_node = self._nodes[-1]
         assert return_node.op == 'return'
-        return src, str(self._nodes[-1].args), free_vars
+        return src, str(self._nodes[-1].args[0]), free_vars
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
@@ -328,6 +330,7 @@ class Graph:
         if root:
             for node in self._nodes:
                 if node.op in ['get_attr', 'call_module']:
+                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = root
                     for i, atom in enumerate(target_atoms):
@@ -335,7 +338,7 @@ class Graph:
                         if m_itr is None:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
-                                            f'{atom} of {seen_qualname}')
+                                               f'{atom} of {seen_qualname}')
 
 
 reflectable_magic_methods = {

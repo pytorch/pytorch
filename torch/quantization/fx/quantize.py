@@ -337,6 +337,8 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
 
         for node in model.graph.nodes:
+            if node.op == 'return':
+                continue
             if node.name in observed_node_names_set:
                 continue
 
@@ -562,6 +564,9 @@ class Quantizer:
                     raise Exception("partially quantized inputs in list not handled yet")
 
         for node in model.graph.nodes:
+            if node.op == 'return':
+                continue
+
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
                 if qconfig is None:
@@ -627,6 +632,9 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
+            if node.op == 'return':
+                continue
+
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
                 # remove activation post process
@@ -676,6 +684,9 @@ class Quantizer:
         quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
+            if node.op == 'return':
+                continue
+
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
                 packed_weight = packed_weights[node.name]
