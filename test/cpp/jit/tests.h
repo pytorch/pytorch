@@ -21,6 +21,7 @@ namespace jit {
   _(InternedStrings)                              \
   _(PassManagement)                               \
   _(Proto)                                        \
+  _(RegisterFusionCachesKernel)                   \
   _(SchemaParser)                                 \
   _(TopologicalIndex)                             \
   _(SubgraphUtils)                                \
@@ -52,6 +53,7 @@ namespace jit {
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
+  _(DCE)                                          \
   _(CustomFusionNestedBlocks)                     \
   _(ModuleInterfaceSerialization)                 \
   _(ModuleCloneWithModuleInterface)               \
@@ -91,10 +93,12 @@ namespace jit {
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
-  _(LiteSequentialSampler)
+  _(LiteSequentialSampler)                        \
+  _(FusionAliasing)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
+  _(Fusion)                                         \
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
@@ -199,6 +203,7 @@ namespace jit {
   _(GPU_FusionThreadPredicate)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
+  _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)                     \

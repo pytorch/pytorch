@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+#include "test/cpp/jit/test_base.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include "ATen/core/interned_strings.h"
@@ -56,27 +56,28 @@
 namespace torch {
 namespace jit {
 
-TEST(FuserTest, TestSimple_CUDA) {
-  const auto graph_string = R"IR(
+void testFusion() {
+  auto testSimple = [&] {
+    const auto graph_string = R"IR(
       graph(%0 : Tensor,
             %1 : Tensor):
         %2 : Tensor = aten::mul(%0, %1)
         return (%2))IR";
-  Graph graph;
-  torch::jit::parseIR(graph_string, &graph);
+    Graph graph;
+    torch::jit::parseIR(graph_string, &graph);
 
-  auto a = at::rand({3, 4}, at::kCUDA);
-  auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
-  auto o = at::zeros({3, 4}, at::kCUDA);
-  auto outputs = debugLaunchGraph(graph, {a, b});
-  ASSERT_EQ(outputs.size(), 1);
-  auto o2 = a * b;
-  float max_diff = (o2 - outputs[0]).abs().max().item<double>();
-  // std::cout << "max diff: " << max_diff << "\n";
-  ASSERT_EQ(max_diff, 0);
-}
+    auto a = at::rand({3, 4}, at::kCUDA);
+    auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
+    auto o = at::zeros({3, 4}, at::kCUDA);
+    auto outputs = debugLaunchGraph(graph, {a, b});
+    ASSERT_EQ(outputs.size(), 1);
+    auto o2 = a * b;
+    float max_diff = (o2 - outputs[0]).abs().max().item<double>();
+    // std::cout << "max diff: " << max_diff << "\n";
+    ASSERT_EQ(max_diff, 0);
+  };
+  testSimple();
 
-TEST(FuserTest, TestOne_CUDA) {
   auto testOne = [&](int ti, int tj) {
     const auto graph_string = R"IR(
       graph(%0 : Tensor,
@@ -131,9 +132,7 @@ TEST(FuserTest, TestOne_CUDA) {
   testOne(0, 1);
   testOne(1, 2);
   testOne(0, 2);
-}
 
-TEST(FuserTest, FusedConcat_CUDA) {
   const auto graph_string0 = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -176,7 +175,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
   };
 }
 
-TEST(FuserTest, FusionAliasing) {
+void testFusionAliasing() {
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -201,7 +200,7 @@ TEST(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
-TEST(FuserTest, KernelCaching) {
+void testRegisterFusionCachesKernel() {
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, 3, 4),
