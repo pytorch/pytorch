@@ -231,6 +231,25 @@ The dynamic control flow is captured correctly. We can verify in backends with d
     #       [37, 37, 37]], dtype=int64)]
 
 
+To avoid exporting a variable scalar tensor as a fixed value constant as part of the ONNX model, please
+avoid use of ``torch.Tensor.item()``. Torch supports implicit cast of single-element tensors to numbers.
+E.g.: ::
+
+    class LoopModel(torch.nn.Module):
+        def forward(self, x, y):
+            res = []
+            arr = x.split(2, 0)
+            for i in range(int(y)):
+                res += [arr[i].sum(0, False)]
+            return torch.stack(res)
+
+    model = torch.jit.script(LoopModel())
+    inputs = (torch.randn(16), torch.tensor(8))
+
+    out = model(*inputs)
+    torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
+
+
 TorchVision support
 -------------------
 
@@ -262,6 +281,7 @@ The following operators are supported:
 * Conv
 * Dropout
 * Embedding (no optional arguments supported)
+* EmbeddingBag
 * FeatureDropout (training mode not supported)
 * Index
 * MaxPool1d
@@ -289,6 +309,7 @@ The following operators are supported:
 * avg_pool2d
 * avg_pool2d
 * avg_pool3d
+* as_strided
 * baddbmm
 * bitshift
 * cat
@@ -314,6 +335,7 @@ The following operators are supported:
 * exp
 * expand
 * expand_as
+* eye
 * flatten
 * floor
 * floor_divide
@@ -335,9 +357,11 @@ The following operators are supported:
 * instance_norm
 * interpolate
 * isnan
+* KLDivLoss
 * layer_norm
 * le
 * leaky_relu
+* len
 * log
 * log1p
 * log2
@@ -358,6 +382,9 @@ The following operators are supported:
 * narrow
 * ne
 * neg
+* new_empty
+* new_full
+* new_zeros
 * nll_loss
 * nonzero
 * norm
@@ -811,7 +838,10 @@ Q: Is tensor list exportable to ONNX?
 
   Yes, this is supported now for ONNX opset version >= 11. ONNX introduced the concept of Sequence in opset 11.
   Similar to list, Sequence is a data type that contains arbitrary number of Tensors.
-  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc. E.g.: ::
+  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc.
+  However, in-place list append within loops is not exportable to ONNX. To implement this, please use inplace
+  add operator.
+  E.g.: ::
 
     class ListLoopModel(torch.nn.Module):
         def forward(self, x):
@@ -820,8 +850,8 @@ Q: Is tensor list exportable to ONNX?
             arr = x.split(2, 0)
             res2 = torch.zeros(3, 4, dtype=torch.long)
             for i in range(len(arr)):
-                res = res.append(arr[i].sum(0, False))
-                res1 = res1.append(arr[-1 - i].sum(0, False))
+                res += [arr[i].sum(0, False)]
+                res1 += [arr[-1 - i].sum(0, False)]
                 res2 += 1
             return torch.stack(res), torch.stack(res1), res2
 
