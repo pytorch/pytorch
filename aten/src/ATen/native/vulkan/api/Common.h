@@ -104,7 +104,7 @@ class Handle final {
   void reset(Type payload = kNull);
 
  private:
-  static Type kNull;
+  static constexpr Type kNull{};
 
  private:
   Type payload_;
@@ -114,9 +114,6 @@ class Handle final {
 //
 // Impl
 //
-
-template<typename Type, typename Deleter>
-Type Handle<Type, Deleter>::kNull{};
 
 template<typename Type, typename Deleter>
 inline Handle<Type, Deleter>::Handle(const Type payload, Deleter deleter)

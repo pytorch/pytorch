@@ -166,7 +166,7 @@ api::Resource::Fence allocate_fence(
 }
 
 void copy_staging_to_buffer(
-    api::Command::Buffer command_buffer,
+    api::Command::Buffer& command_buffer,
     const vTensor::Buffer& staging,
     const vTensor::Buffer& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -184,7 +184,7 @@ void copy_staging_to_buffer(
 }
 
 void copy_buffer_to_staging(
-    api::Command::Buffer command_buffer,
+    api::Command::Buffer& command_buffer,
     const vTensor::Buffer& buffer,
     const vTensor::Buffer& staging) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -202,7 +202,7 @@ void copy_buffer_to_staging(
 }
 
 void copy_buffer_to_image(
-    api::Command::Buffer command_buffer,
+    api::Command::Buffer& command_buffer,
     const vTensor::Buffer& buffer,
     const vTensor::Image& image) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -215,7 +215,7 @@ void copy_buffer_to_image(
 }
 
 void copy_image_to_buffer(
-    api::Command::Buffer command_buffer,
+    api::Command::Buffer& command_buffer,
     const vTensor::Image& image,
     const vTensor::Buffer& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
