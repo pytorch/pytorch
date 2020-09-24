@@ -2244,5 +2244,15 @@ void testProfilerDisableInCallback() {
   torch::autograd::profiler::disableProfiler(std::move(opts));
 }
 
+void testIValueKWargs() {
+  const auto text = R"(
+    def foo(a : int, b : int, c : int = 4):
+      return a + 2*b + 3*c
+  )";
+  auto cu = compile(text);
+  auto result = cu->get_function("foo")({1}, {{"b", 3}});
+  ASSERT_EQ(result.toInt(), 19);
+}
+
 } // namespace jit
 } // namespace torch
