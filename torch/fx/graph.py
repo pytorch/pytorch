@@ -78,9 +78,9 @@ class WithInsertPoint:
 
 class Graph:
     def __init__(self):
-        self._nodes : List[Node] = []
+        self._nodes : List[Node] = [Node(self, 'return', 'return', 'return', (), {})]
         self._used_names : Dict[str, int] = {}  # base name -> number
-        self._insert_point : Optional[Node] = None
+        self._insert_point : Node = self._nodes[-1]
 
     @property
     def nodes(self):
@@ -92,7 +92,10 @@ class Graph:
         """
         val_map : Dict[Node, Node] = {}
         for node in g._nodes:
+            if node.op == 'return':
+                continue
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
+
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -110,10 +113,7 @@ class Graph:
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        if self._insert_point:
-            self.insert_node_before(n=n, before=self._insert_point)
-        else:
-            self._nodes.append(n)
+        self.insert_node_before(n=n, before=self._insert_point)
         return n
 
     def insert_node_before(self, n : Node, before : Node) -> Node:
@@ -221,8 +221,14 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
-        self.result = result
-        self._mark_uses(result)
+        assert len(self._nodes) != 0
+        assert self._nodes[-1].op == 'return'
+        self._nodes[-1].args = result
+
+    @property
+    def result(self):
+        assert self._nodes[-1].op == 'return'
+        return self.nodes[-1].args
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -292,10 +298,14 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
+            elif node.op == 'return':
+                continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         src = ''.join(body)
-        return src, str(self.result), free_vars
+        return_node = self._nodes[-1]
+        assert return_node.op == 'return'
+        return src, str(self._nodes[-1].args), free_vars
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
@@ -324,6 +334,8 @@ class Graph:
                 return None
             elif n.op == 'get_attr':
                 return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+            elif n.op == 'return':
+                return f'return {n.args}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
@@ -335,8 +347,6 @@ class Graph:
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
-        if self.result:
-            s += f'\n    return {format_arg(self.result)}'
         return s
 
 reflectable_magic_methods = {
