@@ -6063,11 +6063,11 @@ class TestTorchDeviceType(TestCase):
             # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
             if batches and batches[0] == 32 and n == 256:
                 continue
-            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
+            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
             test_inverse_helper(_matrices, batches, n)
             test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
             test_inverse_helper(
-                random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype, device=device)
+                random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
                 .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                 batches, n
             )
@@ -6091,7 +6091,7 @@ class TestTorchDeviceType(TestCase):
             return
 
         from numpy.linalg import inv
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 2, dtype=dtype, device=device).permute(0, 2, 1)
+        matrices = random_fullrank_matrix_distinct_singular_value(3, 2, dtype=dtype).to(device).permute(0, 2, 1)
         assert not matrices.is_contiguous()
         matrices_inverse = torch.inverse(matrices)
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
@@ -6124,7 +6124,7 @@ class TestTorchDeviceType(TestCase):
 
         batches = [1]
         n = 5
-        _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype, device=device)
+        _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
         test_inverse_helper(_matrices, batches, n)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
