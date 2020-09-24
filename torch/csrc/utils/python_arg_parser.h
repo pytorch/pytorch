@@ -173,8 +173,6 @@ struct PythonArgs {
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
-  inline std::vector<double> doublelist(int i);
-  inline std::vector<double> getDoublelist(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
@@ -371,7 +369,10 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
   return intlist(i);
 }
 
-inline std::vector<double> PythonArgs::getDoublelist(int i) {
+inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -387,17 +388,6 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     }
   }
   return res;
-}
-
-inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
-  if (!args[i]) {
-    return {};
-  }
-  return this->getDoublelist(i);
-}
-
-inline std::vector<double> PythonArgs::doublelist(int i) {
-  return this->getDoublelist(i);
 }
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
