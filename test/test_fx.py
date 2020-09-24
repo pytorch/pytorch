@@ -319,7 +319,7 @@ class TestFX(JitTestCase):
             interpreter.set_instructions(instructions)
             # Specify name for single output
             assert isinstance(mod.graph.result, torch.fx.Node)
-            interpreter.set_output_name(nodes[-1].args.name)
+            interpreter.set_output_name(mod.graph.result.name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):

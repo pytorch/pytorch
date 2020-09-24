@@ -136,7 +136,7 @@ class Graph:
             elif isinstance(arg, dict):
                 return any(find_use(v) for k, v in arg.items())
             elif isinstance(arg, slice):
-                return any(find_use(arg.start), find_use(arg.stop), find_use(arg.step))
+                return any([find_use(arg.start), find_use(arg.stop), find_use(arg.step)])
             elif isinstance(arg, Node):
                 return arg is to_find
             else:
@@ -149,7 +149,7 @@ class Graph:
         Find all uses of the value produced by `to-replace` and swap out those references for the value produced
         by `replace_with`. Does not delete `to_replace`.
         """
-        def replace_node(n : Node):
+        def replace_node(n : Node) -> Argument:
             if n is to_replace:
                 return replace_with
             else:
@@ -157,8 +157,13 @@ class Graph:
 
         # TODO: computationally inefficient
         for node in self._nodes:
-            node.args = map_arg(node.args, replace_node)
-            node.kwargs = map_arg(node.kwargs, replace_node)
+            new_args = map_arg(node.args, replace_node)
+            assert isinstance(new_args, tuple)
+            node.args = new_args
+
+            new_kwargs = map_arg(node.kwargs, replace_node)
+            assert isinstance(new_kwargs, dict)
+            node.kwargs = new_kwargs
 
     def erase_node(self, to_erase : Node):
         """
@@ -229,12 +234,14 @@ class Graph:
     def output(self, result: Argument):
         assert len(self._nodes) != 0
         assert self._nodes[-1].op == 'return'
-        self._nodes[-1].args = result
+        # Indiscriminately dumping everything into a tuple here. The user-provided
+        # `result` value will always be result.args[0]
+        self._nodes[-1].args = (result,)
 
     @property
     def result(self):
         assert self._nodes[-1].op == 'return'
-        return self.nodes[-1].args
+        return self.nodes[-1].args[0]
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -311,7 +318,7 @@ class Graph:
         src = ''.join(body)
         return_node = self._nodes[-1]
         assert return_node.op == 'return'
-        return src, str(self._nodes[-1].args), free_vars
+        return src, str(self._nodes[-1].args[0]), free_vars
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
@@ -403,6 +410,7 @@ class Graph:
         if root:
             for node in self._nodes:
                 if node.op in ['get_attr', 'call_module']:
+                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = root
                     for i, atom in enumerate(target_atoms):
@@ -410,7 +418,7 @@ class Graph:
                         if m_itr is None:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
-                                            f'{atom} of {seen_qualname}')
+                                               f'{atom} of {seen_qualname}')
 
 
 reflectable_magic_methods = {
