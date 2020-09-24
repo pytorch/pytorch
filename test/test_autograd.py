@@ -4924,7 +4924,7 @@ def add_test(
 class TestAutogradComplex(TestCase):
     def test_complex_cholesky(self):
         def func(x, upper):
-            x = 0.5*(x + x.transpose(-1, -2).conj())
+            x = 0.5 * (x + x.transpose(-1, -2).conj())
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
