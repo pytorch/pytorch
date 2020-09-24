@@ -266,7 +266,10 @@ where
             \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
 
 The key assumption made in the derivation of :eq:`[1]` is that function :math:`F` is a part of a
-real valued function. For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
+real valued function. It implies that the Conjugate Wirtinger and Wirtinger derivative flowing back
+to :math:`F` are complex conjugate of each other. This allows us to use grad_output as the incoming Conjugate
+Wirtinger derivative and recover the incoming Wirtinger derivative by complex conjugation.
+For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
 **What happens for cross-domain functions?**
 *********************************************
@@ -286,6 +289,7 @@ at :math:`x + yj` can be simplified to be written as:
 
     .. math::
         VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
+        :label: [3]
 
 The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
 
@@ -300,8 +304,9 @@ at :math:`x + yj` can be simplified to be written as:
 
     .. math::
         VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
+        :label: [4]
 
-Note that the gradient in this case equals to the real value of the result obtained using the above formula. This is because
-in the derivation of the :eq:`[1]`, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
-from scratch for an :math:`F: ℝ → ℂ` which again is a part of a real valued function :math:`G`, it can be verified that taking the
-real value of formula above gives the correct gradient.
+Note that the gradient in this case equals to the real value of the result obtained using :eq:`[1]`. This is because
+in the derivation of :eq:`[1]`, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
+from scratch for an :math:`F: ℝ → ℂ` which itself is a part of a real valued function :math:`G`, it can be verified that applying the
+real operator (in :eq:`[4]`) to the result obtained using :eq:`[1]` gives the correct gradient.
