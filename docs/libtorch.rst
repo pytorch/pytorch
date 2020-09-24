@@ -35,7 +35,7 @@ To use ninja rather than make, set `CMAKE_GENERATOR="-GNinja" CMAKE_INSTALL="nin
 
 Note that we are working on eliminating tools/build_pytorch_libs.sh in favor of a unified cmake build.
 
-Building libtorch without using Python
+Building libtorch using CMake
 --------------------------------------
 
 You can build C++ libtorch.so without relying on Python.  For example to build a v1.6.0 Release version that uses (system-installed) CUDA and CUDDN, and install it in the directory specified by CMAKE_INSTALL_PREFIX below, you can use
