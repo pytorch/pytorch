@@ -80,7 +80,7 @@ def adam(params: List[Tensor],
         bias_correction2 = 1 - beta2 ** step
 
         if weight_decay != 0:
-            grad = grad.add(p, alpha=weight_decay)
+            grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
