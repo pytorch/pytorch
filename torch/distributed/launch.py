@@ -274,24 +274,26 @@ def main():
             directory_path = os.path.join(os.getcwd(), args.logdir)
             node_rank = args.node_rank
             stdout_file_name = node_local_rank_stdout_filename.format(node_rank, local_rank)
-            file_handle = open(os.path.join(directory_path, stdout_file_name), "w")
+            file_path = os.path.join(directory_path, stdout_file_name)
+            file_handle = open(file_path, "w")
             subprocess_stdout = file_handle
             subprocess_file_handles.append(file_handle)
-            print(f"Note: Stdout for node {node_rank} rank {local_rank} will be written to {stdout_file_name}")
+            print(f"Note: Stdout for node {node_rank} rank {local_rank} will be written to {file_path}")
 
 
         process = subprocess.Popen(cmd, env=current_env, stdout=subprocess_stdout)
         processes.append(process)
 
-    for process in processes:
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                cmd=cmd)
-
-    # close open file descriptors
-    for file_handle in subprocess_file_handles:
-        file_handle.close()
+    try:
+        for process in processes:
+            process.wait()
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(returncode=process.returncode,
+                                                    cmd=cmd)
+    finally:
+        # close open file descriptors
+        for file_handle in subprocess_file_handles:
+            file_handle.close()
 
 
 if __name__ == "__main__":
