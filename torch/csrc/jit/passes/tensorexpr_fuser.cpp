@@ -166,6 +166,7 @@ bool isSupported(Node* node) {
   switch (node->kind()) {
     case prim::ConstantChunk:
     case prim::ListConstruct:
+    case prim::TensorExprGroup:
       return true;
   }
 
@@ -200,12 +201,6 @@ bool setTexprReductionsEnabled(bool value) {
 bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
-
-struct nodesComparator {
-  bool operator()(Node* a, Node* b) const {
-    return a->isAfter(b);
-  }
-};
 
 // TODO: if a value has differently typed uses, temporarrily insert a node
 // specializing the type for each use and later remove, instead of bailing
@@ -298,6 +293,11 @@ class TensorExprFuser {
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
+    // we maintain alias db correctness during initial fusion, but it is
+    // difficult to maintain correctness after inlining so inline only after
+    // fusion is done.
+    inlineSmallFusionGroups(graph_->block());
+    GRAPH_DUMP("After inlining small fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
@@ -314,56 +314,44 @@ class TensorExprFuser {
         n, prim::TensorExprGroup, *aliasDb_);
   }
 
-  // Add unvisited input nodes to the queue for further merging into the fusion
-  // group.
-  void updateQueue(
-      Node* fusion_group,
-      std::set<Node*, nodesComparator>& queue,
-      const std::unordered_set<Node*>& visited) {
-    for (auto input : fusion_group->inputs()) {
-      if (!visited.count(input->node())) {
-        queue.insert(input->node());
+  value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
+    value_list result;
+    for (auto i : inputs) {
+      if (i->node()->owningBlock() == b) {
+        result.push_back(i);
       }
     }
+    // Sort in reverse topological order
+    std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
+      return a->node()->isAfter(b->node());
+    });
+    return result;
   }
 
   // Create a fusion group starting from the node N.
   // We then try to pull inputs into the fusion group and repeat that process
   // until there is nothing we can pull in.
-  Node* createFusionGroup(Node* n) {
-    // Queue of the nodes we should consider for merging into the fusion groups
-    // (those nodes are usually inputs of the fusion group).
-    // We use an ordered set here to visit them in the right order: the fusion
-    // group is closer to the end of the block and we are trying to pull later
-    // nodes first.
-    // NB: the order in the list in theory could stale if we move nodes around.
-    // However, this should only happen to the nodes we could not fuse, and
-    // hence it should not be a problem.
-    std::set<Node*, nodesComparator> queue;
-    std::unordered_set<Node*> visited_nodes;
-
-    Node* fusion_group = n;
+  std::pair<graph_node_list::iterator, bool> createFusionGroup(
+      Node* fusion_node) {
     if (min_group_size_ == 1) {
-      fusion_group = getOrCreateTensorExprSubgraph(n);
+      fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
-
-    updateQueue(fusion_group, queue, visited_nodes);
 
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
-    while (!queue.empty()) {
-      debugDumpFusionGroup("Current fusion group: ", fusion_group);
-      GRAPH_DEBUG(queue.size(), " nodes are in the queue.\n");
-
-      Node* input_node = *queue.begin();
-      queue.erase(queue.begin());
-
-      GRAPH_DEBUG("Trying to merge: ", *input_node);
-      fusion_group = tryMerge(fusion_group, input_node);
-      visited_nodes.insert(input_node);
-      updateQueue(fusion_group, queue, visited_nodes);
+    auto inputs = sortReverseTopological(
+        fusion_node->inputs(), fusion_node->owningBlock());
+    for (auto input : inputs) {
+      debugDumpFusionGroup("Current fusion group: ", fusion_node);
+      GRAPH_DEBUG("Trying to merge: ", *input->node());
+      if (auto maybe_fusion_group = tryMerge(fusion_node, input->node())) {
+        // we successfully merged, so the new group's `inputs` may have
+        // changed. So rescan the new group for more merging opportunities.
+        return std::make_pair(
+            maybe_fusion_group.value()->reverseIterator(), true);
+      }
     }
 
-    return fusion_group;
+    return std::make_pair(++fusion_node->reverseIterator(), false);
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
@@ -373,69 +361,75 @@ class TensorExprFuser {
     }
   }
 
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* n) {
+    GRAPH_DEBUG("Considering node:", *n)
+
+    if (!canHandle(n)) {
+      return std::make_pair(++n->reverseIterator(), false);
+    }
+    // There are some nodes that we can support, but we don't want to start a
+    // fusion group from - skip them.
+    if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
+        n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
+        n->kind() == prim::Constant) {
+      return std::make_pair(++n->reverseIterator(), false);
+    }
+    return createFusionGroup(n);
+  }
+
   // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
   void createFusionGroups(Block* block) {
-    std::vector<Node*> fusion_groups;
-    auto reverse_iter = block->nodes().reverse();
-    Node* prev_fusion_group = nullptr;
-    for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
-      Node* n = *it;
-      GRAPH_DEBUG("Considering node:", *n)
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+        bool changed;
+        std::tie(it, changed) = scanNode(*it);
+        any_changed |= changed;
+      }
+    }
 
+    for (Node* n : block->nodes()) {
       for (Block* b : n->blocks()) {
         createFusionGroups(b);
       }
+    }
 
-      if (!canHandle(n)) {
-        it++;
-        continue;
+    // Try to merge adjacent fusion groups together. Because we have only merged
+    // by looking at graph inputs, without this we would not attempt to merge
+    // adjacent fusion groups that don't have a depdency on each other
+
+    std::vector<Node*> initial_fusion_groups;
+    for (Node* n : block->nodes()) {
+      if (n->kind() == prim::TensorExprGroup) {
+        initial_fusion_groups.push_back(n);
       }
-      // There are some nodes that we can support, but we don't want to start a
-      // fusion group from - skip them.
-      if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
-          n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
-          n->kind() == prim::Constant) {
-        it++;
-        continue;
-      }
+    }
 
-      Node* fusion_group = createFusionGroup(n);
-      debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
+    Node* prev_fusion_group =
+        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
+    for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
       // If merging suceeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
-      if (prev_fusion_group) {
+
+      Node* fusion_group = initial_fusion_groups[i];
+      debugDumpFusionGroup(
+          "Trying to merge into the previous fusion group: ",
+          prev_fusion_group);
+      if (auto merged_fusion_group =
+              tryMerge(prev_fusion_group, fusion_group)) {
+        prev_fusion_group = *merged_fusion_group;
         debugDumpFusionGroup(
-            "Trying to merge into the previous fusion group: ",
+            "Successfully merged into the previous fusion group: ",
             prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
-          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
-          debugDumpFusionGroup(
-              "Successfully merged into the previous fusion group: ",
-              prev_fusion_group);
-        } else {
-          GRAPH_DEBUG("Cannot merge into the previous fusion group");
-          fusion_groups.push_back(prev_fusion_group);
-          prev_fusion_group = fusion_group;
-        }
       } else {
+        GRAPH_DEBUG("Cannot merge into the previous fusion group");
         prev_fusion_group = fusion_group;
       }
-      it = prev_fusion_group->reverseIterator();
-      it++;
-    }
-
-    // We were adding groups into the vector lagging by one - catch up with
-    // adding the last one
-    if (prev_fusion_group) {
-      fusion_groups.push_back(prev_fusion_group);
-    }
-
-    for (Node* n : fusion_groups) {
-      inlineIfTooSmall(n);
     }
   }
 
@@ -471,9 +465,21 @@ class TensorExprFuser {
     return false;
   }
 
-  Node* tryMerge(Node* fusion_group, Node* to_merge) {
+  void inlineSmallFusionGroups(Block* block) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      Node* n = *it;
+      it++;
+
+      for (Block* b : n->blocks()) {
+        inlineSmallFusionGroups(b);
+      }
+      inlineIfTooSmall(n);
+    }
+  }
+
+  c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
-      return fusion_group;
+      return c10::nullopt;
     }
 
     std::vector<Node*> nodes_to_merge = {to_merge};
@@ -490,7 +496,7 @@ class TensorExprFuser {
       GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
       if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
         GRAPH_UPDATE("Failed to move because of AliasDB checks!");
-        return fusion_group;
+        return c10::nullopt;
       }
       move_point = n;
     }
