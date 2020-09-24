@@ -816,14 +816,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::min: {
       return computeTwoOperand(
           "aten_min", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Min::make(lhs, rhs, false);
+            return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
     case aten::max: {
       return computeTwoOperand(
           "aten_max", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Max::make(lhs, rhs, false);
+            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
