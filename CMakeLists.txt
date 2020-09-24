@@ -226,7 +226,7 @@ option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
-# Since TensorPipe does not support Windows, set it to OFF when MSVC detected
+# Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "Tensorpipe cannot be used on Windows. Set it to OFF")

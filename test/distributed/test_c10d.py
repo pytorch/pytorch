@@ -32,7 +32,8 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     simple_sparse_reduce_tests, skip_if_win32
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
+    retry_on_connect_failures, create_device, ADDRESS_IN_USE, CONNECT_TIMEOUT, \
+    TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -47,13 +48,6 @@ if platform == 'darwin':
     LOOPBACK = 'lo0'
 else:
     LOOPBACK = 'lo'
-
-
-def create_device():
-    if sys.platform == 'win32':
-        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
-    else:
-        return c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)
 
 
 def gpus_for_rank(world_size):
@@ -608,7 +602,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [create_device()]
+        opts.devices = [create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -618,8 +612,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
         opts.devices = [
-            create_device(),
-            create_device(),
+            create_device(interface=LOOPBACK),
+            create_device(interface=LOOPBACK),
         ]
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
 
@@ -2093,7 +2087,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_gloo_backend(self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device()]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device, gradient_as_bucket_view)
 
@@ -4041,7 +4035,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device()]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cuda:%d" % self.rank)
         ranks = list(range(self.world_size))
@@ -4052,7 +4046,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device()]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cpu")
         ranks = list(range(self.world_size))

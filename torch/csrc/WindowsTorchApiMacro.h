@@ -9,5 +9,5 @@
 #ifdef _WIN32
 #define TORCH_PYTHON_API
 #else
-#define TORCH_PYTHON_API TORCH_API
+#define TORCH_PYTHON_API CAFFE2_API
 #endif

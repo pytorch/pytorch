@@ -296,7 +296,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # easier to other targets that depend on this. However, in that case, by not
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
-    if(NOT MSVC)
+    if(NOT WIN32)
       add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
       target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
       add_dependencies(process_group_agent torch c10d)
@@ -844,7 +844,7 @@ endif()
   if(BUILD_TEST AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
-    if(USE_DISTRIBUTED AND NOT MSVC)
+    if(USE_DISTRIBUTED AND NOT WIN32)
       add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
     endif()
   endif()

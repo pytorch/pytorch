@@ -11,7 +11,8 @@ import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo
-from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, load_tests, \
+    run_tests, skipIfRocm, create_device
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
 
 
@@ -32,13 +33,6 @@ if NO_MULTIPROCESSING_SPAWN:
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 
-def create_device():
-    if sys.platform == 'win32':
-        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
-    else:
-        return c10d.ProcessGroupGloo.create_device(interface='lo')
-
-
 class ProcessGroupShareTensorTest(TestCase):
 
     world_size = 2
@@ -46,7 +40,7 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [create_device()]
+        opts.devices = [create_device(interface='lo')]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
