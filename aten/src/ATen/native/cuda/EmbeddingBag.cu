@@ -343,6 +343,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode,
                                    const Tensor& per_sample_weights) {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
 
