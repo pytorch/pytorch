@@ -277,6 +277,7 @@ def main():
             file_handle = open(os.path.join(directory_path, stdout_file_name), "w")
             subprocess_stdout = file_handle
             subprocess_file_handles.append(file_handle)
+            print(f"Note: Stdout for node {node_rank} rank {local_rank} will be written to {stdout_file_name}")
 
 
         process = subprocess.Popen(cmd, env=current_env, stdout=subprocess_stdout)
