@@ -315,6 +315,28 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
+        gradient_as_bucket_view (bool): this is a prototype feature. When set to ``True``,
+                      gradients will be views pointing to different offsets of
+                      allreduce communication buckets. This can reduce peak memory
+                      usage, where the saved memory size will be equal to the total
+                      gradients size. Moreover, it avoids the overhead of copying
+                      between gradients and allreduce communication buckets.
+                      When gradients are views, ``detach_()`` cannot be called on the
+                      gradients. If hitting such errors, please fix it by referring to
+                      the :meth:`torch.optim.Optimizer.zero_grad` function in
+                      ``torch/optim/optimizer.py`` as the solution.
+                      Warning! It is also found that ``gradient_as_bucket_view = true``
+                      does not work as expected when ``apex.amp`` is used for
+                      mixed precision training. ``apex.amp`` maintained stashed gradients
+                      that are used for unscaling gradients. These stashed gradients
+                      are pointed to gradients (will be communication buckets when
+                      ``gradient_as_bucket_view = true``) before starting new iteration.
+                      In new iteration, the communication buckets are mutated and thus
+                      these stashed gradients will be unexpectedly mutated as well,
+                      the unexpectedly muated stashed gradients may result in wrong
+                      results. To fix it, these stashed gradients should not be pointed
+                      to gradients, instead they should be copied from gradients when
+                      ``gradient_as_bucket_view = true``.
 
     Attributes:
         module (Module): the module to be parallelized
@@ -329,7 +351,8 @@ class DistributedDataParallel(Module):
                  process_group=None,
                  bucket_cap_mb=25,
                  find_unused_parameters=False,
-                 check_reduction=False):
+                 check_reduction=False,
+                 gradient_as_bucket_view=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -380,6 +403,7 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
+        self.gradient_as_bucket_view = gradient_as_bucket_view
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -516,7 +540,8 @@ class DistributedDataParallel(Module):
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
-            self.find_unused_parameters)
+            self.find_unused_parameters,
+            self.gradient_as_bucket_view)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
