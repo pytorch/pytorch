@@ -5991,7 +5991,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
     # and it gives incorrect results on rocm platform
