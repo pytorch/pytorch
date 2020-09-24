@@ -10722,25 +10722,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
     @onlyCUDA
-    def test_Conv3d_size_1_kernel(self, device):
-        x_cpu = torch.randn(2, 3, 3, 5, 5)
-        conv_cpu = torch.nn.Conv3d(3, 3, kernel_size=1)
-        y_cpu = conv_cpu(x_cpu)
-        y = torch.rand_like(y_cpu)
-        y_cpu.backward(y)
-
-        with cudnn.flags(enabled=False):
-            conv_cuda = torch.nn.Conv3d(3, 3, kernel_size=1).to(device)
-            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
-            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
-            y_cuda = conv_cuda(x_cpu.to(device))
-            y_cuda.backward(y.to(device))
-
-        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
-        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
-        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
-
-    @onlyCUDA
     def test_ConvTranspose3d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose3d(3, 3, kernel_size=1)
