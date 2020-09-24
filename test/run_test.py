@@ -65,6 +65,7 @@ TESTS = [
     'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
+    'test_vmap',
     'test_namedtuple_return_api',
     'test_jit_profiling',
     'test_jit_legacy',
@@ -88,7 +89,8 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
-    'test_functional_autograd_benchmark'
+    'test_functional_autograd_benchmark',
+    'test_package',
 ]
 
 WINDOWS_BLOCKLIST = [
