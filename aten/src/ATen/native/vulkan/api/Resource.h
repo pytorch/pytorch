@@ -310,7 +310,7 @@ struct Resource final {
     struct {
       std::vector<Handle<Fence, void(*)(Fence&)>> pool;
       std::vector<VkFence> free;
-      std::vector<VkFence> in_use;
+      std::vector<VkFence> used;
     } fence_;
   } pool;
 
@@ -360,8 +360,6 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
-
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator_, allocation_, Scope::Access::Read),
@@ -370,8 +368,6 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
-
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator_, allocation_, Scope::Access::Write),
