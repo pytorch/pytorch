@@ -4609,8 +4609,8 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, LongTensor), optional): The first tensor will be populated with the median values and the second tensor
-                                          with their indices in the dimension :attr:`dim` of :attr:`input`.
+    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second tensor,
+                                       which must have dtype long, with their indices in the dimension :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -4660,8 +4660,8 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, LongTensor), optional): The first tensor will be populated with the median values and the second tensor
-                                          with their indices in the dimension :attr:`dim` of :attr:`input`.
+    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second tensor,
+                                       which must have dtype long, with their indices in the dimension :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -8564,6 +8564,12 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.fft` is deprecated and will be removed in
+    PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
+    functions, instead, by importing :ref:`torch.fft <torch-fft-module>` and
+    calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8667,6 +8673,12 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.ifft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8755,6 +8767,13 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.rfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.rfft` for one-sided output, or
+    :func:`torch.fft.fft` for two-sided output.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8826,6 +8845,13 @@ this normalizes the result by multiplying it with
     See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
+
+.. deprecated:: 1.7.0
+    The function :func:`torch.irfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.irfft` for one-sided input, or
+    :func:`torch.fft.ifft` for two-sided input.
 
 .. warning::
     Generally speaking, input to this function should contain values

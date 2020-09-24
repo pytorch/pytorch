@@ -89,7 +89,7 @@ __global__ void gatherKthValue(
   }
 }
 
-// Finds the median, and its index, of the values along dimension dim
+// CUDA kernel to find the median, and its index, of the values along dimension dim
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherMedian(
     cuda::detail::TensorInfo<scalar_t, index_t> values,
@@ -99,8 +99,8 @@ __global__ void gatherMedian(
     index_t numInputSlices,
     index_t inputWithinSliceStride,
     bool ignore_nan) {
-  // Indices are limited to integer fp precision, so counts can fit in
-  // int32, regardless of index_t
+  // Shared memory for the subroutine RadixSelect. Note that RadixSelect converts the
+  // floating point type to int with the same relative ordering.
   __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
 
   index_t slice = getLinearBlockId<index_t>();
@@ -127,6 +127,7 @@ __global__ void gatherMedian(
   }
 
   // Counts number of nan values
+  // This code performs a parallel sum reduction (not the most efficient code)
   __shared__ int64_t num_nan;
   if (threadIdx.x == 0) {
     num_nan = 0;
@@ -323,7 +324,8 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   int64_t size = in.size(dim);
   TORCH_CHECK(
       size > 0,
-      "median() operation does not have an identity for empty input tensor");
+      "median() cannot compute median for a dimension of size 0 because ",
+      "the operation does not have an identity");
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);

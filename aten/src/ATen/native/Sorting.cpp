@@ -282,7 +282,8 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
   TORCH_CHECK(
       size > 0,
-      "median() operation does not have an identity for empty input tensor");
+      "median() cannot compute median for a dimension of size 0 because ",
+      "the operation does not have an identity");
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
