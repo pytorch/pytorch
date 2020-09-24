@@ -184,7 +184,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 
 #ifdef USE_FBGEMM
   fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
-      BIT_RATE, weight_data, embedding_rows, embedding_cols, output_data);
+      bit_width, weight_data, embedding_rows, embedding_cols, output_data);
 #else
   const auto output_columns = output.size(output.dim() - 1);
 
