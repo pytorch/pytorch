@@ -158,11 +158,11 @@ class TestQuantizeFx(QuantizationTestCase):
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
             node_occurrence = dict()
             if weight_prepack_node:
-                node_occurrence[weight_prepack_node] = 1
+                node_occurrence[weight_prepack_node] = 0
+                node_occurrence[quantized_node] = 0
             self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
-                expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 debug=True)
 
@@ -226,10 +226,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for debug in [True, False]:
                 node_occurrence = dict()
                 if weight_prepack_node:
-                    if debug:
-                        node_occurrence[weight_prepack_node] = 1
-                    else:
-                        node_occurrence[weight_prepack_node] = 0
+                    node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
                 m = symbolic_trace(m)
                 qconfig_dict = {"": float16_dynamic_qconfig}

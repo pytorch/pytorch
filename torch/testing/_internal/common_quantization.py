@@ -655,16 +655,16 @@ class QuantizationTestCase(TestCase):
         self.assertEqual((result - result_debug).abs().max(), 0), \
             'Expecting debug and non-debug option to produce identical result'
 
+        qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
             self.printGraphModule(original)
             print()
-            print('quantized graph module:', type(qgraph))
-            self.printGraphModule(qgraph)
+            print('quantized graph module:', type(qgraph_to_check))
+            self.printGraphModule(qgraph_to_check)
             print()
-        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
             qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 

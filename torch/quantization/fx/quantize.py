@@ -45,6 +45,8 @@ from .quantization_patterns import *
 from .utils import (
     _parent_name,
     quantize_node,
+    activation_is_dynamically_quantized,
+    activation_is_statically_quantized,
 )
 
 from collections import OrderedDict
@@ -308,11 +310,10 @@ class Quantizer:
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_child_module):
         if not inplace:
             model = copy.deepcopy(model)
-        self.is_dynamic_quant = is_dynamic_quant
-        if self.is_dynamic_quant:
-            self.patterns = get_dynamic_quant_patterns()
-        else:
-            self.patterns = get_quant_patterns()
+        # if is_dynamic_quant:
+        #     self.patterns = get_dynamic_quant_patterns()
+        # else:
+        self.patterns = get_quant_patterns()
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
@@ -391,7 +392,7 @@ class Quantizer:
                     # observe custom module
                     custom_module = self.modules[node.target]
                     traced_custom_module = symbolic_trace(custom_module)
-                    if self.is_dynamic_quant:
+                    if activation_is_dynamically_quantized(qconfig):
                         prepare = torch.quantization.prepare_dynamic_child_module_fx
                     else:
                         prepare = torch.quantization.prepare_child_module_fx
@@ -405,7 +406,7 @@ class Quantizer:
 
 
                 # don't need to insert observer for output in dynamic quantization
-                if self.is_dynamic_quant:
+                if activation_is_dynamically_quantized(qconfig):
                     continue
 
                 # inserting observers for output of observed module, or mark the output
@@ -530,13 +531,11 @@ class Quantizer:
     def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_child_module=False):
         self.restore_state(model)
         # TODO: uncomment after deepcopy is fixed
-        # if not inplace:
-        #     model = copy.deepcopy(model)
-        self.is_dynamic_quant = is_dynamic_quant
-        # run weight observers before inserting quant dequant nodes
-        # for dynamic quantization
-        if self.is_dynamic_quant:
-            self._run_weight_observers(model)
+        if not inplace:
+            model = copy.deepcopy(model)
+        # always run weight observers in the top level forward method
+        # for dynamically quantized ops
+        self._run_weight_observers(model)
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
@@ -637,7 +636,7 @@ class Quantizer:
                     result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
                 else:
-                    result = obj.convert(self, node, load_arg)
+                    result = obj.convert(self, node, load_arg, debug=debug)
                     if node.op == 'call_module' and is_observed_traceable_custom_module(self.modules[node.target]):
                         quantized = self.modules[node.target]._output_is_observed
                     else:
@@ -653,7 +652,7 @@ class Quantizer:
                         quantized = is_quantized(node.args[0])
 
                     # output of dynamic quantization is not quantized
-                    if self.is_dynamic_quant:
+                    if activation_is_dynamically_quantized(qconfig):
                         quantized = False
 
                 if quantized:
@@ -877,7 +876,8 @@ class Quantizer:
                     for i, node_arg in enumerate(node.args):
                         if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:
                             is_weight = True
-                if (not self.is_dynamic_quant) or is_weight:
+                if qconfig is not None and \
+                   (activation_is_statically_quantized(qconfig) or is_weight):
                     # overwrite previous quant config
                     quants[arg.name] = (DefaultQuant(self, arg), qconfig, is_weight)
             return visit_arg
