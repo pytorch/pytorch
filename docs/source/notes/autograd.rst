@@ -225,7 +225,7 @@ Gradient Descent with the same update rule as that in the case of real numbers. 
 optimization problems where the objective function is real valued.
 
 Suppose we have a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
-and can be decomposed into functions u and v which compute the real and imaginary parts of the function:
+and can be decomposed into functions :math:`u` and :math:`v` which compute the real and imaginary parts of the function:
 
     .. code::
 
@@ -234,11 +234,12 @@ and can be decomposed into functions u and v which compute the real and imaginar
             s = u(x, y) + v(x, y) * 1j
             return s
 
-where :math:`1j` is a unit imaginary number and `u` and `v` are :math:`ℝ^{2} → ℝ^{2}` functions.
+where :math:`1j` is a unit imaginary number and :math:`u` and :math:`v` are :math:`ℝ^{2} → ℝ^{2}` functions.
 
-We define the Vector-Jacobian Product :math:`VJP` of :math:`F` at :math:`x + yj` for grad output vector :math:`grad_out` as:
+We define the Vector-Jacobian Product `VJP` of :math:`F` at :math:`x + yj` for grad output vector :math:`grad\_out` as:
 
-    .. math:: grad_out^{*} * \frac{\partial s}{\partial z^{*}} + grad_out * (\frac{\partial s}{\partial z})^{*}
+    .. math::
+        VJP = grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z})^{*}
 
 where
 
@@ -250,9 +251,10 @@ and
 
 are Conjugate Wirtinger and Wirtinger derivatives respectively.
 
-For `grad_out = c+dj \in C`, the :math:`VJP` can also be expressed as:
+For :math:`grad\_out = c+dj \in C`, the Vector-Jacobian Product can also be expressed as:
 
-    .. math:: \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
+    .. math::
+        VJP = \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
 
 where
 
@@ -269,7 +271,7 @@ real valued function. For more details, please check out Section 3.4 `here <http
 
 The above formula can also be verified to be correct for cross-domain functions functions.
 
-The :math:`VJP` for a function :math:`F: ℂ → ℝ`:
+The Vector-Jacobian Product for a function :math:`F: ℂ → ℝ`:
 
     .. code::
 
@@ -280,11 +282,12 @@ The :math:`VJP` for a function :math:`F: ℂ → ℝ`:
 
 at :math:`x + yj` can be simplified to be written as:
 
-    .. math:: real(grad_out) * \frac{\partial s}{\partial z^{*}}
+    .. math::
+        VJP = real(grad\_out) * \frac{\partial s}{\partial z^{*}}
 
 Note that the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other.
 
-The :math:`VJP` for a function :math:`F: ℝ → ℂ`:
+The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
 
     .. code::
 
@@ -295,8 +298,9 @@ The :math:`VJP` for a function :math:`F: ℝ → ℂ`:
 
 at :math:`x + yj` can be simplified to be written as:
 
-    .. math:: real(grad_out^{*} * \frac{\partial s}{\partial z^{*}} + grad_out * (\frac{\partial s}{\partial z^{*}})^{*})
+    .. math::
+        VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
 
 Note that the gradient in this case equals to the real value of the result obtained using the above formula. This is because
 in the derivation of the formula earlier, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
-from scratch for an :math:`F: R → ℂ`, it can be verified that taking the real value of formula above gives the correct gradient.
+from scratch for an :math:`F: ℝ → ℂ`, it can be verified that taking the real value of formula above gives the correct gradient.
