@@ -1,9 +1,9 @@
 ## @package gradient_checker
 # Module caffe2.python.gradient_checker
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
