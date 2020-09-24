@@ -142,7 +142,6 @@ class Graph:
             else:
                 return False
 
-        # TODO: can't represent a use at the output!
         return [node for node in self._nodes if find_use(node.args) or find_use(node.kwargs)]
 
     def replace_all_uses_with(self, to_replace : Node, replace_with : Node):
