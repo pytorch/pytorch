@@ -128,7 +128,6 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
-  size_t static_smem_size = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // TensorViews actually used in the kernel.

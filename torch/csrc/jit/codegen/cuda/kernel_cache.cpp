@@ -18,6 +18,8 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
   return std::vector<size_t>(small_vec.begin(), small_vec.end());
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
 void debugPrint(const TensorTypePtr& type) {
   printf("\nsizes:");
   if (auto sizes = type->symbolic_sizes().sizes()) {
@@ -67,6 +69,7 @@ void debugPrint(const TensorTypePtr& type) {
     printf("no stride properties available\n");
   }
 }
+#pragma clang diagnostic pop
 
 at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("graphReductionAxes");
@@ -737,11 +740,12 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     for (const auto& output : outputs) {
       // This is to address the issue that not all outputs from a reduction
       // fusion are reduced tensor; We support intermediate tensors to be output
-      if (output.dim() == input_requirement->pw_output_permutation_.size()) {
+      if (static_cast<size_t>(output.dim()) ==
+          input_requirement->pw_output_permutation_.size()) {
         permuted_outputs.emplace_back(
             output.permute(input_requirement->pw_output_permutation_));
       } else if (
-          output.dim() ==
+          static_cast<size_t>(output.dim()) ==
           input_requirement->reduction_output_permutation_.size()) {
         permuted_outputs.emplace_back(
             output.permute(input_requirement->reduction_output_permutation_));

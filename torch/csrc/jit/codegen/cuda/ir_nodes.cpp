@@ -1098,7 +1098,7 @@ class DisjointSet {
   // Internal fixed point implementation:
   //  Returns the equivalent class that e belongs to
   int fixedPoint(int e) const {
-    TORCH_INTERNAL_ASSERT(set_map.size() > e);
+    TORCH_INTERNAL_ASSERT(static_cast<int>(set_map.size()) > e);
     while (set_map[e] != e) {
       // Chasing to fixed point
       e = set_map[e];
@@ -1197,6 +1197,8 @@ class ConcretizeDomain : private BackwardVisitor {
     bcast_domain_map_[id] = concretized(To);
   }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
   void handle(ReductionOp* rop) override {
     concretizePwOp(rop);
   }
@@ -1212,6 +1214,7 @@ class ConcretizeDomain : private BackwardVisitor {
   void handle(TernaryOp* top) override {
     concretizePwOp(top);
   };
+#pragma clang diagnostic pop
 
  private:
   using MapType = std::unordered_map<IterDomain*, IterDomain*>;
@@ -1328,6 +1331,8 @@ class ProveValEqual : private IterVisitor {
     }
   }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
   void handle(ReductionOp* rop) override {
     provePwOp(rop);
   }
@@ -1343,6 +1348,7 @@ class ProveValEqual : private IterVisitor {
   void handle(TernaryOp* top) override {
     provePwOp(top);
   }
+#pragma clang diagnostic pop
 
  private:
   ConcretizeDomain cd_;

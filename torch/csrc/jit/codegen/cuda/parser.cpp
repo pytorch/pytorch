@@ -33,37 +33,6 @@ typedef Expr* CgOp;
 typedef void (*ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
 typedef bool (*MergeQueryFuncPtr)(const Node*);
 
-std::vector<int> reductionAxes(TensorView* tv) {
-  size_t n_dims = tv->nDims();
-  std::vector<int> reduction_axes;
-  for (size_t i = 0; i < n_dims; i++) {
-    if (tv->axis(i)->isReduction()) {
-      reduction_axes.emplace_back(i);
-    }
-  }
-  return reduction_axes;
-}
-
-// coalesces all reduction to the right side and returns total number of
-// reduction axes
-size_t coalescReduction(TensorView* tv) {
-  auto reduction_axes = reductionAxes(tv);
-  size_t n_dims = tv->nDims();
-  std::unordered_map<int, int> coalesc_permute;
-  for (size_t i = 0; i < reduction_axes.size(); i++) {
-    size_t new_pos = i + n_dims - reduction_axes.size();
-    if (new_pos == size_t(reduction_axes[i])) {
-      break;
-    } else {
-      coalesc_permute[reduction_axes[i]] = new_pos;
-    }
-  }
-  if (!coalesc_permute.empty()) {
-    tv->reorder(coalesc_permute);
-  }
-  return reduction_axes.size();
-}
-
 // TODO: add a mutex to make it thread safe.
 class IrParser {
   class RegistrationEntry {

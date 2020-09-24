@@ -525,11 +525,14 @@ class CudaKernelGenerator : private OptInConstDispatch {
     indent() << kTab << genInline(node->reduction_op()->init()) << ");\n";
   }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
   void handle(const kir::Scope& scope) {
     for (auto expr : scope.exprs()) {
       handle(expr);
     }
   }
+#pragma clang diagnostic pop
 
   void handle(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering

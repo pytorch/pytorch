@@ -68,8 +68,11 @@ class IrBuilder {
   Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 
  private:
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-private-field"
   // Non-owning pointer to the kernel to be modified
   Kernel* kernel_ = nullptr;
+#pragma clang diagnostic pop
 };
 
 } // namespace kir
