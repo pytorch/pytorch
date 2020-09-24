@@ -19672,9 +19672,19 @@ _signed_types_no_half = [
     torch.int8, torch.short, torch.int, torch.long
 ]
 
+_integer_types = [
+    torch.uint8, torch.int8, torch.int16,
+    torch.int32, torch.int64
+]
+
 _cpu_types: List[torch.dtype] = []
 
 _unsigned_types = [torch.uint8]
+
+# Binary Float Ops
+# Operators which use TensorIterator::binary_float_op
+# These Ops promote integer inputs to Float.
+binary_float_ops_inplace = ['atan2_', 'div_']
 
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
@@ -19896,7 +19906,7 @@ tensor_op_tests = [
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
-    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
+    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
     ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
@@ -20187,6 +20197,15 @@ def generate_test_function(cls,
             device_args = [arg.to(dtype=dtype) if
                            (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
+
+        # Special case for binary float ops (binary ops that promote int to float)
+        if op_str in binary_float_ops_inplace and \
+                'inplace' in subtest_str and dtype in _integer_types:
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                device_result = getattr(device_tensor, op_str)(*device_args)
+            return  # Nothing more to check
 
         # Runs the tensor op on CPU and device
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
