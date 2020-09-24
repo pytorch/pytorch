@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <memory>
-#include "ATen/core/builtin_function.h"
 
 namespace torch {
 namespace jit {

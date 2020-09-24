@@ -70,7 +70,7 @@ public:
     return (repr_ & ks.repr_) == ks.repr_;
   }
   // Perform set union
-  DispatchKeySet operator|(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator|(DispatchKeySet other) const {
     return DispatchKeySet(repr_ | other.repr_);
   }
   // Perform set intersection
@@ -118,20 +118,92 @@ public:
       .highestPriorityTypeId();
   }
 private:
-  DispatchKeySet(uint64_t repr) : repr_(repr) {}
+  constexpr DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
+
+public:
+  // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
+  // set. The iterator is only invalidated by the destruction of the underlying
+  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // the DispatchKeySet.
+  class iterator {
+   public:
+    using self_type = iterator;
+    using iterator_category = std::input_iterator_tag;
+    using value_type = DispatchKey;
+    using difference_type = ptrdiff_t;
+
+    explicit iterator(const uint64_t *data_ptr, uint8_t i=0) : data_ptr_(data_ptr), i_(i) {
+      // Go to the first key in the set
+      ++(*this);
+    }
+
+    self_type& operator++() {
+      TORCH_INTERNAL_ASSERT(i_ <= static_cast<uint8_t>(DispatchKey::NumDispatchKeys));
+
+      // Create a masked version of the set representation to ignore previous
+      // keys that we've iterated through.
+      uint64_t masked_data = llvm::maskTrailingZeros<uint64_t>(i_) & *data_ptr_;
+      uint64_t firstKeyIndex = llvm::findFirstSet(masked_data);
+
+      // If there are no keys, set to end iterator value
+      if (firstKeyIndex == std::numeric_limits<uint64_t>::max() ||
+         i_ == static_cast<uint8_t>(DispatchKey::NumDispatchKeys)) {
+        i_ = static_cast<uint8_t>(DispatchKey::NumDispatchKeys);
+        return *this;
+      }
+
+      i_ = static_cast<uint8_t>(firstKeyIndex) + 1;
+      return *this;
+    }
+
+    self_type operator++(int) {
+      self_type previous_iterator =  *this;
+      ++(*this);
+      return previous_iterator;
+    }
+
+    bool operator==(const self_type& rhs) const { return i_ == rhs.i_; }
+    bool operator!=(const self_type& rhs) const { return i_ != rhs.i_; }
+    DispatchKey operator*() const { return static_cast<DispatchKey> (i_); }
+
+   private:
+    const uint64_t *data_ptr_;
+    uint8_t i_;
+  };
+
+ public:
+  // Returns iterator to the first key in the set. If no keys are in the
+  // set, then will return the end iterator.
+  iterator begin() const { return iterator(&repr_); }
+
+  // We do not need to iterate beyond NumDispatchKeys so we will treat this as
+  // the end iterator. NumDispatchKeys will always be strictly less than 64.
+  iterator end() const { return iterator(&repr_, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)); }
+
 };
 
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
+  DispatchKey::AutogradXLA,
+  DispatchKey::AutogradPrivateUse1,
+  DispatchKey::AutogradPrivateUse2,
+  DispatchKey::AutogradPrivateUse3,
+  DispatchKey::AutogradOther,
+});
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
-// TODO(#43441): Once we have iterator-like funtionality on DispatchKeySet
-//      we can remove this API and use c10::getRuntimeDispatchKeySet instead.
-//      This API is only used in aten/src/ATen/core/dispatch/OperatorEntry.cpp.
-C10_API ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k);
+// Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key t,
+// DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.
+C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
@@ -151,6 +223,6 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // is the most likely key that will need this treatment;
   // After Autograd keys are moved from globally enabled set to TensorImpl,
   // we should remove all Autograd keys before taking highestPriority.
-  return (s - getRuntimeDispatchKeySet(DispatchKey::Autograd)).highestPriorityTypeId();
+  return (s - autograd_dispatch_keyset).highestPriorityTypeId();
 }
 }
