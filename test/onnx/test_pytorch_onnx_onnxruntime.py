@@ -3001,6 +3001,44 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_list_pass(self):
+        class Slice(torch.nn.Module):
+            def forward(self, x, y):
+                return x.new_zeros(x.shape[2:] + y.shape[1:])
+
+        x = torch.randn(2, 3, 4, 5)
+        y = torch.randn(1, 2, 3, 4)
+        self.run_test(Slice(), (x, y))
+
+        class Size(torch.nn.Module):
+            def forward(self, x, y):
+                return x.new_zeros(x.shape + y.shape)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(Size(), (x, y))
+
+        class Array(torch.nn.Module):
+            def forward(self, x, y):
+                arr1 = [x.shape[0], x.shape[1], 2]
+                arr2 = [y.shape[0], y.shape[1]]
+                return x.new_zeros(arr1 + arr2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(Array(), (x, y))
+
+        class List(torch.nn.Module):
+            def forward(self, x, y):
+                l1 = list(x.shape)
+                l2 = list(y.shape)
+                return x.new_zeros(l1 + l2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(List(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):
         class Emtpy(torch.nn.Module):
             def forward(self, x):

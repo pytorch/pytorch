@@ -186,6 +186,8 @@ def stack(g, tensor_list, dim):
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in sym_help._unpack_list(tensor_list)]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
+def _list(g, self):
+    return self
 
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
