@@ -8,7 +8,6 @@ jobs:
     - checkout
     - calculate_docker_image_tag
     - setup_linux_system_environment
-    - optional_merge_target_branch
     - setup_ci_environment
     - run:
         name: Build
