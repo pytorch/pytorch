@@ -126,6 +126,7 @@ class EventList(list):
         for evt in self:
             p = bw_parent(evt)
             if p is not None:
+                assert p.fwd_thread is not None
                 t = (p.sequence_nr, p.fwd_thread)
                 if t in fwd_stacks:
                     evt.stack = fwd_stacks[t]
@@ -714,7 +715,7 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, node_id, name, thread, fwd_thread, cpu_start, cpu_end, input_shapes=None,
+            self, id, node_id, name, thread, cpu_start, cpu_end, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=True, sequence_nr=-1):
         self.id = id
@@ -1009,9 +1010,9 @@ def parse_event_records(thread_records):
                     node_id=record.node_id(),
                     name=string_table[start.name()],
                     thread=start.thread_id(),
-                    fwd_thread=start.fwd_thread_id(),
                     cpu_start=start_record.cpu_elapsed_us(start),
                     cpu_end=start_record.cpu_elapsed_us(record),
+                    fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
                     stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
                     scope=start.scope(),
