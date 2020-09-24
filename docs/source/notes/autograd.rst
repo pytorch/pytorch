@@ -267,8 +267,8 @@ where
 
 The key assumption made in the derivation of :eq:`[1]` is that function :math:`F` is a part of a
 real valued function. It implies that the Conjugate Wirtinger and Wirtinger derivative flowing back
-to :math:`F` are complex conjugate of each other. This allows us to use grad_output as the incoming Conjugate
-Wirtinger derivative and recover the incoming Wirtinger derivative by complex conjugation.
+to :math:`F` are complex conjugate of each other. This allows us to use :math:`grad\_output` as the incoming Conjugate
+Wirtinger derivative and recover the incoming Wirtinger derivative by complex conjugation of :math:`grad\_output`.
 For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
 **What happens for cross-domain functions?**
