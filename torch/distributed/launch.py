@@ -142,6 +142,7 @@ import subprocess
 import os
 from argparse import ArgumentParser, REMAINDER
 
+node_local_rank_stdout_filename = "node_{}_local_rank_{}"
 
 def parse_args():
     """
@@ -189,9 +190,11 @@ def parse_args():
         "--logdir",
         default=None,
         type=str,
-        help="Relative path to write subprocess logs to. Passing in a relative "
-        "path will create a directory if needed, and write the stdout to a file
-        "given by logdir/process_\{rank\}.",
+        help=f"""Relative path to write subprocess logs to. Passing in a relative
+        path will create a directory if needed, and write the stdout to a file
+        given by {node_local_rank_stdout_filename}. Note that successive runs with the
+        same path to write logs to will overwrite existing logs, so be sure to save logs
+        as needed.""",
     )
 
     # positional
@@ -268,7 +271,9 @@ def main():
         subprocess_stdout = None
         if args.logdir:
             directory_path = os.path.join(os.getcwd(), args.logdir)
-            file_handle = open(os.path.join(directory_path, "process_{}".format(local_rank)), "w")
+            node_rank = args.node_rank
+            stdout_file_name = node_local_rank_stdout_filename.format(node_rank, local_rank)
+            file_handle = open(os.path.join(directory_path, stdout_file_name), "w")
             subprocess_stdout = file_handle
             subprocess_file_handles.append(file_handle)
 
@@ -281,6 +286,7 @@ def main():
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
                                                 cmd=cmd)
+
     # close open file descriptors
     for file_handle in subprocess_file_handles:
         file_handle.close()
