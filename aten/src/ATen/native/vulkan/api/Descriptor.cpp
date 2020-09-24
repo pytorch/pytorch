@@ -44,15 +44,15 @@ const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
   },
 };
 
-Descriptor::Pool::Factory::Factory(const VkDevice device)
-  : device_(device) {
+Descriptor::Pool::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device,
       "Invalid Vulkan device!");
 }
 
 typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
-  const Descriptor& descriptor) const {
+    const Descriptor& descriptor) const {
   const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     nullptr,

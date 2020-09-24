@@ -5,8 +5,8 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Pipeline::Layout::Factory::Factory(const VkDevice device)
- : device_(device) {
+Pipeline::Layout::Factory::Factory(const GPU& gpu)
+ : device_(gpu.device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -76,11 +76,11 @@ VkPipelineCache create_pipeline_cache(const VkDevice device) {
 
 } // namespace
 
-Pipeline::Factory::Factory(const VkDevice device)
- : device_(device),
+Pipeline::Factory::Factory(const GPU& gpu)
+ : device_(gpu.device),
    pipeline_cache_(
-      create_pipeline_cache(device),
-      VK_DELETER(PipelineCache)(device)) {
+      create_pipeline_cache(device_),
+      VK_DELETER(PipelineCache)(device_)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");

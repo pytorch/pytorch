@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -59,6 +60,7 @@ VmaAllocationCreateInfo create_allocation_create_info(
 }
 
 void release_buffer(const Resource::Buffer& buffer) {
+  // Safe to pass null as buffer or allocation.
   vmaDestroyBuffer(
       buffer.memory.allocator,
       buffer.handle,
@@ -72,6 +74,7 @@ void release_image(const Resource::Image& image) {
     vkDestroyImageView(allocator_info.device, image.view, nullptr);
   }
 
+  // Safe to pass null as image or allocation.
   vmaDestroyImage(
       image.memory.allocator,
       image.handle,
@@ -124,22 +127,20 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
   }
 }
 
-Resource::Pool::Pool(
-    const VkInstance instance,
-    const VkPhysicalDevice physical_device,
-    const VkDevice device)
-  : device_(device),
+Resource::Pool::Pool(const GPU& gpu)
+  : device_(gpu.device),
     allocator_(
         create_allocator(
-          instance,
-          physical_device,
-          device),
+          gpu.adapter->runtime->instance(),
+          gpu.adapter->handle,
+          device_),
         vmaDestroyAllocator) {
     buffers_.reserve(Configuration::kReserve);
     images_.reserve(Configuration::kReserve);
 }
 
-Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) {
+Resource::Buffer Resource::Pool::allocate(
+    const Buffer::Descriptor& descriptor) {
   const VkBufferCreateInfo buffer_create_info{
     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     nullptr,
@@ -183,7 +184,8 @@ Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) 
   return buffers_.back().get();
 }
 
-Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
+Resource::Image Resource::Pool::allocate(
+    const Image::Descriptor& descriptor) {
   const VkImageCreateInfo image_create_info{
     VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
     nullptr,

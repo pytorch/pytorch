@@ -49,7 +49,7 @@ struct Pipeline final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(PipelineLayout) Deleter;
@@ -72,8 +72,8 @@ struct Pipeline final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
 
@@ -93,7 +93,7 @@ struct Pipeline final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
 
     typedef Pipeline::Descriptor Descriptor;
     typedef VK_DELETER(Pipeline) Deleter;
@@ -117,9 +117,9 @@ struct Pipeline final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Pipeline(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+  explicit Pipeline(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 
