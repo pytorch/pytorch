@@ -1774,18 +1774,12 @@
 
 - func: kaiser_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: kaiser_window
 
 - func: kaiser_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: kaiser_window
 
 - func: kaiser_window.beta(int window_length, bool periodic, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: kaiser_window
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -2234,8 +2228,6 @@
 
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: max_pool1d
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
@@ -2624,8 +2616,6 @@
 
 - func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: cdist
 
 - func: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
   use_c10_dispatcher: full
@@ -3018,8 +3008,6 @@
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU, CUDA: silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3531,8 +3519,6 @@
   variants: function, method
 
 - func: fix.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: fix_out
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -3946,8 +3932,6 @@
 - func: heaviside(Tensor self, Tensor values) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU, CUDA: heaviside
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
   variants: method
@@ -4395,8 +4379,6 @@
 - func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU, CUDA: fake_quantize_per_tensor_affine_backward
 
 - func: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
@@ -4407,8 +4389,6 @@
 - func: _fake_quantize_learnable_per_tensor_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU, CUDA: _fake_quantize_learnable_per_tensor_affine_backward
 
 - func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
@@ -4419,8 +4399,6 @@
 - func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU, CUDA: fake_quantize_per_channel_affine_backward
 
 - func: _fake_quantize_learnable_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   use_c10_dispatcher: full
@@ -4431,8 +4409,6 @@
 - func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU, CUDA: _fake_quantize_learnable_per_channel_affine_backward
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   use_c10_dispatcher: full
@@ -4545,43 +4521,27 @@
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: lstm
 
 - func: lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: lstm
 
 - func: gru.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: gru
 
 - func: gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: gru
 
 - func: rnn_tanh.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: rnn_tanh
 
 - func: rnn_tanh.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: rnn_tanh
 
 - func: rnn_relu.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: rnn_relu
 
 - func: rnn_relu.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
   use_c10_dispatcher: full
-  dispatch:
-    CPU, CUDA: rnn_relu
 
 - func: lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> (Tensor, Tensor)
   use_c10_dispatcher: full
