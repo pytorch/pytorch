@@ -241,6 +241,7 @@ We define the Vector-Jacobian Product :math:`VJP` of :math:`F` at :math:`x + yj`
     .. math:: grad_out^{*} * \frac{\partial s}{\partial z^{*}} + grad_out * (\frac{\partial s}{\partial z})^{*}
 
 where
+
     .. math:: \frac{\partial s}{\partial z^{*}} = 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j)
 
 and
