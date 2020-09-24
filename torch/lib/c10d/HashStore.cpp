@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <system_error>
 
+#include <c10/util/Exception.h>
+
 namespace c10d {
 
 void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
@@ -78,7 +80,7 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
 }
 
 int64_t HashStore::getNumKeys() {
-  throw std::runtime_error("getNumKeys not implemented for HashStore");
+  TORCH_CHECK(false, "getNumKeys not implemented for HashStore");
 }
 
 bool HashStore::check(const std::vector<std::string>& keys) {

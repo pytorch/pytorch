@@ -16,6 +16,8 @@
 #include <system_error>
 #include <thread>
 
+#include <c10/util/Exception.h>
+
 #define SYSASSERT(rv, ...)                                                 \
   if ((rv) < 0) {                                                          \
     throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
@@ -304,7 +306,7 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 }
 
 int64_t FileStore::getNumKeys() {
-  throw std::runtime_error("getNumKeys not implemented for FileStore");
+  TORCH_CHECK(false, "getNumKeys not implemented for FileStore");
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
