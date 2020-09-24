@@ -37,7 +37,6 @@ at::Tensor maybe_multiply(const at::Tensor & t, const at::Scalar & s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
 Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim);
 Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims);
-at::Tensor nan_to_num_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor norm_backward(const at::Tensor & grad, const at::Tensor & self, const optional<at::Scalar> & p_, const at::Tensor & norm);
 at::Tensor norm_backward(at::Tensor grad, const at::Tensor & self, const optional<at::Scalar> & p_, at::Tensor norm, at::IntArrayRef dim, bool keepdim);
 at::Tensor pow_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & exponent_);
