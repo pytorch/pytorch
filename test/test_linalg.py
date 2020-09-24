@@ -2,10 +2,10 @@ import torch
 import unittest
 import itertools
 import warnings
-from math import inf, nan
+from math import inf, nan, isnan
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
@@ -425,6 +425,15 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+        # TODO: Remove this function once the broken cases are fixed
+        def is_broken_matrix_norm_case(ord, x):
+            if self.device_type == 'cuda':
+                if x.size() == torch.Size([1, 2]):
+                    if ord in ['nuc', 2, -2] and isnan(x[0][0]) and x[0][1] == 1:
+                        # These cases are broken because of an issue with svd
+                        # https://github.com/pytorch/pytorch/issues/43567
+                        return True
+            return False
 
         for matrix in matrices:
             x = torch.tensor(matrix).to(device)
@@ -433,12 +442,16 @@ class TestLinalg(TestCase):
                 msg = f'ord={ord}, matrix={matrix}'
                 result = torch.linalg.norm(x, ord=ord)
                 result_n = np.linalg.norm(x_n, ord=ord)
-                self.assertEqual(result, result_n, msg=msg)
+
+                if is_broken_matrix_norm_case(ord, x):
+                    continue
+                else:
+                    self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):
