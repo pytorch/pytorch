@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct C10_EXPORT Resource final {
+struct Resource final {
   /*
     Memory
   */
@@ -25,12 +25,25 @@ struct C10_EXPORT Resource final {
     template<
         typename Type,
         typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
-    Data<Pointer> map() const;
+    Data<Pointer> map() const &;
 
     template<
         typename Type,
         typename Pointer = std::add_pointer_t<Type>>
-    Data<Pointer> map();
+    Data<Pointer> map() &;
+
+   private:
+    // Intentionally disabed to ensure memory access is always properly
+    // encapsualted in a scoped map-unmap region.  Allowing below overloads
+    // to be invoked on a temporary would open the door to the possibility
+    // of accessing the underlying memory out of the expected scope making
+    // for seemingly ineffective memory writes and hard to hunt down bugs.
+
+    template<typename Type, typename Pointer>
+    Data<Pointer> map() const && = delete;
+
+    template<typename Type, typename Pointer>
+    Data<Pointer> map() && = delete;
   };
 
   /*
@@ -144,7 +157,7 @@ class Resource::Memory::Scope final {
 };
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{
@@ -154,7 +167,7 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
 }
 
 template<typename, typename Pointer>
-inline Resource::Memory::Data<Pointer> Resource::Memory::map() {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
   return Data<Pointer>{

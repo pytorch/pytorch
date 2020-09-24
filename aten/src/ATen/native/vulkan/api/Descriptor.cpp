@@ -46,6 +46,9 @@ const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
 
 Descriptor::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
 }
 
 typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
@@ -61,7 +64,14 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
 
   VkDescriptorPool descriptor_pool{};
   VK_CHECK(vkCreateDescriptorPool(
-      device_, &descriptor_pool_create_info, nullptr, &descriptor_pool));
+      device_,
+      &descriptor_pool_create_info,
+      nullptr,
+      &descriptor_pool));
+
+  TORCH_CHECK(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
 
   return Handle{
     descriptor_pool,
@@ -72,12 +82,29 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
 void Descriptor::Pool::purge(
     const VkDevice device,
     const VkDescriptorPool descriptor_pool) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
+
   VK_CHECK(vkResetDescriptorPool(device, descriptor_pool, 0u));
 }
 
-Descriptor::Factory::Factory(const VkDevice device, const VkDescriptorPool descriptor_pool)
+Descriptor::Factory::Factory(
+    const VkDevice device,
+    const VkDescriptorPool descriptor_pool)
   : device_(device),
     descriptor_pool_(descriptor_pool) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      descriptor_pool,
+      "Invalid Vulkan descriptor pool!");
 }
 
 VkDescriptorSet Descriptor::Factory::allocate(
@@ -92,7 +119,13 @@ VkDescriptorSet Descriptor::Factory::allocate(
 
   VkDescriptorSet descriptor_set{};
   VK_CHECK(vkAllocateDescriptorSets(
-      device_, &descriptor_set_allocate_info, &descriptor_set));
+      device_,
+      &descriptor_set_allocate_info,
+      &descriptor_set));
+
+  TORCH_CHECK(
+      descriptor_set,
+      "Invalid Vulkan descriptor set!");
 
   return descriptor_set;
 }

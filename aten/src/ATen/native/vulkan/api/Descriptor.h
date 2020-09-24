@@ -49,7 +49,7 @@ namespace api {
 // as well.  This behavior is by design.
 //
 
-struct C10_EXPORT Descriptor final {
+struct Descriptor final {
   //
   // Pool
   //
@@ -156,8 +156,8 @@ inline size_t Descriptor::Pool::Factory::Hasher::operator()(
 } // namespace at
 
 inline bool operator==(
-    const VkDescriptorPoolSize& descriptor_pool_size_1,
-    const VkDescriptorPoolSize& descriptor_pool_size_2) {
-  return (descriptor_pool_size_1.type == descriptor_pool_size_2.type) &&
-         (descriptor_pool_size_1.descriptorCount == descriptor_pool_size_2.descriptorCount);
+    const VkDescriptorPoolSize& _1,
+    const VkDescriptorPoolSize& _2) {
+  return (_1.type == _2.type) &&
+         (_1.descriptorCount == _2.descriptorCount);
 }
