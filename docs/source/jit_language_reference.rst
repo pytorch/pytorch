@@ -348,7 +348,7 @@ like any other TorchScript type:
     print(sum_pair(p))
 
 
-.. _TorchScript Enums:
+.. _TorchScript Enum:
 .. _TorchScript Enums:
 .. _torchscript-enums:
 
