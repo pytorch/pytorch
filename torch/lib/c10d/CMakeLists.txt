@@ -79,7 +79,7 @@ add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 
-if(NOT WIN32)
+if(NOT MSVC)
   target_compile_options(c10d PUBLIC
     -Wall
     -Wextra
