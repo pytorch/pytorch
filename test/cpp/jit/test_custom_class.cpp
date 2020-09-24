@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
@@ -318,7 +320,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
 } // namespace
 
-void testTorchbindIValueAPI() {
+TEST(CustomClassTest, TorchbindIValueAPI) {
   script::Module m("m");
 
   // test make_custom_class API

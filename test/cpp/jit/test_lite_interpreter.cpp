@@ -227,7 +227,7 @@ void testLiteInterpreterPrimScalar() {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi != refi);
+  AT_ASSERT(resi == refi);
 }
 
 void testLiteInterpreterLoadOrigJit() {
