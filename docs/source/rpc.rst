@@ -295,7 +295,7 @@ Tutorials
 ---------
 The RPC tutorials introduce users to the RPC framework, provide several example applications
 using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
-to use `the profiler <https://pytorch.org/docs/stable/autograd.html>`__ to profile RPC-based workloads.
+to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__ to profile RPC-based workloads.
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
