@@ -2,7 +2,7 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm
+from torch import randperm, randint
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
@@ -252,6 +252,41 @@ class ChainDataset(IterableDataset):
             total += len(d)  # type: ignore
         return total
 
+class ShuffleDataset(IterableDataset):
+    r"""Dataset shuffled from the original dataset.
+
+    This class is useful to shuffle the existing dataset. The buffer with buffer_size 
+    is filled with the Dataset first, and then pops out a piece of data randomly for
+    each iteration.
+    For the buffer size smaller than 1, the buffer size is set to 1 representing 
+    non-shuffled dataset. For perfect shuffling, the buffer size is required to be 
+    greater or equal to the size of dataset.
+
+    Arguments:
+        dataset (Dataset): The original Dataset.
+        buffer_size (buffer size): The buffer size for shuffling. 
+    """
+    dataset: Dataset[T_co]
+    buffer_size: int
+
+    def __init__(self, dataset: Dataset[T_co], buffer_size: int) -> None:
+        super(ShuffleDataset, self).__init__()
+        self.dataset = dataset
+        self.buffer_size = buffer_size if buffer_size > 1 else 1
+        # self.buffer_size = min(buffer_size, len(dataset))
+
+    def __iter__(self):
+        idx = 0;
+        buf = []
+        for x in self.dataset:
+            if (idx == self.buffer_size):
+                yield buf.pop(randint(0, self.buffer_size, [1]))
+            else:
+                idx += 1
+            buf.append(x)
+        while (idx > 0):
+            idx -= 1
+            yield buf.pop(randint(0, idx+1, [1]))
 
 class Subset(Dataset[T_co]):
     r"""
