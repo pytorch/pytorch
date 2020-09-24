@@ -1,11 +1,13 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
 
-void testClassTypeAddRemoveAttr() {
+
+TEST(ClassTypeTest, AddRemoveAttr) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   cls->addAttribute("attr1", TensorType::get(), true);
@@ -32,7 +34,7 @@ void testClassTypeAddRemoveAttr() {
   cls->addAttribute("attr1", IntType::get());
 }
 
-void testClassTypeAddRemoveConstant() {
+TEST(ClassTypeTest, AddRemoveConstant) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
   cls->addConstant("const1", IValue(1));
@@ -46,7 +48,7 @@ void testClassTypeAddRemoveConstant() {
 
   ASSERT_EQ(cls->getConstant("const1").toInt(), 1);
   ASSERT_EQ(cls->getConstant("const2").toInt(), 2);
-  ASSERT_EQ(cls->getConstant("const2").toInt(), 3);
+  ASSERT_EQ(cls->getConstant("const3").toInt(), 3);
 
   cls->unsafeRemoveConstant("const2");
   ASSERT_TRUE(cls->hasConstant("const1"));
