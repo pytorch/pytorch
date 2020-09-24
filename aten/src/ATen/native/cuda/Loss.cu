@@ -19,24 +19,22 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
       .add_input(target)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "binary_cross_entropy_backward_out_cuda", [&] {
-      at::native::gpu_kernel(iter, [] GPU_LAMBDA (
-          scalar_t grad_val,
-          scalar_t input_val,
-          scalar_t target_val
-        ) -> scalar_t {
-          const scalar_t one = 1;
-          const scalar_t epsilon = EPSILON;
+    at::native::gpu_kernel(iter, [] GPU_LAMBDA (
+        scalar_t grad_val,
+        scalar_t input_val,
+        scalar_t target_val
+      ) -> scalar_t {
+        const scalar_t one = 1;
+        const scalar_t epsilon = EPSILON;
 
-          scalar_t grad_input_denominator = max(
-            (one - input_val) * input_val,
-            epsilon
-          );
+        scalar_t grad_input_denominator = max(
+          (one - input_val) * input_val,
+          epsilon
+        );
 
-          return grad_val * (input_val - target_val) / grad_input_denominator;
-        }
-      );
-    });
+        return grad_val * (input_val - target_val) / grad_input_denominator;
+      }
+    );
   });
 }
 
@@ -84,25 +82,23 @@ Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const T
       .add_input(at::squeeze(target))
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "binary_cross_entropy_out_cuda", [&] {
-      gpu_kernel(iter,
-        [] GPU_LAMBDA (scalar_t input_val, scalar_t target_val) -> scalar_t {
-          const scalar_t zero = 0;
-          const scalar_t one = 1;
-          const scalar_t neg_100 = -100;
+    gpu_kernel(iter,
+      [] GPU_LAMBDA (scalar_t input_val, scalar_t target_val) -> scalar_t {
+        const scalar_t zero = 0;
+        const scalar_t one = 1;
+        const scalar_t neg_100 = -100;
 
-          CUDA_KERNEL_ASSERT(input_val >= zero && input_val <= one);
+        CUDA_KERNEL_ASSERT(input_val >= zero && input_val <= one);
 
-          scalar_t log_input_val = std::log(input_val);
-          scalar_t log_1_minus_input_val = std::log(one - input_val);
+        scalar_t log_input_val = std::log(input_val);
+        scalar_t log_1_minus_input_val = std::log(one - input_val);
 
-          log_input_val = std::max(log_input_val, neg_100);
-          log_1_minus_input_val = std::max(log_1_minus_input_val, neg_100);
+        log_input_val = std::max(log_input_val, neg_100);
+        log_1_minus_input_val = std::max(log_1_minus_input_val, neg_100);
 
-          return ((target_val - one) * log_1_minus_input_val) - (target_val * log_input_val);
-        }
-      );
-    });
+        return ((target_val - one) * log_1_minus_input_val) - (target_val * log_input_val);
+      }
+    );
   });
   if (weight.defined()) {
     loss.mul_(weight);

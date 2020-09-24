@@ -97,6 +97,17 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
     setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
+    """
+    GraphModule is an nn.Module generated from an fx.Graph. GraphModule has
+    important attributes:
+
+        graph : The graph from which this GraphModule was generated
+        code : The Python source code for the function generated from `graph`
+        forward : The Python method generated from `graph`
+
+    Note that when `graph` is reassigned, `code` and `forward` will be automatically
+    regenerated.
+    """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
         # so create a new singleton class for each instance.
@@ -148,10 +159,21 @@ class GraphModule(torch.nn.Module):
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
         self.graph = graph
-        self._generate_forward()
 
-    def _generate_forward(self) -> None:
-        body, result, free_variables = self.graph.python_code(root_module='self')
+    # TorchScript breaks trying to compile the graph setter because of the
+    # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
+    #
+    # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
+    __ignored_properties__ = ['graph']
+
+    @property
+    def graph(self):
+        return self._graph
+
+    @graph.setter
+    def graph(self, val) -> None:
+        self._graph = val
+        body, result, free_variables = self._graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.code = f"""\
 def forward(self, {', '.join(free_variables)}):
@@ -163,7 +185,7 @@ def forward(self, {', '.join(free_variables)}):
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
-        del dict_without_graph['graph']
+        del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph,))
 
     # because __reduce__ is defined for serialization,
