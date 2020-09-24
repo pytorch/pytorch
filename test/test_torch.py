@@ -13317,7 +13317,7 @@ class TestTorchDeviceType(TestCase):
             name, fn, identity = item
             if identity is None:
                 ident_err = 'does not have an identity'
-                
+
                 # Reductions over non-zero dimensions should work even for empty tensors
                 # See https://github.com/pytorch/pytorch/issues/34907 for a discussion on this.
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
