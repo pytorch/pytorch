@@ -577,6 +577,7 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
@@ -651,6 +652,7 @@ class DistributedTest:
             self._barrier()
 
         # NCCL Batch SEND RECV Tensor Error
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_tensor_err(self):
@@ -668,6 +670,7 @@ class DistributedTest:
                     req.wait()
 
         # NCCL Batch SEND RECV Op Error
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
@@ -685,6 +688,7 @@ class DistributedTest:
                     req.wait()
 
         # NCCL Batch SEND RECV p2p_op_list Error
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
@@ -701,6 +705,7 @@ class DistributedTest:
                     req.wait()
 
         # NCCL Batch SEND RECV Mixed Backend Error
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
@@ -721,6 +726,7 @@ class DistributedTest:
                     req.wait()
 
         # NCCL SEND RECV
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
