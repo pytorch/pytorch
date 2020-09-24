@@ -186,29 +186,23 @@ void nan_to_num_kernel_cuda(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  if (c10::isIntegralType(iter.dtype(), true)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "nan_to_num_cuda", [&]() {
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t { return a; });
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
+    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+    scalar_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<scalar_t>(pos_inf.value())
+        : std::numeric_limits<scalar_t>::max();
+    scalar_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<scalar_t>(neg_inf.value())
+        : std::numeric_limits<scalar_t>::lowest();
+    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return at::_isfinite(a)
+          ? a
+          : (at::_isnan(a) ? nan_replacement
+                           : (a == std::numeric_limits<scalar_t>::infinity()
+                                  ? pos_inf_replacement
+                                  : neg_inf_replacement));
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-      scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : std::numeric_limits<scalar_t>::max();
-      scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : std::numeric_limits<scalar_t>::lowest();
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return at::_isfinite(a)
-            ? a
-            : (at::_isnan(a) ? nan_replacement
-                          : (a == std::numeric_limits<scalar_t>::infinity()
-                                 ? pos_inf_replacement
-                                 : neg_inf_replacement));
-      });
-    });
-  }
+  });
 }
 
 void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){

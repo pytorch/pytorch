@@ -379,6 +379,13 @@ Tensor& nan_to_num_out(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
+
+  if (c10::isIntegralType(self.scalar_type())) {
+    result.resize_as_(self);
+    result.copy_(self);
+    return result;
+  }
+
   auto iter = TensorIterator::unary_op(result, self);
   nan_to_num_stub(iter.device_type(), iter, nan, pos_inf, neg_inf);
   return result;
