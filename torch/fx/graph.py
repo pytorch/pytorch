@@ -308,7 +308,7 @@ class Graph:
                         if m_itr is None:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
-                                            f'{atom} of {seen_qualname}')
+                                               f'{atom} of {seen_qualname}')
 
 
 reflectable_magic_methods = {
