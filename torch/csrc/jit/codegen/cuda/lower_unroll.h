@@ -29,12 +29,12 @@ namespace fuser {
  *     if( i * 4 + 3 < I && j * 128 + 127 < J ){
  *       for( k : I0i{4} )
  *         for( l : I1i{128} )
- *           T0[ ( i * 4 + k ) * J + j * 128 + l ] = …
+ *           T0[ ( i * 4 + k ) * J + j * 128 + l ] = ...
  *     } else {
  *       for( k : I0i{4} )
  *         for( l : I1i{128} )
  *           if( i * 4 + k < I && j * 128 + l < J)
- *              T0[ ( i * 4 + k ) * J + j * 128 + l ] = …
+ *              T0[ ( i * 4 + k ) * J + j * 128 + l ] = ...
  *     }
  *
  *   }
