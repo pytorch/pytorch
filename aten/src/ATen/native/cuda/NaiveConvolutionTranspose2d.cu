@@ -684,10 +684,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_height == 1 && kernel_width == 1) {
-              // for 1x1 column skip im2col step
-              columns.copy_(grad_output_n);
-            } else {
+            if (kernel_height != 1 || kernel_width != 1) {
               // Extract columns:
               im2col<scalar_t>(
                   at::cuda::getCurrentCUDAStream(),
