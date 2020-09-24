@@ -5062,6 +5062,8 @@ class CriterionTest(InputVariableMixin, TestBase):
                 cpu_target = convert_dtype(cpu_target, dtype)
             cpu_module.type(dtype)
             gpu_module.type(dtype)
+        else:
+            raise RuntimeError("dtype must be set")
 
         # GPU setup
         gpu_input = to_gpu(cpu_input)
