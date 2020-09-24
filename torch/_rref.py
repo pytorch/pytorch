@@ -32,6 +32,18 @@ def is_rref(ann):
         )
     return getattr(ann, "__origin__", None) is RRef
 
+def _rref_typeof_on_owner(rref):
+    return type(rref.local_value())
+
+
+def _rref_typeof_on_user(rref):
+    return rpc_sync(
+        rref.owner(),
+        _rref_typeof_on_owner,
+        args=(rref,)
+    )
+
+
 # Install docstrings from `PyRRef` to `RRef`.
 #
 # This is for the fact that pybind11 generates the parameter

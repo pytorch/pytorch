@@ -359,6 +359,7 @@ class TestWith(JitTestCase):
         Check that exceptions thrown in the bodies of with-statements are
         handled correctly.
         """
+        global Context
 
         @torch.jit.script
         class Context(object):
@@ -379,10 +380,12 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
 
+        @torch.jit.script
         def method_that_raises():
             # type: () -> Tensor
-            raise Exception()
+            raise Exception("raised exception")
 
+        @torch.jit.script
         def test_exception(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -393,6 +396,7 @@ class TestWith(JitTestCase):
 
             return x
 
+        @torch.jit.script
         def test_exception_nested(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -404,6 +408,7 @@ class TestWith(JitTestCase):
 
             return x
 
+        @torch.jit.script
         def with_that_raises(c):
             # type: (Context) -> Tensor
             a = torch.tensor([1])
@@ -413,6 +418,7 @@ class TestWith(JitTestCase):
 
             return a
 
+        @torch.jit.script
         def test_exception_fn_call(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -426,15 +432,18 @@ class TestWith(JitTestCase):
 
         c = Context(1)
 
-        with self.assertRaises(Exception):
+        # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
+        # not compile class types (of which Context, the context manager being used for this test
+        # is one).
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
@@ -610,3 +619,38 @@ class TestWith(JitTestCase):
         w = s(x, y)
 
         self.assertFalse(w.requires_grad)
+
+    def test_with_record_function(self):
+        """
+        Check that torch.autograd.profiler.record_function context manager is
+        torchscriptable.
+        """
+        def with_rf(x, y):
+            # type: (Tensor, Tensor) -> Tensor
+            with torch.autograd.profiler.record_function("foo"):
+                # Nested record_function.
+                with torch.autograd.profiler.record_function("nested"):
+                    a = x + y
+            return a
+
+        scripted = torch.jit.script(with_rf)
+        x, y = torch.ones(2), torch.ones(2)
+        with torch.autograd.profiler.profile() as p:
+            scripted(x, y)
+
+        # Need to call below to populate CPU children.
+        p.key_averages()
+        function_events = p.function_events
+        # Event with name "foo" should be recorded.
+        rf_events = [evt for evt in function_events if evt.name == "foo"]
+        self.assertTrue(len(rf_events), 1)
+        rf_event = rf_events[0]
+        child_events = rf_event.cpu_children
+        # Ensure we find nested record_function event
+        self.assertTrue("nested" in (child.name for child in child_events))
+        nested_function_event = [
+            evt for evt in function_events if evt.name == "nested"
+        ][0]
+        # Nested record function should have child "aten::add"
+        nested_child_events = nested_function_event.cpu_children
+        self.assertTrue("aten::add" in (child.name for child in nested_child_events))
