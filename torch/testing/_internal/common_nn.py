@@ -4433,7 +4433,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
         check_jit=False,
@@ -4452,7 +4451,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
     dict(
         module_name='CTCLoss',
@@ -4468,7 +4466,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
 ]
 
@@ -5003,7 +5000,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
-        self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
 
     def __call__(self, test_case):
@@ -5064,8 +5060,7 @@ class CriterionTest(InputVariableMixin, TestBase):
         # Convert input, target and module parameters to dtype
         if dtype is not None:
             cpu_input = convert_dtype(cpu_input, dtype, True)
-            # NLLLoss requires target to be LongTensor
-            if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
+            if cpu_target.is_floating_point or cpu_target.is_complex:
                 cpu_target = convert_dtype(cpu_target, dtype)
             cpu_module.type(dtype)
             gpu_module.type(dtype)
