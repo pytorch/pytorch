@@ -40,6 +40,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+struct Adapter;
 struct Command;
 class Context;
 struct Descriptor;
@@ -47,6 +48,12 @@ struct Pipeline;
 struct Resource;
 class Runtime;
 struct Shader;
+
+struct GPU final {
+  const Adapter* adapter;
+  VkDevice device;
+  VkQueue queue;
+};
 
 VK_DELETER_DISPATCHABLE_DECLARE(Instance);
 VK_DELETER_DISPATCHABLE_DECLARE(Device);

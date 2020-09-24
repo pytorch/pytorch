@@ -29,7 +29,7 @@ struct Command final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Pool::Descriptor Descriptor;
       typedef VK_DELETER(CommandPool) Deleter;
@@ -52,8 +52,8 @@ struct Command final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Pool(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
 
     static void purge(VkDevice device, VkCommandPool command_pool);
@@ -78,8 +78,8 @@ struct Command final {
     VkCommandBuffer command_buffer_;
   };
 
-  explicit Command(const VkDevice device)
-    : pool(device) {
+  explicit Command(const GPU& gpu)
+    : pool(gpu) {
   }
 };
 

@@ -108,10 +108,7 @@ struct Resource final {
 
   class Pool final {
    public:
-    Pool(
-        VkInstance instance,
-        VkPhysicalDevice physical_device,
-        VkDevice device);
+    explicit Pool(const GPU& gpu);
 
     Buffer allocate(const Buffer::Descriptor& descriptor);
     Image allocate(const Image::Descriptor& descriptor);
@@ -128,11 +125,8 @@ struct Resource final {
     std::vector<Handle<Image, void(*)(const Image&)>> images_;
   } pool;
 
-  Resource(
-      const VkInstance instance,
-      const VkPhysicalDevice physical_device,
-      const VkDevice device)
-    : pool(instance, physical_device, device) {
+  explicit Resource(const GPU& gpu)
+    : pool(gpu) {
   }
 };
 

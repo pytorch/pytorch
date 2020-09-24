@@ -9,11 +9,12 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Layout::Factory::Factory(const VkDevice device)
-  : device_(device) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        device_,
-        "Invalid Vulkan device!");
+
+Shader::Layout::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
 }
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
@@ -113,8 +114,8 @@ struct Shader::Factory::Compiler final {
 
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-Shader::Factory::Factory(const VkDevice device)
- : device_(device),
+Shader::Factory::Factory(const GPU& gpu)
+ : device_(gpu.device),
    compiler_(new Compiler) {
 }
 

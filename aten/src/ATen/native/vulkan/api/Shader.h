@@ -52,7 +52,7 @@ struct Shader final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorSetLayout) Deleter;
@@ -75,8 +75,8 @@ struct Shader final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
 
@@ -122,7 +122,7 @@ struct Shader final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
     Factory(const Factory&) = delete;
     Factory& operator=(const Factory&) = delete;
     Factory(Factory&&);
@@ -152,9 +152,9 @@ struct Shader final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Shader(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+  explicit Shader(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 

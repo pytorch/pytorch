@@ -72,7 +72,7 @@ struct Descriptor final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Pool::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorPool) Deleter;
@@ -95,8 +95,8 @@ struct Descriptor final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Pool(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
 
     static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
@@ -118,9 +118,9 @@ struct Descriptor final {
     VkDescriptorPool descriptor_pool_;
   } factory;
 
-  explicit Descriptor(const VkDevice device)
-    : pool(device),
-      factory(device, pool.cache.retrieve(Pool::kDefault)) {
+  explicit Descriptor(const GPU& gpu)
+    : pool(gpu),
+      factory(gpu.device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
 

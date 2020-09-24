@@ -5,15 +5,15 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Command::Pool::Factory::Factory(const VkDevice device)
-  : device_(device) {
+Command::Pool::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         device_,
         "Invalid Vulkan device!");
 }
 
 typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
-  const Descriptor& descriptor) const {
+    const Descriptor& descriptor) const {
   const VkCommandPoolCreateInfo command_pool_create_info{
     VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
     nullptr,
