@@ -194,16 +194,16 @@ def forward(self, {', '.join(free_variables)}):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        # delete generated attributes before creating a new
-        # GraphModule
+        graph_module = GraphModule(fake_mod, self.graph)
+        # skip overwriting generated attributes
         for attr in ['code', '_graph', '_modules']:
             fake_mod.__dict__.pop(attr, None)
-        graph_module = GraphModule(fake_mod, self.graph)
         graph_module.__dict__.update(fake_mod.__dict__)
         return graph_module
 
     def __copy__(self):
         graph_module = GraphModule(self, self.graph)
+        # skip overwriting generated attributes
         for attr in self.__dict__:
             if attr not in ['code', '_graph', '_modules']:
                 graph_module.__dict__[attr] = self.__dict__[attr]
