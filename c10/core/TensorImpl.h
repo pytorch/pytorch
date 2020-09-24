@@ -606,10 +606,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether or not to take the conjugate of the tensor (flip the imaginary bit).
    */
   void set_conj(bool value) {
-    if (value)
+    if (value) {
       key_set_ = key_set_.add(DispatchKey::Conjugate);
-    else
+      TORCH_INTERNAL_ASSERT(isComplexType(typeMetaToScalarType(dtype())));
+    } else {
       key_set_ = key_set_.remove(DispatchKey::Conjugate);
+    }
   }
 
   /**

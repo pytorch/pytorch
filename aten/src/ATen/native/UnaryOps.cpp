@@ -208,6 +208,9 @@ Tensor resolve_conj(const Tensor& self) {
 }
 
 Tensor conj(const Tensor& self) {
+  if (!self.is_complex()) {
+    return self;
+  }
   Tensor self_;
   auto impl = c10::make_intrusive<TensorImpl>(
       Storage(self.storage()), self.key_set(), self.dtype());
