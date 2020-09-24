@@ -308,6 +308,7 @@ class Graph:
         if root:
             for node in self._nodes:
                 if node.op in ['get_attr', 'call_module']:
+                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
                     m_itr = root
                     for i, atom in enumerate(target_atoms):
