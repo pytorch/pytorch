@@ -521,6 +521,10 @@ class AttributePropagator {
         node->output()->replaceAllUsesWith(node->input());
         it.destroyCurrent();
       }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
       for (auto sub_b : node->blocks()) {
         removeExtraWaitCalls(sub_b);
       }
