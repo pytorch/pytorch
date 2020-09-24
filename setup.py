@@ -162,7 +162,7 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
+
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -776,6 +776,10 @@ if __name__ == '__main__':
                 'include/ATen/detail/*.h',
                 'include/ATen/native/*.h',
                 'include/ATen/native/cpu/*.h',
+                'include/ATen/native/cuda/*.h',
+                'include/ATen/native/cuda/*.cuh',
+                'include/ATen/native/hip/*.h',
+                'include/ATen/native/hip/*.cuh',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/ATen/quantized/*.h',
