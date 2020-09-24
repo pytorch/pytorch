@@ -96,8 +96,8 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
-  void deleteKey(const std::string& key) override {
-    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, deleteKey, key);
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
   }
 
   bool check(const std::vector<std::string>& keys) override {

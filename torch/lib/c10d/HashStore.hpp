@@ -32,7 +32,7 @@ class HashStore : public Store {
 
   bool check(const std::vector<std::string>& keys) override;
 
-  void deleteKey(const std::string& key) override;
+  bool deleteKey(const std::string& key) override;
 
  protected:
   std::unordered_map<std::string, std::vector<uint8_t>> map_;

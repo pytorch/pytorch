@@ -63,7 +63,7 @@ class TCPStore : public Store {
 
   int64_t add(const std::string& key, int64_t value) override;
 
-  void deleteKey(const std::string& key) override;
+  bool deleteKey(const std::string& key) override;
 
   bool check(const std::vector<std::string>& keys) override;
 

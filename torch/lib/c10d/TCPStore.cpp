@@ -239,8 +239,9 @@ void TCPStoreDaemon::getNumKeysHandler(int socket) const {
 }
 
 void TCPStoreDaemon::deleteHandler(int socket) {
-  std::string key  = tcputil::recvString(socket);
-  tcpStore_.erase(key);
+  std::string key = tcputil::recvString(socket);
+  auto numDeleted = tcpStore_.erase(key);
+  tcputil::sendValue<int64_t>(socket, numDeleted);
 }
 
 void TCPStoreDaemon::checkHandler(int socket) const {
@@ -372,10 +373,12 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
   return addHelper_(regKey, value);
 }
 
-void TCPStore::deleteKey(const std::string& key) {
+bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE);
   tcputil::sendString(storeSocket_, regKey, true);
+  auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
+  return (numDeleted == 1);
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {

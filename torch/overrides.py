@@ -277,6 +277,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.cholesky_inverse: lambda input, upper=False, out=None: -1,
         torch.cholesky_solve: lambda input1, input2, upper=False, out=None: -1,
+        torch.choose_qparams_optimized: lambda input, numel, n_bins, ratio, bit_width: -1,
         torch.chunk: lambda input, chunks, dim=0: -1,
         torch.clamp: lambda input, min=None, max=None, out=None: -1,
         torch.clip: lambda input, min=None, max=None, out=None: -1,

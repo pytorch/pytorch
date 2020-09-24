@@ -284,11 +284,15 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
+        with self.assertRaises(RuntimeError):
+            fs.get("key")
         fs.delete_key("key0")
         fs.delete_key("key3")
         self.assertEqual(fs.num_keys(), 2)
         fs.set("key4", "value2")
         self.assertEqual(fs.num_keys(), 3)
+        self.assertEqual(b"value1", fs.get("key1"))
+        self.assertEqual(b"value2", fs.get("key4"))
 
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
