@@ -19663,7 +19663,7 @@ _float_types_no_half = [torch.float, torch.double]
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
 _signed_types = [
-    torch.half, torch.float, torch.double,
+    torch.half, torch.bfloat16, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
 ]
 
@@ -19905,8 +19905,10 @@ tensor_op_tests = [
     ('chunk', 'neg_dim', _medium_2d, lambda t, d: [4, -2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('clamp', 'neg', _medium_2d, lambda t, d: [-1, 5], 1e-5, 1e-2, 1e-5, _signed_types, [torch.bfloat16]),
     ('clamp', 'pos', _medium_2d, lambda t, d: [1, 5], 1e-5, 1e-2, 1e-5, _unsigned_types, [torch.bfloat16]),
-    ('clamp_min', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16]),
-    ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types, [torch.bfloat16]),
+    ('clamp_min', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, \
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
+    ('clamp_max', '', _medium_2d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, \
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('clone', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('conj', '', _small_3d, lambda t, d: [], 1e-5, 0, 1e-5, _types_no_half, [torch.bfloat16], False),
@@ -19991,14 +19993,14 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half),
     ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
         1e-5, 1e-5, 1e-5, _float_types_no_half),
-    ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-5, 1e-5, _signed_types),
-    ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-5, 1e-5, _signed_types),
+    ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-2, 1e-5, _signed_types),
+    ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)],
-        1e-1, 1e-5, 1e-5, _signed_types),
+        1e-1, 1e-2, 1e-5, _signed_types),
     ('remainder', 'negative_tensor', _small_3d,
         lambda t, d: [0 - _small_3d(t, d, has_zeros=False)],
-        1e-1, 1e-5, 1e-5, _signed_types),
+        1e-1, 1e-2, 1e-5, _signed_types),
     ('std', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('std', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
