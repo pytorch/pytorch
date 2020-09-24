@@ -331,18 +331,19 @@ class TensorExprFuser {
   // Create a fusion group starting from the node N.
   // We then try to pull inputs into the fusion group and repeat that process
   // until there is nothing we can pull in.
-  std::pair<graph_node_list::iterator, bool> createFusionGroup(Node* n) {
-    Node* fusion_group = n;
+  std::pair<graph_node_list::iterator, bool> createFusionGroup(
+      Node* fusion_node) {
     if (min_group_size_ == 1) {
-      fusion_group = getOrCreateTensorExprSubgraph(n);
+      fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
 
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
-    auto inputs = sortReverseTopological(n->inputs(), n->owningBlock());
+    auto inputs = sortReverseTopological(
+        fusion_node->inputs(), fusion_node->owningBlock());
     for (auto input : inputs) {
-      debugDumpFusionGroup("Current fusion group: ", fusion_group);
+      debugDumpFusionGroup("Current fusion group: ", fusion_node);
       GRAPH_DEBUG("Trying to merge: ", *input->node());
-      if (auto maybe_fusion_group = tryMerge(fusion_group, input->node())) {
+      if (auto maybe_fusion_group = tryMerge(fusion_node, input->node())) {
         // we successfully merged, so the new group's `inputs` may have
         // changed. So rescan the new group for more merging opportunities.
         return std::make_pair(
@@ -350,7 +351,7 @@ class TensorExprFuser {
       }
     }
 
-    return std::make_pair(++fusion_group->reverseIterator(), false);
+    return std::make_pair(++fusion_node->reverseIterator(), false);
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
