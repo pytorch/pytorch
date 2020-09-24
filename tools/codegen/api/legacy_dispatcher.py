@@ -71,4 +71,4 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Legacy
         assert_never(a)
 
 def arguments(func: FunctionSchema) -> Sequence[LegacyDispatcherArgument]:
-    return list(map(argument, cpp.gathered_arguments(func)))
+    return list(map(argument, cpp.arguments(func, gathered=True)))
