@@ -1671,36 +1671,47 @@ protected:
   // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
-  // You get to have eight byte-size fields here, before you
-  // should pack this into a bitfield.
+  // Tensor is contiguous
   bool is_contiguous_ = true;
+
+  // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
+  inline void init_bitfields() {
+    is_channels_last_ = false;
+    is_channels_last_contiguous_ = false;
+    is_channels_last_3d_ = false;
+    is_channels_last_3d_contiguous_ = false;
+    is_non_overlapping_and_dense_ = false;
+    is_wrapped_number_ = false;
+    allow_tensor_metadata_change_ = true;
+    reserved_ = false;
+  }
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
   // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
-  bool is_channels_last_ = false;
+  bool is_channels_last_ : 1;
 
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
-  bool is_channels_last_contiguous_ = false;
+  bool is_channels_last_contiguous_ : 1;
 
   // Tensor is stored in the channels last 3d memory format, when dimensions
   // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
-  bool is_channels_last_3d_ = false;
+  bool is_channels_last_3d_ : 1;
 
   // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
   // contiguous memory block.
-  bool is_channels_last_3d_contiguous_ = false;
+  bool is_channels_last_3d_contiguous_ : 1;
 
   // Dense tensor is the tensor that store values in a contiguous block of memory.
   // Non-overlapping tensor is the tensor in which elements occupy individual
   // non-repetitive memory.
-  bool is_non_overlapping_and_dense_ = false;
+  bool is_non_overlapping_and_dense_ : 1;
 
-  bool is_wrapped_number_ = false;
+  bool is_wrapped_number_ : 1;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
   //
@@ -1717,14 +1728,13 @@ protected:
   // NOTE: For a full list of tensor metadata fields, please see
   // `copy_tensor_metadata()` in TensorImpl and its subclasses to find
   // which fields are copied by value.
-  bool allow_tensor_metadata_change_ = true;
+  bool allow_tensor_metadata_change_ : 1;
 
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
-  bool reserved_ = false;
-
+  bool reserved_ : 1;
 };
 
 // Note [TensorImpl size constraints]
@@ -1783,7 +1793,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 30,
+              sizeof(TensorImpl) == sizeof(int64_t) * 29,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
