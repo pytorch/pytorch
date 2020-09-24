@@ -1180,6 +1180,15 @@ class TestClassType(JitTestCase):
             def unsupported(self) -> int:
                 return sum([self.a])
 
+            @property
+            @torch.jit.unused
+            def unsupported_2(self) -> int:
+                return sum([self.a])
+
+            @unsupported_2.setter
+            def unsupported_2(self, value):
+                self.a = sum([self.a])
+
             @attr.setter
             def attr(self, value: int):
                 self.a = value + 3
