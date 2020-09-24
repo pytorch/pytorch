@@ -254,6 +254,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
 
     try:
         _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
+        agent.join()
     except Exception:
         api.shutdown()
         raise

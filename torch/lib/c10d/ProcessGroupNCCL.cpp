@@ -773,7 +773,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // the corresponding underlying NCCL calls will look like
   //   ncclGroupStart() // This is in batch_isend_irecv
   //   ncclGroupStart() // This is [Note 1]
-  //   ncclCommInitRank() // Inside NCCLCOmm::create
+  //   ncclCommInitRank() // Inside NCCLComm::create
   //   ncclSend()
   //   ncclGroupEnd() // This is [Note 2]
   //   ncclGroupEnd() // This is in batch_isend_irecv
@@ -1539,7 +1539,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support recv Anysource");
+  throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(

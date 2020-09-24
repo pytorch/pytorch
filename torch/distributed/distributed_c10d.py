@@ -160,8 +160,7 @@ _group_count = 0
 
 def _rank_not_in_group(group):
     """
-    Helper that checks if the current process's rank is not in a given group
-
+    Helper that checks if the current process's rank is not in a given group.
     """
     if group == GroupMember.WORLD:
         return False
@@ -171,8 +170,7 @@ def _rank_not_in_group(group):
 def _get_group_rank(group, rank):
     """
     Helper that gets a given group's local rank in the group from a given global
-    rank
-
+    rank.
     """
     if group is GroupMember.WORLD:
         raise RuntimeError("group.WORLD does not have local rank to global "
@@ -189,8 +187,7 @@ def _get_group_rank(group, rank):
 def _get_global_rank(group, group_rank):
     """
     Helper that gets a given group's global rank from a given local rank in the
-    group
-
+    group.
     """
     if group is GroupMember.WORLD:
         raise RuntimeError("group.WORLD does not have local rank to global "
@@ -205,8 +202,7 @@ def _get_global_rank(group, group_rank):
 def _check_default_pg():
     """
     Helper that checks if the default ProcessGroup has been initialized, with
-    assertion
-
+    assertion.
     """
     assert _default_pg is not None, \
         "Default process group is not initialized"
@@ -214,8 +210,7 @@ def _check_default_pg():
 
 def _get_group_size(group):
     """
-    Helper that gets a given group's world size
-
+    Helper that gets a given group's world size.
     """
     if group is GroupMember.WORLD:
         _check_default_pg()
@@ -228,7 +223,6 @@ def _get_group_size(group):
 def _check_single_tensor(param, param_name):
     """
     Helper to check that the parameter ``param_name`` is a single tensor.
-
     """
     if not isinstance(param, torch.Tensor):
         raise RuntimeError("Invalid function argument. Expected parameter `{}` "
@@ -238,7 +232,6 @@ def _check_single_tensor(param, param_name):
 def _check_tensor_list(param, param_name):
     """
     Helper to check that the parameter ``param_name`` is a list of tensors.
-
     """
     if not isinstance(param, list) or \
        not all(isinstance(p, torch.Tensor) for p in param):
@@ -246,40 +239,34 @@ def _check_tensor_list(param, param_name):
                            "to be of type List[torch.Tensor].".format(param_name))
 
 
-def _check_op_list(op_list, list_name):
+def _check_op(op):
     """
-    Helper to check that the ``op_list`` is a list of functions.
-
+    Helper to check that the ``op`` is either isend or irecv.
     """
-    if not isinstance(op_list, list) or \
-       not all(op in [isend, irecv] for op in op_list):
-        raise RuntimeError(f"Invalid function. Expected fucntion in `{op_list}` "
-                           f"to be of type torch.distributed.isend or"
-                           f"torch.distributed.irecv.")
+    if op not in [isend, irecv]:
+        raise RuntimeError("Invalid ``op``. Expected ``op`` "
+                           "to be of type ``torch.distributed.isend`` or "
+                           "``torch.distributed.irecv``.")
 
-
-def _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list):
+def _check_p2p_op_list(p2p_op_list):
     """
-    Helper to check that all the inputs have the same length.
-
+    Helper to check that the ``p2p_op_list`` is a list of P2POp instances and
+    all ops use the same backend.
     """
-    expected_length = len(op_list)
-    check_list = [tensor_list, peer_list]
-    if group_list is not None:
-        check_list.append(group_list)
-    if tag_list is not None:
-        check_list.append(tag_list)
+    if not isinstance(p2p_op_list, list) or \
+       not all(isinstance(p2p_op, P2POp) for p2p_op in p2p_op_list):
+        raise RuntimeError("Invalid ``p2p_op_list``. Each op is expected to "
+                           "to be of type ``torch.distributed.P2POp``.")
 
-    for curr_list in check_list:
-        if not isinstance(curr_list, list) or expected_length != len(curr_list):
-            raise RuntimeError(f"Expected parameters to be the same length, "
-                               f"{expected_length} vs {len(curr_list)}, value: {curr_list}")
+
+    backend = get_backend(p2p_op_list[0].group)
+    if not all(backend == get_backend(p2p_op.group) for p2p_op in p2p_op_list):
+        raise RuntimeError("All groups need to use the same backend.")
 
 
 def is_mpi_available():
     """
     Checks if the MPI backend is available.
-
     """
     return _MPI_AVAILABLE
 
@@ -287,7 +274,6 @@ def is_mpi_available():
 def is_nccl_available():
     """
     Checks if the NCCL backend is available.
-
     """
     return _NCCL_AVAILABLE
 
@@ -295,7 +281,6 @@ def is_nccl_available():
 def is_gloo_available():
     """
     Checks if the Gloo backend is available.
-
     """
     return _GLOO_AVAILABLE
 
@@ -303,7 +288,6 @@ def is_gloo_available():
 def is_initialized():
     """
     Checking if the default process group has been initialized
-
     """
     return _default_pg is not None
 
@@ -311,7 +295,6 @@ def is_initialized():
 def _get_default_group():
     """
     Getting the default process group created by init_process_group
-
     """
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
@@ -322,7 +305,6 @@ def _get_default_group():
 def _get_default_store():
     """
     Getting the default store created by init_process_group
-
     """
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
@@ -784,53 +766,86 @@ def recv(tensor,
         return src
 
 
+class P2POp(object):
+    """
+    A class to build point-to-point operations for ``batch_isend_irecv``.
+
+    This class builds the type of P2P operation, communication buffer, peer rank,
+    Process Group group, and tag. Instances of this class will be passed to
+    ``batch_isend_irecv`` for point-to-point communications.
+
+    Arguments:
+        op (callable): A function to send data to or receive data from a peer process.
+            The type of ``op`` is either ``torch.distributed.isend`` or
+            ``torch.distributed.irecv``.
+        tensor (Tensor): Tensor to send or receive.
+        peer (int): Destination or source rank.
+        group (ProcessGroup, optional): The process group to work on.
+        tag (int, optional): Tag to match send with recv.
+    """
+    def __init__(self, op, tensor, peer, group=group.WORLD, tag=0):
+        self.op = op
+        self.tensor = tensor
+        self.peer = peer
+        self.group = group
+        self.tag = tag
+
+    def __new__(cls, op, tensor, peer, group=group.WORLD, tag=0):
+        _check_op(op)
+        _check_single_tensor(tensor, "tensor")
+        return object.__new__(cls)
+
+
 @contextlib.contextmanager
-def _group_manager(backend):
+def _batch_p2p_manager(backend):
     if backend == Backend.NCCL:
-        ProcessGroupNCCL.group_start()
+        ProcessGroupNCCL._group_start()
     try:
         yield
     finally:
         if backend == Backend.NCCL:
-            ProcessGroupNCCL.group_end()
+            ProcessGroupNCCL._group_end()
 
 
-def batch_isend_irecv(op_list,
-                      tensor_list,
-                      peer_list,
-                      group_list=None,
-                      tag_list=None):
+def batch_isend_irecv(p2p_op_list):
     """
-    Send or Receive tensors asynchronously and return a list of requests.
+    Send or Receive a batch of tensors asynchronously and return a list of requests.
 
-    Process the first item in each passed parameters, and then the second item
-    in each passed parameters, etc.
+    Process each of the operations in p2p_op_list and return the corresponding
+    requests. NCCL and Gloo backend are currently supported.
 
     Arguments:
-        op_list: list of point-to-point operations(type of each operations is either
-        ``torch.distributed.isend`` or ``torch.distributed.irecv``.
-        tensor_list (list[Tensor]): list of send or recv tensors.
-        peer_list (list[int]): list of peer ranks to send to or receive from.
-        group_list (list[ProcessGroup], Optional): list of groups to operator on.
-        tag_list (list[int], Optional): list of tags to match send with recv.
+        p2p_op_list: A list of point-to-point operations(type of each operator is
+            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
+            matters and it needs to match with corresponding isend/irecv on the
+            remote end.
 
-    Return:
-        a list of distributed request objects returned by calling the corresponding
+    Returns:
+        A list of distributed request objects returned by calling the corresponding
         op in the op_list.
+
+    Examples:
+        >>> send_tensor = torch.arange(2) + 2 * rank
+        >>> recv_tensor = torch.randn(2)
+        >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> reqs = batch_isend_irecv([send_op, recv_op])
+        >>> for req in reqs:
+        >>>     req.wait()
+        >>> recv_tensor
+        tensor([2, 3])     # Rank 0
+        tensor([0, 1])     # Rank 1
     """
-    _check_op_list(op_list, "op_list")
-    _check_input_length(op_list, tensor_list, peer_list, group_list, tag_list)
-
-    backend = get_backend(group.WORLD if group_list is None else group_list[0])
-
+    _check_p2p_op_list(p2p_op_list)
+    backend = get_backend(p2p_op_list[0].group)
     reqs = []
-    with _group_manager(backend):
-        for i in range(len(op_list)):
-            op = op_list[i]
-            tensor = tensor_list[i]
-            peer = peer_list[i]
-            curr_group = group.WORLD if group_list is None else group_list[i]
-            tag = 0 if tag_list is None else tag_list[i]
+    with _batch_p2p_manager(backend):
+        for p2p_op in p2p_op_list:
+            op = p2p_op.op
+            tensor = p2p_op.tensor
+            peer = p2p_op.peer
+            curr_group = p2p_op.group
+            tag = p2p_op.tag
 
             ret = op(tensor, peer, curr_group, tag)
 
@@ -2046,7 +2061,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     should be created in the same order in all processes.
 
     Arguments:
-        ranks (list[int]): List of ranks of group members.
+        ranks (list[int]): List of ranks of group members. If ``None``, will be
+            set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.

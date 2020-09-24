@@ -493,7 +493,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       PostProcess post);
 
   // Helper that encapsulates work shared across point-to-point communication
-  // primitives.It is the same structure as the helper used for collective
+  // primitives. It is the same structure as the helper used for collective
   // communicaiton primitives.
   template <typename Fn>
   std::shared_ptr<ProcessGroup::Work> pointToPoint(
