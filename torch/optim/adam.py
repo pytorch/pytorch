@@ -47,11 +47,6 @@ class Adam(Optimizer):
                         weight_decay=weight_decay, amsgrad=amsgrad)
         super(Adam, self).__init__(params, defaults)
 
-        # State initialization
-        for group in self.param_groups:
-            for p in group['params']:
-                state = self.state[p]
-
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
         for group in self.param_groups:
