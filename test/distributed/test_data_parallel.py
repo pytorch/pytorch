@@ -775,6 +775,36 @@ class TestDataParallel(TestCase):
                         print("Caught exception during iterations at " + named_msg, flush=True)
                         raise
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parameter_list_dict_replica(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self, data):
+                super(MyMod, self).__init__()
+                self.data = data
+
+            def forward(self, inp):
+                return inp
+
+        p1 = torch.nn.Parameter(torch.rand(10))
+        p2 = torch.nn.Parameter(torch.rand(10))
+        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterList is being used with DataParallel but this"):
+            model(input)
+
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterDict is being used with DataParallel but this"):
+            model(input)
+
 
 if __name__ == '__main__':
     run_tests()

@@ -341,7 +341,7 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfiler(const ProfilerConfig&);
-TORCH_API thread_event_lists disableProfiler();
+TORCH_API thread_event_lists disableProfiler(bool cleanupTLSState = true, bool consolidate = true);
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<Event>&& profiledEvents);
