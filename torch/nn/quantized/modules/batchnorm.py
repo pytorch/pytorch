@@ -7,14 +7,15 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm2d, self).__init__(num_features)
-        self.eps = eps
-        self.scale = 1.0
-        self.zero_point = 0
+        super(BatchNorm2d, self).__init__(num_features, eps)
+        self.register_buffer('scale', torch.Tensor([1.0]))
+        self.register_buffer('zero_point', torch.Tensor([0]).int())
 
     def forward(self, input):
-        return torch.ops.quantized.batch_norm2d(input, self.weight, self.bias, self.running_mean,
-                                                self.running_var, self.eps, self.scale, self.zero_point)
+        return torch.ops.quantized.batch_norm2d(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale.item(),
+            self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedBatchNorm2d'
@@ -32,8 +33,8 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
         new_mod.bias = mod.bias
         new_mod.running_mean = mod.running_mean
         new_mod.running_var = mod.running_var
-        new_mod.scale = float(scale)
-        new_mod.zero_point = int(zero_point)
+        new_mod.scale.copy_(torch.Tensor([float(scale)]))
+        new_mod.zero_point.copy_(torch.Tensor([int(zero_point)]).int())
         return new_mod
 
 class BatchNorm3d(torch.nn.BatchNorm3d):
@@ -43,12 +44,13 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
     def __init__(self, num_features, eps=1e-5, momentum=0.1):
         super(BatchNorm3d, self).__init__(num_features)
         self.eps = eps
-        self.scale = 1.0
-        self.zero_point = 0
+        self.register_buffer('scale', torch.Tensor([1.0]))
+        self.register_buffer('zero_point', torch.Tensor([0]).int())
 
     def forward(self, input):
-        return torch.ops.quantized.batch_norm3d(input, self.weight, self.bias, self.running_mean,
-                                                self.running_var, self.eps, self.scale, self.zero_point)
+        return torch.ops.quantized.batch_norm3d(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale.item(), self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedBatchNorm3d'
@@ -67,6 +69,6 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
         new_mod.bias = mod.bias
         new_mod.running_mean = mod.running_mean
         new_mod.running_var = mod.running_var
-        new_mod.scale = float(scale)
-        new_mod.zero_point = int(zero_point)
+        new_mod.scale.copy_(torch.Tensor([float(scale)]))
+        new_mod.zero_point.copy_(torch.Tensor([int(zero_point)]).int())
         return new_mod

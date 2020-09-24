@@ -16,13 +16,14 @@ class LayerNorm(torch.nn.LayerNorm):
             normalized_shape, eps=eps, elementwise_affine=elementwise_affine)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
         return torch.ops.quantized.layer_norm(
             input, self.normalized_shape, weight=self.weight, bias=self.bias,
-            eps=self.eps, output_scale=self.scale, output_zero_point=self.zero_point)
+            eps=self.eps, output_scale=self.scale.item(),
+            output_zero_point=self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedLayerNorm'
@@ -50,13 +51,13 @@ class GroupNorm(torch.nn.GroupNorm):
         super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
         return torch.ops.quantized.group_norm(
-            input, self.num_groups, self.weight, self.bias, self.eps, self.scale,
-            self.zero_point)
+            input, self.num_groups, self.weight, self.bias, self.eps,
+            self.scale.item(), self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedGroupNorm'
@@ -85,13 +86,13 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
-            input, self.weight, self.bias, self.eps, self.scale,
-            self.zero_point)
+            input, self.weight, self.bias, self.eps, self.scale.item(),
+            self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedInstanceNorm1d'
@@ -120,13 +121,13 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
-            input, self.weight, self.bias, self.eps, self.scale,
-            self.zero_point)
+            input, self.weight, self.bias, self.eps, self.scale.item(),
+            self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedInstanceNorm2d'
@@ -155,13 +156,13 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
         return torch.ops.quantized.instance_norm(
-            input, self.weight, self.bias, self.eps, self.scale,
-            self.zero_point)
+            input, self.weight, self.bias, self.eps, self.scale.item(),
+            self.zero_point.item())
 
     def _get_name(self):
         return 'QuantizedInstanceNorm3d'
