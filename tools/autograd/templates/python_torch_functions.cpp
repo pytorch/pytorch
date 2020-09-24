@@ -44,7 +44,6 @@ using at::Generator;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
-using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
