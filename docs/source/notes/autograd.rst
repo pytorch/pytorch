@@ -220,7 +220,7 @@ Autograd for Complex Numbers
 *******************************************************
 
 PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
-output. PyTorch's autograd convention for complex numbers allows gradient value to be used in
+output. PyTorch's autograd convention for complex numbers allows gradient values to be used in
 Gradient Descent with the same update rule as that in the case of real numbers. This convention works for
 optimization problems where the objective function is real valued.
 
@@ -267,7 +267,7 @@ where
 
 The key assumption made in the derivation of :eq:`[1]` is that function :math:`F` is a part of a
 real valued function. It implies that the Conjugate Wirtinger and Wirtinger derivative flowing back
-to :math:`F` are complex conjugate of each other. This allows us to use :math:`grad\_output` as the incoming Conjugate
+to :math:`F` are complex conjugates of each other. This allows us to use :math:`grad\_output` as the incoming Conjugate
 Wirtinger derivative and recover the incoming Wirtinger derivative by complex conjugation of :math:`grad\_output`.
 For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
@@ -285,7 +285,7 @@ The Vector-Jacobian Product for a function :math:`F: ℂ → ℝ`:
             s = u(x, y)
             return s
 
-at :math:`x + yj` can be simplified to be written as:
+at :math:`x + yj` can be simplified to:
 
     .. math::
         VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
@@ -303,7 +303,7 @@ The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
             s = u(x, y) + v(x, y) * 1j
             return s
 
-at :math:`x + yj` can be simplified to be written as:
+at :math:`x + yj` can be simplified to:
 
     .. math::
         VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
