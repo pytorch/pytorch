@@ -163,6 +163,7 @@ if(USE_DISTRIBUTED)
     if(WIN32)
       append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
     else()
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
     endif()
     # Disable certain warnings for GCC-9.X
