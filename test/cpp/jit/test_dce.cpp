@@ -1,12 +1,12 @@
-#include <gtest/gtest.h>
+#include <test/cpp/jit/test_base.h>
+#include <test/cpp/jit/test_utils.h>
 
-#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
-TEST(EliminateDeadCodeTest, Basic) {
+void testDCE() {
   auto graph = std::make_shared<Graph>();
 
   // Consider the following loop:
