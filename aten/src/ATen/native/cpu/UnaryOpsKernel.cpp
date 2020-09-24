@@ -377,7 +377,7 @@ static void nan_to_num_kernel(
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
   if (c10::isIntegralType(iter.dtype(), true)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "nan_to_num_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "nan_to_num", [&]() {
       cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return a; });
     });
   } else {
