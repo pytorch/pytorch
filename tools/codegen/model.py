@@ -107,6 +107,9 @@ class NativeFunction:
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
 
+    # TODO COMMENT TODO
+    structured: bool
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -149,6 +152,9 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        structured = e.pop('structured', False)
+        assert isinstance(structured, bool), f'not a bool: {structured}'
+
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
 
@@ -175,6 +181,7 @@ class NativeFunction:
             func=func,
             use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
+            structured=structured,
             manual_kernel_registration=manual_kernel_registration,
             python_module=python_module,
             category_override=category_override,
@@ -197,7 +204,58 @@ class NativeFunction:
                 "otherwise you will tickle a Python argument binding bug " \
                 "(which usually manifests itself as the result variable being undefined.)"
 
+        if self.structured:
+            assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
+                "variant of a function"
+
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
+
+@dataclass(frozen=True)
+class NativeFunctionGroup:
+    functional: Optional[NativeFunction]
+    inplace: Optional[NativeFunction]
+    out: Optional[NativeFunction]
+
+    def structured(self) -> bool:
+        if self.out is None:
+            return False
+        return self.out.structured
+
+    def signature(self) -> 'FunctionSchema':
+        if self.out is not None:
+            return self.out.func.signature()
+        elif self.functional is not None:
+            return self.functional.func.signature()
+        elif self.inplace is not None:
+            return self.inplace.func.signature()
+        else:
+            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+
+    def functions(self) -> Iterator[NativeFunction]:
+        if self.out is not None:
+            yield self.out
+        if self.functional is not None:
+            yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    # TODO: check signature() equality
+
+    @staticmethod
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+        functional = d.get(SchemaKind.functional)
+        inplace = d.get(SchemaKind.inplace)
+        out = d.get(SchemaKind.out)
+        return NativeFunctionGroup(
+            functional=functional,
+            inplace=inplace,
+            out=out,
+        )
+
+    # This is an abuse
+    @staticmethod
+    def singleton(f: NativeFunction) -> 'NativeFunctionGroup':
+        return NativeFunctionGroup.from_dict({f.func.kind(): f})
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,

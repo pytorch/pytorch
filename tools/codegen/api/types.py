@@ -71,6 +71,16 @@ class DispatcherArgument:
         return f"{self.type} {self.name}"
 
 @dataclass(frozen=True)
+class MetaArgument:
+    type: str
+    name: str
+    # By fiat, meta argument functions must be on full c10 dispach
+    argument: Argument
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+@dataclass(frozen=True)
 class LegacyDispatcherArgument:
     type: str
     name: str
