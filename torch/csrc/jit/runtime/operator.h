@@ -81,8 +81,11 @@ struct TORCH_API Operator {
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
-                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
-            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
+                UnparsedFunctionSchema{schema, alias_analysis}),
+            c10::make_left<Operation, OperationCreator>([op = std::move(op), schema](Stack* stack) {
+              std::cout << "Calling " << schema << std::endl;
+              op(stack);
+            })})) {}
 
   C10_DEPRECATED_MESSAGE(
       "Please define your operator as taking a `Stack*` argument instead of `Stack&` and as returning `void` instead of `int`.")
@@ -92,7 +95,10 @@ struct TORCH_API Operator {
       c10::AliasAnalysisKind alias_analysis)
       : Operator(
             std::move(schema),
-            [op = std::move(op)](Stack* stack) { op(*stack); },
+            [op = std::move(op), schema](Stack* stack) {
+              std::cout << "Calling " << schema << std::endl;
+              op(*stack);
+            },
             alias_analysis) {}
 
   Operator(
