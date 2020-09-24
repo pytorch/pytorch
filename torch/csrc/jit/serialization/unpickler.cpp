@@ -104,13 +104,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
+      case VariableLengthTupleType::Kind:
       case ListType::Kind: {
         // specialized lists do not need their type refined, so we can exit
         // early here
         if (!w.value.isList()) {
           break;
         }
-        auto elem_type = w.static_type->cast<ListType>()->getElementType();
+        auto elem_type = w.static_type->kind() == ListType::Kind
+            ? w.static_type->cast<ListType>()->getElementType()
+            : w.static_type->cast<VariableLengthTupleType>()->getElementType();
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue& item : lst) {
