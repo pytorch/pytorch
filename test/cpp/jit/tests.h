@@ -9,26 +9,38 @@
 namespace torch {
 namespace jit {
 #define TH_FORALL_TESTS(_)                        \
+  _(ADFormulas)                                   \
   _(Attributes)                                   \
   _(Blocks)                                       \
   _(CallStack)                                    \
   _(CallStackCaching)                             \
+  _(CodeTemplate)                                 \
   _(ControlFlow)                                  \
+  _(CreateAutodiffSubgraphs)                      \
+  _(CustomOperators)                              \
+  _(CustomOperatorAliasing)                       \
+  _(TemplatedOperatorCreator)                     \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
   _(SchemaMatching)                               \
+  _(Differentiate)                                \
+  _(DifferentiateWithRequiresGrad)                \
   _(FromQualString)                               \
   _(InternedStrings)                              \
   _(PassManagement)                               \
   _(Proto)                                        \
+  _(RegisterFusionCachesKernel)                   \
   _(SchemaParser)                                 \
   _(TopologicalIndex)                             \
   _(SubgraphUtils)                                \
   _(SubgraphUtilsVmap)                            \
   _(IRParser)                                     \
+  _(ConstantPooling)                              \
+  _(CleanUpPasses)                                \
   _(THNNConv)                                     \
   _(ATenNativeBatchNorm)                          \
   _(NoneSchemaMatch)                              \
+  _(ClassParser)                                  \
   _(UnifyTypes)                                   \
   _(Profiler)                                     \
   _(FallbackGraphs)                               \
@@ -49,10 +61,15 @@ namespace jit {
   _(ModuleDeepcopyAliasing)                       \
   _(ModuleDefine)                                 \
   _(QualifiedName)                                \
+  _(ClassImport)                                  \
+  _(ScriptObject)                                 \
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
+  _(DCE)                                          \
   _(CustomFusionNestedBlocks)                     \
+  _(ClassDerive)                                  \
+  _(SaveLoadTorchbind)                            \
   _(ModuleInterfaceSerialization)                 \
   _(ModuleCloneWithModuleInterface)               \
   _(ClassTypeAddRemoveAttr)                       \
@@ -83,6 +100,7 @@ namespace jit {
   _(LiteInterpreterHierarchyModuleInfo)           \
   _(LiteInterpreterDuplicatedClassTypeModuleInfo) \
   _(LiteInterpreterEval)                          \
+  _(TorchbindIValueAPI)                           \
   _(LiteInterpreterDict)                          \
   _(LiteInterpreterFindAndRunMethod)              \
   _(LiteInterpreterFindWrongMethodName)           \
@@ -91,10 +109,12 @@ namespace jit {
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
-  _(LiteSequentialSampler)
+  _(LiteSequentialSampler)                        \
+  _(FusionAliasing)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
+  _(Fusion)                                         \
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
@@ -199,6 +219,7 @@ namespace jit {
   _(GPU_FusionThreadPredicate)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
+  _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)                     \
