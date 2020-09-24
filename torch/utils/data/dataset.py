@@ -2,10 +2,10 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm, randint
+from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Sized
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -252,7 +252,7 @@ class ChainDataset(IterableDataset):
             total += len(d)  # type: ignore
         return total
 
-class ShuffleDataset(IterableDataset):
+class ShuffleDataset(IterableDataset[T_co]):
     r"""Dataset shuffled from the original dataset.
 
     This class is useful to shuffle the existing dataset. The buffer with buffer_size 
@@ -266,27 +266,27 @@ class ShuffleDataset(IterableDataset):
         dataset (Dataset): The original Dataset.
         buffer_size (buffer size): The buffer size for shuffling. 
     """
-    dataset: Dataset[T_co]
-    buffer_size: int
+    dataset: IterableDataset[T_co]
+    buf: List[T_co]
 
-    def __init__(self, dataset: Dataset[T_co], buffer_size: int) -> None:
+    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
         super(ShuffleDataset, self).__init__()
         self.dataset = dataset
         self.buffer_size = buffer_size if buffer_size > 1 else 1
-        # self.buffer_size = min(buffer_size, len(dataset))
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T_co]:
+        from random import randint 
         idx = 0
-        buf = []
+        self.buf = []
         for x in self.dataset:
             if (idx == self.buffer_size):
-                yield buf.pop(randint(0, self.buffer_size, [1]))
+                yield self.buf.pop(randint(0, self.buffer_size - 1))
             else:
                 idx += 1
-            buf.append(x)
+            self.buf.append(x)
         while (idx > 0):
             idx -= 1
-            yield buf.pop(randint(0, idx + 1, [1]))
+            yield self.buf.pop(randint(0, idx))
 
 class Subset(Dataset[T_co]):
     r"""
