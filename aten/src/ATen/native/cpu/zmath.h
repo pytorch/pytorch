@@ -138,6 +138,15 @@ inline c10::complex<double> ceil_impl (c10::complex<double> z) {
   return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
+template<typename T>
+inline c10::complex<T> sgn_impl (c10::complex<T> z) {
+  if (z == c10::complex<T>(0, 0)) {
+    return c10::complex<T>(0, 0);
+  } else {
+    return z / zabs(z);
+  }
+}
+
 template <typename TYPE>
 inline TYPE floor_impl (TYPE z) {
   return std::floor(z);

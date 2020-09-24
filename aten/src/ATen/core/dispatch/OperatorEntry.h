@@ -4,6 +4,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
@@ -228,6 +229,7 @@ private:
 
   std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
+  static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
   // signature_hash_ is set to the hash of the function signature if any of
   // the kernels was created in a way that allowed us to know the function
@@ -250,6 +252,11 @@ private:
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
+
+  // Returns true if kernel_ has entry for any key in ks.
+  bool hasKernelForDispatchKeySet(DispatchKeySet ks) const;
+  // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
+  c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl
