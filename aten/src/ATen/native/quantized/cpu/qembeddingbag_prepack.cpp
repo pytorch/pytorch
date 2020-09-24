@@ -183,60 +183,65 @@ Tensor _qembeddingbag_nbit_prepack_helper(
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
-      bit_width, weight_data, embedding_rows, embedding_cols, output_data);
-#else
-  const auto output_columns = output.size(output.dim() - 1);
+  if (!optimized_qparams) {
+    fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+        bit_width, weight_data, embedding_rows, embedding_cols, output_data);
+  } else {
+#endif // USE_FBGEMM
+    const auto output_columns = output.size(output.dim() - 1);
 
-  for (int row = 0; row < embedding_rows; ++row) {
-    const float* input_row = weight_data + row * embedding_cols;
-    std::uint8_t* output_row = output_data + row * output_columns;
+    for (int row = 0; row < embedding_rows; ++row) {
+      const float* input_row = weight_data + row * embedding_cols;
+      std::uint8_t* output_row = output_data + row * output_columns;
 
-    float Xmin, Xmax;
-    if (optimized_qparams) {
-      std::tie(Xmax, Xmin) = at::choose_qparams_optimized(
-          weight_contig[row], embedding_cols, 200, 0.16, bit_width);
-    } else {
-      Xmin = *std::min_element(input_row, input_row + embedding_cols);
-      Xmax = *std::max_element(input_row, input_row + embedding_cols);
-    }
-    Xmin = static_cast<at::Half>(Xmin);
-    float range = Xmax - Xmin;
-    // Set scale to 1.0f for the corner case of Xmax == Xmin .
-    // Any non-zero scale would work because during quantization
-    // (X - Xmin) / scale will be 0 for all X unless scale is 0.
-    at::Half scale = range == 0 ? 1.0f : range / ((1 << bit_width) - 1);
-    float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
-    if (scale == 0 || std::isinf(inverse_scale)) {
-      // Corner case handling when Xmax == Xmin
-      // Any scale would work because X - Xmin will be 0 for all X
-      scale = 1.0f;
-      inverse_scale = 1.0f;
-    }
-    // Update the scale and zero_point of each row.
-    at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
-        output_row +
-        (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-
-    output_row_scale_zp[0] = scale;
-    output_row_scale_zp[1] = Xmin;
-
-    // Pack the weight values.
-    for (int col = 0; col < embedding_cols; ++col) {
-      float X = input_row[col];
-      std::uint8_t quantized = std::max(
-          0,
-          std::min<int>(lrintf((X - Xmin) * inverse_scale), (1 << bit_width) - 1));
-      // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
-      // and index 1 is packed in the upper 4-bits.
-      if (col % NUM_ELEM_PER_BYTE == 0) {
-        output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+      float Xmin, Xmax;
+      if (optimized_qparams) {
+        std::tie(Xmax, Xmin) = at::choose_qparams_optimized(
+            weight_contig[row], embedding_cols, 200, 0.16, bit_width);
       } else {
-        output_row[col / NUM_ELEM_PER_BYTE] |=
-            (quantized << ((col % NUM_ELEM_PER_BYTE) * bit_width));
+        Xmin = *std::min_element(input_row, input_row + embedding_cols);
+        Xmax = *std::max_element(input_row, input_row + embedding_cols);
       }
-    } // embedding_cols
-  } // embedding_rows
+      Xmin = static_cast<at::Half>(Xmin);
+      float range = Xmax - Xmin;
+      // Set scale to 1.0f for the corner case of Xmax == Xmin .
+      // Any non-zero scale would work because during quantization
+      // (X - Xmin) / scale will be 0 for all X unless scale is 0.
+      at::Half scale = range == 0 ? 1.0f : range / ((1 << bit_width) - 1);
+      float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
+      if (scale == 0 || std::isinf(inverse_scale)) {
+        // Corner case handling when Xmax == Xmin
+        // Any scale would work because X - Xmin will be 0 for all X
+        scale = 1.0f;
+        inverse_scale = 1.0f;
+      }
+      // Update the scale and zero_point of each row.
+      at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
+          output_row +
+          (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+
+      output_row_scale_zp[0] = scale;
+      output_row_scale_zp[1] = Xmin;
+
+      // Pack the weight values.
+      for (int col = 0; col < embedding_cols; ++col) {
+        float X = input_row[col];
+        std::uint8_t quantized = std::max(
+            0,
+            std::min<int>(
+                lrintf((X - Xmin) * inverse_scale), (1 << bit_width) - 1));
+        // We pack 2 4-bit values in a byte. Index 0 is packed in the lower
+        // 4-bits and index 1 is packed in the upper 4-bits.
+        if (col % NUM_ELEM_PER_BYTE == 0) {
+          output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+        } else {
+          output_row[col / NUM_ELEM_PER_BYTE] |=
+              (quantized << ((col % NUM_ELEM_PER_BYTE) * bit_width));
+        }
+      } // embedding_cols
+    } // embedding_rows
+#ifdef USE_FBGEMM
+  }
 #endif // USE_FBGEMM
 
   return output;
