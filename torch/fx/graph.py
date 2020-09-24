@@ -144,7 +144,7 @@ class Graph:
             # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
             name = node.name
         else:
-            name = self._name(node.name)
+            name = self._name(node.target)
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
@@ -286,20 +286,27 @@ class Graph:
                 raise RuntimeError(f'Argument \'{arg}\'{context_str}was used before it has been '
                                    f'defined! Please check that Nodes in the graph are topologically ordered\n{self}')
 
+        seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
-        for node in self.nodes:
+        for node in self._nodes:
+            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr']:
+                raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
 
+            if node.name in seen_names:
+                raise RuntimeError(f'Node redefined name {node.name}!')
+            seen_names.add(node.name)
+
         if hasattr(self, 'result'):
             map_arg(self.result, check_arg)
 
         # Check targets are legit
         if root:
-            for node in self.nodes:
+            for node in self._nodes:
                 if node.op in ['get_attr', 'call_module']:
                     target_atoms = node.target.split('.')
                     m_itr = root
