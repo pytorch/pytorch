@@ -2613,7 +2613,8 @@ class TestAutograd(TestCase):
             # hence we eliminate this non-determinism
             # by making sure that each column of U
             # gets multiplied by the sign of its max (in absolute value) element.
-            # Also, gradcheck manipulates the input, this can also cause the sign flips.
+            # Also, gradcheck changes the content of the input by +/- eps (default to 1e-06)
+            # to compute the numerical gradient which can also cause the signs to flip.
             _, idx = U.abs().max(-2, keepdim=True)
             sign = U.gather(-2, idx).sign()
             U = U * sign

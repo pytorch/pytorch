@@ -382,6 +382,7 @@ def lobpcg(A: Tensor,
       To make sure that `A.grad` is symmetric, so that `A - t * A.grad` is symmetric
       in first-order optimization routines, prior to running `lobpcg`
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
+      The map is performed only when the `A` requires gradients.
 
     Arguments:
 
