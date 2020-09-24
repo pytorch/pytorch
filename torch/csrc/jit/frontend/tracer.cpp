@@ -921,15 +921,15 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-std::vector<FileLineFunc> defaultPythonCallstack() {
-  return std::vector<FileLineFunc>();
+std::vector<StackEntry> defaultPythonCallstack() {
+  return std::vector<StackEntry>();
 }
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
     defaultPythonCallstack);
-std::vector<FileLineFunc> pythonCallstack() {
+std::vector<StackEntry> pythonCallstack() {
   return python_callstack_fn.load()();
 }
-void setPythonCallstack(std::vector<FileLineFunc> (*v)()) {
+void setPythonCallstack(std::vector<StackEntry> (*v)()) {
   python_callstack_fn.store(v);
 }
 

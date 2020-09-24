@@ -143,6 +143,12 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 //  - save profiling events into the profiling state
 //
 
+struct FileLineFunc {
+  std::string filename;
+  size_t line;
+  std::string funcname;
+};
+
 // Profiler state
 struct ProfilerThreadLocalState
     : public c10::MemoryReportingInfoBase {
@@ -227,9 +233,9 @@ struct ProfilerThreadLocalState
       // backward nodes source range corresponds to the forward node
       // TODO: consider using C++ stack trace
       if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-        auto cs = jit::currentCallstack();
+        auto cs = prepareCallstack(jit::currentCallstack());
         if (cs.empty()) {
-          cs = jit::tracer::pythonCallstack();
+          cs = prepareCallstack(jit::tracer::pythonCallstack());
         }
         evt.setStack(callstackStr(cs));
       }
@@ -286,7 +292,24 @@ struct ProfilerThreadLocalState
   }
 
  private:
-  std::vector<std::string> callstackStr(const std::vector<jit::FileLineFunc>& cs) {
+  std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
+    std::vector<FileLineFunc> entries;
+    entries.reserve(cs.size());
+    for (const auto& entry : cs) {
+      auto& range = entry.range;
+      if (range.source()) {
+        auto& src = range.source();
+        if (src && src->filename()) {
+          auto line = src->starting_line_no() +
+              src->lineno_for_offset(range.start());
+          entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
+        }
+      }
+    }
+    return entries;
+  }
+
+  std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
     std::vector<std::string> cs_str;
     cs_str.reserve(cs.size());
     for (const auto& entry : cs) {

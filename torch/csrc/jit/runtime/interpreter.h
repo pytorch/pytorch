@@ -5,6 +5,7 @@
 
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
@@ -127,12 +128,7 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
     const at::Tensor& t);
 
 // current (TLS) TorchScript interpreter callstack
-struct TORCH_API FileLineFunc {
-  std::string filename;
-  size_t line;
-  std::string funcname;
-};
-TORCH_API std::vector<FileLineFunc> currentCallstack();
+TORCH_API std::vector<StackEntry> currentCallstack();
 
 } // namespace jit
 } // namespace torch

@@ -1620,25 +1620,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 };
 
-std::vector<FileLineFunc> currentCallstack() {
-  std::vector<FileLineFunc> entries;
+std::vector<StackEntry> currentCallstack() {
   if (tls_int_state_ptr_) {
     auto cs = tls_int_state_ptr_->callstack();
-    entries.reserve(cs.size());
     std::reverse(cs.begin(), cs.end());
-    for (const auto& entry : cs) {
-      auto& range = entry.range;
-      if (range.source()) {
-        auto& src = range.source();
-        if (src && src->filename()) {
-          auto line = src->starting_line_no() +
-              src->lineno_for_offset(range.start());
-          entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
-        }
-      }
-    }
+    return cs;
   }
-  return entries;
+  return std::vector<StackEntry>();
 }
 
 std::atomic<size_t> InterpreterStateImpl::Frame::num_frames;

@@ -23,16 +23,19 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::vector<FileLineFunc> pythonCallstack() {
+std::vector<StackEntry> pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
-  std::vector<FileLineFunc> entries;
+  std::vector<StackEntry> entries;
 
   while (nullptr != frame) {
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    entries.emplace_back(FileLineFunc{filename, line, funcname});
+    auto source =
+      std::make_shared<Source>(funcname, filename, line);
+    entries.emplace_back(StackEntry{
+        funcname, SourceRange(source, 0, funcname.size())});
     frame = frame->f_back;
   }
   return entries;
@@ -44,10 +47,18 @@ SourceRange getPythonInterpreterSourceRange() {
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {
-     stack_trace << entry.filename << "(" << entry.line << "): " << entry.funcname << "\n";
-     if (!source_filename) {
-      source_filename = entry.filename;
-      source_line = entry.line;
+    auto& range = entry.range;
+    if (range.source()) {
+      auto& src = range.source();
+      if (src && src->filename()) {
+        auto line = src->starting_line_no() +
+            src->lineno_for_offset(range.start());
+        stack_trace << *(src->filename()) << "(" << line << "): " << entry.filename << "\n";
+        if (!source_filename) {
+          source_filename = *(src->filename());
+          source_line = line;
+        }
+      }
     }
   }
 
@@ -132,6 +143,7 @@ void pythonWarn(const std::string& reason) {
 
 void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
+  setPythonCallstack(pythonCallstack);
 
   auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState, std::shared_ptr<TracingState>>(
