@@ -817,9 +817,9 @@ class DistributedDataParallel(Module):
                 is_last_joiner = True
                 i = 0
                 WARN_THRESHOLD = 1000
-                warned = False
+                warnings.simplefilter("once")
                 while not all_procs_joined:
-                    if i > WARN_THRESHOLD and not warned:
+                    if i > WARN_THRESHOLD:
                         my_rank = dist.get_rank(self.process_group)
                         warnings.warn(
                             "Detected uneven input skew of greater "
@@ -828,7 +828,6 @@ class DistributedDataParallel(Module):
                             "other currently active ranks. This level of skew could "
                             "lead to performance degradation during training."
                         )
-                        warned = True
                     # Schedules allreduce to match fwd pass allreduce in non-joined procs
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
