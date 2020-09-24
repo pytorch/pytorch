@@ -2753,7 +2753,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or Scalar): the divisor
+    other (Tensor or Number): the divisor
 
 Keyword args:
     {out}
@@ -9007,7 +9007,7 @@ where ``L`` is the :attr:`window_length`. This function computes:
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 
 Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
 The :attr:`periodic` argument is intended as a helpful shorthand
 to produce a periodic window as input to functions like :func:`torch.stft`.
 

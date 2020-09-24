@@ -132,8 +132,9 @@ void floordiv_integral_kernel(TensorIterator& iter) {
           // Subtracts one from the results of truncation division
           //   if the divisor and dividend have different sign(bit)s
           //   and the remainder of the division is nonzero
-          const auto div_result = std::div(a, b);
-          return (div_result.rem == 0) ? div_result.quot : div_result.quot - 1;
+          const auto quot = a / b;
+          const auto rem = a % b;
+          return rem ? quot - 1 : quot;
         } else {
           // When the sign(bit)s of the divisor and dividend are the same
           //   truncation division is equivalent to floor division
