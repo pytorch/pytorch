@@ -164,6 +164,24 @@ void testExprDoubleTest() {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
+void testExprDisallowBoolArithmetic() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kBool);
+  VarHandle y("y", kBool);
+  std::string error{"arithmetic binary operations on Bool not supported"};
+  ASSERT_THROWS_WITH((x + y), error);
+  ASSERT_THROWS_WITH((x - y), error);
+  ASSERT_THROWS_WITH((x * y), error);
+  ASSERT_THROWS_WITH((x / y), error);
+  ASSERT_THROWS_WITH((x & y), error);
+  ASSERT_THROWS_WITH((x | y), error);
+  ASSERT_THROWS_WITH((x ^ y), error);
+  ASSERT_THROWS_WITH((x << y), error);
+  ASSERT_THROWS_WITH((x >> y), error);
+  ASSERT_THROWS_WITH(Max::make(x, y, /*propagate_nans=*/true), error);
+  ASSERT_THROWS_WITH(Min::make(x, y, /*propagate_nans=*/true), error);
+}
+
 void testExprVectorAdd01() {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
