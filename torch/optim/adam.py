@@ -51,15 +51,6 @@ class Adam(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
-                state['step'] = 0
-                # Exponential moving average of gradient values
-                state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                # Exponential moving average of squared gradient values
-                state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                if group['amsgrad']:
-                    # Maintains max of all exp. moving avg. of sq. grad. values
-                    state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
 
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
@@ -94,7 +85,19 @@ class Adam(Optimizer):
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                     grads.append(p.grad)
+
                     state = self.state[p]
+                    # Lazy state initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        # Exponential moving average of gradient values
+                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        # Exponential moving average of squared gradient values
+                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        if group['amsgrad']:
+                            # Maintains max of all exp. moving avg. of sq. grad. values
+                            state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
 
