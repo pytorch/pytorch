@@ -13,6 +13,8 @@ from functools import wraps
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 
+from typing import Optional
+
 import numpy
 import math
 import warnings
@@ -2727,6 +2729,7 @@ def as_strided(g, self, sizes, strides, offset=None):
     sizes = sym_help._maybe_get_const(sizes, 'is')
     rank = len(strides)
     self_1d = g.op("Reshape", self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    ind: Optional[torch.Tensor]
     if not sym_help._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
         for i, (size, stride) in enumerate(zip(sizes, strides)):
