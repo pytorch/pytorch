@@ -190,7 +190,7 @@ Reducer::Reducer(
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
 // registered from Python API using `register_comm_hook`. `PythonCommHook`
-// enables registering a Python hook and is a sub class of `CommHookInterface`.
+// enables registering a Python hook and is a subclass of `CommHookInterface`.
 // `CommHookInterface` can be used to implement CPP hooks in the future.
 
 Reducer::~Reducer() noexcept(false) {
@@ -425,11 +425,9 @@ std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
 
 void Reducer::set_forward_pass_work_handle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-    at::Tensor& tensor,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
-  forwardPassWorkHandle_.resultTensor = tensor;
   forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
@@ -495,7 +493,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // rebuilt_param_indices_ based on gradient arriving order, and then at the
   // end of finalize_backward(), buckets will be rebuilt based on
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
-  // and initialized. Also we only need to dump tensors and parameter indcies of
+  // and initialized. Also we only need to dump tensors and parameter indices of
   // one replica.
   push_rebuilt_params(index);
 
@@ -573,12 +571,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (divFactor_ == kUnsetDivFactor) {
     divFactor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
-    if (workHandle) {
-      if (!forwardPassWorkHandle_.useStaticWorldSize) {
-        workHandle->wait();
-        at::Tensor& res = forwardPassWorkHandle_.resultTensor;
-        divFactor_ = res.item().to<int>();
-      }
+    if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
+      workHandle->wait();
+      auto results = workHandle->result();
+      // Guard against the results being empty
+      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      at::Tensor& res = results.front();
+      divFactor_ = res.item().to<int>();
     }
   }
 
