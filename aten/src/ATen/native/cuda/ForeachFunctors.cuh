@@ -133,11 +133,15 @@ struct BinaryOpScalarFunctor {
         }
 };
 
-template<typename T, template<class> class Op>
+template<typename T>
 struct BinaryOpScalarListFunctor_ {
-    __device__ void operator() (
+    using io_t = T;
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListScalarListMetadata<1>& tl) {
+        TensorListScalarListMetadata<1>& tl,
+        Op op) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
+
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -145,7 +149,7 @@ struct BinaryOpScalarListFunctor_ {
             T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
-            double y = tl.scalar_vals[tensor_loc];
+            opmath_t y = tl.scalar_vals[tensor_loc];
 
             n -= chunk_idx * chunk_size;
 
@@ -158,7 +162,7 @@ struct BinaryOpScalarListFunctor_ {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]), y));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -176,7 +180,7 @@ struct BinaryOpScalarListFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]), y));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -189,11 +193,15 @@ struct BinaryOpScalarListFunctor_ {
         }
 };
 
-template<typename T, template<class> class Op>
+template<typename T>
 struct BinaryOpScalarListFunctor {
-    __device__ void operator() (
+    using io_t = T;
+    template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListScalarListMetadata<2>& tl) {
+        TensorListScalarListMetadata<2>& tl,
+        Op op) {
+            using opmath_t = typename get_opmath_t<T>::opmath_t;
+
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -204,7 +212,7 @@ struct BinaryOpScalarListFunctor {
             T* out = (T*)tl.addresses[1][tensor_loc];
             out += chunk_idx * chunk_size;
 
-            double y = tl.scalar_vals[tensor_loc];
+            opmath_t y = tl.scalar_vals[tensor_loc];
 
             n -= chunk_idx * chunk_size;
 
@@ -217,7 +225,7 @@ struct BinaryOpScalarListFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]), y));
                     }
                     // store
                     load_store(out, r_x, i_start, 0);
@@ -235,7 +243,7 @@ struct BinaryOpScalarListFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                        r_x[ii] = static_cast<T>(op(static_cast<opmath_t>(r_x[ii]), y));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {

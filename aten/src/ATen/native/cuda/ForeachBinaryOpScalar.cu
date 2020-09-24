@@ -10,6 +10,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
         vec_res.emplace_back(at::native::empty_like(t));
     }

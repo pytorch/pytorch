@@ -8,6 +8,7 @@ template<template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2, Scalar alpha = 1) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: tensors1) {
         vec_res.emplace_back(at::native::empty_like(t));
     }

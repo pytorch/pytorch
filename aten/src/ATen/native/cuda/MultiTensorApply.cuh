@@ -36,11 +36,11 @@ template<int n> struct TensorListMetadata
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
 
-template<int n> struct TensorListScalarListMetadata
+template<typename T, int n> struct TensorListScalarListMetadata
 {
   void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
   int sizes[depth_to_max_tensors_scalarlist[n-1]];
-  double scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
+  get_opmath_t<T>::opmath_t scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
@@ -65,7 +65,7 @@ void multi_tensor_apply(
         TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth.");
         const cuda::OptionalCUDAGuard device_guard(device_of(tensor_lists[0][0]));
         size_t n_tensors = tensor_lists[0].size();
-        TensorListScalarListMetadata<depth> tensorListMeta;
+        TensorListScalarListMetadata<callable::io_t, depth> tensorListMeta;
 
         int loc_block_info = 0;
         int loc_tensor_info = 0;

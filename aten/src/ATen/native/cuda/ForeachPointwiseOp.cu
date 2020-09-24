@@ -8,6 +8,7 @@ template<template<class> class Op>
 std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: input) {
         vec_res.emplace_back(at::native::empty_like(t));
     }

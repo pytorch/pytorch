@@ -8,6 +8,7 @@ template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<double> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
@@ -16,7 +17,11 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<double> s
     tensor_lists.emplace_back(vec_res);
 
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, scalars, BinaryOpScalarListFunctor<scalar_t, Op>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<2>(tensor_lists,
+                              scalars,
+                              BinaryOpScalarListFunctor<scalar_t>(),
+                              Op<opmath_t>());
     });
     return tensor_lists[1];
 }
@@ -27,7 +32,11 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<double> scalars) {
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        multi_tensor_apply<1>(tensor_lists, scalars, BinaryOpScalarListFunctor_<scalar_t, Op>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<1>(tensor_lists,
+                              scalars,
+                              BinaryOpScalarListFunctor_<scalar_t>(),
+                              Op<opmath_t>());
     });
 }
 
