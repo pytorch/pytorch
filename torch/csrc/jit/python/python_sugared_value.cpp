@@ -586,12 +586,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
+  } else if (concreteType_->isIgnoredAttribute(field)) {
+    hint = "attribute was ignored during compilation";
   }
 
   throw ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
-      << " has no attribute '" << field << "' " << hint;
+      << " has no attribute '" << field << "', " << hint;
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {

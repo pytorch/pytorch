@@ -186,6 +186,10 @@ c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
   return c10::nullopt;
 }
 
+bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
+  return data_.ignoredAttributes_.count(name) > 0;
+}
+
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
     findSubmoduleConcreteType(const std::string& name) const {
   const auto it = std::find_if(
@@ -279,6 +283,10 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
+}
+
+void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
+  ignoredAttributes_.emplace(std::move(name));
 }
 
 void ConcreteModuleType::dump() const {
