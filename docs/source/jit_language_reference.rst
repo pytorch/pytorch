@@ -355,10 +355,6 @@ like any other TorchScript type:
 TorchScript Enums
 ^^^^^^^^^^^^^^^^^^^
 
-.. warning::
-
-    TorchScript enum support is experimental..
-
 Python enums can be used in TorchScript without any extra annotation or code:
 
 ::
