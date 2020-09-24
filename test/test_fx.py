@@ -176,10 +176,12 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        t = Proxy(g.result)
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
+        t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
-        g.output((t + t).node)
-        gm = GraphModule(m, g)
+        new_g.output((t + t).node)
+        gm = GraphModule(m, new_g)
         gm.graph.lint(gm)
         self.assertEqual(gm(3, 4), 14)
 
@@ -480,9 +482,10 @@ class TestFX(JitTestCase):
         traced.graph.lint(traced)
 
         def transform(traced):
-            new_graph = copy.deepcopy(traced.graph)
+            new_graph = torch.fx.Graph()
+            new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
+                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
@@ -638,7 +641,7 @@ class TestFX(JitTestCase):
         c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
-        nodes = graph.nodes
+        nodes = graph._nodes
         nodes[2], nodes[3] = nodes[3], nodes[2]
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()

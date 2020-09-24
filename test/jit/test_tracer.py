@@ -1310,6 +1310,39 @@ class TestTracer(JitTestCase):
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
 
+        # Note that Bar's forward can only be traced, but not scripted
+        class Bar(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.export
+            def addTwo(self, x):
+                return x + 2
+
+            def forward(self, input):
+                return (lambda a: a + 1)(input)
+
+        # When tracing Bar as a submodule, we only want to script the
+        # exported methods, and we want to keep the forwards still
+        # being traced.
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.bar = Bar()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.bar(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['addOne']
+        check(traced)
+
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):
             @staticmethod
