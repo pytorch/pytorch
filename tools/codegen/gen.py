@@ -352,8 +352,8 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 
         # scattered_cpp_args: ['dtype', 'layout', 'device', 'pin_memory']
         # gathered_cpp_args: ['options']
-        scattered_cpp_args = cpp.scattered_cpp_arguments(f.func)
-        gathered_cpp_args = cpp.gathered_cpp_arguments(f.func)
+        scattered_cpp_args = cpp.cpp_arguments(f.func, gathered=False)
+        gathered_cpp_args = cpp.cpp_arguments(f.func, gathered=True)
         scattered_cpp_args_str = ', '.join(map(str, scattered_cpp_args))
         gathered_cpp_args_str = ', '.join(map(str, gathered_cpp_args))
         scattered_cpp_args_str_no_default = ', '.join(map(lambda a: a.str_no_default(), scattered_cpp_args))
@@ -365,10 +365,10 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         # gathering_dispatcher_expr:  ['TensorOptions().dtype(dtype).layout(layout)...']
         # TODO gathered_dispatcher_expr and gathering_dispatcher_expr are only needed for non-c10-full ops,
         #      remove later.
-        scattered_dispatcher_exprs = dispatcher.cpparguments_exprs(scattered_cpp_args, process_tensoroptions=None)
-        gathered_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=None)
-        scattering_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions='scatter')
-        gathering_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions='gather')
+        scattered_dispatcher_exprs = dispatcher.cpparguments_exprs(scattered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+        gathered_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+        scattering_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.SCATTER)
+        gathering_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.GATHER)
 
         scattering_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, scattering_dispatcher_exprs))
         gathering_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, gathering_dispatcher_exprs))
@@ -453,8 +453,8 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 
         # scattered_cpp_args: ['dtype', 'layout', 'device', 'pin_memory']
         # gathered_cpp_args: ['options']
-        scattered_cpp_args = cpp.scattered_cpp_arguments(f.func, method=True)
-        gathered_cpp_args = cpp.gathered_cpp_arguments(f.func, method=True)
+        scattered_cpp_args = cpp.cpp_arguments(f.func, method=True, gathered=False)
+        gathered_cpp_args = cpp.cpp_arguments(f.func, method=True, gathered=True)
 
         scattered_cpp_args_exclude_this = [a for a in scattered_cpp_args if not isinstance(a.argument, ThisArgument)]
         scattered_cpp_args_exclude_this_str = ', '.join(str(a) for a in scattered_cpp_args_exclude_this)
@@ -469,10 +469,10 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         # gathering_dispatcher_expr:  ['TensorOptions().dtype(dtype).layout(layout)...']
         # TODO gathered_dispatcher_expr and gathering_dispatcher_expr are only needed for non-c10-full ops,
         #      remove later.
-        scattered_dispatcher_exprs = dispatcher.cpparguments_exprs(scattered_cpp_args, process_tensoroptions=None)
-        gathered_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=None)
-        scattering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions='scatter')
-        gathering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions='gather')
+        scattered_dispatcher_exprs = dispatcher.cpparguments_exprs(scattered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+        gathered_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+        scattering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions=dispatcher.ProcessTensoroptions.SCATTER)
+        gathering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions=dispatcher.ProcessTensoroptions.GATHER)
 
         scattering_dispatcher_exprs_exclude_this_str = ', '.join(map(lambda a: a.expr, scattering_dispatcher_exprs_exclude_this))
         gathering_dispatcher_exprs_exclude_this_str = ', '.join(map(lambda a: a.expr, gathering_dispatcher_exprs_exclude_this))
@@ -881,7 +881,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
-    cpp_args = cpp.gathered_cpp_arguments(f.func)
+    cpp_args = cpp.cpp_arguments(f.func, gathered=True)
     arguments = [
         compute_cpp_argument_yaml(
             cpp_a, schema_order=False,
@@ -900,7 +900,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         for a in schema_order_jit_arguments
     ]
 
-    cpp_schema_order_types = [cpp.to_cpp_argument(a).type for a in schema_order_jit_arguments]
+    cpp_schema_order_types = [cpp.argument(a).type for a in schema_order_jit_arguments]
     cpp_returns = cpp.returns_type(f.func.returns)
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
