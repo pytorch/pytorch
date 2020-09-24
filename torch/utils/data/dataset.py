@@ -276,7 +276,7 @@ class ShuffleDataset(IterableDataset):
         # self.buffer_size = min(buffer_size, len(dataset))
 
     def __iter__(self):
-        idx = 0;
+        idx = 0
         buf = []
         for x in self.dataset:
             if (idx == self.buffer_size):
@@ -286,7 +286,7 @@ class ShuffleDataset(IterableDataset):
             buf.append(x)
         while (idx > 0):
             idx -= 1
-            yield buf.pop(randint(0, idx+1, [1]))
+            yield buf.pop(randint(0, idx + 1, [1]))
 
 class Subset(Dataset[T_co]):
     r"""
