@@ -2428,6 +2428,12 @@ Examples::
             [-0.2278, -0.1068, -1.4678,  6.3936]])
 """.format(**common_args))
 
+add_docstr(torch.divide, r"""
+divide(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.div`.
+""")
+
 add_docstr(torch.dot,
            r"""
 dot(input, tensor) -> Tensor
@@ -5023,8 +5029,7 @@ Example::
     torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
 """.format(**single_dim_common))
 
-add_docstr(torch.mul,
-           r"""
+add_docstr(torch.mul, r"""
 mul(input, other, *, out=None)
 
 Multiplies each element of the input :attr:`input` with the scalar
@@ -5086,6 +5091,12 @@ Example::
             [-0.1614, -0.0382,  0.1645, -0.7021],
             [ 0.0360,  0.0085, -0.0367,  0.1567],
             [ 0.4312,  0.1019, -0.4394,  1.8753]])
+""".format(**common_args))
+
+add_docstr(torch.multiply, r"""
+multiply(input, other, *, out=None)
+
+Alias for :func:`torch.mul`.
 """.format(**common_args))
 
 add_docstr(torch.multinomial,
@@ -6590,6 +6601,31 @@ Example::
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
     tensor([ False, True,  False,  False])
+""".format(**common_args))
+
+add_docstr(torch.sgn,
+           r"""
+sgn(input, *, out=None) -> Tensor
+
+For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
+elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
+returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+
+:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
+:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> x.sgn()
+    tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
 add_docstr(torch.sin,
@@ -8478,6 +8514,12 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.fft` is deprecated and will be removed in
+    PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
+    functions, instead, by importing :ref:`torch.fft <torch-fft-module>` and
+    calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8581,6 +8623,12 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.ifft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8669,6 +8717,13 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. deprecated:: 1.7.0
+    The function :func:`torch.rfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.rfft` for one-sided output, or
+    :func:`torch.fft.fft` for two-sided output.
+
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
@@ -8740,6 +8795,13 @@ this normalizes the result by multiplying it with
     See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
+
+.. deprecated:: 1.7.0
+    The function :func:`torch.irfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.irfft` for one-sided input, or
+    :func:`torch.fft.ifft` for two-sided input.
 
 .. warning::
     Generally speaking, input to this function should contain values

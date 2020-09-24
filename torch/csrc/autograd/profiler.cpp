@@ -389,9 +389,6 @@ void pushProfilingCallbacks() {
 
 const int kCUDAWarmupStart = 5;
 
-// temp. workaround for dispatcher ::Profiler key
-thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -446,12 +443,10 @@ void enableProfiler(const ProfilerConfig& new_config) {
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
-  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -473,22 +468,29 @@ void enableProfiler(const ProfilerConfig& new_config) {
   state->mark("__start_profile", false);
 }
 
-thread_event_lists disableProfiler() {
+thread_event_lists disableProfiler(bool cleanupTLSState, bool consolidate) {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  std::shared_ptr<c10::DebugInfoBase> state;
+  if (cleanupTLSState) {
+    state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  } else {
+    state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
+  }
+
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
-  g_.pop_back();
-  at::removeCallback(state_ptr->callbackHandle());
+  if (cleanupTLSState) {
+    at::removeCallback(state_ptr->callbackHandle());
+  }
 
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (!consolidate || state_ptr->config().state == ProfilerState::NVTX) {
     return thread_event_lists();
   }
 
   state_ptr->mark("__stop_profile");
-
+  // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
 
@@ -518,23 +520,27 @@ void Event::record(bool record_cuda) {
       " elements to reconstruct Event.");
 
   // Reconstruct input shapes from ivalues.
-  auto shapeListFromServer = ivalues.get(EventIValueIdx::SHAPES);
+  auto shapeListIValue = ivalues.get(EventIValueIdx::SHAPES);
   TORCH_INTERNAL_ASSERT(
-    shapeListFromServer.isList(),
-    "Expected profiler shapes IValue to contain type c10::impl::GenericLIst."
+    shapeListIValue.isList(),
+    "Expected profiler shapes IValue to contain type c10::impl::GenericList."
   );
 
-  auto shapeList = shapeListFromServer.toList();
-  std::vector<std::vector<int64_t>> shapesFromServer;
-  shapesFromServer.reserve(shapeList.size());
+  auto shapeList = shapeListIValue.toList();
+  std::vector<std::vector<int64_t>> shapes;
+  shapes.reserve(shapeList.size());
   for (size_t i = 0 ; i < shapeList.size(); ++i) {
     std::vector<int64_t> s;
-    auto curShapesList = shapeList.get(i).toList();
+    auto shapeIValue = shapeList.get(i);
+    TORCH_INTERNAL_ASSERT(
+        shapeIValue.isList(),
+        "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
+    auto curShapesList = shapeIValue.toList();
     s.reserve(curShapesList.size());
     for (size_t j = 0; j < curShapesList.size(); ++j) {
       s.emplace_back(curShapesList.get(j).toInt());
     }
-    shapesFromServer.emplace_back(s);
+    shapes.emplace_back(s);
   }
 
   Event evt(
@@ -544,7 +550,7 @@ void Event::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::THREAD_ID).toInt(), // thread_id
       static_cast<at::RecordFunctionHandle>(
           ivalues.get(EventIValueIdx::HANDLE).toDouble()), // handle
-      std::move(shapesFromServer), // input shapes
+      std::move(shapes), // input shapes
       ivalues.get(EventIValueIdx::NODE_ID).toInt(), // node id
       true, // is remote
       ivalues.get(EventIValueIdx::CPU_MEM_USAGE).toInt(), // cpu_mem_usage
