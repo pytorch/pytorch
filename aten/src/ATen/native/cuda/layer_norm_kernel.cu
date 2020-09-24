@@ -306,10 +306,8 @@ void LayerNormKernelImpl(
       X.scalar_type(),
       "LayerNormKernelImpl",
       [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormKernelImpl", [&] {
-          LayerNormKernelImplInternal<scalar_t>(
-              X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-        });
+        LayerNormKernelImplInternal<scalar_t>(
+            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
 }
 
@@ -434,11 +432,8 @@ void LayerNormBackwardKernelImpl(
       X.scalar_type(),
       "LayerNormBackwardKernelImpl",
       [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(
-            scalar_t, "LayerNormBackwardKernelImpl", [&] {
-              LayerNormBackwardKernelImplInternal<scalar_t>(
-                  dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-            });
+        LayerNormBackwardKernelImplInternal<scalar_t>(
+            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 
