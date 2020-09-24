@@ -327,7 +327,7 @@ struct Resource final {
     struct {
       std::vector<Handle<Fence, void(*)(Fence&)>> pool;
       std::vector<VkFence> free;
-      std::vector<VkFence> in_use;
+      std::vector<VkFence> used;
     } fence_;
   } pool;
 
@@ -376,8 +376,6 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
-
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator_, allocation_, Access::Read),
@@ -386,8 +384,6 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
-
   static_assert(
       (kAccess == Access::Read) ||
       (kAccess == Access::Write) ||
