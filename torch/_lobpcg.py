@@ -144,25 +144,22 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
 
     # compute U_ortho, a basis for the orthogonal complement to the span(U),
-    # by projecting a random [..., m, m-k] matrix onto the subspace spanned
+    # by projecting a random [..., m, m - k] matrix onto the subspace spanned
     # by the columns of U.
     #
-    # fix seed for determinism
-    torch_curr_random_state = torch.get_rng_state()
-    torch.manual_seed(13)
+    # fix generator for determinism
+    gen = torch.Generator(A.device)
 
     # orthogonal complement to the span(U)
     U_ortho = proj_U_ortho.matmul(
         torch.randn(
             (*A.shape[:-1], A.size(-1) - D.size(-1)),
             dtype=A.dtype,
-            device=A.device
+            device=A.device,
+            generator=gen
         )
     )
     U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
-
-    # restore random state
-    torch.set_rng_state(torch_curr_random_state)
 
     # compute the coefficients of the characteristic polynomial of the tensor D.
     # Note that D is diagonal, so the diagonal elements are exactly the roots

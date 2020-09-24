@@ -2592,7 +2592,7 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
-    @slowTest
+    #@slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
 
@@ -2629,8 +2629,8 @@ class TestAutograd(TestCase):
             # Custom gradient vectors for better stability due to some
             # non-determinism in the lobpcg's forward.
             # Note it is not required if symeig is in forward instead (tested).
-            D_grad = torch.rand(*A.shape[:-2], k) / 10
-            U_grad = torch.rand(*A.shape[:-1], k) / 10
+            D_grad = torch.rand(*A.shape[:-2], k) / 100
+            U_grad = torch.rand(*A.shape[:-1], k) / 100
             gradgradcheck(lambda A: func(k, A, largest), A, [D_grad, U_grad], atol=1e-4)
 
             # check whether A.grad is symmetric
