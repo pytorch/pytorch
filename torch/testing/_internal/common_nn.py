@@ -5063,7 +5063,7 @@ class CriterionTest(InputVariableMixin, TestBase):
 
         # Convert input, target and module parameters to dtype
         if dtype is not None:
-            if not isinstance(cpu_target, torch.LongTensor) and "CTCLoss" not in str(test_case):
+            if not isinstance(cpu_target, torch.LongTensor) and not cpu_target.is_floating_point and "CTCLoss" not in str(test_case):
                 raise RuntimeError("not CTCLoss")
             cpu_input = convert_dtype(cpu_input, dtype, True)
             # NLLLoss requires target to be LongTensor
