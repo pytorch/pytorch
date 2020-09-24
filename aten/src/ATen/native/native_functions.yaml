@@ -3676,11 +3676,13 @@
   use_c10_dispatcher: full
   dispatch:
     SparseCPU: softmax_sparse_cpu
+    SparseCUDA: softmax_sparse_cuda
 
 - func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU: softmax_backward_sparse_cpu
+    SparseCUDA: softmax_backward_sparse_cuda
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -3693,11 +3695,13 @@
   use_c10_dispatcher: full
   dispatch:
     SparseCPU: log_softmax_sparse_cpu
+    SparseCUDA: log_softmax_sparse_cuda
 
 - func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU: log_softmax_backward_sparse_cpu
+    SparseCUDA: log_softmax_backward_sparse_cuda
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   use_c10_dispatcher: full
@@ -4309,6 +4313,10 @@
   variants: function
 
 - func: _saturate_weight_to_fp16(Tensor weight) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (float, float)
   use_c10_dispatcher: full
   variants: function
 
@@ -7935,6 +7943,26 @@
   variants: function
 
 - func: fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ifftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_rfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_irfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
   variants: function
