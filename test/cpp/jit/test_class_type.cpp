@@ -38,7 +38,7 @@ TEST(ClassTypeTest, AddRemoveConstant) {
   auto cls = ClassType::create("foo.bar", cu);
   cls->addConstant("const1", IValue(1));
   cls->addConstant("const2", IValue(2));
-  cls->addConstant("const3", IValue(2));
+  cls->addConstant("const3", IValue(3));
   ASSERT_EQ(cls->numConstants(), 3);
   ASSERT_TRUE(cls->hasConstant("const1"));
   ASSERT_TRUE(cls->hasConstant("const2"));
