@@ -163,7 +163,6 @@ def preprocess_file_and_save_result(
         is_pytorch_extension=False,
         clean_ctx=None,
         show_progress=True):
-    print(f"Hipifying filepath:{filepath} with output_directory:{output_directory}")
     result = preprocessor(output_directory, filepath, all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
     fin_path = os.path.join(output_directory, filepath)
@@ -760,7 +759,6 @@ def preprocessor(output_directory, filepath, all_files, includes, stats, hip_cla
                     return m.group(0)
                 # Hipify header file first if needed
                 if header_filepath not in HIPIFY_FINAL_RESULT:
-                    print(f"header_dir: {header_dir}, header_filepath: {header_filepath}")
                     preprocess_file_and_save_result(output_directory, os.path.relpath(header_filepath, output_directory), all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
                 return templ.format(os.path.relpath(HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"], header_dir))
 
