@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -130,7 +130,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
     TORCH_CHECK(
         torch::distributed::rpc::getAllowJitRRefPickle() == true,
         "RRef jit pickling is only allowed inside RPC calls.");
@@ -166,7 +166,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
