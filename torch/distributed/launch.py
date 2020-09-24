@@ -83,13 +83,13 @@ Set your device to local rank using either
 
 ::
 
-    >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
+    >>> torch.cuda.set_device(args.local_rank)  # before your code runs
 
 or
 
 ::
 
-    >>> with torch.cuda.device(arg.local_rank):
+    >>> with torch.cuda.device(args.local_rank):
     >>>    # your code to run
 
 3. In your training program, you are supposed to call the following function
@@ -111,8 +111,8 @@ here is how to configure it.
 ::
 
     model = torch.nn.parallel.DistributedDataParallel(model,
-                                                      device_ids=[arg.local_rank],
-                                                      output_device=arg.local_rank)
+                                                      device_ids=[args.local_rank],
+                                                      output_device=args.local_rank)
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
