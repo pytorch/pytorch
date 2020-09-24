@@ -281,7 +281,6 @@ UNPACK_METHODS = {
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
     'c10::optional<ArrayRef<double>>': 'doublelistOptional',
-    'ArrayRef<double>': 'doublelist',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',
