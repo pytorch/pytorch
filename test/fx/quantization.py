@@ -269,6 +269,8 @@ class Quantizer:
 
         for node in self.graph.nodes:
             root_node, obj = self.matches.get(node.name, (None, None))
+            if node.op == 'return':
+                continue
             if root_node is None:
                 # not quantized just copy it
                 env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))

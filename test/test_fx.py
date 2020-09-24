@@ -176,7 +176,7 @@ class TestFX(JitTestCase):
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
         new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        t = Proxy(new_g.nodes[-2])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -276,7 +276,8 @@ class TestFX(JitTestCase):
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
-            for n in mod.graph.nodes:
+            nodes = mod.graph.nodes
+            for n in nodes:
                 target, args, out_name = n.target, n.args, n.name
                 assert len(n.kwargs) == 0, "kwargs currently not supported"
 
@@ -299,9 +300,10 @@ class TestFX(JitTestCase):
                         else:
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
-
+                elif n.op == 'return':
+                    continue
                 else:
-                    raise RuntimeError('Unsupported opcode' + n.op)
+                    raise RuntimeError('Unsupported opcode ' + n.op)
 
             interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
             # Load constants
@@ -312,7 +314,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            interpreter.set_output_name(mod.graph.result.name)
+            assert isinstance(mod.graph.result, torch.fx.Node)
+            interpreter.set_output_name(nodes[-1].args.name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -396,8 +399,9 @@ class TestFX(JitTestCase):
         m = M()
         g = TaggingTracer().trace(m).graph
         for n in g.nodes:
-            self.assertTrue(hasattr(n, 'tag'))
-            self.assertEqual(n.tag, 'foo')
+            if n.op != 'return':
+                self.assertTrue(hasattr(n, 'tag'))
+                self.assertEqual(n.tag, 'foo')
 
     def test_tensor_attribute(self):
         class TensorAttribute(torch.nn.Module):
@@ -471,7 +475,7 @@ class TestFX(JitTestCase):
             new_graph = torch.fx.Graph()
             new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
+                op='call_method', target='neg', args=(new_graph.nodes[-2],), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
