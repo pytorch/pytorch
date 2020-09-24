@@ -537,6 +537,45 @@ class TestTEFuser(JitTestCase):
                 )
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_minmax_int_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(fn(x, y), z)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+        binary_ops = [
+            torch.min,
+            torch.max
+        ]
+        devices = ["cuda"]
+        for dtype, op, device in product(dtypes, binary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                z = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
