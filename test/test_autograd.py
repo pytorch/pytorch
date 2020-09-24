@@ -2592,7 +2592,7 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
-    #@slowTest
+    @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
 
