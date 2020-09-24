@@ -23,17 +23,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-namespace {
-
-// Evaluates a constant expression and returns its value.
-template <typename T>
-static T EvalConstExpr(const ExprHandle& expr) {
-  ExprEval<SimpleIREvaluator> eval(expr);
-  return eval.value<T>();
-}
-
-} // namespace
-
 class IndexFlattener : public IRMutator {
  public:
   Stmt* flatten(Stmt* s) {
