@@ -12,10 +12,10 @@ from . import _prctl_pr_set_pdeathsig
 class ProcessException(Exception):
     __slots__ = ["error_index", "error_pid"]
 
-    def __init__(self, msg: str, error_index: int, pid: int):
+    def __init__(self, msg: str, error_index: int, error_pid: int):
         super().__init__(msg)
         self.error_index = error_index
-        self.pid = pid
+        self.error_pid = error_pid
 
 
 class ProcessRaisedException(ProcessException):
