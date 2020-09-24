@@ -219,24 +219,39 @@ Autograd for Complex Numbers
 **What notion of complex derivative does PyTorch use?**
 *******************************************************
 
-PyTorch follows `JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
-convention for autograd for Complex Numbers.
+PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
+output. PyTorch's autograd convention for complex numbers allows gradient value to be used in
+Gradient Descent with the same update rule as that in the case of real numbers. This convention works for
+optimization problems where the objective function is real valued.
 
-Suppose we have a function :math:`F: ℂ → ℂ` which we can decompose into functions u and v
-which compute the real and imaginary parts of the function:
+Suppose we have a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
+and can be decomposed into functions u and v which compute the real and imaginary parts of the function:
 
     .. code::
 
         def F(z):
             x, y = real(z), imag(z)
-            return u(x, y) + v(x, y) * 1j
+            s = u(x, y) + v(x, y) * 1j
+            return s
 
-where :math:`1j` is a unit imaginary number.
+where :math:`1j` is a unit imaginary number and `u` and `v` are :math:`ℝ^{2} → ℝ^{2}` functions.
 
-We define the :math:`JVP` for function :math:`F` at :math:`(x, y)` applied to a tangent
-vector :math:`c+dj \in C` as:
+We define the Vector-Jacobian Product :math:`VJP` of :math:`F` at :math:`x + yj` for grad output vector :math:`grad_out` as:
 
-    .. math:: \begin{bmatrix} 1 & 1j \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
+    .. math:: grad_out^{*} * \frac{\partial s}{\partial z^{*}} + grad_out * (\frac{\partial s}{\partial z})^{*}
+
+where
+    .. math:: \frac{\partial s}{\partial z^{*}} = 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j)
+
+and
+
+    .. math:: \frac{\partial s}{\partial z} = 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j)
+
+are Conjugate Wirtinger and Wirtinger derivatives respectively.
+
+For `grad_out = c+dj \in C`, the :math:`VJP` can also be expressed as:
+
+    .. math:: \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
 
 where
 
@@ -245,49 +260,42 @@ where
             \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
             \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
 
-This is similar to the definition of the JVP for a function defined from :math:`R^2 → R^2`, and the multiplication
-with :math:`[1, 1j]^T` is used to identify the result as a complex number.
+The key assumption made in the derivation of the above formula is that function :math:`F` is a part of a
+real valued function. For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
-We define the :math:`VJP` of :math:`F` at :math:`(x, y)` for a cotangent vector :math:`c+dj \in C` as:
+**What happens for cross-domain functions?**
+*********************************************
 
-    .. math:: \begin{bmatrix} c & -d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -1j \end{bmatrix}
+The above formula can also be verified to be correct for cross-domain functions functions.
 
-In PyTorch, the `VJP` is mostly what we care about, as it is the computation performed when we do backward
-mode automatic differentiation. Notice that d and :math:`1j` are negated in the formula above. Please look at
-the `JAX docs <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
-to get explanation for the negative signs in the formula.
+The :math:`VJP` for a function :math:`F: ℂ → ℝ`:
 
-**What happens if I call backward() on a complex scalar?**
-*******************************************************************************
+    .. code::
 
-The gradient for a complex function is computed assuming the input function is a holomorphic function.
-This is because for general :math:`ℂ → ℂ` functions, the Jacobian has 4 real-valued degrees of freedom
-(as in the `2x2` Jacobian matrix above), so we can’t hope to represent all of them with in a complex number.
-However, for holomorphic functions, the gradient can be fully represented with complex numbers due to the
-Cauchy-Riemann equations that ensure that `2x2` Jacobians have the special form of a scale-and-rotate
-matrix in the complex plane, i.e. the action of a single complex number under multiplication. And so, we can
-obtain that gradient using backward which is just a call to `vjp` with covector `1.0`.
+        def F(z):
+            x, y = real(z), imag(z)
+            s = u(x, y)
+            return s
 
-The net effect of this assumption is that the partial derivatives of the imaginary part of the function
-(:math:`v(x, y)` above) are discarded for :func:`torch.autograd.backward` on a complex scalar
-(e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
+at :math:`x + yj` can be simplified to be written as:
 
-For any other desired behavior, you can specify the covector `grad_output` in :func:`torch.autograd.backward` call accordingly.
+    .. math:: real(grad_out) * \frac{\partial s}{\partial z^{*}}
 
-**How are the JVP and VJP defined for cross-domain functions?**
-***************************************************************
+Note that the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other.
 
-Based on formulas above and the behavior we expect to see (going from :math:`ℂ → ℝ^2 → ℂ` should be an identity),
-we use the formula given below for cross-domain functions.
+The :math:`VJP` for a function :math:`F: ℝ → ℂ`:
 
-The :math:`JVP` and :math:`VJP` for a :math:`f1: ℂ → ℝ^2` are defined as:
+    .. code::
 
-    .. math:: JVP = J * \begin{bmatrix} c \\ d \end{bmatrix}
+        def F(z):
+            x = real(z)     # z = real(z)
+            s = u(x, y) + v(x, y) * 1j
+            return s
 
-    .. math:: VJP = \begin{bmatrix} c & d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -1j \end{bmatrix}
+at :math:`x + yj` can be simplified to be written as:
 
-The :math:`JVP` and :math:`VJP` for a :math:`f1: ℝ^2 → ℂ` are defined as:
+    .. math:: real(grad_out^{*} * \frac{\partial s}{\partial z^{*}} + grad_out * (\frac{\partial s}{\partial z^{*}})^{*})
 
-    .. math:: JVP = \begin{bmatrix} 1 & 1j \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix} \\ \\
-
-    .. math:: VJP = \begin{bmatrix} c & -d \end{bmatrix} * J
+Note that the gradient in this case equals to the real value of the result obtained using the above formula. This is because
+in the derivation of the formula earlier, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
+from scratch for an :math:`F: R → ℂ`, it can be verified that taking the real value of formula above gives the correct gradient.
