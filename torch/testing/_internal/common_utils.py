@@ -50,7 +50,6 @@ import torch.backends.mkl
 from enum import Enum
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
-import torch.distributed as c10d
 
 torch.backends.disable_global_flags()
 
@@ -64,12 +63,6 @@ class ProfilingMode(Enum):
     LEGACY = 1
     SIMPLE = 2
     PROFILING = 3
-
-def create_device(interface=None):
-    if sys.platform == 'win32' or interface is None:
-        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
-    else:
-        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)

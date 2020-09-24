@@ -10,9 +10,10 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_gloo
+from torch.testing._internal.common_distributed import requires_gloo, \
+    create_device
 from torch.testing._internal.common_utils import TestCase, load_tests, \
-    run_tests, skipIfRocm, create_device
+    run_tests, skipIfRocm
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
 
 

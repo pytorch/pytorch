@@ -153,6 +153,13 @@ TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
+def create_device(interface=None):
+    if sys.platform == 'win32' or interface is None:
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
+    else:
+        return c10d.ProcessGroupGloo.create_device(interface=interface)
+
+
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 

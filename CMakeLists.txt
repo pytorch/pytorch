@@ -229,7 +229,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 if(WIN32)
   set(USE_TENSORPIPE OFF)
-  message(WARNING "Tensorpipe cannot be used on Windows. Set it to OFF")
+  message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we

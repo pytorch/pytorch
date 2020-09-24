@@ -684,6 +684,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               options.devices.push_back(
                   ::c10d::ProcessGroupGloo::createDefaultDevice());
             }
+
             options.timeout = timeout;
             options.threads = options.devices.size() * 2;
             return std::make_shared<::c10d::ProcessGroupGloo>(

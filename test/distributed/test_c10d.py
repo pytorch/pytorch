@@ -29,11 +29,10 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
-    simple_sparse_reduce_tests, skip_if_win32
+    simple_sparse_reduce_tests, skip_if_win32, create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_connect_failures, create_device, ADDRESS_IN_USE, CONNECT_TIMEOUT, \
-    TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

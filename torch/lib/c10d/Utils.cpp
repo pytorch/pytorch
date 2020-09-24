@@ -16,10 +16,8 @@
 #include <memory>
 #include <string>
 #include <thread>
-#endif
 
 namespace c10d {
-#ifndef _WIN32
 namespace tcputil {
 
 namespace {
@@ -358,5 +356,5 @@ std::tuple<int, std::string> accept(
       socket, sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addr)));
 }
 } // namespace tcputil
-#endif
 } // namespace c10d
+#endif
