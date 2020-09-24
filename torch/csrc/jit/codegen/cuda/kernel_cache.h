@@ -44,7 +44,7 @@ class TORCH_CUDA_API InputsIdLookup {
   // the lookup cache. This is needed because lookup shortcut is also cached in
   // nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
   // see [ Note -- 2 level cache implementation ]
-  TORCH_CUDA_API IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
 
   // debugging API
   size_t size() const {
