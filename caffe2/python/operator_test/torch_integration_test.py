@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -7,9 +7,11 @@ import struct
 import torch
 import unittest
 
-from caffe2.python import core, workspace
+from caffe2.python import core, dyndep, workspace
 from hypothesis import given, settings
 from scipy.stats import norm
+
+dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/operators:calibration_op')
 
 
 def generate_rois(roi_counts, im_dims):
@@ -874,6 +876,71 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_gather_ranges_to_dense_op(self):
+        data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
+        ranges = np.array([[[2, 4]], [[0, 0]]])
+        key = np.array([0, 1, 3, 2, 1, 0, 1, 0])
+        lengths = np.array([4])
+        min_observation = 2
+        max_mismatched_ratio = 0.5
+        max_empty_ratio = 1.0
+
+        outputs_name = ["X_{}".format(i) for i in range(len(lengths))]
+        ref_op = core.CreateOperator(
+            "GatherRangesToDense",
+            ["data", "ranges", "key"],
+            outputs_name,
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+        workspace.FeedBlob("data", data)
+        workspace.FeedBlob("ranges", ranges)
+        workspace.FeedBlob("key", key)
+        workspace.RunOperatorOnce(ref_op)
+        ref_outputs = []
+        for output_name in outputs_name:
+            ref_outputs.append(workspace.FetchBlob(output_name))
+
+        outputs = torch.ops._caffe2.GatherRangesToDense(
+            torch.from_numpy(data),
+            torch.from_numpy(ranges),
+            torch.from_numpy(key),
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+
+        self.assertEqual(len(ref_outputs), len(outputs))
+        for i in range(0, len(ref_outputs)):
+            np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
+
+    def test_prior_correct_calibration_prediction_op(self):
+        beta = np.array([1.0, 2.0], dtype=np.float32)
+        gamma = np.array([3.0, 4.0], dtype=np.float32)
+        pred = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+        ref_op = core.CreateOperator(
+            "PriorCorrectionCalibrationPrediction",
+            ["beta", "gamma", "pred"],
+            ["new_pred"],
+        )
+        workspace.FeedBlob("beta", beta)
+        workspace.FeedBlob("gamma", gamma)
+        workspace.FeedBlob("pred", pred)
+        workspace.RunOperatorOnce(ref_op)
+        ref_output = workspace.FetchBlob("new_pred")
+
+        output = torch.ops._caffe2.PriorCorrectionCalibrationPrediction(
+            torch.from_numpy(beta),
+            torch.from_numpy(gamma),
+            torch.from_numpy(pred),
+        )
+        torch.testing.assert_allclose(ref_output, output)
+
 
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
     @settings(deadline=1000)
