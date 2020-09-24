@@ -177,14 +177,15 @@ def preprocess(
     for filepath in all_files:
         result = preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
 
+        fin_path = os.path.join(output_directory, filepath)
         # Show what happened
         if show_progress:
             print(
-                result["orig_path"], "->",
+                fin_path, "->",
                 result["hipified_path"], result["status"])
 
         if result["hipified_path"] is not None:
-            final_result[filepath]=result
+            final_result[fin_path]=result
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -670,7 +671,6 @@ RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
 """
 Returns a dict with the following keys:
-    "orig_path"     : absolute path of source file
     "hipified_path" : absolute path of hipified source file
     "status"        : "ok"      if hipified file was written out
                       "skipped" if an identical hipified file already existed
@@ -682,7 +682,7 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
 
     with open(fin_path, 'r', encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
-            return {"orig_path": fin_path, "hipified_path": None, "status": "ignored"}
+            return {"hipified_path": None, "status": "ignored"}
         fin.seek(0)
         output_source = fin.read()
 
@@ -757,9 +757,9 @@ def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch,
     if do_write:
         with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
             fout.write(output_source)
-        return {"orig_path": fin_path, "hipified_path": fout_path, "status": "ok"}
+        return {"hipified_path": fout_path, "status": "ok"}
     else:
-        return {"orig_path": fin_path, "hipified_path": fout_path, "status": "skipped"}
+        return {"hipified_path": fout_path, "status": "skipped"}
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:
