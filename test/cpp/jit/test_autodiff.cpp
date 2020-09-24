@@ -1,5 +1,4 @@
-#include <gtest/gtest.h>
-
+#include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -84,7 +83,7 @@ variable_list grad(
       fmap(inputs, get_edge));
 }
 
-TEST(AutodiffTest, ADFormulas) {
+void testADFormulas() {
   const auto cast = [](const Variable& v) {
     return static_cast<at::Tensor>(v);
   };
@@ -175,7 +174,7 @@ TEST(AutodiffTest, ADFormulas) {
   }
 }
 
-TEST(AutodiffTest, Differentiate) {
+void testDifferentiate() {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
   std::vector<int64_t> sizes{2, 3, 4};
@@ -230,7 +229,7 @@ TEST(AutodiffTest, Differentiate) {
       ->run(*grad_spec.df);
 }
 
-TEST(AutodiffTest, DifferentiateWithRequiresGrad) {
+void testDifferentiateWithRequiresGrad() {
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
