@@ -234,12 +234,13 @@ and can be decomposed into functions :math:`u` and :math:`v` which compute the r
             s = u(x, y) + v(x, y) * 1j
             return s
 
-where :math:`1j` is a unit imaginary number and :math:`u` and :math:`v` are :math:`ℝ^{2} → ℝ^{2}` functions.
+where :math:`1j` is a unit imaginary number and :math:`u` and :math:`v` are :math:`ℝ^{2} → ℝ` functions.
 
 We define the Vector-Jacobian Product `VJP` of :math:`F` at :math:`x + yj` for grad output vector :math:`grad\_out` as:
 
     .. math::
         VJP = grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z})^{*}
+        :label: [1]
 
 where
 
@@ -251,10 +252,11 @@ and
 
 are Conjugate Wirtinger and Wirtinger derivatives respectively.
 
-For :math:`grad\_out = c+dj \in C`, the Vector-Jacobian Product can also be expressed as:
+For :math:`grad\_out = c + dj \in C`, the Vector-Jacobian Product can also be expressed as:
 
     .. math::
         VJP = \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
+        :label: [2]
 
 where
 
@@ -263,7 +265,7 @@ where
             \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
             \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
 
-The key assumption made in the derivation of the above formula is that function :math:`F` is a part of a
+The key assumption made in the derivation of :eq:`[1]` is that function :math:`F` is a part of a
 real valued function. For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
 **What happens for cross-domain functions?**
@@ -283,16 +285,14 @@ The Vector-Jacobian Product for a function :math:`F: ℂ → ℝ`:
 at :math:`x + yj` can be simplified to be written as:
 
     .. math::
-        VJP = real(grad\_out) * \frac{\partial s}{\partial z^{*}}
-
-Note that the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other.
+        VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
 
 The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
 
     .. code::
 
         def F(z):
-            x = real(z)     # z = real(z)
+            x, y = z, 0     # z = real(z)
             s = u(x, y) + v(x, y) * 1j
             return s
 
@@ -302,5 +302,6 @@ at :math:`x + yj` can be simplified to be written as:
         VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
 
 Note that the gradient in this case equals to the real value of the result obtained using the above formula. This is because
-in the derivation of the formula earlier, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
-from scratch for an :math:`F: ℝ → ℂ`, it can be verified that taking the real value of formula above gives the correct gradient.
+in the derivation of the :eq:`[1]`, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
+from scratch for an :math:`F: ℝ → ℂ` which again is a part of a real valued function :math:`G`, it can be verified that taking the
+real value of formula above gives the correct gradient.
