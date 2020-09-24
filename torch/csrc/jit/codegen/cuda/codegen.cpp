@@ -527,6 +527,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Woverloaded-virtual"
+  // TODO(Kir): fix me
   void handle(const kir::Scope& scope) {
     for (auto expr : scope.exprs()) {
       handle(expr);
