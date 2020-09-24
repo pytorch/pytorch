@@ -13280,12 +13280,12 @@ class TestTorchDeviceType(TestCase):
             # name, function, identity
             ('max', torch.max, None),
             ('amax', torch.amax, None),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
             ('argmax', torch.argmax, None),
             ('min', torch.min, None),
             ('amin', torch.amin, None),
             ('argmin', torch.argmin, None),
             ('mode', torch.mode, None),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
             ('prod', torch.prod, 1.),
             ('sum', torch.sum, 0.),
             ('norm', torch.norm, 0.),
@@ -13317,8 +13317,12 @@ class TestTorchDeviceType(TestCase):
             name, fn, identity = item
             if identity is None:
                 ident_err = 'does not have an identity'
+                
+                # Reductions over non-zero dimensions should work even for empty tensors
+                # See https://github.com/pytorch/pytorch/issues/34907 for a discussion on this.
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2, keepdim=True))
+
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
             else:
