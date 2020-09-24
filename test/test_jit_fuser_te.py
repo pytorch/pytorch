@@ -1311,6 +1311,36 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(ref, t(x))
             self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_superslomo(self):
+        # Test extracted from Super-SloMo: https://github.com/avinashpaliwal/Super-SloMo
+        # A few interesting things happen here: strided inputs of mixed size,
+        # plus outputs of mixed shapes.  The latter characteristic happened to
+        # expose a memory corruption bug due to not properly guarding the
+        # outputs.
+        def eager(t0, t1, t2, t3, t4):
+            t5 = torch.mul(t0, t4)
+            t6 = torch.mul(t2, t3)
+            t7 = torch.mul(t6, t1)
+            t9 = torch.add(t5, t7)
+            t11 = torch.add(t0, t6)
+            ft_p = torch.div(t9, t11)
+            return (ft_p, t11, t9, t6)
+
+        t0 = torch.rand(1, 6, 352, 352, device="cuda").transpose(0, 1)
+        t1 = torch.rand(6, 3, 352, 352, device="cuda")
+        t2 = torch.rand(6, device="cuda")[None, None, None, :].permute(3, 0, 1, 2)
+        t3 = torch.rand(6, 1, 352, 352, device="cuda")
+        t4 = torch.rand(6, 3, 352, 352, device="cuda")
+        inputs = [t0, t1, t2, t3, t4]
+
+        script = torch.jit.script(eager)
+        for _ in range(4):
+            for pair in zip(script(*inputs), eager(*inputs)):
+                test, ref = pair
+                torch.testing.assert_allclose(test, ref)
+        self.assertAllFused(script.graph_for(*inputs))
+
 
 if __name__ == '__main__':
     run_tests()
