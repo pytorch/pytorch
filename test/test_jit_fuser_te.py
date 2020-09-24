@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import operator
 import unittest
 import contextlib
 import torch
@@ -458,6 +459,82 @@ class TestTEFuser(JitTestCase):
         # skip_check to skip extra bailout nodes in between
         graph = backward_graph(s, skip_check=True)
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_add_bool(self):
+        def f(x, y, z):
+            return x + y + z
+
+        x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        z = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+
+        ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
+        self.assertAllFused(ge.graph_for(x, y, z))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_mul_bool(self):
+        def f(x, y, z):
+            return x * y * z
+
+        x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        z = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+
+        ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
+        self.assertAllFused(ge.graph_for(x, y, z))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_div_bool(self):
+        def f(x, y, z):
+            return (x + y) / z
+
+        x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
+        z = torch.ones_like(x, dtype=torch.bool, device='cuda')
+
+        ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
+        self.assertAllFused(ge.graph_for(x, y, z))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_bitwise_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(fn(x, y), z)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+        binary_ops = [
+            operator.__and__,
+            operator.__or__,
+            operator.__xor__
+        ]
+        devices = ["cuda"]
+        for dtype, op, device in product(dtypes, binary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                z = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_comparison_eq_ne(self):

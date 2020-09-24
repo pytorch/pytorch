@@ -154,9 +154,9 @@ Descriptor::Set& Descriptor::Set::bind(
       type,
       {
         .buffer = {
-          buffer.handle(),
-          buffer.offset(),
-          buffer.range(),
+          buffer.handle,
+          buffer.offset,
+          buffer.range,
         },
       },
     });
@@ -173,9 +173,9 @@ Descriptor::Set& Descriptor::Set::bind(
       type,
       {
         .image = {
-          image.sampler(),
-          image.view(),
-          image.layout(),
+          image.sampler,
+          image.view,
+          image.layout
         },
       },
     });
