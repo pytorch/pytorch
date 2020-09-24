@@ -47,7 +47,9 @@ from .utils import (
     quantize_node,
 )
 
+from collections import OrderedDict
 import copy
+import re
 
 # ------------------------
 # Helper Functions
@@ -143,6 +145,54 @@ def is_submodule_of_fake_quant(name, module, named_modules):
     parent_name, _ = _parent_name(name)
     return is_activation_post_process(named_modules[parent_name])
 
+def get_flattened_qconfig_dict(qconfig_dict):
+    """ flatten the global, object_type and module_name qconfig
+    to the same qconfig_dict so that it can be used by
+    propagate_qconfig_ function.
+    "module_name_regex" is ignored for now since it's not supported
+    in propagate_qconfig_, but it can be fixed later.
+
+    For example:
+    Input: {
+      "": qconfig,
+      "object_type": [
+        (torch.add, qconfig)
+      ],
+      "module_name": [
+        ("conv", qconfig)
+      ]
+    }
+
+    Output: {
+      "": qconfig,
+      torch.add: qconfig,
+      "conv": qconfig
+    }
+    """
+    flattened = dict()
+    if '' in qconfig_dict:
+        flattened[''] = qconfig_dict['']
+
+    def flatten_key(key):
+        if key in qconfig_dict:
+            for obj, qconfig in qconfig_dict[key]:
+                flattened[obj] = qconfig
+
+    flatten_key('object_type')
+    flatten_key('module_name')
+    return flattened
+
+def convert_dict_to_ordered_dict(qconfig_dict):
+    """ Convert dict in qconfig_dict to ordered dict
+    """
+    # convert a qconfig list for a type to OrderedDict
+    def _convert_to_ordered_dict(key, qconfig_dict):
+        qconfig_dict[key] = OrderedDict(qconfig_dict.get(key, []))
+
+    _convert_to_ordered_dict('object_type', qconfig_dict)
+    _convert_to_ordered_dict('module_name_regex', qconfig_dict)
+    _convert_to_ordered_dict('module_name', qconfig_dict)
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -188,23 +238,72 @@ class Quantizer:
     def _qat_swap_modules(self, root):
         convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
-    def _generate_qconfig_map(self, root, input_graph):
-        def get_qconfig(module):
-            return module.qconfig if hasattr(module, 'qconfig') else None
+    def _generate_qconfig_map(self,
+                              root,
+                              input_graph,
+                              qconfig_dict):
+        global_qconfig = qconfig_dict.get('', None)
+
+        def get_module_type_qconfig(
+                module_type, fallback_qconfig=global_qconfig):
+            return qconfig_dict['object_type'].get(module_type, fallback_qconfig)
+
+        def get_function_qconfig(
+                function, fallback_qconfig=global_qconfig):
+            return qconfig_dict['object_type'].get(function, fallback_qconfig)
+
+        def get_module_name_regex_qconfig(
+                module_name, fallback_qconfig=global_qconfig):
+            for regex_pattern, qconfig in qconfig_dict['module_name_regex'].items():
+                if re.match(regex_pattern, module_name):
+                    # first match wins
+                    return qconfig
+            return fallback_qconfig
+
+        def get_module_name_qconfig(
+                module_name, fallback_qconfig=global_qconfig):
+            if module_name == '':
+                # module name qconfig not found
+                return fallback_qconfig
+            if module_name in qconfig_dict['module_name']:
+                return qconfig_dict['module_name'][module_name]
+            else:
+                parent, _ = _parent_name(module_name)
+                return get_module_name_qconfig(parent, fallback_qconfig)
+
+        # get qconfig for module_name,
+        # fallback to module_name_regex_qconfig, module_type_qconfig, global_qconfig
+        # if necessary
+        def get_qconfig(module_name):
+            module_type_qconfig = \
+                get_module_type_qconfig(type(self.modules[module_name]))
+            module_name_regex_qconfig = \
+                get_module_name_regex_qconfig(module_name, module_type_qconfig)
+            module_name_qconfig = \
+                get_module_name_qconfig(module_name, module_name_regex_qconfig)
+            return module_name_qconfig
 
         self.qconfig_map = dict()
         for node in input_graph.nodes:
             if node.op == 'get_attr':
-                parent, _ = _parent_name(node.target)
-                self.qconfig_map[node.name] = get_qconfig(self.modules[parent])
+                module_name, _ = _parent_name(node.target)
+                self.qconfig_map[node.name] = get_qconfig(module_name)
             elif node.op == 'call_function':
-                self.qconfig_map[node.name] = get_qconfig(root)
+                # precedence: [TODO] module_name_qconfig (need scope support from fx)
+                # > function_qconfig > global_qconfig
+                function_qconfig = get_function_qconfig(node.target)
+                self.qconfig_map[node.name] = function_qconfig
             elif node.op == 'call_method':
                 self_obj = node.args[0]
                 # qconfig for call_method should be the same as the `self` object for the call
                 self.qconfig_map[node.name] = self.qconfig_map[self_obj.name]
             elif node.op == 'call_module':
-                self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
+                module_qconfig = get_qconfig(node.target)
+                # regex is not supported eager mode propagate_qconfig_, we'll need to
+                # set the qconfig explicitly here in case regex
+                # is used
+                self.modules[node.target].qconfig = module_qconfig
+                self.qconfig_map[node.name] = module_qconfig
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_child_module):
         if not inplace:
@@ -215,14 +314,17 @@ class Quantizer:
         else:
             self.patterns = get_quant_patterns()
 
-        propagate_qconfig_(model, qconfig_dict)
+        flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+        # TODO: support regex as well
+        propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
             self._qat_swap_modules(model)
 
         self.modules = dict(model.named_modules())
 
+        convert_dict_to_ordered_dict(qconfig_dict)
         # map from node name to qconfig, used in _find_matches
-        self._generate_qconfig_map(model, model.graph)
+        self._generate_qconfig_map(model, model.graph, qconfig_dict)
 
         # match the patterns that will get quantized
         matches = self._find_matches(model.graph, self.modules, self.patterns)
@@ -299,6 +401,8 @@ class Quantizer:
                     child_module_input_idxs = observed_custom_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
+                    self.modules[node.target] = observed_custom_module
+
 
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
@@ -326,7 +430,7 @@ class Quantizer:
                         observed_node_names_set.add(node.name)
                 elif isinstance(obj, TraceableCustomModuleQuantizeHandler):
                     assert node.op == 'call_module'
-                    output_is_observed = self.modules[node.target]
+                    output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
                 elif qconfig is not None and obj.all_nodes:
@@ -369,13 +473,14 @@ class Quantizer:
                     observed_node_names_set.add(node.name)
 
         observed_graph.output(load_arg(model.graph.result))
-        # indicate whether output is observed or not.
-        # This used for correctly quantize child modules
-        output_is_observed = model.graph.result.name in observed_node_names_set
-
         model = GraphModule(model, observed_graph)
         self.save_state(model)
         if is_child_module:
+            # indicate whether output is observed or not.
+            # This used for correctly quantize child modules
+            assert isinstance(model.graph.result, Node), \
+                'child module returning dict is not yet supported'
+            output_is_observed = model.graph.result.name in observed_node_names_set
             model._observed_input_idxs = observed_input_idxs
             model._output_is_observed = output_is_observed
         return model
@@ -594,9 +699,9 @@ class Quantizer:
 
         if is_child_module:
             # result are kepted quantized in the quantized child module
-            graph_output = load_x(model.graph.result)
+            graph_output = map_arg(model.graph.result, load_x)
         else:
-            graph_output = load_non_quantized(model.graph.result)
+            graph_output = map_arg(model.graph.result, load_non_quantized)
         self.quantized_graph.output(graph_output)
 
         # remove activation post process
@@ -608,7 +713,7 @@ class Quantizer:
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
-                # remove activation post process
+                # remove activation post process node
                 env[node.name] = env[node.args[0].name]
             else:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)

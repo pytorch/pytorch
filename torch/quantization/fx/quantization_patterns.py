@@ -541,7 +541,9 @@ class TraceableCustomModuleQuantizeHandler(QuantizeHandler):
         observed_custom_module = quantizer.modules[node.target]
         quantized_custom_module = convert(observed_custom_module, debug=debug)
         parent_name, name = _parent_name(node.target)
+        # update the modules dict
         setattr(quantizer.modules[parent_name], name, quantized_custom_module)
+        quantizer.modules[node.target] = quantized_custom_module
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 

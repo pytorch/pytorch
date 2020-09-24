@@ -50,6 +50,7 @@ _all__ = [
     'register_quantized_custom_mdoule_mapping',
     'get_quantized_custom_module_class',
     'is_custom_module_class',
+    'is_observed_custom_module',
     'register_traceable_custom_module_class',
     'is_traceable_custom_module',
     # Sub functions for `prepare` and `swap_module`
