@@ -291,6 +291,9 @@ at :math:`x + yj` can be simplified to be written as:
         VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
         :label: [3]
 
+since the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other and :math:`grad\_out` is
+real valued.
+
 The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
 
     .. code::
