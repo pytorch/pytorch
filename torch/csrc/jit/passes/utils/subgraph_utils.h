@@ -36,14 +36,18 @@ TORCH_API Node* createSingletonSubgraphAndUpdateAliasing(
 
 // Merge a node into a subgraph node. If `toMerge` is also a subgraph, the
 // subgraphs are merged.
-// `toMerge` is destroyed.
+// If `destroyNode` is true `toMerge` is destroyed.
 // An optional argument 'vmap' could be used to retrieve value mappings.
 // Values will be mapped to their new subgraph values
-TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
 TORCH_API void mergeNodeIntoSubgraph(
     Node* toMerge,
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap);
+    bool destroyNode = true);
+TORCH_API void mergeNodeIntoSubgraph(
+    Node* toMerge,
+    Node* subgraphNode,
+    std::unordered_map<Value*, Value*>& vmap,
+    bool destroyNode = true);
 
 // Merges a node into a subgraph node, and updates the new outputs of the
 // subgraph to have the aliasing properties of the corresponding `to_merge`
