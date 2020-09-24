@@ -12,7 +12,7 @@ namespace native {
 static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
   // check if number of axis in dim is valid
   if (flip_dims_size <= 0 || flip_dims_size > total_dims) {
-    AT_INDEX_ERROR("flip dims size out of range, got flip dims size=", flip_dims_size);
+    TORCH_CHECK_INDEX(false, "flip dims size out of range, got flip dims size=", flip_dims_size);
   }
 
   auto flip_dims_v = dims.vec();
@@ -21,11 +21,11 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
   auto min_max_d = std::minmax_element(flip_dims_v.begin(), flip_dims_v.end());
 
   if (*min_max_d.first >= total_dims || *min_max_d.first < -total_dims) {
-    AT_INDEX_ERROR("The min flip dims out of range, got min flip dims=", *min_max_d.first);
+    TORCH_CHECK_INDEX(false, "The min flip dims out of range, got min flip dims=", *min_max_d.first);
   }
 
   if (*min_max_d.second >= total_dims || *min_max_d.second < -total_dims) {
-    AT_INDEX_ERROR("The max flip dims out of range, got max flip dims=", *min_max_d.second);
+    TORCH_CHECK_INDEX(false, "The max flip dims out of range, got max flip dims=", *min_max_d.second);
   }
 
   // check duplicates in dims

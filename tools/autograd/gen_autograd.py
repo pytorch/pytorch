@@ -27,25 +27,35 @@ import os
 import yaml
 import re
 from collections import defaultdict
-from .utils import YamlLoader, split_name_params
+from .utils import YamlLoader, split_name_params, op_name_without_overload
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
+# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
+# you **MUST** also update the public list of view ops accordingly in
+# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
+# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
+#
 # A map: function name => name of the argument that all outputs are view of
+
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
+
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'squeeze': 'self',
     't': 'self',
     'transpose': 'self',
     'unfold': 'self',
     'unsqueeze': 'self',
+    'flatten': 'self',
     'view': 'self',
     'unbind': 'self',
     '_indices': 'self',
@@ -59,11 +69,25 @@ VIEW_FUNCTIONS = {
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
 
+for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
+    VIEW_FUNCTIONS[key] = 'self'
+
+# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
+# which inplace modification of outputs is being gradually deprecated.
+MULTI_OUTPUT_SAFE_FUNCTIONS = {
+    'split',
+    'split_with_sizes',
+}
+
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
-# returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
+# may return a view of its inputs; however they may sometimes return a copy.
+# (e.g. `contiguous`)
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
+    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
+    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
+})
 
 def format_return_type(returns):
     if len(returns) == 0:
@@ -85,6 +109,26 @@ def get_simple_type(arg):
         simple_type = '{}?'.format(opt_match.group(1))
     return simple_type
 
+def has_tensoroptions_argument(declaration):
+    for argument in declaration['arguments']:
+        if 'TensorOptions' == argument['dynamic_type']:
+            return True
+    return False
+
+def process_schema_order_arg(schema_order_arg):
+    if schema_order_arg == 'dtype':
+        return 'optTypeMetaToScalarType(options.dtype_opt())'
+    elif schema_order_arg == 'layout':
+        return 'options.layout_opt()'
+    elif schema_order_arg == 'device':
+        return 'options.device_opt()'
+    elif schema_order_arg == 'pin_memory':
+        return 'options.pinned_memory_opt()'
+    elif schema_order_arg == 'memory_format':
+        return 'c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format)'
+    else:
+        return schema_order_arg
+
 
 def load_aten_declarations(path):
     with open(path, 'r') as f:
@@ -103,11 +147,20 @@ def load_aten_declarations(path):
 
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
+        declaration['schema_order_formals'] = [arg['type'] + ' ' + arg['name']
+                                               for arg in declaration['schema_order_arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
-        declaration['type_method_formals'] = [arg['type'] + ' ' + arg['name']
-                                              for arg in declaration['arguments']]
-        declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
+        declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
+        if has_tensoroptions_argument(declaration):
+            declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
+        if declaration.get('overload_name'):
+            declaration['type_wrapper_name'] = "{}_{}".format(
+                declaration['name'], declaration['overload_name'])
+        else:
+            declaration['type_wrapper_name'] = declaration['name']
+        declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']
@@ -178,13 +231,20 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
-    aten_decls = load_aten_declarations(aten_path)
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_op_list=None):
+    full_aten_decls = load_aten_declarations(aten_path)
+
+    def filter_decls(aten_decls, selected_op_list):
+        if selected_op_list is None:
+            return aten_decls
+        return [decl for decl in aten_decls if op_name_without_overload(decl) in selected_op_list]
+
+    aten_decls = filter_decls(full_aten_decls, selected_op_list)
 
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
     autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+        os.path.join(autograd_dir, 'derivatives.yaml'), full_aten_decls)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
@@ -200,8 +260,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+    # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
+    gen_variable_factories(out, full_aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):
@@ -233,6 +293,10 @@ def gen_autograd_python(aten_path, out, autograd_dir):
     gen_python_functions.gen_py_torch_functions(
         out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_nn_functions(
+        out, aten_decls, template_path)
+    gen_python_functions.gen_py_fft_functions(
+        out, aten_decls, template_path)
+    gen_python_functions.gen_py_linalg_functions(
         out, aten_decls, template_path)
 
 

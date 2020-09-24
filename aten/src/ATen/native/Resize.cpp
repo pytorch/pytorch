@@ -1,10 +1,26 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
+
+void resize_output(Tensor& output, IntArrayRef shape) {
+  // Tests for resizing of tensors with one more elements
+  if (output.numel() != 0 && !output.sizes().equals(shape)) {
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ".",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
+  }
+
+  output.resize_(shape);
+}
 
 // Call the sparse implementation in SparseTensor.cpp directly.
 // A dynamic dispatch here is NOT necessary, so I didn't put
@@ -78,17 +94,6 @@ Tensor& resize_(
   }
   return self;
 }
-
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(resize_), &resize_>(DispatchKey::CPUTensorId)
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyCatchAllKernel<decltype(resize_as_), &resize_as_>()
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  ;
 
 } // namespace native
 } // namespace at

@@ -76,8 +76,8 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output + oh*osizeW + ow;
       int64_t *ptr_ind = indices + oh*osizeW + ow;
-      int argmax = -1;
-      T max = THCNumerics<T>::min();
+      int argmax = istartH * isizeW + istartW;
+      T max = at::numeric_limits<T>::lower_bound(); // -Infinity
       int ih, iw;
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
@@ -229,7 +229,7 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideH = input.stride(1);
     int64_t istrideW = input.stride(2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_cuda",
       [&] {
         output.resize_({sizeD, osizeH, osizeW});
@@ -247,13 +247,13 @@ void adaptive_max_pool2d_out_cuda_template(
 
         // run maxpool kernel
         adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                   input_data, output_data,
-                                   indices_data,
-                                   isizeH, isizeW, osizeH, osizeW,
-                                   istrideD, istrideH, istrideW);
+                                    input_data, output_data,
+                                    indices_data,
+                                    isizeH, isizeW, osizeH, osizeW,
+                                    istrideD, istrideH, istrideW);
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
 
   } else {
     Tensor input_ = input.contiguous();
@@ -266,7 +266,7 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideH = input_.stride(2);
     int64_t istrideW = input_.stride(3);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_.scalar_type(),
       "adaptive_max_pool2d_cuda",
       [&] {
         output.resize_({sizeB, sizeD, osizeH, osizeW});
@@ -284,13 +284,13 @@ void adaptive_max_pool2d_out_cuda_template(
 
         // run maxpool kernel
         adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                   input_data, output_data,
-                                   indices_data,
-                                   isizeH, isizeW, osizeH, osizeW,
-                                   istrideD, istrideH, istrideW);
+                                    input_data, output_data,
+                                    indices_data,
+                                    isizeH, isizeW, osizeH, osizeW,
+                                    istrideD, istrideH, istrideW);
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
 
   }
 }
@@ -326,7 +326,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     gradInput.resize_as_(input);
     gradInput.zero_();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -357,7 +357,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         }
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   } else {
     int64_t sizeB  = input.size(0);
     int64_t sizeD  = input.size(1);
@@ -372,7 +372,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -403,7 +403,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         }
       }
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -443,6 +443,9 @@ Tensor& adaptive_max_pool2d_backward_out_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_out_cuda");
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -456,6 +459,9 @@ Tensor adaptive_max_pool2d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("adaptive_max_pool2d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,

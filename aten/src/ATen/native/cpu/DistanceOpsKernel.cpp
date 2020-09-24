@@ -126,7 +126,7 @@ struct Dist {
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : diff * diff.abs().pow(p - Vec(2)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
   };
 
-  // Info norm
+  // Inf norm
   template<typename data_t>
   struct idist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }

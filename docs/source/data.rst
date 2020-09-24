@@ -22,7 +22,8 @@ These options are configured by the constructor arguments of a
     DataLoader(dataset, batch_size=1, shuffle=False, sampler=None,
                batch_sampler=None, num_workers=0, collate_fn=None,
                pin_memory=False, drop_last=False, timeout=0,
-               worker_init_fn=None)
+               worker_init_fn=None, *, prefetch_factor=2,
+               persistent_workers=False)
 
 The sections below describe in details the effects and usages of these options.
 
@@ -164,7 +165,7 @@ Disable automatic batching
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In certain cases, users may want to handle batching manually in dataset code,
-or simply load individual samples. For example, it could cheaper to directly
+or simply load individual samples. For example, it could be cheaper to directly
 load batched data (e.g., bulk reads from a database or reading continuous
 chunks of memory), or the batch size is data dependent, or the program is
 designed to work on individual samples.  Under these scenarios, it's likely

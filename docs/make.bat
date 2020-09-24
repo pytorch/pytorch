@@ -10,6 +10,7 @@ if "%SPHINXBUILD%" == "" (
 set SOURCEDIR=source
 set BUILDDIR=build
 set SPHINXPROJ=PyTorch
+set SPHINXOPTS=-j auto
 
 if "%1" == "" goto help
 

@@ -4,7 +4,9 @@
 #include <random>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 #include <ATen/ATen.h>
@@ -39,15 +41,15 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
-  ASSERT_THROW(s1.toHalf(), std::domain_error);
+  ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
 TEST(TestScalar, TestScalar) {
@@ -62,8 +64,8 @@ TEST(TestScalar, TestScalar) {
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {

@@ -22,26 +22,27 @@ void torch_warn() {
 
 TEST(UtilsTest, WarnOnce) {
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn_once_A();
     torch_warn_once_A();
     torch_warn_once_B();
     torch_warn_once_B();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn once"), 1);
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn something else once"), 1);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "warn once"), 1);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn something else once"),
+        1);
   }
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn();
     torch_warn();
     torch_warn();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn multiple times"), 3);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn multiple times"), 3);
   }
 }
 

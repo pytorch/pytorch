@@ -1,11 +1,15 @@
-# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6
-from .conv import Conv2d, Conv3d
+from .activation import ReLU, ReLU6, Hardswish, ELU
+from .batchnorm import BatchNorm2d, BatchNorm3d
+from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
+    InstanceNorm2d, InstanceNorm3d
+from .conv import Conv1d, Conv2d, Conv3d
+from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
+from .embedding_ops import Embedding, EmbeddingBag
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -77,14 +81,28 @@ class DeQuantize(torch.nn.Module):
         return DeQuantize()
 
 __all__ = [
+    'BatchNorm2d',
+    'BatchNorm3d',
+    'Conv1d',
     'Conv2d',
     'Conv3d',
+    'ConvTranspose1d',
+    'ConvTranspose2d',
     'DeQuantize',
     'Linear',
     'MaxPool2d',
     'Quantize',
     'ReLU',
     'ReLU6',
+    'Hardswish',
+    'ELU',
+    'LayerNorm',
+    'GroupNorm',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'Embedding',
+    'EmbeddingBag',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

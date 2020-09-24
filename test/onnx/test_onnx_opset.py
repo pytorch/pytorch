@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from test_pytorch_common import TestCase, run_tests
 
 import torch
@@ -45,7 +40,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def check_onnx_opsets_operator(module, x, ops, opset_versions, training=False, example_outputs=None):
+def check_onnx_opsets_operator(module, x, ops, opset_versions, training=torch.onnx.TrainingMode.EVAL, example_outputs=None):
     for opset_version in opset_versions:
         f = io.BytesIO()
         torch.onnx.export(module, x, f,
@@ -238,12 +233,12 @@ class TestONNXOpset(TestCase):
         # test training mode
         ops = [{"op_name" : "Dropout", "attributes" : [{"name" : "ratio", "f" : 0.5, "type" : 1}]}]
         ops = {9 : ops, 10 : ops}
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=True)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.TRAINING)
 
         # test eval mode
         ops = []
         ops = {9 : ops, 10 : ops}
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.EVAL)
 
     def test_full(self):
         class MyModule(Module):
@@ -252,10 +247,9 @@ class TestONNXOpset(TestCase):
 
         ops = [{"op_name" : "Constant"},
                {"op_name" : "ConstantOfShape"},
-               {"op_name" : "Cast"},
                {"op_name" : "Add"}]
         ops = {9 : ops, 10 : ops}
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
     def test_interpolate(self):

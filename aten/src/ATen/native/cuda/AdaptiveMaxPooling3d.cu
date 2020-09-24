@@ -88,8 +88,8 @@ __global__ void adaptivemaxpool(
       T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output_dt + oh*osizeW + ow;
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
-      int64_t argmax = -1;
-      T max = THCNumerics<T>::min();
+      int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
+      T max = at::numeric_limits<T>::lower_bound(); // -Infinity
 
       int it, ih, iw;
       for(it = 0; it < kT; ++it) {
@@ -134,7 +134,7 @@ void adaptivemaxpool_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -212,7 +212,7 @@ void adaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -289,7 +289,7 @@ void atomicadaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -363,7 +363,7 @@ void adaptive_max_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "adaptive_max_pool3d_cuda",
     [&] {
       scalar_t *input_data = input.data_ptr<scalar_t>();
@@ -430,7 +430,7 @@ void adaptive_max_pool3d_backward_out_cuda_template(
   }
 
   if (atomic) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -444,7 +444,7 @@ void adaptive_max_pool3d_backward_out_cuda_template(
       }
     );
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();

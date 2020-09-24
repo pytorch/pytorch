@@ -92,7 +92,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
 OpSchema::Cost CostInferenceForBatchMatMul(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 2, "BatchMatMul requires two inputs");
+  CAFFE_ENFORCE_EQ(in.size(), 2U, "BatchMatMul requires two inputs");
 
   ArgumentHelper helper(def);
   struct OpSchema::Cost c;

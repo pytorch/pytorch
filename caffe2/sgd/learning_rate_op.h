@@ -4,16 +4,20 @@
 #include <cfloat>
 #include <cmath>
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/sgd/learning_rate_functors.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LearningRate);
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class LearningRateOp final : public Operator<Context> {
  public:
-  LearningRateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  LearningRateOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         functor_(nullptr),
         base_lr_(this->template GetSingleArgument<float>("base_lr", FLT_MAX)) {
     CAFFE_ENFORCE_NE(base_lr_, FLT_MAX, "Base learning rate must be set.");
@@ -76,6 +80,20 @@ class LearningRateOp final : public Operator<Context> {
       DCHECK_LE(end_multiplier, 1);
       return new HillLearningRate<T>(
           num_iter, start_multiplier, gamma, power, end_multiplier);
+    } else if (policy == "slope") {
+      int64_t num_iter_1 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_1", 0);
+      DCHECK_GT(num_iter_1, 0);
+      T multiplier_1 = this->template GetSingleArgument<float>(
+          arg_prefix + "multiplier_1", 0.);
+      int64_t num_iter_2 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_2", 0);
+      DCHECK_GT(num_iter_1, 0);
+      T multiplier_2 = this->template GetSingleArgument<float>(
+          arg_prefix + "multiplier_2", 0.);
+      DCHECK_GT(num_iter_2, num_iter_1);
+      return new SlopeLearningRate<T>(
+          num_iter_1, multiplier_1, num_iter_2, multiplier_2);
     } else if (policy == "step") {
       int stepsize =
           this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
@@ -173,7 +191,7 @@ class LearningRateOp final : public Operator<Context> {
       int stepsize =
           this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
       T decay =
-          this->template GetSingleArgument<int>(arg_prefix + "decay", 1.0);
+          this->template GetSingleArgument<float>(arg_prefix + "decay", 1.0);
       DCHECK_GT(stepsize, 0);
       DCHECK_GE(max_lr, base_lr_);
       return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);

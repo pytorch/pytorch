@@ -1,8 +1,8 @@
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/constants.h>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ namespace {
 // operators where we expect to find tuples as inputs/outputs
 // this is to assert we are only doing modifications when we know
 // we can flatten tuples
-std::unordered_set<Symbol> white_list = {
+std::unordered_set<Symbol> supported_ops = {
     prim::If,
     prim::Loop,
     prim::TupleUnpack,
@@ -21,6 +21,8 @@ std::unordered_set<Symbol> white_list = {
     prim::TupleSlice,
     prim::Param,
     prim::Return,
+    prim::PythonOp,
+    aten::format,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
@@ -97,7 +99,7 @@ static void RemoveTupleConstants(Node* n) {
 
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
-  for (Value * elem: elements) {
+  for (Value* elem : elements) {
     RemoveTupleConstants(elem->node());
   }
 
@@ -128,9 +130,10 @@ static void VisitNode(Node* n, Node* insert_point) {
     auto input = n->inputs()[i];
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
       TORCH_CHECK(
-          white_list.count(n->kind()) > 0,
+          supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
-          "unsupported kind: ", n->kind().toQualString());
+          "unsupported kind: ",
+          n->kind().toQualString());
       TORCH_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
@@ -162,9 +165,10 @@ static void VisitNode(Node* n, Node* insert_point) {
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
       TORCH_CHECK(
-          white_list.count(n->kind()) > 0,
+          supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
-          "unsupported kind: ", n->kind().toQualString());
+          "unsupported kind: ",
+          n->kind().toQualString());
       for (size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
       }

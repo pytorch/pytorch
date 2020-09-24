@@ -4,11 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
 
-PROJECT(googletest-download NONE)
+project(googletest-download NONE)
 
-INCLUDE(ExternalProject)
+include(ExternalProject)
 ExternalProject_Add(googletest
   URL https://github.com/google/googletest/archive/release-1.8.0.zip
   URL_HASH SHA256=f3ed3b58511efd272eb074a3a6d6fb79d7c2e6a0e374323d1e6bcbcc1ef141bf

@@ -31,9 +31,24 @@ class SparseAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+
+        sparse_params = []
+        for index, param in enumerate(params):
+            if isinstance(param, dict):
+                for d_index, d_param in enumerate(param.get("params", [])):
+                    if d_param.is_sparse:
+                        sparse_params.append([index, d_index])
+            elif param.is_sparse:
+                sparse_params.append(index)
+        if sparse_params:
+            raise ValueError(
+                f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
+            )
+
         defaults = dict(lr=lr, betas=betas, eps=eps)
         super(SparseAdam, self).__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -43,13 +58,14 @@ class SparseAdam(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                grad = p.grad
                 if not grad.is_sparse:
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
 
@@ -59,9 +75,9 @@ class SparseAdam(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 state['step'] += 1
 
@@ -99,6 +115,6 @@ class SparseAdam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                p.data.add_(make_sparse(-step_size * numer.div_(denom)))
+                p.add_(make_sparse(-step_size * numer.div_(denom)))
 
         return loss

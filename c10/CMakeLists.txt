@@ -28,6 +28,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/boxing/*.cpp
+        core/boxing/impl/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
@@ -37,23 +38,36 @@ file(GLOB C10_SRCS
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+if(HAVE_SOVERSION)
+  set_target_properties(c10 PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
 # ---[ Dependency of c10
-if (${USE_GFLAGS})
+if(${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if (${USE_GLOG})
+if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 
-if (USE_NUMA)
+find_package(Backtrace)
+if(Backtrace_FOUND)
+  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
+  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+else()
+  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
+endif()
+
+if(USE_NUMA)
   message(STATUS "NUMA paths:")
   message(STATUS ${Numa_INCLUDE_DIR})
   message(STATUS ${Numa_LIBRARIES})
@@ -63,7 +77,7 @@ else()
   message(STATUS "don't use NUMA")
 endif()
 
-if (ANDROID)
+if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
 
@@ -97,6 +111,6 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
 install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
         DESTINATION include/c10/macros)
 
-if (MSVC AND C10_BUILD_SHARED_LIBS)
+if(MSVC AND C10_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
 endif()

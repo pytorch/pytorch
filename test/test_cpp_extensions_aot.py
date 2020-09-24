@@ -11,20 +11,21 @@ import torch.utils.cpp_extension
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
-except ImportError:
+    import torch_test_cpp_extension.rng as rng_extension
+except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
-        "`python run_test.py -i test_cpp_extensions_aot` instead."
-    )
+        "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
+    ) from e
 
 
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
-    NOTE: run_test.py's test_cpp_extensions_aot_no_ninja target
-    also runs this test case, but with ninja disabled. If you are debugging
+    NOTE: run_test.py's test_cpp_extensions_aot_ninja target
+    also runs this test case, but with ninja enabled. If you are debugging
     a test failure here from the CI, check the logs for which target
-    (test_cpp_extensions_aot vs test_cpp_extensions_aot_no_ninja)
+    (test_cpp_extensions_aot_no_ninja vs test_cpp_extensions_aot_ninja)
     failed.
     """
 
@@ -74,11 +75,10 @@ class TestCppExtensionAOT(common.TestCase):
         # `True`. This *should* mean that on Python 3, the produced shared
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        # On Python 2 there is no ABI suffix anyway.
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
-        self.assertEqual(len(matches), 1, str(matches))
-        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
@@ -88,10 +88,6 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 class TestMSNPUTensor(common.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        msnpu_extension.init_msnpu_extension()
-
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -140,6 +136,40 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(msnpu_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
+
+class TestRNGExtension(common.TestCase):
+
+    def setUp(self):
+        super(TestRNGExtension, self).setUp()
+
+    def test_rng(self):
+        fourty_two = torch.full((10,), 42, dtype=torch.int64)
+
+        t = torch.empty(10, dtype=torch.int64).random_()
+        self.assertNotEqual(t, fourty_two)
+
+        gen = torch.Generator(device='cpu')
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertNotEqual(t, fourty_two)
+
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
+        gen = rng_extension.createTestCPUGenerator(42)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        copy = gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy)
+        copy2 = rng_extension.identity(copy)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy2)
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(t, fourty_two)
+        del gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy2
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 if __name__ == "__main__":
     common.run_tests()

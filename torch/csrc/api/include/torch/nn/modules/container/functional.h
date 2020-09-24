@@ -24,7 +24,7 @@ namespace nn {
 ///   Sequential sequential(
 ///     Linear(3, 4),
 ///     Functional(torch::relu),
-///     BatchNorm(3),
+///     BatchNorm1d(3),
 ///     Functional(torch::elu, /*alpha=*/1));
 /// \endrst
 ///

@@ -3,11 +3,11 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -17,10 +17,8 @@ namespace torch {
 namespace jit {
 
 namespace {
-c10::OperatorOptions aliasAnalysisIsSpecialCase() {
-  c10::OperatorOptions options;
-  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return options;
+c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 } // namespace
 
@@ -109,58 +107,55 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
 }
 
 RegisterOperators mm_tree_reduction_reg({Operator(
-    prim::MMTreeReduce,
-    [](const Node* node) -> Operation {
-      size_t num_inputs = node->inputs().size();
-      return [num_inputs](Stack& stack) {
-        std::vector<at::Tensor> inputs;
-        inputs.reserve(num_inputs);
-        for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
-          inputs.push_back(std::move(*it).toTensor());
-        }
-        drop(stack, num_inputs);
+    "prim::MMTreeReduce(...) -> Tensor",
+    [](Stack* stack) {
+      auto num_inputs = pop(stack).toInt();
+      std::vector<at::Tensor> inputs;
+      inputs.reserve(num_inputs);
+      for (auto it = stack->end() - num_inputs; it != stack->end(); ++it) {
+        inputs.push_back(std::move(*it).toTensor());
+      }
+      drop(stack, num_inputs);
 
-        AT_ASSERT(inputs.size() > 0);
-        AT_ASSERT(inputs.size() % 2 == 0);
-        size_t side_num_elems = inputs.size() / 2;
-        auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
-        auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
-        // TODO: checking this is not free, so we should stop if this keeps
-        // failing
-        if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
-            shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
-          // sometimes lhs_inputs or rhs_inputs are not contiguous, and that
-          // causes at::cat to go through slow path view them as contiguous if
-          // possible by transposing
-          bool lhs_input_transposed = should_be_transposed(lhs_inputs);
-          bool rhs_input_transposed = should_be_transposed(rhs_inputs);
-          at::Tensor lhs, rhs;
-          if (lhs_input_transposed) {
-            std::vector<at::Tensor> lhs_contig_inputs =
-                transpose_inputs(lhs_inputs);
-            lhs = at::cat(lhs_contig_inputs, /*dim*/ 0);
-            lhs = lhs.t();
-          } else {
-            lhs = at::cat(lhs_inputs, /*dim=*/1);
-          }
-          if (rhs_input_transposed) {
-            std::vector<at::Tensor> rhs_contig_inputs =
-                transpose_inputs(rhs_inputs);
-            rhs = at::cat(rhs_contig_inputs, /*dim*/ 1);
-            rhs = rhs.t();
-          } else {
-            rhs = at::cat(rhs_inputs, /*dim=*/0);
-          }
-          push(stack, at::mm(lhs, rhs));
+      AT_ASSERT(inputs.size() > 0);
+      AT_ASSERT(inputs.size() % 2 == 0);
+      size_t side_num_elems = inputs.size() / 2;
+      auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
+      auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
+      // TODO: checking this is not free, so we should stop if this keeps
+      // failing
+      if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
+          shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
+        // sometimes lhs_inputs or rhs_inputs are not contiguous, and that
+        // causes at::cat to go through slow path view them as contiguous if
+        // possible by transposing
+        bool lhs_input_transposed = should_be_transposed(lhs_inputs);
+        bool rhs_input_transposed = should_be_transposed(rhs_inputs);
+        at::Tensor lhs, rhs;
+        if (lhs_input_transposed) {
+          std::vector<at::Tensor> lhs_contig_inputs =
+              transpose_inputs(lhs_inputs);
+          lhs = at::cat(lhs_contig_inputs, /*dim*/ 0);
+          lhs = lhs.t();
         } else {
-          auto acc = at::mm(inputs[0], inputs[side_num_elems]);
-          for (size_t i = 1; i < side_num_elems; ++i) {
-            acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
-          }
-          push(stack, std::move(acc));
+          lhs = at::cat(lhs_inputs, /*dim=*/1);
         }
-        return 0;
-      };
+        if (rhs_input_transposed) {
+          std::vector<at::Tensor> rhs_contig_inputs =
+              transpose_inputs(rhs_inputs);
+          rhs = at::cat(rhs_contig_inputs, /*dim*/ 1);
+          rhs = rhs.t();
+        } else {
+          rhs = at::cat(rhs_inputs, /*dim=*/0);
+        }
+        push(stack, at::mm(lhs, rhs));
+      } else {
+        auto acc = at::mm(inputs[0], inputs[side_num_elems]);
+        for (size_t i = 1; i < side_num_elems; ++i) {
+          acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
+        }
+        push(stack, std::move(acc));
+      }
     },
     aliasAnalysisIsSpecialCase())});
 
@@ -324,11 +319,11 @@ RegisterOperators mm_batch_side_reg({Operator(
     [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
-      return [num_other_side_inputs, single_side](Stack& stack) {
+      return [num_other_side_inputs, single_side](Stack* stack) {
         at::Tensor side_input;
         std::vector<at::Tensor> other_side_inputs;
         other_side_inputs.reserve(num_other_side_inputs);
-        for (auto it = stack.end() - num_other_side_inputs; it != stack.end();
+        for (auto it = stack->end() - num_other_side_inputs; it != stack->end();
              ++it) {
           other_side_inputs.push_back(std::move(*it).toTensor());
         }
@@ -347,23 +342,21 @@ RegisterOperators mm_batch_side_reg({Operator(
               mm_out,
               num_other_side_inputs,
               /*dim=*/single_side == Side::LHS ? 1 : 0);
-          stack.insert(
-              stack.end(),
+          stack->insert(
+              stack->end(),
               std::make_move_iterator(outputs.begin()),
               std::make_move_iterator(outputs.end()));
         } else {
           if (single_side == Side::LHS) {
             for (at::Tensor& other : other_side_inputs) {
-              stack.emplace_back(side_input.mm(other));
+              stack->emplace_back(side_input.mm(other));
             }
           } else {
             for (at::Tensor& other : other_side_inputs) {
-              stack.emplace_back(other.mm(side_input));
+              stack->emplace_back(other.mm(side_input));
             }
           }
         }
-
-        return 0;
       };
     },
     aliasAnalysisIsSpecialCase())});
@@ -482,7 +475,9 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
-  PeepholeOptimize(graph);
+
+  // tensor type properties are not guaranteed to be correct
+  PeepholeOptimize(graph, /*disable_shape_peepholes*/ true);
 }
 
 } // namespace jit

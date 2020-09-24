@@ -1,19 +1,30 @@
 import torch
 import functools
 import inspect
+from typing import Any, Callable, TypeVar, cast
+
+
+__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
+
+
+# Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
+# See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
+FuncType = Callable[..., Any]
+F = TypeVar('F', bound=FuncType)
+
 
 class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
-    def __call__(self, func):
+    def __call__(self, func: F) -> F:
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
         @functools.wraps(func)
         def decorate_context(*args, **kwargs):
-            with self:
+            with self.__class__():
                 return func(*args, **kwargs)
-        return decorate_context
+        return cast(F, decorate_context)
 
     def _wrap_generator(self, func):
         """Wrap each generator invocation with the context manager"""
@@ -22,12 +33,18 @@ class _DecoratorContextManager:
             gen = func(*args, **kwargs)
             while True:
                 try:
-                    with self:
+                    with self.__class__():
                         x = next(gen)
                     yield x
                 except StopIteration:
                     break
         return generator_context
+
+    def __enter__(self) -> None:
+        raise NotImplementedError
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        raise NotImplementedError
 
 
 class no_grad(_DecoratorContextManager):
@@ -40,12 +57,10 @@ class no_grad(_DecoratorContextManager):
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
 
-    This mode has no effect when using :class:`~enable_grad` context manager .
-
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
 
     Example::
@@ -62,13 +77,17 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            super().__init__()
+        self.prev = False
+
     def __enter__(self):
         self.prev = torch.is_grad_enabled()
-        torch._C.set_grad_enabled(False)
+        torch.set_grad_enabled(False)
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch.set_grad_enabled(self.prev)
-        return False
 
 
 class enable_grad(_DecoratorContextManager):
@@ -80,7 +99,7 @@ class enable_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
 
     Example::
@@ -102,13 +121,12 @@ class enable_grad(_DecoratorContextManager):
         True
 
     """
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
-        torch._C.set_grad_enabled(True)
+        torch._C._set_grad_enabled(True)
 
-    def __exit__(self, *args):
-        torch.set_grad_enabled(self.prev)
-        return False
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_grad_enabled(self.prev)
 
 
 class set_grad_enabled(object):
@@ -116,9 +134,6 @@ class set_grad_enabled(object):
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
-
-    When using :class:`~enable_grad` context manager, :class:`~set_grad_enabled(False)`
-    has no effect.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -148,13 +163,12 @@ class set_grad_enabled(object):
 
     """
 
-    def __init__(self, mode):
+    def __init__(self, mode: bool) -> None:
         self.prev = torch.is_grad_enabled()
-        torch._C.set_grad_enabled(mode)
+        torch._C._set_grad_enabled(mode)
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args):
-        torch.set_grad_enabled(self.prev)
-        return False
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_grad_enabled(self.prev)

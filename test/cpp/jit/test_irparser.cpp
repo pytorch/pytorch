@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/jit/test_base.h"
 
@@ -17,7 +17,7 @@ namespace jit {
  */
 static void checkRoundtrip(const std::string& s) {
   auto graph = std::make_shared<Graph>();
-  script::parseIR(s, &*graph);
+  parseIR(s, &*graph);
   std::ostringstream ss;
   ss << *graph;
   std::string parsed = ss.str();
@@ -42,7 +42,7 @@ void testIRParser() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0 : Tensor, %1 : Tensor):
   %2 : Tensor = foo::add(%0, %1)
@@ -116,8 +116,27 @@ graph(%0 : Tensor,
 )IR");
   }
   {
+    checkRoundtrip(R"IR(
+graph(%0 : Tensor,
+      %1 : Tensor,
+      %2 : Tensor):
+  %3 : int = prim::Constant[value=-1]()
+  %4 : Tensor = aten::add(%0, %1, %3)
+  %5 : Tensor = prim::If(%2)
+    block0():
+      %6 : int = prim::Constant[value=1]()
+      %7 : Tensor = aten::add(%1, %3, %6)
+      %8 : int = prim::Constant[value=1]()
+      %9 : Tensor = aten::add(%7, %3, %8)
+      -> (%9)
+  %10 : int = prim::Constant[value=-987]()
+  %11 : Tensor = aten::add(%5, %3, %10)
+  return (%11)
+)IR");
+  }
+  {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%a):
   return (%a))IR",
@@ -127,7 +146,7 @@ graph(%a):
   {
     // Check that parser correctly handles values reusing the same name.
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x):
   %x = a::a(%x)
@@ -239,9 +258,119 @@ graph(%0 : Tensor,
     # CHECK: return
       return (%a))IR";
 
-    script::parseIR(text, &*graph);
+    parseIR(text, &*graph);
     AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
     torch::jit::testing::FileCheck().run(text, *graph);
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+graph(%a : Float(4, 5),
+      %b : Float(4:5, 5:1),
+      %c : Double(*, *)):
+  return (%a)
+)IR",
+        &*graph,
+        vmap);
+    Value* a = graph->inputs()[0];
+    Value* b = graph->inputs()[1];
+    Value* c = graph->inputs()[2];
+
+    auto a_type = a->type()->cast<TensorType>();
+    auto a_sizes = *a_type->sizes().concrete_sizes();
+    auto a_strides = a_type->strides().concrete_sizes();
+    AT_ASSERT(a_sizes[0] == 4 && a_sizes[1] == 5);
+    AT_ASSERT(a_strides == c10::nullopt);
+
+    auto b_type = b->type()->cast<TensorType>();
+    auto b_sizes = *b_type->sizes().concrete_sizes();
+    auto b_strides = *(b_type->strides().sizes());
+    AT_ASSERT(b_sizes[0] == 4 && b_sizes[1] == 5);
+    AT_ASSERT(*b_strides[0] == 5 && *b_strides[1] == 1);
+
+    auto c_type = c->type()->cast<TensorType>();
+    AT_ASSERT(*c_type->sizes().size() == 2);
+    AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
+    AT_ASSERT(c_type->strides().concrete_sizes() == c10::nullopt);
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    bool error_thrown = false;
+    try {
+      parseIR(
+          R"IR(
+graph(%a : Float(4:5, 5)):
+  return (%a)
+)IR",
+          &*graph,
+          vmap);
+    } catch (const std::exception& error) {
+      error_thrown = true;
+    }
+    AT_ASSERT(error_thrown);
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%a : Float(4, 5),
+      %b : Float(4:5, 5:1),
+      %c : Double(*, *)):
+  return (%a)
+)IR");
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%a : Float(*, *, device=cpu),
+      %b : Float(*, *, requires_grad=1),
+      %c : Long(5, 10, requires_grad=1, device=cpu),
+      %d : Float(5, requires_grad=0, device=cuda:2),
+      %e : Long(4:6, 3:2, 2:1, requires_grad=0, device=cuda:1),
+      %f : Float(),
+      %g : Float(device=cpu),
+      %h : Float(requires_grad=1),
+      %i : Float(requires_grad=0, device=cuda:1),
+      %j : Double(*, *, requires_grad=0)):
+  return (%a)
+)IR");
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    parseIR(
+        R"IR(
+graph():
+  %d : int[] = prim::Constant[value=[1,2,3]]()
+  return (%d)
+)IR",
+        &*graph);
+    Node* n = graph->outputs()[0]->node();
+    AT_ASSERT(n->kind() == prim::Constant);
+    AT_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
+    const auto& genericList = n->ival(attr::value).toList();
+    std::vector<int> int_vals;
+    for (const IValue& ival : genericList) {
+      int_vals.push_back(ival.toInt());
+    }
+    AT_ASSERT(int_vals.size() == 3);
+    AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
+  }
+  {
+    checkRoundtrip(
+        R"IR(
+graph(%x : Float(10, *, 10)):
+  return (%x)
+)IR");
+    checkRoundtrip(
+        R"IR(
+graph(%x : Double(*, 200, *, requires_grad=1, device=cuda:1),
+      %b : Float(5, *, requires_grad=1),
+      %c : Long(*, 10, device=cpu)):
+  return (%x)
+)IR");
   }
 }
 } // namespace jit

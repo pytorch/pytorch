@@ -5,7 +5,6 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.parallel as dp
-import torch.optim as optim
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -106,20 +105,49 @@ class TestDataParallel(JitTestCase):
     def test_tensor_sharing(self):
         module = self.Msm1(self.Msm()).cuda()
         replica = dp.replicate(module, {0, 1})
-        optimizer = optim.SGD(module.parameters(), lr=1, momentum=1)
+
+        def assert_share_data(t1, t2):
+            # Only checks that they point to the same memory on the same device.
+            if t1.device != t2.device:
+                return False
+            if t1.storage().data_ptr() != t2.storage().data_ptr():
+                return False
+            return True
+
+        for p1, p2 in zip(module.parameters(), replica[0].parameters()):
+            self.assertTrue(assert_share_data(p1, p2))
+
+        for p1, p2 in zip(module.buffers(), replica[0].buffers()):
+            self.assertTrue(assert_share_data(p1, p2))
+
+        for p1, p2 in zip(module.parameters(), replica[1].parameters()):
+            self.assertFalse(assert_share_data(p1, p2))
+
+        for p1, p2 in zip(module.buffers(), replica[1].buffers()):
+            self.assertFalse(assert_share_data(p1, p2))
+
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
+    def test_tensor_sharing_with_forward(self):
+        module = self.Msm1(self.Msm()).cuda()
+        replica = dp.replicate(module, {0, 1})
         x = torch.ones(2, 2, requires_grad=True).cuda()
-        first_forward = module.forward(x)
+        first_forward = module(x)
         first_forward.sum().backward()
-        optimizer.step()
-        second_forward = module.forward(first_forward)
+        with torch.no_grad():
+            for p in module.parameters():
+                # Use .data here to avoid version counter bump.
+                # The graph created by the following forward will be wrong but
+                # we never backward through them so it's fine
+                p.data -= 1. * p.grad
+        second_forward = module(x)
 
         # replica which is on the same GPU has a shallow copy of the original
         # params and buffers
-        r0_forward = replica[0].forward(x)
+        r0_forward = replica[0](x)
         self.assertEqual(second_forward, r0_forward)
 
         # replica which is on a different GPU has a deep copy of the original
         # params and buffers
         x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
-        r1_forward = replica[1].forward(x1)
+        r1_forward = replica[1](x1)
         self.assertEqual(first_forward, r1_forward)

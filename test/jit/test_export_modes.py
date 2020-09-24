@@ -79,6 +79,8 @@ class TestExportModes(JitTestCase):
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
             ModelWithAtenNotONNXOp(), (x, y), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     # torch.fmod is using to test ONNX_ATEN.
@@ -94,4 +96,6 @@ class TestExportModes(JitTestCase):
         y = torch.randn(3, 4, dtype=torch.float32)
         torch.onnx.export_to_pretty_string(
             ModelWithAtenFmod(), (x, y), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)

@@ -49,4 +49,13 @@ INSTANTIATE_FOR_CONTAINER(set)
 
 #include <glog/logging.h>
 
+// Additional macros on top of glog
+
+// Log with source location information override (to be used in generic
+// warning/error handlers implemented as functions, not macros)
+//
+// Note, we don't respect GOOGLE_STRIP_LOG here for simplicity
+#define LOG_AT_FILE_LINE(n, file, line) \
+  ::google::LogMessage(file, line, ::google::GLOG_##n).stream()
+
 #endif // C10_UTIL_LOGGING_IS_GOOGLE_GLOG_H_

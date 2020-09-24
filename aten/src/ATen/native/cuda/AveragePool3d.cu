@@ -55,6 +55,11 @@ __global__ void avg_pool3d_cuda_update_output(
     hend = min(hend, input.size(2));
     wend = min(wend, input.size(3));
 
+    if (tstart >= tend || hstart >= hend || wstart >= wend) {
+      output[slice][oFrame][oRow][oCol] = scalar_t(0);
+      return;
+    }
+
     accscalar_t divide_factor;
     if (divisor_override) {
       divide_factor = static_cast<accscalar_t>(divisor_override);
@@ -118,6 +123,11 @@ __global__ void avg_pool3d_cuda_update_output(
     tend = min(tend, input.size(1));
     hend = min(hend, input.size(2));
     wend = min(wend, input.size(3));
+
+    if (tstart >= tend || hstart >= hend || wstart >= wend) {
+      output[slice][oFrame][oRow][oCol] = scalar_t(0);
+      return;
+    }
 
     accscalar_t divide_factor;
     if (divisor_override) {
@@ -401,7 +411,7 @@ void avg_pool3d_out_cuda_template(
     work_output = work_output.reshape({nbatch * nslices, otime, oheight, owidth});
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(),
     "avg_pool3d_out_cuda",
     [&] {
@@ -426,19 +436,17 @@ void avg_pool3d_out_cuda_template(
         default:
           avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-               work_input.packed_accessor64<scalar_t, 4>(),
-               work_output.packed_accessor64<scalar_t, 4>(),
-               kT, kH, kW,
-               dT, dH, dW,
-               padT, padH, padW,
-               count_include_pad,
-               offsetZ, divisor);
+                work_input.packed_accessor64<scalar_t, 4>(),
+                work_output.packed_accessor64<scalar_t, 4>(),
+                kT, kH, kW,
+                dT, dH, dW,
+                padT, padH, padW,
+                count_include_pad,
+                offsetZ, divisor);
             break;
         }
 
-        TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-          "avg_pool3d_out_cuda failed with error code ",
-          cudaGetLastError());
+        AT_CUDA_CHECK(cudaGetLastError());
 
         totalZ -= 65535;
         offsetZ += 65535;
@@ -546,7 +554,7 @@ void avg_pool3d_backward_out_cuda_template(
   // specialization yields 3x speedup over the gpuAtomicAdd implementation.
   // Padding must be 0, otherwise, pool size may change.
   if (dT == 1 && dH == 1 && dW == 1 && padT == 0 && padH == 0 && padW == 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool3d_backward_out_frame_stride1",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
@@ -574,9 +582,7 @@ void avg_pool3d_backward_out_cuda_template(
               1.0f/divide_factor,
               offsetZ);
 
-          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-            "avg_pool3d_backward_out_frame failed with error code ",
-            cudaGetLastError());
+          AT_CUDA_CHECK(cudaGetLastError());
 
           totalZ -= 65535;
           offsetZ += 65535;
@@ -585,7 +591,7 @@ void avg_pool3d_backward_out_cuda_template(
     );
   }
   else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
@@ -601,29 +607,27 @@ void avg_pool3d_backward_out_cuda_template(
           if (kernelsOverlap) {
             avg_pool3d_cuda_update_grad_input_atomic<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor64<scalar_t, 4>(),
-                 work_grad_input.packed_accessor64<scalar_t, 4>(),
-                 kT, kH, kW,
-                 dT, dH, dW,
-                 padT, padH, padW,
-                 count_include_pad,
-                 offsetZ, divisor);
+                  work_grad_output.packed_accessor64<scalar_t, 4>(),
+                  work_grad_input.packed_accessor64<scalar_t, 4>(),
+                  kT, kH, kW,
+                  dT, dH, dW,
+                  padT, padH, padW,
+                  count_include_pad,
+                  offsetZ, divisor);
           }
           else {
             avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor64<scalar_t, 4>(),
-                 work_grad_input.packed_accessor64<scalar_t, 4>(),
-                 kT, kH, kW,
-                 dT, dH, dW,
-                 padT, padH, padW,
-                 count_include_pad,
-                 offsetZ, divisor);
+                  work_grad_output.packed_accessor64<scalar_t, 4>(),
+                  work_grad_input.packed_accessor64<scalar_t, 4>(),
+                  kT, kH, kW,
+                  dT, dH, dW,
+                  padT, padH, padW,
+                  count_include_pad,
+                  offsetZ, divisor);
           }
 
-          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-            "avg_pool3d_backward_out_frame failed with error code ",
-            cudaGetLastError());
+          AT_CUDA_CHECK(cudaGetLastError());
 
           totalZ -= 65535;
           offsetZ += 65535;
@@ -690,6 +694,9 @@ Tensor& avg_pool3d_backward_out_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("avg_pool3d_backward_out_cuda");
   avg_pool3d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -713,6 +720,9 @@ Tensor avg_pool3d_backward_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("avg_pool3d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   avg_pool3d_backward_out_cuda_template(
     gradInput,

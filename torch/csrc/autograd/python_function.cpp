@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -17,9 +18,10 @@
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 
@@ -44,11 +46,16 @@ PyObject *THPFunctionClass = nullptr;
 
 namespace torch { namespace autograd {
 
+void PyNode::throw_python_error() {
+  python_error err;
+  err.persist();
+  throw err;
+}
 auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
 
   THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
-  if (!pyInputs) throw python_error();
+  if (!pyInputs) throw_python_error();
 
   for (size_t i = 0; i != inputs.size(); ++i) {
     PyTuple_SET_ITEM(pyInputs.get(), i, THPVariable_Wrap(inputs[i]));
@@ -56,7 +63,7 @@ auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
 
   THPObjectPtr r(PyObject_CallMethod(
       obj, "_do_backward", "OO", pyInputs.get(), Py_True));
-  if (!r) throw python_error();
+  if (!r) throw_python_error();
 
   auto num_outputs = PyTuple_GET_SIZE(r.get());
   tensor_list tensor_results(num_outputs);
@@ -104,23 +111,23 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs(PyTuple_New(num_inputs));
-  if (!pyInputs) throw python_error();
+  if (!pyInputs) throw_python_error();
   auto& output_info = py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
     PyObject* input;
-    if (inputs[i].defined()) {
+    if (inputs[i].defined() || !py_fn->materialize_grads) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
       input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
     }
-    if (!input) throw python_error();
+    if (!input) throw_python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
   THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
-  if (!apply_fn) throw python_error();
+  if (!apply_fn) throw_python_error();
   THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
-  if (!r) throw python_error();
+  if (!r) throw_python_error();
   ensure_tuple(r);
 
   auto& is_variable_input = py_fn->is_variable_input;
@@ -136,7 +143,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     if (all_none) {
       num_outputs = num_forward_inputs;
       r = PyTuple_GetSlice(r.get(), 0, num_forward_inputs);
-      if (!r) throw python_error();
+      if (!r) throw_python_error();
     }
   }
 
@@ -166,12 +173,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       continue;
     }
     if (output == Py_None) {
-      auto& info = input_info[results.size()];
-      if (info.requires_grad) {
-        results.emplace_back(info.zeros(_device_guard));
-      } else {
-        results.emplace_back();
-      }
+      results.emplace_back();
     } else {
       if (!THPVariable_Check(output)) {
         std::string msg("expected Variable or None (got ");
@@ -189,9 +191,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 auto PyNode::is_traceable() -> bool {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr forward_class {PyObject_GetAttrString(obj, "_forward_cls")};
-  if (!forward_class) throw python_error();
+  if (!forward_class) throw_python_error();
   THPObjectPtr traceable_py_bool {PyObject_GetAttrString(forward_class, "is_traceable")};
-  if (!traceable_py_bool) throw python_error();
+  if (!traceable_py_bool) throw_python_error();
   return traceable_py_bool == Py_True;
 }
 
@@ -299,6 +301,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
+  self->materialize_grads = true;
   return obj;
 }
 
@@ -363,7 +366,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     if (THPVariable_Check(obj)) {
       return ((THPVariable*)obj)->cdata;
     }
-    throw TypeError("%s.forward: expected Variable (got %s) for return value %d",
+    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
 
@@ -539,7 +542,7 @@ static void _trace_post_record(
     return;
   }
 
-  node->i_(attr::inplace, is_inplace);
+  node->i_(jit::attr::inplace, is_inplace);
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
@@ -558,7 +561,7 @@ static void _trace_post_record(
     Value* value = node->outputs()[i];
     if (var->cdata.defined()) {
       value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(autograd::as_variable_ref(var->cdata), value);
+      jit::tracer::setValueTrace(var->cdata, value);
     }
   }
 }
@@ -608,67 +611,10 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   return outputs.release();
 }
 
-// Legacy codepath
-PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
-{
+PyObject* THPFunction_name(THPFunction *self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  RECORD_FUNCTION(
-    Py_TYPE(self)->tp_name,
-    std::vector<c10::IValue>(),
-    autograd::Node::peek_at_next_sequence_nr());
-
-  TORCH_WARN("Legacy autograd function with non-static forward method is deprecated and will be removed in 1.3. ",
-             "Please use new-style autograd function with static forward method. ",
-             "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)");
-
-  auto info_pair = unpack_input<true>(_inputs);
-  auto& unpacked_input = info_pair.first;
-  auto& input_info = info_pair.second;
-  bool is_executable = input_info.is_executable;
-  std::shared_ptr<PyNode> cdata = self->cdata.lock();
-  if (cdata) {
-    // In some pathological cases, self->cdata can already be set on entry to
-    // this function.  This occurs on misuse of the legacy autograd API in the
-    // following way:
-    //
-    //    f = MyFunction()
-    //    y1 = f(x1)
-    //    y2 = f(x2)  # bad!!
-    //
-    // Historically, we did something very nutty: we set y1.grad_fn ==
-    // y2.grad_fn (even though these variables really have nothing to do with
-    // each other.)  At least now we have a warning.  All of this hoo-ha will
-    // go away when we delete the implementation of legacy autograd.
-    TORCH_WARN(
-      "Legacy autograd function object was called twice.  You will probably "
-      "get incorrect gradients from this computation, as the saved tensors "
-      "from the second invocation will clobber the saved tensors from the "
-      "first invocation.  Please consider rewriting your autograd function "
-      "in the modern style; for information on the new format, please see: "
-      "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd");
-  } else {
-    Py_INCREF(self);
-    cdata = std::shared_ptr<PyNode>(new PyNode(THPObjectPtr((PyObject*)self)), deleteNode);
-    self->cdata = cdata;
-  }
-  cdata->set_next_edges(std::move(input_info.next_edges));
-  self->needs_input_grad = input_info.needs_input_grad.release();
-
-  // We don't support tracing in the legacy code path
-  _assert_not_tracing(Py_TYPE(self)->tp_name, unpacked_input.input_vars);
-
-  // Now we're ready to call a forward (implemented in Python)
-  THPObjectPtr raw_output;
-  {
-    AutoGradMode grad_mode(false);
-    THPObjectPtr forward_fn(PyObject_GetAttrString((PyObject*)self, "forward"));
-    if (!forward_fn) return nullptr;
-    raw_output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
-    if (!raw_output) return nullptr;
-  }
-
-  return process_outputs(nullptr, cdata, self, unpacked_input, _inputs, std::move(raw_output),
-                         is_executable, nullptr);
+  auto cdata = self->cdata.lock();
+  return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
 
@@ -678,7 +624,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    autograd::Node::peek_at_next_sequence_nr());
+    at::sequence_number::peek());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -819,7 +765,9 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // zero-filled buffers instead
     Py_INCREF(raw_grad_output);
     THPObjectPtr grad_output(raw_grad_output);
-    _prepare_grads(self, grad_output, true);
+    if (self->materialize_grads) {
+      _prepare_grads(self, grad_output, true);
+    }
 
     // self.backward(*grad_output)
     THPObjectPtr backward_fn(PyObject_GetAttrString((PyObject*)self, "backward"));
@@ -838,8 +786,6 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_outputs, num_grads);
 
-    // If any of the remaining grad_inputs are None, zero them.
-    _prepare_grads(self, grad_input, false);
     return grad_input.release();
 
   } catch (python_error& e) {
@@ -883,6 +829,18 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
     "https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd")
   return torch::autograd::registerFunctionHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
+}
+
+int THPFunction_set_materialize_grads(THPFunction *self, PyObject *value, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(value)) {
+    THPUtils_invalidArguments(value, nullptr, "set_materialize_grads", 1, "(bool)");
+    return -1;
+  }
+  self->materialize_grads = (value == Py_True);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject *unpack_saved_variables(
@@ -1049,12 +1007,13 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+  {"materialize_grads", nullptr, (setter)THPFunction_set_materialize_grads, nullptr, nullptr},
   {nullptr}
 };
 
 static struct PyMethodDef THPFunction_methods[] = {
+  {(char*)"name", (PyCFunction)THPFunction_name, METH_NOARGS, nullptr},
   {(char*)"apply", (PyCFunction)THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
-  {(char*)"_do_forward", (PyCFunction)THPFunction_do_forward, METH_VARARGS, nullptr},
   {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, nullptr},
   {(char*)"register_hook", (PyCFunction)THPFunction_register_hook, METH_O, nullptr},

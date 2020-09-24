@@ -5,7 +5,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -190,10 +190,10 @@ Tensor q_avg_pool2d(
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     auto output = at::_empty_affine_quantized(
         output_shape,
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        input.suggest_memory_format());
+        c10::nullopt);
     // fast path for channel last: qavg_pool_2d_nhwc_stub
     if (output_shape.size() == 3) {
       qavg_pool2d_nhwc_stub(
@@ -286,7 +286,10 @@ Tensor q_avg_pool2d(
     return output;
   }
 }
+} // namespace
+
 #ifdef USE_PYTORCH_QNNPACK
+namespace qnnp_avgpool_helper {
 Tensor qnnpack_avg_pool2d(
     Tensor input,
     IntArrayRef kernel_size,
@@ -315,7 +318,7 @@ Tensor qnnpack_avg_pool2d(
   const int64_t oW = output_shape[output_shape.size() - 1];
   const auto outC = inC;
 
-  Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+  Tensor input_contig = input.contiguous(c10::MemoryFormat::ChannelsLast);
 
   initQNNPACK();
   const auto scale = input_contig.q_scale();
@@ -326,10 +329,11 @@ Tensor qnnpack_avg_pool2d(
       "qnnpack_avg_pool2d(): the resulting output Tensor size should be >= 0");
   // NHWC output
   output = at::_empty_affine_quantized(
-      {batch_size, oH, oW, outC},
+      output_shape,
       at::device(kCPU).dtype(kQUInt8),
       scale,
-      zero_point);
+      zero_point,
+      c10::MemoryFormat::ChannelsLast);
 
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
   const pytorch_qnnp_status createStatus =
@@ -371,19 +375,18 @@ Tensor qnnpack_avg_pool2d(
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Average Pooling operator");
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
       "failed to run QNNPACK Average Pool operator");
-  // TODO: remove permute once MemoryLayout is added above
-  return output.permute({0, 3, 1, 2});
+  return output.contiguous(input.suggest_memory_format());
 }
+} // qnnp_avgpool_helper
 #endif
-} // namespace
 
-Tensor quantized_avg_pool2d(
+Tensor avg_pool2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -395,7 +398,7 @@ Tensor quantized_avg_pool2d(
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       input.scalar_type() == kQUInt8) {
-    return qnnpack_avg_pool2d(
+    return at::native::qnnp_avgpool_helper::qnnpack_avg_pool2d(
         input,
         kernel_size,
         stride,
@@ -405,7 +408,7 @@ Tensor quantized_avg_pool2d(
         divisor_override);
   }
 #endif
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool2d", [&]() {
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
     output = q_avg_pool2d<scalar_t>(
         input,
         kernel_size,

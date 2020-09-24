@@ -1,6 +1,6 @@
 "Manages CMake."
 
-from __future__ import print_function
+
 
 import multiprocessing
 import os
@@ -115,14 +115,14 @@ class CMake:
         if IS_WINDOWS:
             return cmake_command
         cmake3 = which('cmake3')
-        if cmake3 is not None:
-            cmake = which('cmake')
-            if cmake is not None:
-                bare_version = CMake._get_version(cmake)
-                if (bare_version < LooseVersion("3.5.0") and
-                        CMake._get_version(cmake3) > bare_version):
-                    cmake_command = 'cmake3'
-        return cmake_command
+        cmake = which('cmake')
+        if cmake3 is not None and CMake._get_version(cmake3) >= LooseVersion("3.5.0"):
+            cmake_command = 'cmake3'
+            return cmake_command
+        elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.5.0"):
+            return cmake_command
+        else:
+            raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
 
     @staticmethod
     def _get_version(cmd):
@@ -165,6 +165,11 @@ class CMake:
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
+        ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
+        if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
+            # Cannot rerun ninja on Windows due to a ninja bug.
+            # The workground is to remove `.ninja_deps`.
+            os.remove(ninja_deps_file)
 
         args = []
         if USE_NINJA:
@@ -218,7 +223,6 @@ class CMake:
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
             'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
-            'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
@@ -229,14 +233,17 @@ class CMake:
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_HOST_COMPILER',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDA_SEPARABLE_COMPILATION',
              'CUDNN_LIBRARY',
              'CUDNN_INCLUDE_DIR',
              'CUDNN_ROOT',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'JAVA_HOME',
+             'INTEL_MKL_DIR',
+             'INTEL_OMP_DIR',
              'MKL_THREADING',
-             'MKLDNN_THREADING',
+             'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
@@ -245,9 +252,6 @@ class CMake:
              'ATEN_THREADING',
              'WERROR')
         })
-
-        if 'USE_GLOO_IBVERBS' in my_env:
-            print("WARNING: USE_GLOO_IBVERBS is deprecated. Use USE_IBVERBS instead.")
 
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
@@ -339,19 +343,3 @@ class CMake:
         else:
             build_args += ['--', '-j', max_jobs]
         self.run(build_args, my_env)
-
-        # in cmake, .cu compilation involves generating certain intermediates
-        # such as .cu.o and .cu.depend, and these intermediates finally get compiled
-        # into the final .so.
-        # Ninja updates build.ninja's timestamp after all dependent files have been built,
-        # and re-kicks cmake on incremental builds if any of the dependent files
-        # have a timestamp newer than build.ninja's timestamp.
-        # There is a cmake bug with the Ninja backend, where the .cu.depend files
-        # are still compiling by the time the build.ninja timestamp is updated,
-        # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
-        # build detector.
-        # This line works around that bug by manually updating the build.ninja timestamp
-        # after the entire build is finished.
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(ninja_build_file):
-            os.utime(ninja_build_file, None)

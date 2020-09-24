@@ -11,4 +11,7 @@
 #include <TH/generic/THBlas.h>
 #include <TH/THGenerateBFloat16Type.h>
 
+#include <TH/generic/THBlas.h>
+#include <TH/THGenerateHalfType.h>
+
 #endif

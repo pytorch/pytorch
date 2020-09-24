@@ -3,33 +3,83 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
 
-c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
+c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
   Stack stack;
-  for (const Value* input : node->inputs()) {
+  for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
-      stack.push_back(ival);
+      stack.push_back(*ival);
     } else {
       return c10::nullopt;
     }
   }
-  try {
-    auto op = getOperation(node);
-    op(stack);
-    TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
-  } catch (...) {
-    return c10::nullopt;
+  switch (n->kind()) {
+    case prim::ListUnpack: {
+      if (stack.back().toList().size() != n->outputs().size()) {
+        return c10::nullopt;
+      }
+      listUnpack(stack, n->outputs().size());
+    } break;
+    case prim::TupleConstruct: {
+      auto tt = n->output()->type()->expect<TupleType>();
+      if (tt->name()) {
+        namedTupleConstruct(stack, tt, n->inputs().size());
+      } else {
+        tupleConstruct(stack, n->inputs().size());
+      }
+    } break;
+    case prim::ListConstruct: {
+      listConstruct(
+          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+    } break;
+    case prim::DictConstruct: {
+      dictConstruct(
+          stack, n->output()->type()->expect<DictType>(), n->inputs().size());
+    } break;
+    case prim::CreateObject: {
+      createObject(stack, n->output()->type()->expect<ClassType>());
+    } break;
+    case prim::isinstance: {
+      isinstance(stack, n->tys(attr::types));
+    } break;
+    default: {
+      const auto& the_operator = n->getOperator();
+      if (the_operator.schema().is_vararg()) {
+        // vararg schemas require the number of inputs at the top of the stack
+        // but this is broken in other places in constant prop, so disable it
+        // for now
+        return c10::nullopt;
+      }
+
+      auto op = n->getOperation();
+      try {
+        op(&stack);
+      } catch (...) {
+        return c10::nullopt;
+      }
+    } break;
+  }
+
+  for (const IValue& v : stack) {
+    if (v.isTensor()) {
+      at::Tensor t = v.toTensor();
+      if (t.defined() && t.requires_grad()) {
+        // requires grad tensors cannot be constants
+        return c10::nullopt;
+      }
+    }
   }
   return stack;
 }
@@ -43,6 +93,9 @@ std::unordered_set<Symbol> skip_list = {
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
+    prim::Guard,
+    prim::profile,
+    prim::profile_optional,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -75,39 +128,12 @@ struct ConstantPropagator {
     }
   }
 
-  std::vector<IValue> runNode(Node* n) {
-    auto op = getOperation(n);
-    Stack stack;
-    for (auto input : n->inputs()) {
-      stack.push_back(*toIValue(input));
-    }
-    op(stack);
-    auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
-      if (v.isTensor()) {
-        auto t = std::move(v).toTensor();
-        if (t.defined()) {
-          if (t.requires_grad()) {
-            // error gets caught within propagateNode()
-            throw c10::Error("Can't insert requires grad as constant", "");
-          }
-          return IValue(t);
-        } else {
-          return t;
-        }
-      } else {
-        return v;
-      }
-    });
-    return var_outputs;
-  }
-
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
-    try {
-      outputs = runNode(n);
-    } catch (...) {
-      // Catch exceptions. This op may not be run,
-      // so catch the error here & leave the op in the graph
+    if (auto outputs_opt = runNodeIfInputsAreConstant(n)) {
+      outputs = std::move(outputs_opt.value());
+    } else {
+      // The op failed to run, so we cannot continue constant-prop for it.
       return;
     }
     auto graph = n->owningGraph();
@@ -270,7 +296,7 @@ struct ConstantPropagator {
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
-      return AliasDb::mutableType(v);
+      return AliasDb::isMutableType(v);
     });
   }
 

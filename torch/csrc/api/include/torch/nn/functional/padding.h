@@ -11,22 +11,24 @@ inline Tensor _narrow_with_range(const Tensor& input, int64_t dim, int64_t start
 }
 
 inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
-  input = torch::cat({input, _narrow_with_range(input, 2, 0, padding[-1 + padding.size()])}, /*dim=*/2);
-  input = torch::cat({_narrow_with_range(input, 2, -(padding[-1 + padding.size()] + padding[-2 + padding.size()]), -padding[-1 + padding.size()]), input}, /*dim=*/2);
+  int padding_size = padding.size();
+  input = torch::cat({input, _narrow_with_range(input, 2, 0, padding[-1 + padding_size])}, /*dim=*/2);
+  input = torch::cat({_narrow_with_range(input, 2, -(padding[-1 + padding_size] + padding[-2 + padding_size]), -padding[-1 + padding_size]), input}, /*dim=*/2);
 
-  if (padding.size() > 2) {
-    input = torch::cat({input, _narrow_with_range(input, 3, 0, padding[-3 + padding.size()])}, /*dim=*/3);
-    input = torch::cat({_narrow_with_range(input, 3, -(padding[-3 + padding.size()] + padding[-4 + padding.size()]), -padding[-3 + padding.size()]), input}, /*dim=*/3);
+  if (padding_size > 2) {
+    input = torch::cat({input, _narrow_with_range(input, 3, 0, padding[-3 + padding_size])}, /*dim=*/3);
+    input = torch::cat({_narrow_with_range(input, 3, -(padding[-3 + padding_size] + padding[-4 + padding_size]), -padding[-3 + padding_size]), input}, /*dim=*/3);
   }
 
-  if (padding.size() > 4) {
-    input = torch::cat({input, _narrow_with_range(input, 4, 0, padding[-5 + padding.size()])}, /*dim=*/4);
-    input = torch::cat({_narrow_with_range(input, 4, -(padding[-5 + padding.size()] + padding[-6 + padding.size()]), -padding[-5 + padding.size()]), input}, /*dim=*/4);
+  if (padding_size > 4) {
+    input = torch::cat({input, _narrow_with_range(input, 4, 0, padding[-5 + padding_size])}, /*dim=*/4);
+    input = torch::cat({_narrow_with_range(input, 4, -(padding[-5 + padding_size] + padding[-6 + padding_size]), -padding[-5 + padding_size]), input}, /*dim=*/4);
   }
 
   return input;
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor pad(const Tensor& input,
                   IntArrayRef pad,
@@ -81,7 +83,19 @@ inline Tensor pad(const Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pad
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::PadFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+/// ```
 inline Tensor pad(const Tensor& input, const PadFuncOptions& options) {
   return detail::pad(input, options.pad(), options.mode(), options.value());
 }

@@ -37,12 +37,27 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaGetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }
+  c10::optional<Device> uncheckedGetDevice() const noexcept {
+    int device;
+    auto err = cudaGetDevice(&device);
+    C10_CUDA_CHECK_WARN(err);
+    if (err != cudaSuccess) {
+      return c10::nullopt;
+    }
+    return Device(DeviceType::CUDA, device);
+  }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
-    C10_CUDA_CHECK(cudaSetDevice(d.index()));
+    Device current_device = getDevice();
+    if (current_device != d) {
+      C10_CUDA_CHECK(cudaSetDevice(d.index()));
+    }
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
+    auto current_device = uncheckedGetDevice();
+    if (!current_device.has_value() || current_device.value() != d) {
+      C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
+    }
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream(d.index()).unwrap();

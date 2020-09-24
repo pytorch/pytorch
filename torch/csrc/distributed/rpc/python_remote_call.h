@@ -3,7 +3,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
 namespace torch {
@@ -15,7 +15,8 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   PythonRemoteCall(
       SerializedPyObj&& serializedPyObj,
       at::IValue retRRefId,
-      at::IValue retForkId);
+      at::IValue retForkId,
+      const bool isAsyncExecution);
 
   inline const SerializedPyObj& serializedPyObj() const {
     return serializedPyObj_;
@@ -29,13 +30,18 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return retForkId_;
   }
 
-  Message toMessage() && override;
+  inline bool isAsyncExecution() const {
+    return isAsyncExecution_;
+  }
+
+  Message toMessageImpl() && override;
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
  private:
-  const SerializedPyObj serializedPyObj_;
+  SerializedPyObj serializedPyObj_;
   const at::IValue retRRefId_;
   const at::IValue retForkId_;
+  const bool isAsyncExecution_;
 };
 
 } // namespace rpc

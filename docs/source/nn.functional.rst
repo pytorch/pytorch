@@ -160,6 +160,11 @@ Non-linear activation functions
 .. autofunction:: hardtanh
 .. autofunction:: hardtanh_
 
+:hidden:`hardswish`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardswish
+
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
 
@@ -268,6 +273,17 @@ Non-linear activation functions
 
 .. autofunction:: sigmoid
 
+:hidden:`hardsigmoid`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardsigmoid
+
+:hidden:`silu`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: silu
+
+
 Normalization functions
 -----------------------
 
@@ -321,6 +337,11 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: alpha_dropout
+
+:hidden:`feature_alpha_dropout`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: feature_alpha_dropout
 
 :hidden:`dropout2d`
 ~~~~~~~~~~~~~~~~~~~
@@ -462,6 +483,11 @@ Loss functions
 
 .. autofunction:: triplet_margin_loss
 
+:hidden:`triplet_margin_with_distance_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: triplet_margin_with_distance_loss
+
 Vision functions
 ----------------
 
@@ -512,5 +538,3 @@ DataParallel functions (multi-GPU, distributed)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.parallel.data_parallel
-
-

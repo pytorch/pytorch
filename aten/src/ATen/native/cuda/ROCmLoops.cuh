@@ -62,6 +62,45 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
+// See [NOTE: Complex Operator Unification]
+// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
+// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
+// to reinterpret_cast between these representations.
+// In order to separate these concerns, we have a check for non-c10 complex separately.
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct uses_non_c10_complex {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::template arg<nargs - 1>::type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return uses_non_c10_complex<func_t, nargs - 1>::check();
+    });
+  }
+};
+
+template<typename func_t>
+struct uses_non_c10_complex<func_t, 0> {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::result_type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return non_c10_complex;
+  }
+};
+
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
 // new codes will be put into namespace modern. These two namespaces
@@ -83,16 +122,6 @@ __global__ void elementwise_kernel(int N, func_t f) {
       idx += nt;
     }
   }
-}
-
-template<int N>
-static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
-  AT_ASSERT(N == iter.ntensors());
-  std::array<const int64_t*, N> strides;
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i).data();
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
 template<int nt, int vt, typename func_t>
@@ -178,10 +207,29 @@ using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::t
 
 }  // namespace arg_type
 
+template<typename func_t, int remaining=function_traits<func_t>::arity-1>
+struct has_same_arg_types {
+  using traits = function_traits<func_t>;
+  static constexpr bool value = std::is_same<
+      typename traits::template arg<remaining>::type,
+      typename traits::template arg<remaining-1>::type
+    >::value && has_same_arg_types<func_t, remaining-1>::value;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, 0> {
+  static constexpr bool value = true;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, -1> {
+  static constexpr bool value = true;
+};
+
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(nt)
+template<typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -198,8 +246,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
+  int idx = block_work_size * blockIdx.x + tid;
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
@@ -210,52 +257,115 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   // fetch data
-  return_t results[vt];
-  arg_t args[vt][nargs];
+  return_t results[thread_work_size];
+  arg_t args[thread_work_size][nargs];
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * nt);
+        args[i][j] = *(args_base[j] + i * num_threads);
       }
     }
   }
 
   // compute
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
   // store data
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
+      *(result_base + i * num_threads) = results[i];
     }
   }
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
+template<typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+  elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
+template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 } // namespace modern
+
+
+template <typename func_t>
+void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  at::detail::Array<ScalarType, ntensors> dtypes;
+  for (int i = 0; i < ntensors; i++) {
+    dtypes[i] = iter.tensor(i).scalar_type();
+  }
+
+  int64_t numel = iter.numel();
+  if (iter.is_trivial_1d()) {
+    auto inner_strides = iter.get_inner_strides();
+    at::detail::Array<int, ntensors> strides;
+    for (int i = 0; i < ntensors; i++) {
+      strides[i] = inner_strides[i];
+    }
+
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+        void* out = data[0] + strides[0] * idx;
+        arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      });
+    } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
+      modern::launch_kernel(numel, f, data);
+    } else {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
+        *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
+      });
+    }
+  } else {
+    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+        auto offsets = offset_calc.get(idx);
+        void* out = data[0] + offsets[0];
+        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      });
+    } else {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+        auto offsets = offset_calc.get(idx);
+        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
+      });
+    }
+  }
+}
 
 }} // namespace at::native

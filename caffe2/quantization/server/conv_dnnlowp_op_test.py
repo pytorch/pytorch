@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
@@ -6,13 +6,13 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
+from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
     run_conv_or_fc,
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -39,6 +39,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_dnnlowp_conv_int(
         self,
         stride,
@@ -208,6 +209,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_dnnlowp_conv_relu_int(
         self,
         stride,
@@ -451,6 +453,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         prepack_weight=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=None, max_examples=50)
     def test_dnnlowp_conv3d_int(
         self,
         stride,

@@ -3,15 +3,13 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
-
-using namespace torch::jit::script;
 
 static const std::vector<std::string> subMethodSrcs = {R"JIT(
 def one(self, x: Tensor, y: Tensor) -> Tensor:
@@ -37,13 +35,13 @@ static void import_libs(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table) {
+    const std::vector<at::IValue>& tensor_table) {
   SourceImporter si(
       cu,
       &tensor_table,
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
-  si.loadNamedType(QualifiedName(class_name));
+  si.loadType(QualifiedName(class_name));
 }
 
 void testModuleInterfaceSerialization() {
@@ -51,7 +49,7 @@ void testModuleInterfaceSerialization() {
   Module parentMod("parentMod", cu);
   Module subMod("subMod", cu);
 
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   import_libs(
       cu,
       "__torch__.OneForward",

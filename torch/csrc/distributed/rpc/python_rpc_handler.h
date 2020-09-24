@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -17,22 +17,22 @@ namespace rpc {
 // torch/distributed/internal_rpc_utils.py are imported only once.
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
+  struct RRefProxyFunctions {
+    py::object rrefProxyCtor_;
+    py::object rpcSync_;
+    py::object rpcAsync_;
+    py::object remote_;
+  };
+
+  struct RRefTypeFunctions {
+    py::object onOwner_;
+    py::object onUser_;
+  };
+
   static PythonRpcHandler& getInstance();
 
-  // Deserialize Python function, run it, and serialize its return value.
-  std::vector<char> generatePythonUDFResult(
-      const std::vector<char>& pickledPayload,
-      const std::vector<torch::Tensor>& requestTensorTable,
-      std::vector<torch::Tensor>& responseTensorTable);
-
-  // Returned python UDF result is pickled binary string, so run python
-  // function to unpickle the python UDF result and return py::object to user
-  py::object loadPythonUDFResult(
-      const std::vector<char>& pickledPayload,
-      const std::vector<torch::Tensor>& tensorTable);
-
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const SerializedPyObj& serializedObj);
+  py::object runPythonUdf(const py::object& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -44,6 +44,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   void handleException(const py::object& obj);
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
+  // Check if obj is an RemoteException instance.
+  bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
@@ -60,7 +62,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit();
 
   // Parse the string to recover the jit_type, this is used for RRef python
   // pickling/unpickling type recovery. The type string inference rule is as
@@ -73,25 +75,17 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
 
+  // Return a set of Python functions for RRef helpers.
+  const RRefProxyFunctions& getRRefProxyFunctions() const;
+
+  // Return a set of Python functions to retrieve the type of the object
+  // referenced by a given RRef.
+  const RRefTypeFunctions& getRRefTypeFunctions() const;
+
  private:
+  void init();
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
-
-// A macro that grabs the GIL, profiling the acquisition time. The average GIL
-// acquisition time will be recorded in RpcAgent's getMetrics().
-#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
-  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
-  auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
-  if (shouldProfileGIL) {                                                \
-    startTime = std::chrono::high_resolution_clock::now();               \
-  }                                                                      \
-  pybind11::gil_scoped_acquire ag;                                       \
-  if (shouldProfileGIL) {                                                \
-    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
-        std::chrono::high_resolution_clock::now() - startTime);          \
-    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
-  }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
@@ -101,25 +95,37 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Ref to `torch.distributed.rpc.internal._run_function`.
   py::object pyRunFunction_;
 
-  // Ref to `torch.distributed.rpc.internal._load_return_value`.
-  py::object pyLoadReturnValue_;
-
   // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
+
+  // Ref to `torch.distributed.rpc.internal.deserialize`.
+  py::object pyDeserialize_;
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
 
+  // Python functions for RRef proxy
+  RRefProxyFunctions rrefProxyFunctions_;
+
+  // Ref to 'torch.distributed.rpc.api._rref_typeof_on_'
+  RRefTypeFunctions rrefTypeFunctions_;
+
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
-  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
-  // We import the compilation unit here only once for less cost and thread
-  // safety.
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
+  // and imported in C++ (see get_python_cu() in
+  // csrc/jit/python/pybind_utils.h). We import the compilation unit here only
+  // once for less cost and thread safety.
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit_;
 
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
-  std::shared_ptr<jit::script::ScriptTypeParser> typeParser_;
+  std::shared_ptr<jit::ScriptTypeParser> typeParser_;
+
+  // Indicates whether or not we have properly initialized the handler.
+  bool initialized_;
+
+  // Lock to protect initialization.
+  std::mutex init_lock_;
 };
 
 } // namespace rpc

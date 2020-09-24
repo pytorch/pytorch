@@ -107,7 +107,7 @@ class IDeepFeeder : public BlobFeederBase {
     else if (meta == TypeMeta::Make<uint8_t>())
       return itensor::data_type::u8;
     else
-      return itensor::data_type::data_undef;
+      return itensor::data_type::undef;
   }
 
 public:

@@ -211,8 +211,8 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout = torch::getLayout(backend);
-  type_obj.dtype = torch::getDtype(scalarType);
+  type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
+  type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 

@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/boolean_mask_ops.h"
 
@@ -91,7 +93,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     if (numOfOutput > 0) {
       BooleanMaskCopyKernel<<<
-          min(numOfOutput, static_cast<int64_t>(CAFFE_MAXIMUM_NUM_BLOCKS)),
+          std::min(numOfOutput, static_cast<int64_t>(CAFFE_MAXIMUM_NUM_BLOCKS)),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(

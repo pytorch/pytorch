@@ -31,6 +31,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec256/vec256.h>
 
 #ifndef _MSC_VER
@@ -186,7 +187,11 @@ static inline void unroll_contiguous_scalar_checks(
 template <typename func_t>
 void cpu_kernel(TensorIterator& iter, func_t&& op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -201,14 +206,21 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
   iter.cast_outputs();
 }
 
-template <typename func_t, typename vec_func_t>
+template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU, but some kernels (like Fill)
+  // explicitly dynamic_cast, so we give the opt-out of checking.
+  c10::guts::if_constexpr<check_dynamic_cast>([&] {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  });
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
@@ -224,10 +236,13 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
-    iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
+  constexpr bool result_void = std::is_void<typename traits::result_type>::value;
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
+                        ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -238,8 +253,44 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
         basic_loop(data, strides, 0, n, std::forward<func_t>(op));
       });
     }
-  }, {0, iter.numel()});
+  }, range);
   iter.cast_outputs();
+}
+
+template <typename func_t>
+void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+  cpu_serial_kernel(iter, op, {0, iter.numel()});
+}
+
+template <typename func_t, typename vec_func_t>
+void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
+  using traits = function_traits<func_t>;
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+
+  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+    } else {
+      using Indices = std::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
+        if (idx) {
+          vectorized_loop(data, n, idx, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+        } else {
+          basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+        }
+      });
+    }
+  }, range);
+  iter.cast_outputs();
+}
+
+template <typename func_t, typename vec_func_t>
+void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+  cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 
 }}}  // namespace at::native::<anonymous>

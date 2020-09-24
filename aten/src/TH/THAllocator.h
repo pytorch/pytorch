@@ -53,7 +53,7 @@ class CAFFE2_API THMapAllocator {
 
   // This is very dangerous.  You have to redefine this destructor for each
   // subclass
-  virtual ~THMapAllocator() { close(); }
+  virtual ~THMapAllocator();
 
 protected:
   bool closed_ = false;

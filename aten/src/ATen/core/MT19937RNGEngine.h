@@ -2,7 +2,9 @@
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 
@@ -21,22 +23,22 @@ constexpr uint32_t LMASK = 0x7fffffff;
 /**
  * Note [Mt19937 Engine implementation]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Originally implemented in: 
+ * Originally implemented in:
  * http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/MT2002/CODES/MTARCOK/mt19937ar-cok.c
  * and modified with C++ constructs. Moreover the state array of the engine
  * has been modified to hold 32 bit uints instead of 64 bits.
- * 
+ *
  * Note that we reimplemented mt19937 instead of using std::mt19937 because,
  * at::mt19937 turns out to be faster in the pytorch codebase. PyTorch builds with -O2
  * by default and following are the benchmark numbers (benchmark code can be found at
  * https://github.com/syed-ahmed/benchmark-rngs):
- * 
+ *
  * with -O2
  * Time to get 100000000 philox randoms with at::uniform_real_distribution = 0.462759s
  * Time to get 100000000 at::mt19937 randoms with at::uniform_real_distribution = 0.39628s
  * Time to get 100000000 std::mt19937 randoms with std::uniform_real_distribution = 0.352087s
  * Time to get 100000000 std::mt19937 randoms with at::uniform_real_distribution = 0.419454s
- * 
+ *
  * std::mt19937 is faster when used in conjunction with std::uniform_real_distribution,
  * however we can't use std::uniform_real_distribution because of this bug:
  * http://open-std.org/JTC1/SC22/WG21/docs/lwg-active.html#2524. Plus, even if we used
@@ -44,14 +46,14 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * than what's in pytorch currently and that messes up the tests in tests_distributions.py.
  * The other option, using std::mt19937 with at::uniform_real_distribution is a tad bit slower
  * than at::mt19937 with at::uniform_real_distribution and hence, we went with the latter.
- * 
+ *
  * Copyright notice:
  * A C-program for MT19937, with initialization improved 2002/2/10.
  * Coded by Takuji Nishimura and Makoto Matsumoto.
  * This is a faster version by taking Shawn Cokus's optimization,
  * Matthe Bellew's simplification, Isaku Wada's real version.
  *
- * Before using, initialize the state by using init_genrand(seed) 
+ * Before using, initialize the state by using init_genrand(seed)
  * or init_by_array(init_key, key_length).
  *
  * Copyright (C) 1997 - 2002, Makoto Matsumoto and Takuji Nishimura,
@@ -68,8 +70,8 @@ constexpr uint32_t LMASK = 0x7fffffff;
  *   notice, this list of conditions and the following disclaimer in the
  *   documentation and/or other materials provided with the distribution.
  *
- *   3. The names of its contributors may not be used to endorse or promote 
- *   products derived from this software without specific prior written 
+ *   3. The names of its contributors may not be used to endorse or promote
+ *   products derived from this software without specific prior written
  *   permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -123,7 +125,7 @@ public:
   }
 
   inline bool is_valid() {
-    if ((data_.seeded_ == true) 
+    if ((data_.seeded_ == true)
       && (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N)
       && (data_.next_ <= MERSENNE_STATE_N)) {
       return true;
@@ -133,7 +135,7 @@ public:
 
   inline uint32_t operator()() {
     uint32_t y;
-    
+
     if (--(data_.left_) == 0) {
         next_state();
     }

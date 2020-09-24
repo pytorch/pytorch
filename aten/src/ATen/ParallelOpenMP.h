@@ -19,22 +19,29 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return;
   }
 #ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
-  // choose number of tasks based on grain size and number of threads
-  int64_t num_threads = omp_in_parallel() ? 1 : omp_get_max_threads();
-  if (grain_size > 0) {
-    num_threads = std::min(num_threads, divup((end - begin), grain_size));
-  }
+  // Work around memory leak when using 1 thread in nested "omp parallel"
+  // caused by some buggy OpenMP versions and the fact that omp_in_parallel()
+  // returns false when omp_get_max_threads() == 1 inside nested "omp parallel"
+  // See issue gh-32284
 
-#pragma omp parallel num_threads(num_threads)
+#pragma omp parallel if (omp_get_max_threads() > 1 && !omp_in_parallel() && ((end - begin) > grain_size))
   {
+    // choose number of tasks based on grain size and number of threads
+    // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
+    int64_t num_threads = omp_get_num_threads();
+    if (grain_size > 0) {
+      num_threads = std::min(num_threads, divup((end - begin), grain_size));
+    }
+
     int64_t tid = omp_get_thread_num();
-    int64_t chunk_size = divup((end - begin), omp_get_num_threads());
+    int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
@@ -63,6 +70,7 @@ inline scalar_t parallel_reduce(
     const F& f,
     const SF& sf) {
   TORCH_CHECK(grain_size >= 0);
+  at::internal::lazy_init_num_threads();
   if (begin >= end) {
     return ident;
   } else if (in_parallel_region() || get_num_threads() == 1) {

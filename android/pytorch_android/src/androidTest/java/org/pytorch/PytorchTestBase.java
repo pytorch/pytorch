@@ -1,17 +1,15 @@
 package org.pytorch;
 
-import org.junit.Before;
-import org.junit.Test;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import org.junit.Test;
 
 public abstract class PytorchTestBase {
   private static final String TEST_MODULE_ASSET_NAME = "test.pt";
@@ -19,8 +17,7 @@ public abstract class PytorchTestBase {
   @Test
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
-    final IValue input =
-        IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
+    final IValue input = IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -57,17 +54,17 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     double[] values =
         new double[] {
-            -Double.MAX_VALUE,
-            Double.MAX_VALUE,
-            -Double.MIN_VALUE,
-            Double.MIN_VALUE,
-            -Math.exp(1.d),
-            -Math.sqrt(2.d),
-            -3.1415f,
-            3.1415f,
-            -1,
-            0,
-            1,
+          -Double.MAX_VALUE,
+          Double.MAX_VALUE,
+          -Double.MIN_VALUE,
+          Double.MIN_VALUE,
+          -Math.exp(1.d),
+          -Math.sqrt(2.d),
+          -3.1415f,
+          3.1415f,
+          -1,
+          0,
+          1,
         };
     for (double value : values) {
       final IValue input = IValue.from(value);
@@ -242,15 +239,14 @@ public abstract class PytorchTestBase {
     tensorFloats.getDataAsByteArray();
   }
 
-
   @Test
   public void testEqString() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     String[] values =
         new String[] {
-            "smoketest",
-            "проверка не латинских символов", // not latin symbols check
-            "#@$!@#)($*!@#$)(!@*#$"
+          "smoketest",
+          "проверка не латинских символов", // not latin symbols check
+          "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
       final IValue input = IValue.from(value);
@@ -267,9 +263,9 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     String[] values =
         new String[] {
-            "smoketest",
-            "проверка не латинских символов", // not latin symbols check
-            "#@$!@#)($*!@#$)(!@*#$"
+          "smoketest",
+          "проверка не латинских символов", // not latin symbols check
+          "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
       final IValue input = IValue.from(value);
@@ -277,7 +273,8 @@ public abstract class PytorchTestBase {
       assertTrue(value.equals(input.toStr()));
       final IValue output = module.runMethod("str3Concat", input);
       assertTrue(output.isString());
-      String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
+      String expectedOutput =
+          new StringBuilder().append(value).append(value).append(value).toString();
       assertTrue(expectedOutput.equals(output.toStr()));
     }
   }
@@ -286,12 +283,12 @@ public abstract class PytorchTestBase {
   public void testEmptyShape() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final long someNumber = 43;
-    final IValue input = IValue.from(Tensor.fromBlob(new long[]{someNumber}, new long[]{}));
+    final IValue input = IValue.from(Tensor.fromBlob(new long[] {someNumber}, new long[] {}));
     final IValue output = module.runMethod("newEmptyShapeWithItem", input);
     assertTrue(output.isTensor());
     Tensor value = output.toTensor();
-    assertArrayEquals(new long[]{}, value.shape());
-    assertArrayEquals(new long[]{someNumber}, value.getDataAsLongArray());
+    assertArrayEquals(new long[] {}, value.shape());
+    assertArrayEquals(new long[] {someNumber}, value.getDataAsLongArray());
   }
 
   @Test
@@ -310,8 +307,86 @@ public abstract class PytorchTestBase {
     final IValue output = module.runMethod("testNonContiguous");
     assertTrue(output.isTensor());
     Tensor value = output.toTensor();
-    assertArrayEquals(new long[]{2}, value.shape());
-    assertArrayEquals(new long[]{100, 300}, value.getDataAsLongArray());
+    assertArrayEquals(new long[] {2}, value.shape());
+    assertArrayEquals(new long[] {100, 300}, value.getDataAsLongArray());
+  }
+
+  @Test
+  public void testChannelsLast() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] data = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104});
+    final IValue outputNHWC = module.runMethod("contiguousChannelsLast", IValue.from(inputNHWC));
+    assertIValueTensor(outputNHWC, MemoryFormat.CHANNELS_LAST, inputShape, data);
+  }
+
+  @Test
+  public void testChannelsLast3d() throws IOException {
+    long[] shape = new long[] {1, 2, 2, 2, 2};
+    long[] dataNCHWD = new long[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    long[] dataNHWDC = new long[] {1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16};
+
+    Tensor inputNHWDC = Tensor.fromBlob(dataNHWDC, shape, MemoryFormat.CHANNELS_LAST_3D);
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue outputNCHWD = module.runMethod("contiguous", IValue.from(inputNHWDC));
+    assertIValueTensor(outputNCHWD, MemoryFormat.CONTIGUOUS, shape, dataNCHWD);
+
+    Tensor inputNCHWD = Tensor.fromBlob(dataNCHWD, shape, MemoryFormat.CONTIGUOUS);
+    final IValue outputNHWDC =
+        module.runMethod("contiguousChannelsLast3d", IValue.from(inputNCHWD));
+    assertIValueTensor(outputNHWDC, MemoryFormat.CHANNELS_LAST_3D, shape, dataNHWDC);
+  }
+
+  @Test
+  public void testChannelsLastConv2d() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] dataNCHW = new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104};
+    Tensor inputNCHW = Tensor.fromBlob(dataNCHW, inputShape, MemoryFormat.CONTIGUOUS);
+    long[] dataNHWC = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(dataNHWC, inputShape, MemoryFormat.CHANNELS_LAST);
+
+    long[] weightShape = new long[] {3, 3, 1, 1};
+    long[] dataWeightOIHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNCHW = Tensor.fromBlob(dataWeightOIHW, weightShape, MemoryFormat.CONTIGUOUS);
+    long[] dataWeightOHWI = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNHWC = Tensor.fromBlob(dataWeightOHWI, weightShape, MemoryFormat.CHANNELS_LAST);
+
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+
+    final IValue outputNCHW =
+        module.runMethod("conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
+
+    final IValue outputNHWC =
+        module.runMethod("conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
+    assertIValueTensor(
+        outputNHWC,
+        MemoryFormat.CHANNELS_LAST,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
+  }
+
+  static void assertIValueTensor(
+      final IValue ivalue,
+      final MemoryFormat memoryFormat,
+      final long[] expectedShape,
+      final long[] expectedData) {
+    assertTrue(ivalue.isTensor());
+    Tensor t = ivalue.toTensor();
+    assertEquals(memoryFormat, t.memoryFormat());
+    assertArrayEquals(expectedShape, t.shape());
+    assertArrayEquals(expectedData, t.getDataAsLongArray());
   }
 
   protected abstract String assetFilePath(String assetName) throws IOException;

@@ -2,24 +2,37 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+
+#ifdef CUDART_VERSION
+#include <cusolver_common.h>
+#endif
+
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
 
+namespace c10 {
+
+class CuDNNError : public c10::Error {
+  using Error::Error;
+};
+
+}  // namespace c10
+
 // See Note [CHECK macro]
-#define AT_CUDNN_CHECK(EXPR)                                                     \
-  do {                                                                           \
-    cudnnStatus_t status = EXPR;                                                 \
-    if (status != CUDNN_STATUS_SUCCESS) {                                        \
-      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                \
-        AT_ERROR(                                                                \
-            "cuDNN error: ",                                                     \
-            cudnnGetErrorString(status),                                         \
-            ". This error may appear if you passed in a non-contiguous input."); \
-      } else {                                                                   \
-        AT_ERROR("cuDNN error: ", cudnnGetErrorString(status));                  \
-      }                                                                          \
-    }                                                                            \
+#define AT_CUDNN_CHECK(EXPR)                                                                  \
+  do {                                                                                        \
+    cudnnStatus_t status = EXPR;                                                              \
+    if (status != CUDNN_STATUS_SUCCESS) {                                                     \
+      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                             \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                   \
+            "cuDNN error: ",                                                                  \
+            cudnnGetErrorString(status),                                                      \
+            ". This error may appear if you passed in a non-contiguous input.");              \
+      } else {                                                                                \
+        TORCH_CHECK_WITH(CuDNNError, false, "cuDNN error: ", cudnnGetErrorString(status));    \
+      }                                                                                       \
+    }                                                                                         \
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
@@ -45,6 +58,21 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 cusparseGetErrorString(__err),                  \
                 " when calling `" #EXPR "`");                   \
   } while (0)
+
+// cusolver related headers are only supported on cuda now
+#ifdef CUDART_VERSION
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                              \
+  do {                                                          \
+    cusolverStatus_t __err = EXPR;                              \
+    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,               \
+                "cusolver error: ", __err,                      \
+                ", when calling `" #EXPR "`");                  \
+  } while (0)
+
+#else
+#define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#endif
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
 

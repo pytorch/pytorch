@@ -17,7 +17,7 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-    throw std::runtime_error("PyTorch was compiled without NumPy support");
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 }}
 #else
@@ -75,19 +75,19 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.device().type() != DeviceType::CPU) {
-      throw TypeError(
-        "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.", tensor.device().type());
+    throw TypeError(
+      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
+      "copy the tensor to host memory first.", tensor.device().str().c_str());
   }
   if (tensor.layout() != Layout::Strided) {
       throw TypeError(
         "can't convert %s layout tensor to numpy."
-        "convert the tensor to a strided layout first.", tensor.layout());
+        "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
   }
-  if (tensor.requires_grad()) {
+  if (at::GradMode::is_enabled() && tensor.requires_grad()) {
     throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
+        "Can't call numpy() on Tensor that requires grad. "
+        "Use tensor.detach().numpy() instead.");
   }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
@@ -129,8 +129,19 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
-
   auto array = (PyArrayObject*)obj;
+
+  if (!PyArray_ISWRITEABLE(array)) {
+    TORCH_WARN_ONCE(
+      "The given NumPy array is not writeable, and PyTorch does "
+      "not support non-writeable tensors. This means you can write to the "
+      "underlying (supposedly non-writeable) NumPy array using the tensor. "
+      "You may want to copy the array to protect its data or make it writeable "
+      "before converting it to a tensor. This type of warning will be "
+      "suppressed for the rest of this program.");
+
+  }
+
   int ndim = PyArray_NDIM(array);
   auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
   auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));
@@ -149,8 +160,10 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   for (int i = 0; i < ndim; i++) {
     if (strides[i] < 0) {
       throw ValueError(
-          "some of the strides of a given numpy array are negative. This is "
-          "currently not supported, but will be added in future releases.");
+          "At least one stride in the given numpy array is negative, "
+          "and tensors with negative strides are not currently supported. "
+          "(You can probably work around this by making a copy of your array "
+          " with array.copy().) ");
     }
     // XXX: this won't work for negative strides
     storage_size += (sizes[i] - 1) * strides[i];
@@ -177,11 +190,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
-    case kComplexDouble: return NPY_COMPLEX128;
-    case kComplexFloat: return NPY_COMPLEX64;
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
     case kHalf: return NPY_HALF;
+    case kComplexDouble: return NPY_COMPLEX128;
+    case kComplexFloat: return NPY_COMPLEX64;
     case kLong: return NPY_INT64;
     case kInt: return NPY_INT32;
     case kShort: return NPY_INT16;
@@ -189,7 +202,7 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
     case kByte: return NPY_UINT8;
     case kBool: return NPY_BOOL;
     default:
-      throw TypeError("Got unsupported ScalarType ", toString(scalar_type));
+      throw TypeError("Got unsupported ScalarType %s", toString(scalar_type));
   }
 }
 
@@ -198,6 +211,8 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
+    case NPY_COMPLEX64: return kComplexFloat;
+    case NPY_COMPLEX128: return kComplexDouble;
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
@@ -223,7 +238,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, int64, int32, int16, int8, uint8, and bool.",
+      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
@@ -232,7 +247,8 @@ bool is_numpy_int(PyObject* obj) {
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return is_numpy_int(obj) || PyArray_IsScalar(obj, Floating);
+  return is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
+         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating);
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {

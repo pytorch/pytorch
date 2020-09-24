@@ -139,10 +139,10 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
 
   // get some multinomial samples
   // this will trigger torch.multinomial without replacement
-  // which increments philox offset by 4*num_samples times.
+  // which utilizes uniform which increments counter by 4.
   // num_samples in the following call is 4.
-  at::ones({10}, at::TensorOptions(at::kCUDA)).multinomial(4);
+  at::ones({4}, at::TensorOptions(at::kCUDA)).multinomial(4);
 
-  // expected uniforms will start from counter offset of 4*4
-  assert_with_expected_uniforms(16);
+  // expected uniforms will start from counter offset of 4
+  assert_with_expected_uniforms(4);
 }

@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/autograd.h>
 
 namespace torch { namespace autograd {
 
@@ -37,19 +38,20 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (!var.requires_grad()) {
         return;
       }
-      // NB: we don't support returning non-differentiable views that could require grad
-      if (var.is_view()) {
-        throw std::runtime_error("Returning Variables sharing storage with other Variables "
-                                 "that require grad is not supported in Python functions. "
-                                 "Please submit a feature request if you hit this error.");
-      }
       // Return detached aliases of inputs, instead of changing their requires_grad
       // property.
       if (is_input) {
         var = var.detach();
-      } else {
+      } else if (!var.is_view()) {
         var.detach_();
       }
+      // If var is a view of one of the inputs of the custom autograd Function,
+      // we don't detach it in a no_grad block. This is so that we can mimic the
+      // behavior of returning a view from a no_grad block:
+      //   x = torch.randn(3, requires_grad=True)
+      //   with torch.no_grad():
+      //       y = x.view(-1)
+      // Here, `y` requires_grad (!).
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
         throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
@@ -71,7 +73,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.grad().reset();
+      var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -83,7 +85,11 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
-      var = var.view_as(var);
+      // Run in no_grad mode to mimic the behavior of the forward.
+      {
+        AutoGradMode grad_mode(false);
+        var = var.view_as(var);
+      }
       impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
       impl::set_gradient_edge(var, {cdata, output_nr});
@@ -93,15 +99,17 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   std::vector<torch::autograd::Variable> outputs;
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
+  int num_diff_outputs = 0;
 
 
   for (auto i = 0; i < num_outputs; ++i) {
+    Variable var = raw_outputs[i];
+
     auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
     bool is_input = inputs.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
-    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0;
-
-    Variable var = raw_outputs[i];
+    bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0
+                              && isDifferentiableType(var.scalar_type());
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
@@ -109,8 +117,34 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
+    // For deprecation cycle. Can be removed after 1.6. In the case where we detected a view
+    // in no grad mode during the forward, only warn the user (do not change the flag if we
+    // return and input that is a view as is).
+    // See NOTE [ View + Inplace detection ] for why we replace everything by a warning.
+    if (!(is_input && is_modified) && var.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+    }
+
+    if (is_differentiable) {
+      ++num_diff_outputs;
+    }
+
     outputs_impl.insert(out_tensor_impl);
     outputs.emplace_back(var);
+  }
+
+  // If multiple differentiable outputs are returned, we do not allow views to be modified inplace
+  // See NOTE [ View + Inplace detection ] for more details
+  if (num_diff_outputs > 1) {
+    for (auto& var: outputs) {
+      if (var.is_view()) {
+        // NB: is_view() ==> get_autograd_meta()
+        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+      }
+    }
   }
 
   // All the modified Tensors must be returned as is for the rewrite to be valid.
@@ -198,6 +232,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   for(auto& var : outputs) {
     non_differentiable_.insert(var.unsafeGetTensorImpl());
   }
+}
+
+void AutogradContext::set_materialize_grads(bool value) {
+  materialize_grads_ = value;
 }
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {

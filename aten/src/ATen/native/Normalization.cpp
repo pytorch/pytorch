@@ -8,12 +8,15 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/batch_norm.h>
 
 #include <vector>
 
-static const int MIOPEN_DIM_MAX = 4;
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(batch_norm_cpu_inference_contiguous_stub);
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
@@ -87,59 +90,6 @@ void batch_norm_cpu_inference_collect_linear_and_constant_terms(
   }
 }
 
-/// A fast path for CPU inference when all tensors are contiguous.
-/// This code achieves machine bandwidth peak without AVX support.
-/// If this changes for future architectures, we can move it to the cpu/
-/// directory.
-template<typename scalar_t>
-void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& mean, const Tensor& variance, double eps) {
-
-  int64_t n_batch = input.size(0);
-  int64_t n_channel = input.size(1);
-  int64_t image_size = input.numel() / n_batch / n_channel;
-
-  scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
-
-  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
-  scalar_t* beta_data = beta.data_ptr<scalar_t>();
-
-  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
-      alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
-
-  // Apply the linear terms to the input,
-  // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
-  // No need to use parallel_for as this function is supposed to be
-  // memory-limited.
-  // Keep the loop struture simple to make sure compiler vectorization kicks in.
-  if (image_size != 1) {
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t c = 0; c < n_channel; ++c) {
-        for (int64_t i = 0; i < image_size; ++i) {
-          // Keep all the offset calculation within the inner loop for
-          // simplicity. Compilers are very good at hoisting the common part
-          // outside.
-          int64_t offset = n * n_channel * image_size + c * image_size + i;
-          output_data[offset] = input_data[offset] * alpha_data[c] +
-              beta_data[c];
-        }
-      }
-    }
-  } else {
-    // image_size == 1
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t c = 0; c < n_channel; ++c) {
-        int64_t offset = n * n_channel + c;
-        output_data[offset] = input_data[offset] * alpha_data[c] + beta_data[c];
-      }
-    }
-  }
-}
-
 /// A fast path for CPU inference when all tensors are channels last contiguous.
 /// This code achieves machine bandwidth peak without AVX support.
 /// If this changes for future architectures, we can move it to the cpu/
@@ -207,8 +157,8 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_var.is_contiguous()) {
 
     Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    batch_norm_cpu_inference_contiguous<scalar_t>(
-      output, input, weight, bias, running_mean, running_var, eps);
+    batch_norm_cpu_inference_contiguous_stub(kCPU, output, input, weight,
+        bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
@@ -285,9 +235,9 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
       Tensor in = input.select(1, f);
 
       // compute mean per input
-      auto iter = TensorIterator();
-      iter.add_input(in);
-      iter.build();
+      auto iter = TensorIteratorConfig()
+        .add_input(in)
+        .build();
       accscalar_t sum = 0;
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         sum += i;
@@ -296,10 +246,10 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
       save_mean_a[f] = mean;
 
       // compute variance per input
-      iter = TensorIterator();
-      iter.add_input(in);
-      iter.build();
       accscalar_t var_sum = 0;
+      iter = TensorIteratorConfig()
+        .add_input(in)
+        .build();
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         var_sum += (i - mean) * (i - mean);
       });
@@ -371,19 +321,19 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
         // sum over all gradOutput in feature plane
         accscalar_t sum = 0;
-        auto iter = TensorIterator();
-        iter.add_input(grad_out);
-        iter.build();
+        auto iter = TensorIteratorConfig()
+          .add_input(grad_out)
+          .build();
         cpu_serial_kernel(iter, [&](const scalar_t g) -> void {
           sum += g;
         });
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        iter = TensorIterator();
-        iter.add_input(in);
-        iter.add_input(grad_out);
-        iter.build();
+        iter = TensorIteratorConfig()
+          .add_input(in)
+          .add_input(grad_out)
+          .build();
         cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
           dotp += (i - mean) * go;
         });
@@ -398,25 +348,31 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
-            iter = TensorIterator::unary_op(grad_in, in);
-            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-              return (i - mean) * k;
-            });
+            {
+              auto iter = TensorIterator::unary_op(grad_in, in);
+              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+                return (i - mean) * k;
+              });
+            }
 
             accscalar_t grad_mean = sum / n;
-            iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
-            cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
-              return (go - grad_mean - gi) * invstd * w;
-            });
+            {
+              auto iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+              cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
+                return (go - grad_mean - gi) * invstd * w;
+              });
+            }
           } else {
             // when in evaluation mode
             // Q(X) = X - running_mean  ; i.e. input centered to zero mean
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
-            iter = TensorIterator::unary_op(grad_in, grad_out);
-            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-              return i * invstd * w;
-            });
+            {
+              auto iter = TensorIterator::unary_op(grad_in, grad_out);
+              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+                return i * invstd * w;
+              });
+            }
           }
         }
         if (grad_input_mask[1]) {
@@ -487,11 +443,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.scalar_type() != at::kDouble
+               && input.scalar_type() != at::kBFloat16
                && (weight.scalar_type() != at::kHalf)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
                && detail::getCUDAHooks().compiledWithMIOpen()
+               && cudnn_enabled
                );
 
   if (use_miopen) {
@@ -539,7 +497,7 @@ Tensor batch_norm(
     auto out = input.clone();
     if (weight.defined()) out = out * weight[0];
     if (bias.defined()) out = out + bias[0];
-    return out; 
+    return out;
   }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
@@ -575,52 +533,6 @@ Tensor instance_norm(
   }
 
   return out.view(input.sizes());
-}
-
-Tensor group_norm(const Tensor& input, int64_t num_groups,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps, bool cudnn_enabled) {
-
-    auto input_shape = input.sizes();
-    int64_t b = input.size(0);
-    int64_t c = input.size(1);
-
-    TORCH_CHECK(c % num_groups == 0,
-             "Expected number of channels in input to be divisible by ",
-             "num_groups, but got input of shape ", input.sizes(), " and "
-             "num_groups=", num_groups);
-
-    TORCH_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
-             "Expected weight to be a vector of size equal to the number of ",
-             "channels in input, but got weight of shape ", weight.sizes(),
-             " and input of shape ", input.sizes());
-    TORCH_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
-             "Expected bias to be a vector of size equal to the number of ",
-             "channels in input, but got bias of shape ", weight.sizes(),
-             " and input of shape ", input.sizes());
-
-    // Apply group norm
-    // view(..., -1) does not work for empty tensor
-    auto input_reshaped = input.contiguous().view({1, b * num_groups, b ? -1 : 1});
-
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
-                              cudnn_enabled);
-    out = out.view(input_shape);
-
-    if (!weight.defined() && !bias.defined()) {
-      return out;
-    }
-
-    std::vector<int64_t> affine_param_shape(input.dim(), 1);
-    affine_param_shape[1] = c;
-
-    if (weight.defined() && bias.defined()) {
-      return bias.view(affine_param_shape).addcmul(out, weight.view(affine_param_shape), 1);
-    } else if (weight.defined()) {
-      return out.mul(weight.view(affine_param_shape));
-    } else {
-      return out.add(bias.view(affine_param_shape));
-    }
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(

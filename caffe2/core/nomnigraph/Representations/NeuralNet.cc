@@ -62,12 +62,16 @@ void NNModule::replaceSubgraph(
   auto sg_outputs = nn::getOutputs(sg);
 
   auto sg_inputs_copy = sg_inputs;
+  auto sg_outputs_copy = sg_outputs;
+
   for (const auto& input : node_inputs) {
     sg_inputs_copy.erase(input);
+    // outputs may contain inputs that have additional
+    // consumers external to the subgraph
+    sg_outputs_copy.erase(input);
   }
   assert(sg_inputs_copy.size() == 0 && "Not all inputs were listed");
 
-  auto sg_outputs_copy = sg_outputs;
   for (const auto& output : node_outputs) {
     sg_outputs_copy.erase(output);
   }

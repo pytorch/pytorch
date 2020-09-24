@@ -370,30 +370,31 @@ static std::vector<Dimname> compute_matmul_outnames(
 }
 
 void propagate_names_for_addmv(
-    TensorImpl* result,
-    TensorImpl* mat,
-    TensorImpl* vec,
-    TensorImpl* bias) {
-  if (!impl::has_names(result) && !impl::has_names(mat) &&
-      !impl::has_names(vec) && !impl::has_names(bias)) {
+    Tensor& result,
+    const Tensor& mat,
+    const Tensor& vec,
+    const Tensor& bias) {
+  if (!result.has_names() && !mat.has_names() &&
+      !vec.has_names() && !bias.has_names()) {
     return;
   }
-  auto mv_outnames = compute_matmul_outnames(impl::get_names(mat), impl::get_names(vec));
-  auto add_outnames = unify_from_right(mv_outnames, impl::get_names(bias));
+  auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
+  auto add_outnames = unify_from_right(mv_outnames, bias.names());
   propagate_names(result, add_outnames);
 }
 
 void propagate_names_for_addmm(
-    TensorImpl* result,
-    TensorImpl* m1,
-    TensorImpl* m2,
-    TensorImpl* bias) {
-  if (!impl::has_names(m1) && !impl::has_names(m2) &&
-      !impl::has_names(bias) && !impl::has_names(result)) {
+    Tensor& result,
+    const Tensor& m1,
+    const Tensor& m2,
+    const Tensor& bias) {
+  if (!m1.has_names() && !m2.has_names() &&
+      !bias.has_names() && !result.has_names()) {
     return;
   }
-  auto mm_outnames = compute_matmul_outnames(impl::get_names(m1), impl::get_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+
+  auto mm_outnames = compute_matmul_outnames(m1.names(), m2.names());
+  auto add_outnames = unify_from_right(mm_outnames, bias.names());
   propagate_names(result, add_outnames);
 }
 

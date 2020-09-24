@@ -39,11 +39,11 @@ When writing TorchScript directly using ``@torch.jit.script`` decorator, the pro
 only use the subset of Python supported in TorchScript. This section documents
 what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
-part of TorchScript. See `Builtin Functions`_ for a complete reference of available
+part of TorchScript. See `Builtin Functions` for a complete reference of available
 Pytorch tensor methods, modules, and functions.
 
 As a subset of Python, any valid TorchScript function is also a valid Python
-function. This makes it possible to `disable TorchScript`_ and debug the
+function. This makes it possible to `disable TorchScript` and debug the
 function using standard Python tools like ``pdb``. The reverse is not true: there
 are many valid Python programs that are not valid TorchScript programs.
 Instead, TorchScript focuses specifically on the features of Python that are
@@ -102,16 +102,19 @@ Example (a type mismatch)
      @torch.jit.script
      def an_error(x):
          if x:
-         ~~~~~...  <--- HERE
+         ~~~~~
              r = torch.rand(1)
+             ~~~~~~~~~~~~~~~~~
          else:
+         ~~~~~
+             r = 4
+             ~~~~~ <--- HERE
+         return r
      and was used here:
          else:
              r = 4
          return r
-                ~ <--- HERE
-     ...
-
+                ~ <--- HERE...
 
 Unsupported Typing Constructs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -185,13 +188,10 @@ MyPy-style type annotations using the types listed above.
 
     ...
 
-  In our examples, we use comment-based type hints to ensure Python 2
-  compatibility as well.
-
 
 An empty list is assumed to be ``List[Tensor]`` and empty dicts
 ``Dict[str, Tensor]``. To instantiate an empty list or dict of other types,
-use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.annotate``.
+use `Python 3 type hints`.
 
 Example (type annotations for Python 3):
 
@@ -216,31 +216,6 @@ Example (type annotations for Python 3):
 
     x = torch.jit.script(EmptyDataStructures())
 
-
-Example (``torch.jit.annotate`` for Python 2):
-
-.. testcode::
-
-    import torch
-    import torch.nn as nn
-    from typing import Dict, List, Tuple
-
-    class EmptyDataStructures(torch.nn.Module):
-        def __init__(self):
-            super(EmptyDataStructures, self).__init__()
-
-        def forward(self, x):
-            # type: (Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]
-
-            # This annotates the list to be a `List[Tuple[int, float]]`
-            my_list = torch.jit.annotate(List[Tuple[int, float]], [])
-            for i in range(10):
-                my_list.append((i, float(x.item())))
-
-            my_dict = torch.jit.annotate(Dict[str, int], {})
-            return my_list, my_dict
-
-    x = torch.jit.script(EmptyDataStructures())
 
 
 
@@ -302,6 +277,13 @@ Example (refining types on parameters and locals):
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+
+    TorchScript class support is experimental. Currently it is best suited
+    for simple record-like types (think a ``NamedTuple`` with methods
+    attached).
+
 Python classes can be used in TorchScript if they are annotated with :func:`@torch.jit.script <torch.jit.script>`,
 similar to how you would declare a TorchScript function:
 
@@ -508,7 +490,7 @@ Subscripts and Slicing
 
 Function Calls
 ^^^^^^^^^^^^^^
-Calls to `builtin functions`_
+Calls to `builtin functions`
 
 ::
 
@@ -759,10 +741,15 @@ Example:
      @torch.jit.script...
      def foo(x):
          if x < 0:
-         ~~~~~~~~~...  <--- HERE
+         ~~~~~~~~~
+             y = 4
+             ~~~~~ <--- HERE
+         print(y)
+     and was used here:
+         if x < 0:
              y = 4
          print(y)
-     ...
+               ~ <--- HERE...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using
@@ -789,12 +776,12 @@ to TorchScript, leaving calls to Python functions in place. This way you can inc
 check the correctness of the model as you go.
 
 
-.. autofunction:: is_scripting
+.. autofunction:: torch.jit.is_scripting
 
 
 Attribute Lookup On Python Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TorchScript can lookup attributes on modules. `Builtin functions`_ like ``torch.add``
+TorchScript can lookup attributes on modules. `Builtin functions` like ``torch.add``
 are accessed this way. This allows TorchScript to call functions defined in
 other modules.
 
@@ -849,28 +836,8 @@ Supported constant Python types are
 * tuples containing supported types
 * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
 
-.. note::
-    If you are on Python 2, you can mark an attribute as a constant by adding
-    its name to the ``__constants__`` property of the class:
 
-    .. testcode::
 
-        import torch
-        import torch.nn as nn
-
-        class Foo(nn.Module):
-            __constants__ = ['a']
-
-            def __init__(self):
-                super(Foo, self).__init__()
-                self.a = 1 + 4
-
-            def forward(self, input):
-                return self.a + input
-
-        f = torch.jit.script(Foo())
-
-    |
 
 .. _module attributes:
 
@@ -916,33 +883,3 @@ Example:
             return self.some_dict[input] + self.my_int
 
     f = torch.jit.script(Foo({'hi': 2}))
-
-
-.. note::
-    If you are on Python 2, you can mark an attribute's type by adding it to
-    the ``__annotations__`` class property as a dictionary of attribute name to
-    type
-
-    .. testcode::
-
-        from typing import List, Dict
-
-        class Foo(nn.Module):
-            __annotations__ = {'words': List[str], 'some_dict': Dict[str, int]}
-
-            def __init__(self, a_dict):
-                super(Foo, self).__init__()
-                self.words = []
-                self.some_dict = a_dict
-
-                # `int`s can be inferred
-                self.my_int = 10
-
-            def forward(self, input):
-                # type: (str) -> int
-                self.words.append(input)
-                return self.some_dict[input] + self.my_int
-
-        f = torch.jit.script(Foo({'hi': 2}))
-
-    |

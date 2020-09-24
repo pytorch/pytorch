@@ -1,12 +1,20 @@
 #pragma once
 
 #include <torch/csrc/utils/future.h>
-#include <torch/serialize.h>
+#include <torch/types.h>
 #include <vector>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+// An enum denoting common RPC errors to allow specific error handling for them.
+enum RPCErrorType {
+  UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
+  TIMEOUT = 1, /* Indicates that the RPC has timed out */
+  INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
+                             FaultyProcessGroupAgent for testing */
+};
 
 enum MessageType {
   // messages for dist.rpc on builtin operators
@@ -20,7 +28,7 @@ enum MessageType {
   // messages for dist.remote on builtin operators and Python UDF
   SCRIPT_REMOTE_CALL = 4, // A remote call on a builtin operator
   PYTHON_REMOTE_CALL = 5, // A remote call on a Python UDF
-  REMOTE_RET = 6, // A remote call on a Python UDF
+  REMOTE_RET = 6, // Response for remote calls for UDF, builtin, or script
 
   // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
@@ -43,6 +51,10 @@ enum MessageType {
   // Messages to tell workers to clean up their autograd context.
   CLEANUP_AUTOGRAD_CONTEXT_REQ = 19,
   CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
+
+  // Messages that tell workers to run requests with profiling enabled.
+  RUN_WITH_PROFILING_REQ = 21,
+  RUN_WITH_PROFILING_RESP = 22,
 
   // Other internal message types
   EXCEPTION = 55,
@@ -93,6 +105,7 @@ class TORCH_API Message final {
   std::vector<char>&& movePayload() &&;
   std::vector<torch::Tensor>&& moveTensors() &&;
 
+  std::vector<char>& payload();
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
@@ -115,18 +128,23 @@ class TORCH_API Message final {
   int64_t id_ = -1;
 };
 
-// Create a response Message with an exception for the provided request message.
+// Create a response Message of type Exception.
 // The exception string representation will be used as the message's payload.
+// A message ID corresponding to the request that resulted in this response can
+// be provided for matching requests/responses.
+TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
+
+// Create a response Message of type Exception.
+// The passed in string representation will be used as the message's payload.
+// A message ID corresponding to the request that resulted in this response can
+// be provided for matching requests/responses.
 TORCH_API Message
-createExceptionResponse(const Message& request, const std::exception& e);
+createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-// Create a response Message with an exception type for the provided request
-// message. The passed in string will be used as the created message's payload
-TORCH_API Message createExceptionResponse(
-    const Message& request,
-    const std::string& exceptionStr);
-
-typedef torch::utils::Future<Message> FutureMessage;
+// FutureMessage is an internal type used in the communication layer. All
+// user-facing surface APIs should use JitFuture instead.
+using FutureMessage = torch::utils::Future<Message>;
+using JitFuture = c10::ivalue::Future;
 
 } // namespace rpc
 } // namespace distributed

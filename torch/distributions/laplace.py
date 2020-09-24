@@ -7,7 +7,7 @@ from torch.distributions.utils import broadcast_all
 
 class Laplace(Distribution):
     r"""
-    Creates a Laplace distribution parameterized by :attr:`loc` and :attr:'scale'.
+    Creates a Laplace distribution parameterized by :attr:`loc` and :attr:`scale`.
 
     Example::
 

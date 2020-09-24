@@ -81,6 +81,9 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
   }
 }
 
+// Used outside of the translation unit
+template void AllreduceOp<CPUContext>::initializeHalvingDoubling();
+
 template <class Context>
 void AllreduceOp<Context>::initializeRingFull() {
   if (init_.template IsType<float>()) {

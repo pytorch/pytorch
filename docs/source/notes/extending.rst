@@ -5,6 +5,8 @@ In this note we'll cover ways of extending :mod:`torch.nn`,
 :mod:`torch.autograd`, :mod:`torch`, and writing custom C extensions utilizing our C
 libraries.
 
+.. _extending-autograd:
+
 Extending :mod:`torch.autograd`
 -------------------------------
 
@@ -50,7 +52,21 @@ encode the operation history. Every new function requires you to implement 2 met
     mark any input that is modified inplace by the forward function.
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
     be used to tell the engine if an output is not differentiable.
+  - :meth:`~torch.autograd.function._ContextMethodMixin.set_materialize_grads` can be
+    used to tell the autograd engine to optimize gradient computations in the cases where
+    the output does not depend on the input by not materializing grad tensors given to backward
+    function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
+    which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
+    to calling backward. However, supporting this optimization means your custom autograd function
+    has to handle gradients that are represented in this way and is thus opt-in. Default value is True.
 
+.. note::
+
+  By default, all the output Tensors that are of differentiable type will be set to
+  require gradient and have all autograd metadata set for them. If you don't want
+  them to require gradients, you can use the `mark_non_differentiable` method mentioned
+  above. For output Tensors that are not of differentiable type (integer types for example),
+  they won't be marked as requiring gradients.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
@@ -114,11 +130,36 @@ non-Tensor arguments::
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
+And here, we optimize the above example by calling set_materialize_grads(False)::
+
+    class MulConstant(Function):
+        @staticmethod
+        def forward(ctx, tensor, constant):
+            ctx.set_materialize_grads(False)
+            ctx.constant = constant
+            return tensor * constant
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            # Here we must handle None grad_output tensor. In this case we
+            # can skip unnecessary computations and just return None.
+            if grad_output is None:
+                return None, None
+
+            # We return as many input gradients as there were arguments.
+            # Gradients of non-Tensor arguments to forward must be None.
+            return grad_output * ctx.constant, None
+
 .. note::
     Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
     track history. So if ``backward`` is implemented with differentiable
     operations, (e.g., invocation of another custom
     :class:`~torch.autograd.function`), higher order derivatives will work.
+    In this case, the Tensors saved with ``save_for_backward`` can also be used
+    in the backward and have gradients flowing back but Tensors saved in the ``ctx``
+    won't have gradients flowing back for them.
+    If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
+    make it an output of the custom ``Function`` and save it with ``save_for_backward``.
 
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
@@ -134,6 +175,8 @@ numerical approximations using small finite differences::
     print(test)
 
 See :ref:`grad-check` for more details on finite-difference gradient comparisons.
+If your function is used in higher order derivatives (differentiating the backward pass) you
+can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
 
 Extending :mod:`torch.nn`
 -------------------------
@@ -190,7 +233,7 @@ This is how a ``Linear`` module can be implemented::
 
             # Not a very smart way to initialize weights
             self.weight.data.uniform_(-0.1, 0.1)
-            if bias is not None:
+            if self.bias is not None:
                 self.bias.data.uniform_(-0.1, 0.1)
 
         def forward(self, input):
@@ -285,19 +328,24 @@ this time adding a ``__torch_function__`` implementation::
       def tensor(self):
           return self._value * torch.eye(self._N)
 
-      def __torch_function__(self, func, args=(), kwargs=None):
+      def __torch_function__(self, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
-          if func not in HANDLED_FUNCTIONS:
+          if func not in HANDLED_FUNCTIONS or not all(
+              issubclass(t, (torch.Tensor, ScalarTensor))
+              for t in types
+          ):
               return NotImplemented
           return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
-The ``__torch_function__`` method takes three arguments: ``func``, a reference to
-the torch API function that is being overrided, ``args``, the tuple of arguments
-passed to the function, and ``kwargs``, the dict of keyword arguments passed to
-the function. It uses a global dispatch stable named ``HANDLED_FUNCTIONS`` to
-store custom implementations. The keys of this dictionary are functions in the
-``torch`` namespace and the values are implementations for ``ScalarTensor``.
+The ``__torch_function__`` method takes four arguments: ``func``, a reference
+to the torch API function that is being overridden, ``types``, the list of
+types of Tensor-likes that implement ``__torch_function__``, ``args``, the
+tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
+arguments passed to the function. It uses a global dispatch stable named
+``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
+dictionary are functions in the ``torch`` namespace and the values are
+implementations for ``ScalarTensor``.
 
 .. note:: Using a global dispatch table is not a mandated part of the
           ``__torch_function__`` API, it is just a useful design pattern for
@@ -400,10 +448,13 @@ handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
 function when no override is available. For example, if we change our
 implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
 
-  def __torch_function__(self, func, args=(), kwargs=None):
+  def __torch_function__(self, func, types, args=(), kwargs=None):
       if kwargs is None:
           kwargs = {}
-      if func not in HANDLED_FUNCTIONS:
+      if func not in HANDLED_FUNCTIONS or not all(
+              issubclass(t, (torch.Tensor, ScalarTensor))
+              for t in types
+          ):
           args = [a.tensor() if hasattr(a, 'tensor') else a for a in args]
           return func(*args, **kwargs)
       return HANDLED_FUNCTIONS[func](*args, **kwargs)
@@ -420,6 +471,64 @@ are :class:`ScalarTensor` instances::
 Also see the ``MetadataTensor`` example below for another variation on this
 pattern but instead always returns a ``MetadataTensor`` to propagate metadata
 through operations in the :mod:`torch` API.
+
+The ``__torch_function__`` protocol is designed for full coverage of the API,
+partial coverage may lead to undesirable results, in particular, certain
+functions raising a ``TypeError``. This is especially true for subclasses,
+where all three of `torch.add`, `torch.Tensor.__add__` and `torch.Tensor.add`
+must be covered, even if they return exactly the same result. Failing to do
+this may also lead to infinite recursion. If one requires the implementation
+of a function from ``torch.Tensor`` subclasses, they must use
+``super().__torch_function__`` inside their implementation.
+
+
+Subclassing ``torch.Tensor``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+As of version 1.7.0, methods and functions applied on ``torch.Tensor`` subclasses
+will return subclass instances instead of ``torch.Tensor`` instances::
+
+  >>> class SubTensor(torch.Tensor):
+  ...     pass
+  >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
+  'SubTensor'
+  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  'SubTensor'
+
+If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
+default. If there is no unique way to determine such a case, then a
+``TypeError`` is raised::
+
+  >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
+  'SubTensor2'
+  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  'SubTensor2'
+  >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
+  Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+  TypeError: no implementation found for 'torch.add' on types that implement __torch_function__: [SubTensor, OtherSubTensor]
+
+If one wishes to have a global override for all tensor methods, one can use
+``__torch_function__``. Here is an example that logs all function/method
+calls::
+
+  class LoggingTensor(torch.Tensor):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
+          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          if kwargs is None:
+              kwargs = {}
+          return super().__torch_function__(func, types, args, kwargs)
+
+However, if one instead wishes to override a method on the Tensor subclass,
+there one can do so either by directly overriding the method (by defining
+it for a subclass), or by using ``__torch_function__`` and matching with
+``func``.
+
+One should be careful within ``__torch_function__`` for subclasses to always
+call ``super().__torch_function__(func, ...)`` instead of ``func`` directly,
+as was the case before version 1.7.0. Failing to do this may cause ``func``
+to recurse back into ``__torch_function__`` and therefore cause infinite
+recursion.
 
 Extending :mod:`torch` with a :class:`Tensor` wrapper type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -440,7 +549,7 @@ implementation more permissive about what operations are allowed::
       def __repr__(self):
           return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
 
-      def __torch_function__(self, func, args=(), kwargs=None):
+      def __torch_function__(self, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           args = [a._t if hasattr(a, '_t') else a for a in args]
@@ -483,6 +592,54 @@ a case the rules are:
   implement an operation by returning ``NotImplemented``.
 * If all of the ``__torch_function__`` implementations return
   ``NotImplemented``, PyTorch raises a ``TypeError``.
+
+Testing Coverage of Overrides for the PyTorch API
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+One troublesome aspect of implementing ``__torch_function__`` is that if some
+operations do and others do not have overrides, users will at best see an
+inconsistent experience, or at worst will see errors raised at runtime when they
+use a function that does not have an override. To ease this process, PyTorch
+provides a developer-facing API for ensuring full support for
+``__torch_function__`` overrides. This API is private and may be subject to
+changes without warning in the future.
+
+First, to get a listing of all overridable functions, use
+``torch._overrides.get_overridable_functions``. This returns a dictionary whose
+keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
+functions in that namespace that can be overriden. For example, let's print the
+names of the first 5 functions in ``torch.nn.functional`` that can be
+overriden::
+
+  >>> from torch._overrides import get_overridable_functions
+  >>> func_dict = get_overridable_functions()
+  >>> nn_funcs = func_dict[torch.nn.functional]
+  >>> print([f.__name__ for f in nn_funcs[:5])
+  ['adaptive_avg_pool1d', 'adaptive_avg_pool2d', 'adaptive_avg_pool3d',
+   'adaptive_max_pool1d', 'adaptive_max_pool1d_with_indices']
+
+This listing of functions makes it possible to iterate over all overridable
+functions, however in practice this is not enough to write tests for all of
+these functions without laboriously and manually copying the signature of each
+function for each test. To ease this process, the
+``torch._overrides.get_testing_overrides`` function returns a dictionary mapping
+overridable functions in the ``PyTorch`` API to dummy lambda functions that have
+the same signature as the original function but unconditionally return -1. These
+functions are most useful to use with ``inspect`` to analyze the function
+signature of the original ``PyTorch`` function::
+
+  >>> import inspect
+  >>> from torch._overrides import get_testing_overrides
+  >>> override_dict = get_testing_overrides()
+  >>> dummy_add = override_dict[torch.add]
+  >>> inspect.signature(dummy_add)
+  <Signature (input, other, out=None)>
+
+Finally, ``torch._overrides.get_ignored_functions`` returns a tuple of functions
+that explicitly cannot be overrided by ``__torch_function__``. This list can be
+useful to confirm that a function that isn't present in the dictionary returned
+by ``get_overridable_functions`` cannot be overriden.
+
 
 Writing custom C++ extensions
 -----------------------------

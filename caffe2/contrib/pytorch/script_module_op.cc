@@ -7,8 +7,8 @@
 namespace caffe2 {
 
 using torch::jit::IValue;
-using torch::jit::script::Method;
-using torch::jit::script::Module;
+using torch::jit::Method;
+using torch::jit::Module;
 
 namespace {
 class ScriptModuleSerializer : public BlobSerializerBase {
@@ -31,7 +31,7 @@ class ScriptModuleSerializer : public BlobSerializerBase {
     // the more efficient serialization version (if we ever get to that point)
     BlobProto blob_proto;
     blob_proto.set_name(name);
-    blob_proto.set_type("torch::jit::script::Module");
+    blob_proto.set_type("torch::jit::Module");
     blob_proto.set_content(ss.str());
     acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
@@ -134,7 +134,7 @@ REGISTER_BLOB_SERIALIZER(
 // NB: the first argument to REGISTER_BLOB_DESERIALIZER macro doesn't really
 // need to be a real type, it just get converted to string
 REGISTER_BLOB_DESERIALIZER(
-    torch::jit::script::Module,
+    torch::jit::Module,
     ScriptModuleDeserializer);
 
 OPERATOR_SCHEMA(ScriptModule)
