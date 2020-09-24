@@ -390,17 +390,15 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "adaptive_avg_pool3d_cuda", [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool3d_cuda", [&] {
-          scalar_t* input_data = input.data_ptr<scalar_t>();
-          scalar_t* output_data = output.data_ptr<scalar_t>();
+        scalar_t* input_data = input.data_ptr<scalar_t>();
+        scalar_t* output_data = output.data_ptr<scalar_t>();
 
-          adaptiveaveragepool_loop(
-              input_data, output_data,
-              totalZ,
-              isizeT, isizeH, isizeW,
-              osizeT, osizeH, osizeW,
-              istrideD, istrideT, istrideH, istrideW);
-          });
+        adaptiveaveragepool_loop(
+            input_data, output_data,
+            totalZ,
+            isizeT, isizeH, isizeW,
+            osizeT, osizeH, osizeW,
+            istrideD, istrideT, istrideH, istrideW);
       });
 }
 
@@ -457,30 +455,26 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   if (atomic) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
-          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool3d_backward_cuda", [&] {
-            scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-            scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
-            atomicadaptiveaveragegradinput_loop(
-                gradInput_data, gradOutput_data,
-                totalZ,
-                isizeT, isizeH, isizeW,
-                osizeT, osizeH, osizeW);
-            });
+          atomicadaptiveaveragegradinput_loop(
+              gradInput_data, gradOutput_data,
+              totalZ,
+              isizeT, isizeH, isizeW,
+              osizeT, osizeH, osizeW);
         });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
-          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool3d_backward_cuda", [&] {
-            scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-            scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
-            adaptiveaveragegradinput_loop(
-                gradInput_data, gradOutput_data,
-                totalZ,
-                isizeT, isizeH, isizeW,
-                osizeT, osizeH, osizeW);
-            });
+          adaptiveaveragegradinput_loop(
+              gradInput_data, gradOutput_data,
+              totalZ,
+              isizeT, isizeH, isizeW,
+              osizeT, osizeH, osizeW);
         });
   }
 }
@@ -507,6 +501,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input) {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_out_cuda");
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
@@ -516,6 +511,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
 Tensor adaptive_avg_pool3d_backward_cuda(
     const Tensor& gradOutput_,
     const Tensor& input) {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

@@ -186,6 +186,7 @@ struct PythonArgs {
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
+  inline c10::optional<std::string> stringOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -520,6 +521,11 @@ inline std::string PythonArgs::string(int i) {
   return THPUtils_unpackString(args[i]);
 }
 
+inline c10::optional<std::string> PythonArgs::stringOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return THPUtils_unpackString(args[i]);
+}
+
 inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i]) return signature.params[i].default_int;
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
@@ -704,9 +710,6 @@ static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
   }
   PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
-    return py::object();
-  }
-  if(PyObject_HasAttrString(obj, name) == 0){
     return py::object();
   }
   return PyObject_FastGetAttrString((PyObject *)tp, name);
