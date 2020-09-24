@@ -5042,8 +5042,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
-            elif isinstance(obj, torch.Tensor):
-                return obj.to(dtype)
             elif isinstance(obj, tuple):
                 return tuple(convert_dtype(o, dtype, requires_grad) for o in obj)
             else:
@@ -5060,7 +5058,7 @@ class CriterionTest(InputVariableMixin, TestBase):
         # Convert input, target and module parameters to dtype
         if dtype is not None:
             cpu_input = convert_dtype(cpu_input, dtype, True)
-            if cpu_target.is_floating_point or cpu_target.is_complex:
+            if cpu_target.is_floating_point() or cpu_target.is_complex():
                 cpu_target = convert_dtype(cpu_target, dtype)
             cpu_module.type(dtype)
             gpu_module.type(dtype)
