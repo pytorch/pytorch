@@ -3,7 +3,6 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Cache.h>
-#include <ATen/native/vulkan/api/Command.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -18,9 +17,10 @@ struct Resource final {
   // Memory
   //
 
-  class Memory final {
-   public:
-    constexpr Memory();
+  struct Memory final {
+    VmaAllocator allocator;
+    VmaAllocation allocation;
+    VmaAllocationInfo allocation_info;
 
     class Scope;
     template<typename Type>
@@ -37,10 +37,6 @@ struct Resource final {
     Data<Pointer> map() &;
 
    private:
-    friend class Pool;
-    Memory(VmaAllocator, VmaAllocation);
-    void* map() const;
-
     // Intentionally disabed to ensure memory access is always properly
     // encapsualted in a scoped map-unmap region.  Allowing below overloads
     // to be invoked on a temporary would open the door to the possibility
@@ -52,20 +48,13 @@ struct Resource final {
 
     template<typename Type, typename Pointer>
     Data<Pointer> map() && = delete;
-
-   private:
-    VmaAllocator allocator_;
-    VmaAllocation allocation_;
   };
 
   //
   // Buffer
   //
 
-  class Buffer final {
-   public:
-    constexpr Buffer();
-
+  struct Buffer final {
     /*
       Descriptor
     */
@@ -79,54 +68,24 @@ struct Resource final {
       } usage;
     };
 
-    /*
-      Object
-    */
-
-    class Object final {
-     public:
-      constexpr Object();
+    struct Object final {
+      VkBuffer handle;
+      VkDeviceSize offset;
+      VkDeviceSize range;
 
       operator bool() const;
-      VkBuffer handle() const;
-      VkDeviceSize offset() const;
-      VkDeviceSize range() const;
+    } object;
 
-     private:
-      friend class Pool;
-      Object(VkBuffer, VkDeviceSize, VkDeviceSize);
-
-     private:
-      VkBuffer handle_;
-      VkDeviceSize offset_;
-      VkDeviceSize range_;
-    };
+    Memory memory;
 
     operator bool() const;
-
-    const Object& object() const;
-    Object& object();
-
-    const Memory& memory() const;
-    Memory& memory();
-
-   private:
-    friend class Pool;
-    Buffer(const Object&, const Memory&);
-
-   private:
-    Object object_;
-    Memory memory_;
   };
 
   //
   // Image
   //
 
-  class Image final {
-   public:
-    constexpr Image();
-
+  struct Image final {
     //
     // Sampler
     //
@@ -199,72 +158,31 @@ struct Resource final {
       Sampler::Descriptor sampler;
     };
 
-    /*
-      Object
-    */
-
-    class Object final {
-     public:
-      constexpr Object();
+    struct Object final {
+      VkImage handle;
+      VkImageLayout layout;
+      VkImageView view;
+      VkSampler sampler;
 
       operator bool() const;
-      VkImage handle() const;
-      VkImageLayout layout() const;
-      VkImageView view() const;
-      VkSampler sampler() const;
+    } object;
 
-      void transition(
-          const Command::Buffer& command_buffer,
-          VkImageLayout image_layout);
-
-     private:
-      friend class Pool;
-      Object(VkImage, VkImageLayout, VkImageView, VkSampler);
-
-     private:
-      VkImage handle_;
-      VkImageLayout layout_;
-      VkImageView view_;
-      VkSampler sampler_;
-    };
+    Memory memory;
 
     operator bool() const;
-
-    const Object& object() const;
-    Object& object();
-
-    const Memory& memory() const;
-    Memory& memory();
-
-   private:
-    friend class Pool;
-    Image(const Object&, const Memory&);
-
-   private:
-    Object object_;
-    Memory memory_;
   };
 
   //
   // Fence
   //
 
-  class Fence final {
-   public:
-    constexpr Fence();
+  struct Fence final {
+    Pool* pool;
+    size_t id;
 
     operator bool() const;
-    VkFence handle() const;
+    VkFence handle(bool used = true) const;
     void wait(uint64_t timeout_nanoseconds = UINT64_MAX);
-
-   private:
-    friend class Pool;
-    Fence(VkDevice, VkFence);
-
-   private:
-    VkDevice device_;
-    VkFence handle_;
-    mutable bool used_;
   };
 
   //
@@ -278,7 +196,7 @@ struct Resource final {
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&) = default;
     Pool& operator=(Pool&&) = default;
-    ~Pool() = default;
+    ~Pool();
 
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
@@ -286,9 +204,7 @@ struct Resource final {
     void purge();
 
    private:
-    static void release_buffer(const Resource::Buffer&);
-    static void release_image(const Resource::Image&);
-    static void release_fence(Resource::Fence&);
+    friend struct Fence;
 
    private:
     struct Configuration final {
@@ -308,9 +224,11 @@ struct Resource final {
     } image_;
 
     struct {
-      std::vector<Handle<Fence, void(*)(Fence&)>> pool;
-      std::vector<VkFence> free;
-      std::vector<VkFence> used;
+      std::vector<Handle<VkFence, VK_DELETER(Fence)>> pool;
+      struct {
+        mutable std::vector<VkFence> list;
+        size_t position;
+      } used;
     } fence_;
   } pool;
 
@@ -322,25 +240,6 @@ struct Resource final {
 //
 // Impl
 //
-
-inline constexpr Resource::Memory::Memory()
-  : allocator_{},
-    allocation_{} {
-}
-
-inline Resource::Memory::Memory(
-  const VmaAllocator allocator,
-  const VmaAllocation allocation)
-  : allocator_(allocator),
-    allocation_(allocation) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      allocator_,
-      "Invalid VMA allocator!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      allocation_,
-      "Invalid VMA allocation!");
-}
 
 class Resource::Memory::Scope final {
  public:
@@ -360,81 +259,30 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
+  void* map(const Memory& memory);
+
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator_, allocation_, Scope::Access::Read),
+    Scope(allocator, allocation, Scope::Access::Read),
   };
 }
 
 template<typename, typename Pointer>
 inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
+  void* map(const Memory& memory);
+
   return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator_, allocation_, Scope::Access::Write),
+    Scope(allocator, allocation, Scope::Access::Write),
   };
 }
 
-inline constexpr Resource::Buffer::Object::Object()
-  : handle_{},
-    offset_{},
-    range_{} {
-}
-
-inline Resource::Buffer::Object::Object(
-    const VkBuffer buffer,
-    const VkDeviceSize offset,
-    const VkDeviceSize range)
-  : handle_(buffer),
-    offset_(offset),
-    range_(range) {
-}
-
 inline Resource::Buffer::Object::operator bool() const {
-  return VK_NULL_HANDLE != handle();
-}
-
-inline VkBuffer Resource::Buffer::Object::handle() const {
-  return handle_;
-}
-
-inline VkDeviceSize Resource::Buffer::Object::offset() const {
-  return offset_;
-}
-
-inline VkDeviceSize Resource::Buffer::Object::range() const {
-  return range_;
-}
-
-inline constexpr Resource::Buffer::Buffer()
-  : object_{},
-    memory_{} {
-}
-
-inline Resource::Buffer::Buffer(
-    const Object& object,
-    const Memory& memory)
-  : object_(object),
-    memory_(memory) {
+  return VK_NULL_HANDLE != handle;
 }
 
 inline Resource::Buffer::operator bool() const {
-  return object();
-}
-
-inline const Resource::Buffer::Object& Resource::Buffer::object() const {
-  return object_;
-}
-
-inline Resource::Buffer::Object& Resource::Buffer::object() {
-  return object_;
-}
-
-inline const Resource::Memory& Resource::Buffer::memory() const {
-  return memory_;
-}
-
-inline Resource::Memory& Resource::Buffer::memory() {
-  return memory_;
+  return object;
 }
 
 inline bool operator==(
@@ -455,115 +303,29 @@ inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
       descriptor.border);
 }
 
-inline constexpr Resource::Image::Object::Object()
-  : handle_{},
-    layout_{},
-    view_{},
-    sampler_{} {
-}
-
-inline Resource::Image::Object::Object(
-    const VkImage image,
-    const VkImageLayout layout,
-    const VkImageView view,
-    const VkSampler sampler)
-  : handle_(image),
-    layout_(layout),
-    view_(view),
-    sampler_(sampler) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      handle_,
-      "Invalid Vulkan image!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      view_,
-      "Invalid Vulkan image view!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      sampler_,
-      "Invalid Vulkan image sampler!");
-}
-
 inline Resource::Image::Object::operator bool() const {
-  return VK_NULL_HANDLE != handle();
-}
-
-inline VkImage Resource::Image::Object::handle() const {
-  return handle_;
-}
-
-inline VkImageLayout Resource::Image::Object::layout() const {
-  return layout_;
-}
-
-inline VkImageView Resource::Image::Object::view() const {
-  return view_;
-}
-
-inline VkSampler Resource::Image::Object::sampler() const {
-  return sampler_;
-}
-
-inline constexpr Resource::Image::Image()
-  : object_{},
-    memory_{} {
-}
-
-inline Resource::Image::Image(
-    const Object& object,
-    const Memory& memory)
-  : object_(object),
-    memory_(memory) {
+  return VK_NULL_HANDLE != handle;
 }
 
 inline Resource::Image::operator bool() const {
-  return object();
-}
-
-inline const Resource::Image::Object& Resource::Image::object() const {
-  return object_;
-}
-
-inline Resource::Image::Object& Resource::Image::object() {
-  return object_;
-}
-
-inline const Resource::Memory& Resource::Image::memory() const {
-  return memory_;
-}
-
-inline Resource::Memory& Resource::Image::memory() {
-  return memory_;
-}
-
-inline constexpr Resource::Fence::Fence()
-  : device_{},
-    handle_{},
-    used_{false} {
-}
-
-inline Resource::Fence::Fence(
-    const VkDevice device,
-    const VkFence fence)
-  : device_(device),
-    handle_(fence),
-    used_(false) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      handle_,
-      "Invalid Vulkan fence!");
+  return object;
 }
 
 inline Resource::Fence::operator bool() const {
-  return handle_ != VK_NULL_HANDLE;
+  return pool;
 }
 
-inline VkFence Resource::Fence::handle() const {
-  used_ = true;
-  return handle_;
+inline VkFence Resource::Fence::handle(const bool used) const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (used) {
+    pool->fence_.used.list.push_back(fence);
+  }
+
+  return fence;
 }
 
 } // namespace api
