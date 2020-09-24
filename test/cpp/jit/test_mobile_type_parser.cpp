@@ -14,7 +14,6 @@ TEST(MobileTypeParserTest, Empty) {
   ASSERT_ANY_THROW(c10::parseType(empty_ps));
 }
 
-
 TEST(MobileTypeParserTest, RoundTripAnnotationStr) {
   std::string int_ps("int");
   auto int_tp = c10::parseType(int_ps);

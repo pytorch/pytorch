@@ -6,7 +6,6 @@
 namespace torch {
 namespace jit {
 
-
 TEST(ClassTypeTest, AddRemoveAttr) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
