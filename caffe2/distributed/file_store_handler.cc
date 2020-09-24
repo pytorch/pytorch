@@ -127,7 +127,7 @@ int64_t FileStoreHandler::getNumKeys() {
   return 0;
 }
 
-void FileStoreHandler::deleteKey(const std::string& /* unused */) {
+bool FileStoreHandler::deleteKey(const std::string& /* unused */) {
   CHECK(false) << "deleteKey not implemented for FileStoreHandler";
 }
 

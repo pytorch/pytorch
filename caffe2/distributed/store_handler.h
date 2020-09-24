@@ -49,7 +49,7 @@ class CAFFE2_API StoreHandler {
   /*
    * Removes the specified key from the store.
    */
-  virtual void deleteKey(const std::string& key) = 0;
+  virtual bool deleteKey(const std::string& key) = 0;
 
   /*
    * Check if a keys exist in the store.

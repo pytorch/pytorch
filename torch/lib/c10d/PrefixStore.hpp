@@ -17,7 +17,7 @@ class PrefixStore : public Store {
 
   int64_t add(const std::string& key, int64_t value) override;
 
-  void deleteKey(const std::string& key) override;
+  bool deleteKey(const std::string& key) override;
 
   int64_t getNumKeys() override;
 
