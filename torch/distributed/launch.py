@@ -235,7 +235,8 @@ def main():
         # Possibly create the directory to write subprocess log output to.
         if os.path.exists(args.logdir):
             if not os.path.isdir(args.logdir):
-                print("passed in --logdir must be a relative path to a directory")
+                print("passed in --logdir must be a relative path to a directory. Ignoring argument.")
+                args.logdir = None
         else:
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
