@@ -19,6 +19,10 @@ class ProcessException(Exception):
 
 
 class ProcessRaisedException(ProcessException):
+    """
+    Exception is thrown when the process failed due to exception
+    raised by the code.
+    """
     def __init__(
         self,
         msg: str,
@@ -29,6 +33,10 @@ class ProcessRaisedException(ProcessException):
 
 
 class ProcessExitedException(ProcessException):
+    """
+    Exception is thrown when the process failed due to signal
+    or exited with a specific code.
+    """
     __slots__ = ["exit_code"]
 
     def __init__(
