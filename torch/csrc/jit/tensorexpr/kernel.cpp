@@ -673,11 +673,20 @@ Tensor* TensorExprKernel::computeFourOperand(
       });
 }
 
+namespace {
+
+// Convert boolean to integer, if needed.
+ExprHandle boolToInteger(const ExprHandle& x) {
+  return x.dtype().scalar_type() == ScalarType::Bool ? cast<int>(x) : x;
+}
+
+} // namespace
+
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return lhs + rhs;
+        return boolToInteger(lhs) + boolToInteger(rhs);
       };
       TORCH_INTERNAL_ASSERT(
           v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
@@ -694,6 +703,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::sub: {
       auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
       };
       TORCH_INTERNAL_ASSERT(
@@ -706,35 +716,35 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::mul: {
       return computeTwoOperand(
           "aten_mul", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs;
+            return boolToInteger(lhs) * boolToInteger(rhs);
           });
     } break;
 
     case aten::div: {
       return computeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs / rhs;
+            return boolToInteger(lhs) / boolToInteger(rhs);
           });
     } break;
 
     case aten::__and__: {
       return computeTwoOperand(
           "aten_and", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs & rhs;
+            return boolToInteger(lhs) & boolToInteger(rhs);
           });
     } break;
 
     case aten::__or__: {
       return computeTwoOperand(
           "aten_or", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs | rhs;
+            return boolToInteger(lhs) | boolToInteger(rhs);
           });
     } break;
 
     case aten::__xor__: {
       return computeTwoOperand(
           "aten_xor", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs ^ rhs;
+            return boolToInteger(lhs) ^ boolToInteger(rhs);
           });
     } break;
 
@@ -806,14 +816,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::min: {
       return computeTwoOperand(
           "aten_min", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Min::make(lhs, rhs, false);
+            return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
     case aten::max: {
       return computeTwoOperand(
           "aten_max", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Max::make(lhs, rhs, false);
+            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
