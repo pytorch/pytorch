@@ -165,9 +165,7 @@ def default_expr(d: str, t: Type) -> str:
         if d == 'None':
             return 'c10::nullopt'
 
-        t_str = argumenttype_type(t.elem, mutable=False)
-        inner_default = default_expr(d, t.elem)
-        return f'{t_str}({inner_default})'
+        return default_expr(d, t.elem)
 
     if isinstance(t, ListType) and d.startswith('[') and d.endswith(']'):
         return '{' + d[1:-1] + '}'
