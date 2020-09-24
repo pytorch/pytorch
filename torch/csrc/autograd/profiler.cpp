@@ -54,7 +54,7 @@ namespace {
       "aten::stride",
       "aten::empty",
       "aten::empty_like",
-      "aten::empty_strided"
+      "aten::empty_strided",
       "aten::as_strided",
       "aten::expand",
       "aten::resize_",
