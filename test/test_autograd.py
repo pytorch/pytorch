@@ -4922,6 +4922,29 @@ def add_test(
             setattr(TestAutogradDeviceType, test_name, do_test)
 
 class TestAutogradComplex(TestCase):
+    def test_complex_cholesky(self):
+        def func(x, upper):
+            x = 0.5*(x + x.transpose(-1, -2).conj())
+            return torch.sum(torch.cholesky(x, upper))
+
+        def run_test(upper, dims):
+            x = torch.rand(*dims, requires_grad=True, dtype=torch.cdouble)
+            x = x + torch.eye(dims[-1])
+
+            gradcheck(func, [x, upper])
+            # TODO: gradgradcheck does not work
+            # gradgradcheck(func, [x, upper])
+
+            x = torch.rand(*dims, dtype=torch.cdouble)
+            x = torch.matmul(x, x.transpose(-1, -2).conj())
+            x.requires_grad_()
+            chol = x.cholesky().sum().backward()
+            self.assertEqual(x.grad, x.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
+
     def test_view_func_for_complex_views(self):
         # case 1: both parent and child have view_func
         x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)
