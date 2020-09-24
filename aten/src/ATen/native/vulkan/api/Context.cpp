@@ -82,7 +82,9 @@ VkInstance create_instance(const bool enable_validation_layers) {
         instance_extension_count);
 
     VK_CHECK(vkEnumerateInstanceExtensionProperties(
-        nullptr, &instance_extension_count, instance_extension_properties.data()));
+        nullptr,
+        &instance_extension_count,
+        instance_extension_properties.data()));
 
     constexpr const char* const requested_instance_extensions[]{
       VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
@@ -121,6 +123,7 @@ VkInstance create_instance(const bool enable_validation_layers) {
 
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
+  TORCH_CHECK(instance, "Invalid Vulkan instance!");
 
   return instance;
 }
@@ -159,13 +162,20 @@ VkDebugReportCallbackEXT create_debug_report_callback(
       nullptr,
       &debug_report_callback));
 
+  TORCH_CHECK(
+      debug_report_callback,
+      "Invalid Vulkan debug report callback!");
+
   return debug_report_callback;
 }
 
 VkPhysicalDevice acquire_physical_device(const VkInstance instance) {
   uint32_t device_count = 0;
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
-  TORCH_CHECK(device_count > 0, "Vulkan: Could not find a device with Vulkan support!");
+
+  TORCH_CHECK(
+      device_count > 0,
+      "Vulkan: Could not find a device with Vulkan support!");
 
   std::vector<VkPhysicalDevice> devices(device_count);
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
@@ -187,13 +197,16 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
       physical_device, &queue_family_count, nullptr);
 
   TORCH_CHECK(
-      queue_family_count > 0, "Vulkan: Invalid number of queue families!");
+      queue_family_count > 0,
+      "Vulkan: Invalid number of queue families!");
 
   std::vector<VkQueueFamilyProperties> queue_families_properties(
     queue_family_count);
 
   vkGetPhysicalDeviceQueueFamilyProperties(
-      physical_device, &queue_family_count, queue_families_properties.data());
+      physical_device,
+      &queue_family_count,
+      queue_families_properties.data());
 
   for (uint32_t i = 0; i < queue_families_properties.size(); ++i) {
     const VkQueueFamilyProperties& properties = queue_families_properties[i];
@@ -234,6 +247,7 @@ VkDevice create_device(
 
   VkDevice device{};
   VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
+  TORCH_CHECK(device, "Invalid Vulkan device!");
 
   return device;
 }
@@ -243,6 +257,8 @@ VkQueue acquire_queue(
     const uint32_t compute_queue_family_index) {
   VkQueue queue{};
   vkGetDeviceQueue(device, compute_queue_family_index, 0, &queue);
+  TORCH_CHECK(queue, "Invalid Vulkan queue!");
+
   return queue;
 }
 
@@ -309,11 +325,11 @@ bool available() {
   return initialize();
 }
 
-Context& context() {
+Context* context() {
   Context* const context = initialize();
   TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
 
-  return *context;
+  return context;
 }
 
 } // namespace api
