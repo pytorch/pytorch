@@ -228,7 +228,7 @@ class Graph:
             # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
             name = node.name
         else:
-            name = self._name(node.name)
+            name = self._name(node.target)
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
@@ -383,14 +383,21 @@ class Graph:
                 raise RuntimeError(f'Argument \'{arg}\'{context_str}was used before it has been '
                                    f'defined! Please check that Nodes in the graph are topologically ordered\n{self}')
 
+        seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
         return_node_idx : Optional[int] = None
         for i, node in enumerate(self._nodes):
+            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'return']:
+                raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
+
+            if node.name in seen_names:
+                raise RuntimeError(f'Node redefined name {node.name}!')
+            seen_names.add(node.name)
 
             if node.op == 'return':
                 if return_node_idx:
@@ -401,7 +408,6 @@ class Graph:
             raise RuntimeError('This graph had no return node!')
         elif return_node_idx != len(self._nodes) - 1:
             raise RuntimeError('Return node was not the last node in the graph!')
-
 
         if hasattr(self, 'result'):
             map_arg(self.result, check_arg)
