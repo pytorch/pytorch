@@ -41,12 +41,7 @@ class Semaphore {
 };
 
 #ifdef _WIN32
-std::string tmppath() {
-  const char* tmpfile = getenv("TMPFILE");
-  if (tmpfile) {
-    return std::string(tmpfile);
-  }
-
+std::string autoGenerateTmpFilePath() {
   char tmp[L_tmpnam_s];
   errno_t err;
   err = tmpnam_s(tmp, L_tmpnam_s);
@@ -55,6 +50,16 @@ std::string tmppath() {
     throw std::system_error(errno, std::system_category());
   }
   return std::string(tmp);
+}
+
+std::string tmppath() {
+  const char* tmpfile = getenv("TMPFILE");
+  if (tmpfile) {
+    return std::string(tmpfile);
+  }
+  else {
+    return autoGenerateTmpFilePath();
+  }
 }
 #else
 std::string tmppath() {

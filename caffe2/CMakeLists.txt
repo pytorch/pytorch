@@ -971,6 +971,14 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+  # Pass USE_RPC in order to reduce use of 
+  # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+  # need to be removed after RPC supported on Windows
+  if(NOT WIN32)
+    target_compile_definitions(torch_cpu PRIVATE
+      USE_RPC
+    )
+  endif()
   # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)

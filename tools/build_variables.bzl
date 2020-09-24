@@ -541,11 +541,14 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
 ]
 
-libtorch_python_distributed_sources = [
-    "torch/csrc/distributed/autograd/init.cpp",
+libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
+]
+
+libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
+    "torch/csrc/distributed/autograd/init.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
     "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/py_rref.cpp",
@@ -559,12 +562,6 @@ libtorch_python_distributed_sources = [
     "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
-]
-
-libtorch_python_distributed_win32_sources = [
-    "torch/csrc/distributed/c10d/comm.cpp",
-    "torch/csrc/distributed/c10d/init.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
 ]
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):

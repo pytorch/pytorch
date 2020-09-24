@@ -688,15 +688,13 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::testing::python_functions());
-#endif
 #endif
 #endif
 

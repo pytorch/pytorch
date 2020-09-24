@@ -23,7 +23,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
 using torch::distributed::autograd::DistAutogradContainer;
 #endif
@@ -267,7 +267,7 @@ void insertLastUses(Graph& g) {
 }
 
 inline int64_t getDistAutogradContextId() {
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
   return DistAutogradContainer::currentContextId();
 #else
   return 0;
@@ -1690,7 +1690,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
   auto prev_dist_id = DistAutogradContainer::currentContextId();
   DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
 #endif
@@ -1700,7 +1700,7 @@ void InterpreterContinuation::operator()() {
   } else {
     state.runAsync(stack);
   }
-#if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+#ifdef USE_RPC
   DistAutogradContainer::forceCurrentContextId(prev_dist_id);
 #endif
 }
