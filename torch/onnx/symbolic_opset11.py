@@ -590,7 +590,7 @@ def index(g, self, index):
     else:
         indices = [index]
 
-    # Handle single mask index, this is the same as masked_select
+    # Handle single mask index.
     if len(indices) == 1:
         index = indices[0]
         if not sym_help._is_none(index) and (index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"):
