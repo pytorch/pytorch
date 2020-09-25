@@ -630,13 +630,16 @@ class QuantizationTestCase(TestCase):
         if type(inputs) == list:
             inputs = inputs[0]
         if quant_type == QuantType.QAT:
-            qconfig_dict = {'': get_default_qat_qconfig(torch.backends.quantized.engine)}
+            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
             model.train()
-        else:
-            qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        elif quant_type == QuantType.STATIC:
+            qconfig = get_default_qconfig(torch.backends.quantized.engine)
             model.eval()
-        original = symbolic_trace(model)
+        else:
+            qconfig = default_dynamic_qconfig
+            model.eval()
 
+        original = symbolic_trace(model)
         if quant_type == QuantType.DYNAMIC:
             prepare = prepare_dynamic_fx
             convert = convert_dynamic_fx
@@ -644,6 +647,7 @@ class QuantizationTestCase(TestCase):
             prepare = prepare_fx
             convert = convert_fx
 
+        qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
         qgraph = convert(prepared)
@@ -652,8 +656,11 @@ class QuantizationTestCase(TestCase):
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
-        self.assertEqual((result - result_debug).abs().max(), 0), \
-            'Expecting debug and non-debug option to produce identical result'
+        # numeric match for debug option for dynamic
+        # quantized op is not needed right now
+        if quant_type != QuantType.DYNAMIC:
+            self.assertEqual((result - result_debug).abs().max(), 0), \
+                'Expecting debug and non-debug option to produce identical result'
 
         qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:

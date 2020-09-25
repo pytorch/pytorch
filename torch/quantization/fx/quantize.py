@@ -31,7 +31,6 @@ from ..quantize import _remove_qconfig
 from .pattern_utils import (
     is_match,
     get_quant_patterns,
-    get_dynamic_quant_patterns,
 )
 
 from .standalone_module import (
@@ -310,9 +309,6 @@ class Quantizer:
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_child_module):
         if not inplace:
             model = copy.deepcopy(model)
-        # if is_dynamic_quant:
-        #     self.patterns = get_dynamic_quant_patterns()
-        # else:
         self.patterns = get_quant_patterns()
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
@@ -511,10 +507,10 @@ class Quantizer:
         return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True, is_child_module=is_child_module)
 
     def _run_weight_observers(self, observed):
-        r''' Extract the subgraph that produces the weight for dynamically quantized
-        node and run the subgraph to observe the weight.
-        Note that the observers of dynamically quantized modules are run during
-        the conversion step.
+        r''' Extract the subgraph that produces the weight for dynamic quant
+        or weight only quant node and run the subgraph to observe the weight.
+        Note that the observers of dynamic quant or weight only quant ops are run during
+        the convert step.
         '''
         for node in observed.graph.nodes:
             if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
@@ -535,7 +531,7 @@ class Quantizer:
         if not inplace:
             model = copy.deepcopy(model)
         # always run weight observers in the top level forward method
-        # for dynamically quantized ops
+        # for dynamic quant ops or weight only quant ops
         self._run_weight_observers(model)
 
         # move to cpu since we only have quantized cpu kernels

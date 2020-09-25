@@ -162,7 +162,7 @@ def weight_dtype(qconfig):
 
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
-    dynamically quantized or not
+    quantized or not
     """
     return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
 
