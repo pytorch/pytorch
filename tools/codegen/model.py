@@ -304,10 +304,6 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in [
                     '_amp_non_finite_check_and_unscale_',
-                    '_foreach_add_.ScalarList',
-                    '_foreach_sub_.ScalarList',
-                    '_foreach_mul_.ScalarList',
-                    '_foreach_div_.ScalarList',
                     '_foreach_add_.Scalar',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',

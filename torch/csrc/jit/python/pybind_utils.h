@@ -303,12 +303,17 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    // try_ann_to_type will compile the class if it's not already compiled.
-    auto jit_type = py::cast<TypePtr>(
-        py::module::import("torch.jit.annotations")
-            .attr("try_ann_to_type")(input.get_type(), SourceRange()));
-    if (jit_type && !jit_type->is_module()) {
-      return InferredType(jit_type);
+    py::str qualifiedName = py::module::import("torch._jit_internal")
+                                .attr("_qualified_name")(input.get_type());
+    auto pyClass = py::module::import("torch.jit._state")
+                       .attr("_get_script_class")(qualifiedName);
+    if (!pyClass.is_none()) {
+      auto cu = get_python_cu();
+      const auto classname =
+          c10::QualifiedName(py::cast<std::string>(qualifiedName));
+      auto class_type = cu->get_class(classname);
+      TORCH_INTERNAL_ASSERT(class_type);
+      return InferredType(class_type);
     }
   }
 

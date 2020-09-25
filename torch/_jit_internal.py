@@ -223,8 +223,7 @@ def can_compile_class(cls):
     names = cls.__dict__
     fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
-    fx_class = 'fx' in cls.__module__ if hasattr(cls, "__module__") else False
-    return all(has_code) and not fx_class
+    return all(has_code)
 
 
 def createResolutionCallbackForClassMethods(cls):
@@ -391,6 +390,15 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
+    if isinstance(fn, property):
+        prop = fn
+        setattr(prop.fget, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        if prop.fset:
+            setattr(prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        return prop
+
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
