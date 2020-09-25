@@ -407,19 +407,22 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #endif
 
 #if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
-  template <>
-  void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasOperation_t op = _cublasOpFromChar(trans);
-    _cublasAdjustLdLevel2(m, n, &lda);
-    GEMV_CHECK_ARGVALUES(c10::complex<float>);
-    TORCH_CUDABLAS_CHECK(
-        cublasCgemv(handle, op, m, n, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
-        lda, reinterpret_cast<const cuComplex*>(x), incx, reinterpret_cast<const cuComplex*>(&beta),
-        reinterpret_cast<cuComplex*>(y), incy));
-  }
+template <>
+void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
+  // gemv is bw bound, and does not benefit from TF32. But the precision
+  // loss still happens on TF32. So we disable it here.
+  NoTF32Guard disable_tf32;
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t op = _cublasOpFromChar(trans);
+  _cublasAdjustLdLevel2(m, n, &lda);
+  GEMV_CHECK_ARGVALUES(c10::complex<float>);
+  TORCH_CUDABLAS_CHECK(
+      cublasCgemv(handle, op, m, n, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
+      lda, reinterpret_cast<const cuComplex*>(x), incx, reinterpret_cast<const cuComplex*>(&beta),
+      reinterpret_cast<cuComplex*>(y), incy));
+}
 #endif
 
 template <>
@@ -436,6 +439,9 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
 
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
+  // gemv is bw bound, and does not benefit from TF32. But the precision
+  // loss still happens on TF32. So we disable it here.
+  NoTF32Guard disable_tf32;
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
