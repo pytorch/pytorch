@@ -414,7 +414,9 @@ struct TORCH_API Node {
     return inputs_.at(i);
   }
 
+  bool hasNamedInput(const std::string& name) const;
   Value* namedInput(Symbol name) const;
+  Value* namedInput(const std::string& name) const;
 
   c10::optional<IValue> get(Symbol name) const;
 
