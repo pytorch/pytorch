@@ -563,9 +563,9 @@ class TestForeach(TestCase):
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
             torch._foreach_add_(tensors1, tensors2)
 
         # Lists have different amount of tensors
