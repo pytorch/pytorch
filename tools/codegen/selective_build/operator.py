@@ -10,7 +10,7 @@ class PyTorchModelMetadata:
     version: str
 
     @staticmethod
-    def from_yaml(data: Dict) -> 'PyTorchModelMetadata':
+    def from_yaml(data: Dict[str, object]) -> 'PyTorchModelMetadata':
         name = data['name']
         assert isinstance(name, str)
 

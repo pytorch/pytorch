@@ -89,10 +89,19 @@ def get_selector(selected_op_list, selected_op_list_path):
         selected_op_list_path,
     )
 
+    is_root_operator = False
+    is_used_for_training = False
+
+    if selected_op_list_path is not None:
+        is_root_operator = "root_op_list.yaml" in selected_op_list_path
+        is_used_for_training = "combined_op_list.yaml" in selected_op_list_path
+
     selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
     if selected_op_list is not None:
         selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            selected_op_list
+            selected_op_list,
+            is_root_operator,
+            is_used_for_training,
         )
 
     return selector

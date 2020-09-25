@@ -879,7 +879,9 @@ def main() -> None:
     selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
     if op_registration_whitelist is not None:
         selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            op_registration_whitelist
+            op_registration_whitelist,
+            True,
+            False,
         )
 
     native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
