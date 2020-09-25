@@ -197,18 +197,31 @@ class C10_EXPORT vTensor final {
 
  private:
   void enforce_invariants() const;
+  api::Resource::Image& image_() const;
+  api::Resource::Buffer& buffer_() const;
+  api::Resource::Buffer& staging_() const;
 
+ private:
   api::Context* context_;
-  api::Resource::Image image_;
-  api::Resource::Buffer buffer_;
-  api::Resource::Buffer staging_;
-  api::Resource::Fence fence_;
 
   mutable struct {
-    uint32_t image : 1u;
-    uint32_t buffer : 1u;
-    uint32_t staging : 1u;
-  } dirty_;
+    api::Resource::Image image;
+    api::Resource::Buffer buffer;
+    api::Resource::Buffer staging;
+    api::Resource::Fence fence;
+    struct {
+      uint16_t image : 1u;
+      uint16_t buffer : 1u;
+      uint16_t staging : 1u;
+    } dirty;
+    struct {
+      uint16_t image : 1u;
+      uint16_t staging : 1u;
+    } should_have;
+  } view_;
+
+  c10::SmallVector<int64_t, 6u> sizes_;
+  TensorOptions options_;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;

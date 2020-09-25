@@ -2,7 +2,10 @@ set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
 # Build separate libraries the define custom classes/operators used from our Python tests.
 # These are intended to be used with torch.ops.load_library() in our Python test suite.
-add_library(torchbind_test SHARED ${JIT_TEST_ROOT}/test_custom_class.cpp)
+add_library(torchbind_test SHARED
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.h
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.cpp
+)
 target_link_libraries(torchbind_test torch)
 
 add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
@@ -30,6 +33,8 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_cleanup_passes.cpp
   ${JIT_TEST_ROOT}/test_create_autodiff_subgraphs.cpp
   ${JIT_TEST_ROOT}/test_custom_class.cpp
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.h
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.cpp
   ${JIT_TEST_ROOT}/test_custom_operators.cpp
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
