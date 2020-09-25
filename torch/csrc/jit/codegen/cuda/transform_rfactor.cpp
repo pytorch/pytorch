@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
@@ -151,6 +152,8 @@ class ReplayRFactor : public ReplayTransformations {
 TensorDomain* TransformRFactor::runReplay(
     TensorDomain* orig_td,
     std::vector<int> axes) {
+  FUSER_PERF_SCOPE("runReplay");
+
   TORCH_CHECK(!axes.empty(), "No axes provided to rfactor replay.");
 
   int ndims = (int)orig_td->nDims();
@@ -300,6 +303,8 @@ TensorDomain* TransformRFactor::runReplay(
 TensorDomain* TransformRFactor::runReplay2(
     TensorDomain* orig_td,
     std::vector<int> axes) {
+  FUSER_PERF_SCOPE("runReplay2");
+
   int ndims = (int)orig_td->nDims();
 
   // Adjust and check provided axes

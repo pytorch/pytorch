@@ -41,6 +41,7 @@ TESTS = [
     'test_foreach',
     'test_indexing',
     'test_jit',
+    'test_linalg',
     'test_logging',
     'test_mkldnn',
     'test_multiprocessing',
