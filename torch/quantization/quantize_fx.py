@@ -21,6 +21,13 @@ def fuse_fx(graph_module, inplace=False):
     return fuser.fuse(graph_module, inplace)
 
 def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant, is_child_module=False):
+    r""" Internal helper function for prepare_fx
+    Args:
+      graph_module, qconfig_dict, inplace: see docs for :func:`~torch.quantization.prepare_fx`
+      `is_child_module`: a boolean flag indicates whether we are
+      quantizing a child module or not, the way we quantize child module
+      is described in :func:`~torch.quantization.prepare_child_module_fx`
+    """
     _check_is_graph_module(graph_module)
     graph_module = fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
