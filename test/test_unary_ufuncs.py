@@ -1,6 +1,7 @@
 import math
 from itertools import product, chain
 from numbers import Number
+import random
 
 import unittest
 
@@ -377,6 +378,36 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nan_to_num(self, device, dtype):
+        for contiguous in [False, True]:
+            for x in generate_numeric_tensors(dtype=dtype, device=device):
+                if not contiguous:
+                    x = x.T
+                self.compare_with_numpy(torch.nan_to_num, np.nan_to_num, x)
+                self.compare_with_numpy(lambda x: x.nan_to_num(), np.nan_to_num, x)
+
+                # With args
+                nan = random.random()
+                posinf = random.random() * 5
+                neginf = random.random() * 10
+
+                self.compare_with_numpy(lambda x: x.nan_to_num(nan=nan, posinf=posinf),
+                                        lambda x: np.nan_to_num(x, nan=nan, posinf=posinf),
+                                        x)
+                self.compare_with_numpy(lambda x: x.nan_to_num(posinf=posinf, neginf=neginf),
+                                        lambda x: np.nan_to_num(x, posinf=posinf, neginf=neginf),
+                                        x)
+
+                # Out Variant
+                out = torch.empty_like(x)
+                result = torch.nan_to_num(x)
+                torch.nan_to_num(x, out=out)
+                self.assertEqual(result, out)
+
+                result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
+                torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
+                self.assertEqual(result, out)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
