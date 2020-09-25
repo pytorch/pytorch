@@ -12,6 +12,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import textwrap
 import ctypes
 
 if sys.version_info < (3,):
@@ -192,6 +193,31 @@ else:
 # torch._C module initialization code in C
 if TYPE_CHECKING:
     import torch._C as _C
+
+# Check to see if we can load C extensions, and if not provide some guidance
+# on what the problem might be.
+try:
+    # _initExtension is chosen (arbitrarily) as a sentinel.
+    from torch._C import _initExtension
+except ImportError:
+    import torch._C as _C_for_compiled_check
+
+    # The __file__ check only works for Python 3.7 and above.
+    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+        raise ImportError(textwrap.dedent('''
+            Failed to load PyTorch C extensions:
+                It appears that PyTorch has loaded the `torch/_C` folder
+                of the PyTorch repository rather than the C extensions which
+                are expected in the `torch._C` namespace. This can occur when
+                using the `install` workflow. e.g.
+                    $ python setup.py install && python -c "import torch"
+
+                This error can generally be solved using the `develop` workflow
+                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                or by running Python from a different directory.
+            ''').strip()) from None
+    raise  # If __file__ is not None the cause is unknown, so just re-raise.
+
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
@@ -590,11 +616,7 @@ quantized_gru = torch.ops.aten.quantized_gru
 from .overrides import has_torch_function, handle_torch_function
 
 def Assert(condition, message):
-    r"""An alternative to Python's assert which is symbolically traceable.
-    TODO before land: align on function name (assert is reserved).
-    TODO before land: align on where this function should live
-    #  (torch, torch.fx, torch.fx.utils, etc).
-    TODO before land: update the docs after ^ are resolved
+    r"""A wrapper around Python's assert which is symbolically traceable.
     """
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
         return handle_torch_function(Assert, (condition,), condition, message)
