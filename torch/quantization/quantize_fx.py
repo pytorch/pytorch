@@ -185,10 +185,19 @@ def quantize_static_fx(model, qconfig_dict, run_fn, run_args, inplace=False, deb
         "module_name_regex": [
           ("foo.*bar.*conv[0-9]+", qconfig?)
           ...,
-        ]
+        ],
         # priority (in increasing order): global, object_type, module_name_regex, module_name
         # qconfig == None means fusion and quantization should be skipped for anything
         # matching the rule
+
+        # optional: specify the path for standalone modules
+        # These modules are symbolically traced and quantized as one unit
+        # User should also skip symbolic tracing through these modules
+        # so that the call to the submodule appears as one call_module
+        # node in the forward graph of the GraphModule
+        "standalone_module_name": [
+           "submodule.standalone"
+        ]
         }
         `run_fn`: a calibration function for calibrating the prepared model
         `run_args`: positional arguments for `run_fn`

@@ -24,8 +24,6 @@ from torch.quantization import (
     prepare_qat_fx,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
-    register_standalone_module_class,
-    is_standalone_module,
 )
 
 from torch.quantization import (
@@ -339,9 +337,6 @@ class TestQuantizeFx(QuantizationTestCase):
                         not isinstance(m, torch.nn.Sequential)) or \
                     isinstance(m, StandaloneModule)
 
-        register_standalone_module_class(StandaloneModule)
-        self.assertTrue(is_standalone_module(StandaloneModule()))
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -374,7 +369,7 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         m = CustomTracer().trace(original_m).eval()
-        qconfig_dict = {'': default_qconfig}
+        qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
         # check prepared model
         m = prepare_fx(m, qconfig_dict)
         # calibration
