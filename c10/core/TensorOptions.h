@@ -36,6 +36,10 @@ inline Device device_or_default(c10::optional<Device> device) {
   return device.has_value() ? *device : Device(kCPU);
 }
 
+inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
+  return pinned_memory.has_value() ? *pinned_memory : false;
+}
+
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -317,7 +321,7 @@ struct C10_API TensorOptions {
 
   /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
-    return has_pinned_memory_ ? pinned_memory_ : false;
+    return pinned_memory_or_default(pinned_memory_opt());
   }
 
   /// Returns whether the `pinned_memory` is specified.
