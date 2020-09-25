@@ -580,9 +580,9 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         if activation_is_dynamically_quantized(qconfig):
-            convert = torch.quantization.convert_dynamic_child_module_fx
+            convert = torch.quantizations.quantize_fx._convert_dynamic_standalone_module_fx
         else:
-            convert = torch.quantization.convert_child_module_fx
+            convert = torch.quantization.quantize_fx._convert_standalone_module_fx
         observed_standalone_module = quantizer.modules[node.target]
         quantized_standalone_module = convert(observed_standalone_module, debug=debug)
         parent_name, name = _parent_name(node.target)
