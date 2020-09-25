@@ -438,7 +438,18 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
 
         dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
         dispatcher_args = dispatcher.arguments(f.func)
-        dispatcher_exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
+
+        args: Union[Sequence[DispatcherArgument], Sequence[LegacyDispatcherArgument]]
+        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            returns_type = dispatcher_returns_type
+            args = dispatcher_args
+            exprs = dispatcher.exprs(dispatcher_args)
+            dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
+        else:
+            returns_type = legacy_dispatcher_returns_type
+            args = legacy_dispatcher_args
+            exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
+            dispatch_key = "options.computeDispatchKey()"
 
         if target is Target.DEFINITION:
             # I don't think there's actually a good reason to generate
@@ -448,14 +459,14 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
             if legacy_dispatcher_tensor_args:
                 tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
                 compute_dk = f"""\
-DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
+DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
             else:
-                compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
+                compute_dk = f"DispatchKey _dk = {dispatch_key};"
             return f"""\
 // aten::{f.func}
-{legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
+{returns_type} {name}({', '.join(str(a) for a in args)}) {{
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
@@ -464,7 +475,7 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
   DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch() ? _dk : _autograd_dk;
-  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
