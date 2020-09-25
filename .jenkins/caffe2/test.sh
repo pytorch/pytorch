@@ -163,7 +163,7 @@ pip install --user pytest-sugar
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@662373f6057bb0d39eaf6e5fde3083639ed93af3
+  pip install -q --user git+https://github.com/pytorch/vision.git@8dfcff745a5bd2d4886716bf0deff8dcc8e75fed
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
