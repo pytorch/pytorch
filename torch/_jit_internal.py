@@ -876,3 +876,9 @@ def _is_exception(obj):
     if not inspect.isclass(obj):
         return False
     return issubclass(obj, Exception)
+
+def safe_unwrap(obj):
+    if getattr(obj, "__wrapped__", None):
+        return inspect.unwrap(obj)
+
+    return obj

@@ -268,7 +268,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # to infer the type.
         attr_py_type = type(value)
         ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
-        if torch._jit_internal.can_compile_class(attr_py_type) and not issubclass(attr_py_type, ignored_builtin_classes):
+        if torch._jit_internal.can_compile_class(attr_py_type) and not issubclass(attr_py_type, ignored_builtin_classes) and not issubclass(attr_py_type, Enum):
             torch.jit.script(type(value))
 
         attr_type = infer_type(name, value)

@@ -105,7 +105,7 @@ struct PythonResolver : public Resolver {
       return script_class.class_type_.type_;
     }
 
-    auto unwrapped = py::module::import("inspect").attr("unwrap")(obj);
+    auto unwrapped = py::module::import("torch._jit_internal").attr("safe_unwrap")(obj);
     py::bool_ isClass =
         py::module::import("inspect").attr("isclass")(unwrapped);
 

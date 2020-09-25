@@ -464,7 +464,7 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return x + self.b
 
-        with self.assertRaisesRegex(TypeError, r"function\(\) argument 1 must be code, not str"):
+        with self.assertRaisesRegex(TypeError, r"function\(\) argument .* must be code, not str"):
             @torch.jit.script
             class Derived(Base):
                 def two(self, x):
