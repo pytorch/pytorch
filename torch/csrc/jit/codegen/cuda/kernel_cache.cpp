@@ -1,10 +1,10 @@
+
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-
-// TODO: This class is dead at the moment, but we need to figure out a generic
-// cacheing system that will suite our needs.
 
 namespace torch {
 namespace jit {
@@ -18,6 +18,8 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
   return std::vector<size_t>(small_vec.begin(), small_vec.end());
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
 void debugPrint(const TensorTypePtr& type) {
   printf("\nsizes:");
   if (auto sizes = type->symbolic_sizes().sizes()) {
@@ -67,18 +69,15 @@ void debugPrint(const TensorTypePtr& type) {
     printf("no stride properties available\n");
   }
 }
+#pragma clang diagnostic pop
 
 at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("graphReductionAxes");
+
   at::DimVector reduction_axes;
+  // TODO: let check that we have only single reduction node in the graph.
   for (const auto& n : graph->nodes()) {
     if (isReductionNode(n)) {
-      // TODO: I think this is enough to detect reduction that's not the output
-      // as well. Since we go in topological order, we would run into
-      // intermediate reduction, if there's any.
-      TORCH_INTERNAL_ASSERT(
-          graph->outputs().size() == 1 && graph->outputs()[0] == n->output(),
-          "support for graph with reduction is limited to single output from reduction node");
-
       // TODO: we should return empty when `keepdim` is True?
       auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
       TORCH_INTERNAL_ASSERT(
@@ -97,6 +96,8 @@ at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
 }
 
 at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
+  FUSER_PERF_SCOPE("getPermutationPerSortedStride");
+
   // `permute_seq` is the returned permutation to achieve sorted stride;
   at::DimVector permute_seq;
 
@@ -157,9 +158,9 @@ at::DimVector inversePermutation(
     for (const auto& dim : permuted) {
       int adjusted_offset = 0;
       for (const auto& red_dim : reduction_axes) {
-        if (red_dim < (const unsigned long)dim) {
+        if (red_dim < (unsigned long)dim) {
           adjusted_offset++; // 1.b
-        } else if (red_dim == (const unsigned long)dim) {
+        } else if (red_dim == (unsigned long)dim) {
           adjusted_offset = -1; // 1.a
           break;
         }
@@ -185,59 +186,200 @@ at::DimVector inversePermutation(
 
 } // namespace
 
+InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
+    const at::ArrayRef<IValue>& inputs) {
+  IdLookupReturn ret;
+  std::stringstream encoded_inputs;
+  for (const auto& input : inputs) {
+    if (input.isTensor()) {
+      auto input_tensor = input.toTensor();
+
+      encoded_inputs << ";";
+      auto sep = "";
+      for (auto size : input_tensor.sizes()) {
+        encoded_inputs << sep << size;
+        sep = ",";
+      }
+      encoded_inputs << "@";
+      sep = "";
+      for (auto stride : input_tensor.strides()) {
+        encoded_inputs << sep << stride;
+        sep = ",";
+      }
+    } else {
+      // encode s for scalar;
+      encoded_inputs << ";s";
+    }
+  }
+  auto& id_iter_pair = encoding_lookup_[encoded_inputs.str()];
+
+  // short-cut to leave LRU entry as is;
+  if (id_iter_pair.lru_iter == used_entry_.begin()) {
+    ret.id = id_iter_pair.id;
+    return ret;
+  }
+
+  if (id_iter_pair.id == 0) {
+    // no entry existed for given input set, set id for given entry
+    id_iter_pair.id = current_id_++;
+    if (used_entry_.size() == max_cache_size_) {
+      // pop least recently used cache;
+      const auto& remove_iter = encoding_lookup_.find(used_entry_.back());
+      used_entry_.pop_back();
+      ret.evict_id = remove_iter->second.id;
+      ret.eviction = true;
+      encoding_lookup_.erase(remove_iter);
+    }
+  } else {
+    used_entry_.erase(id_iter_pair.lru_iter);
+  }
+
+  ret.id = id_iter_pair.id;
+  id_iter_pair.lru_iter =
+      used_entry_.insert(used_entry_.begin(), encoded_inputs.str());
+  return ret;
+}
+
 FusionExecutorCache::FusionExecutorCache(
     std::unique_ptr<Fusion>&& fusion,
     at::Device device)
-    : device_(device), fusion_(std::move(fusion)) {}
+    : device_(device), fusion_(std::move(fusion)) {
+  FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
+  // avoid putting `has_reduction_` in the initializer list
+  has_reduction_ = fusion_->hasReduction();
+}
 
-// TODO: dummy cache
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
-    const at::ArrayRef<IValue>& inputs) {
-  // caching strategy is different for pw-fusion and reduction-fusion.
-  if (fusion_->hasReduction()) {
-    // copy the fusion, since each FusionExecutor needs to manipulate the fusion
-    // in order to generate kernel.
-    Fusion fusion = *fusion_;
-    FusionGuard fg(&fusion);
-    TensorView* red_tv = nullptr;
-    for (auto expr : fusion.exprs()) {
-      if (expr->getExprType().has_value() &&
-          expr->getExprType().value() == ExprType::ReductionOp) {
-        red_tv = expr->outputs()[0]->as<TensorView>();
-        break;
+    const at::ArrayRef<IValue>& inputs,
+    size_t unique_id) {
+  FUSER_PERF_SCOPE("runFusionWithInputs");
+  LaunchParams launch_params;
+  if (code_to_fe_lookup_.count(unique_id) == 0) {
+    // enter when we get a new input set. We need to search for compatible
+    // entries in cached `FusionExecutor` or compile new one as needed.
+
+    // caching strategy is different for pw-fusion and reduction-fusion.
+    if (has_reduction_) {
+      // Grab the fusion to analyze for heuristics
+      FusionGuard fg(fusion_.get());
+
+      TensorView* reduction_tv = nullptr;
+      // Use dependency check to find the reduction tv as it returns used values
+      // instead of exprs.
+
+      // The call is relatively heavy weight, consider caching
+      auto used_vals = DependencyCheck::getAllValsBetween(
+          {fusion_->inputs().begin(), fusion_->inputs().end()},
+          fusion_->outputs());
+
+      // Find the reduction tensor view, make sure there's only one
+      for (auto val : used_vals) {
+        if (val->getValType().value() == ValType::TensorView) {
+          auto tv = val->as<TensorView>();
+          if (tv->hasReduction()) {
+            TORCH_INTERNAL_ASSERT(
+                reduction_tv == nullptr,
+                "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
+            reduction_tv = tv;
+          }
+        }
       }
+
+      TORCH_INTERNAL_ASSERT(
+          reduction_tv != nullptr,
+          "Could not find the reduction tensor view in the fusion.");
+
+      // Generate the reduction parameters
+      auto reduction_params =
+          getReductionHeuristics(fusion_.get(), inputs, reduction_tv);
+
+      TORCH_INTERNAL_ASSERT(
+          reduction_params.has_value(),
+          "Error getting reduction heuristics for scheduling.");
+
+      launch_params = reduction_params.value().lparams;
+
+      auto fusion_executor =
+          &red_fusion_executor_cache_[reduction_params.value()];
+
+      if (!fusion_executor->compiled()) {
+        // HEURISTIC NOT COMPILED, COMPILE A KERNEL
+        Fusion fusion = *fusion_;
+
+        FusionGuard fg(&fusion);
+
+        // Heavy weight call
+        auto used_vals = DependencyCheck::getAllValsBetween(
+            {fusion.inputs().begin(), fusion.inputs().end()}, fusion.outputs());
+
+        TensorView* reduction_tv = nullptr;
+
+        for (auto val : used_vals) {
+          if (val->getValType().value() == ValType::TensorView) {
+            auto tv = val->as<TensorView>();
+            if (tv->hasReduction()) {
+              TORCH_INTERNAL_ASSERT(
+                  reduction_tv == nullptr,
+                  "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
+              reduction_tv = tv;
+            }
+          }
+        }
+
+        TORCH_INTERNAL_ASSERT(
+            reduction_tv != nullptr,
+            "Could not find the reduction tensor view in the fusion.");
+
+        // Heavy weight call
+        auto outputsOfReduction =
+            DependencyCheck::getAllOutputsOf({reduction_tv});
+
+        auto tv_entries =
+            ir_utils::filterByType<TensorView>(outputsOfReduction);
+
+        std::vector<TensorView*> tvOutputsOfReduction(
+            tv_entries.begin(), tv_entries.end());
+
+        scheduleReduction(
+            &fusion,
+            reduction_params.value(),
+            reduction_tv,
+            tvOutputsOfReduction);
+
+        // This means we have not found a previously generated kernel that's
+        // compatible with the new reduction params. We need to finish codegen.
+        CompileOptions options;
+        options.device = device_;
+        fusion_executor->compileFusion(&fusion, options);
+      }
+      // record new short cut to `FusionExecutor`
+      code_to_fe_lookup_[unique_id] = fusion_executor;
+
+    } else {
+      // Handle pointwise operations
+      if (!pw_fusion_executor_cache_) {
+        pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
+        CompileOptions options;
+        options.device = device_;
+        // no need to copy fusion_, as we are not generating more than 1 kernel
+        // for PW.
+        scheduleFusion(fusion_.get(), inputs);
+        pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
+      }
+      // record new short cut to `FusionExecutor`
+      code_to_fe_lookup_[unique_id] = pw_fusion_executor_cache_.get();
     }
-    auto reduction_params = scheduleReduction(&fusion, inputs, red_tv);
-    TORCH_INTERNAL_ASSERT(
-        reduction_params.has_value(),
-        "reduction schedule failed in `scheduleReduction`");
-    auto& fusion_executor =
-        red_fusion_executor_cache_[reduction_params.value()];
-    if (!fusion_executor.compiled()) {
-      // This means we have not found a previously generated kernel that's
-      // compatible with the new reduction params. We need to finish codegen.
-      CompileOptions options;
-      options.device = device_;
-      fusion_executor.compileFusion(&fusion, options);
-    }
-    return fusion_executor.runFusion(inputs);
-  } else {
-    if (!pw_fusion_executor_cache_) {
-      pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
-      CompileOptions options;
-      options.device = device_;
-      // no need to copy fusion_, as we are not generating more than 1 kernel
-      // for PW.
-      scheduleFusion(fusion_.get(), inputs);
-      pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
-    }
-    return pw_fusion_executor_cache_->runFusion(inputs);
   }
+
+  return code_to_fe_lookup_[unique_id]->runFusion(
+      inputs, launch_params, unique_id);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(
     const std::shared_ptr<Graph>& graph,
     const std::vector<size_t>& reduction_axes) {
+  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+
   // run over inputs to extract common types;
   TensorTypePtr acc_type = TensorType::get();
   for (const auto& input : graph->inputs()) {
@@ -256,16 +398,14 @@ GraphCache::InputsRequirement::InputsRequirement(
       vec_optional_ttp.emplace_back(c10::nullopt);
     }
   }
-  input_permutation_ = getPermutationPerSortedStride(acc_type);
-  output_permutation_ = inversePermutation(input_permutation_, reduction_axes);
-  TORCH_CHECK(
-      acc_type->device().has_value(), "requires fixed device for all inputs");
-  device_ = acc_type->device();
+  extractPermutation(acc_type, reduction_axes);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(
     const at::ArrayRef<IValue>& inputs,
     const std::vector<size_t>& reduction_axes) {
+  FUSER_PERF_SCOPE("InputsRequirement::InputsRequirement");
+
   // run over inputs to extract common types;
   TensorTypePtr acc_type = TensorType::get();
   for (const auto& input : inputs) {
@@ -287,11 +427,7 @@ GraphCache::InputsRequirement::InputsRequirement(
       vec_optional_ttp.emplace_back(c10::nullopt);
     }
   }
-  input_permutation_ = getPermutationPerSortedStride(acc_type);
-  output_permutation_ = inversePermutation(input_permutation_, reduction_axes);
-  TORCH_CHECK(
-      acc_type->device().has_value(), "requires fixed device for all inputs");
-  device_ = acc_type->device();
+  extractPermutation(acc_type, reduction_axes);
 }
 
 bool GraphCache::InputsRequirement::requiresPermutation() {
@@ -302,10 +438,16 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
     }
   }
   // Check if output agrees
-  const size_t output_rank = output_permutation_.size();
-  for (size_t i = 0; i < output_rank; i++) {
+  const size_t pw_output_rank = pw_output_permutation_.size();
+  for (size_t i = 0; i < pw_output_rank; i++) {
     TORCH_INTERNAL_ASSERT(
-        output_permutation_[i] == (long)i,
+        pw_output_permutation_[i] == (long)i,
+        "permutation of output and input is not consistent");
+  }
+  const size_t reduction_output_rank = reduction_output_permutation_.size();
+  for (size_t i = 0; i < reduction_output_rank; i++) {
+    TORCH_INTERNAL_ASSERT(
+        reduction_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   return false;
@@ -314,9 +456,12 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
 // TODO: tests!
 bool GraphCache::InputsRequirement::complyWith(
     const InputsRequirement& expect) {
+  FUSER_PERF_SCOPE("InputsRequirement::complyWith");
+
   if (device_ != expect.device_ ||
       input_permutation_ != expect.input_permutation_ ||
-      output_permutation_ != expect.output_permutation_ ||
+      pw_output_permutation_ != expect.pw_output_permutation_ ||
+      reduction_output_permutation_ != expect.reduction_output_permutation_ ||
       vec_optional_ttp.size() != expect.vec_optional_ttp.size()) {
     return false;
   }
@@ -381,8 +526,22 @@ bool GraphCache::InputsRequirement::complyWith(
   return true;
 }
 
-FusionExecutorCache* GraphCache::createFusionExecutorCache(
+void GraphCache::InputsRequirement::extractPermutation(
+    const TensorTypePtr& acc_type,
+    const std::vector<size_t>& reduction_axes) {
+  input_permutation_ = getPermutationPerSortedStride(acc_type);
+  reduction_output_permutation_ =
+      inversePermutation(input_permutation_, reduction_axes);
+  pw_output_permutation_ = inversePermutation(input_permutation_, {});
+  TORCH_CHECK(
+      acc_type->device().has_value(), "requires fixed device for all inputs");
+  device_ = acc_type->device();
+}
+
+FusionExecutorCache* GraphCache::appendFusionExecutorCache(
     const InputsRequirement& input_stack) {
+  FUSER_PERF_SCOPE("createFusionExecutorCache");
+
   input_stacks_.emplace_back(input_stack);
   std::shared_ptr<Graph> parsing_graph = graph_->copy();
   // assign inputs on parsing_graph to accommodate legacy executor, where input
@@ -457,12 +616,6 @@ FusionExecutorCache* GraphCache::createFusionExecutorCache(
       // see [ NOTE - reduction in graph ] part 2.
       for (auto n : parsing_graph->nodes()) {
         if (isReductionNode(n)) {
-          // TODO: this is mostly redundant check, but it's compile time, we
-          //       leave it here to be safe;
-          TORCH_INTERNAL_ASSERT(
-              parsing_graph->outputs().size() == 1 &&
-                  parsing_graph->outputs()[0] == n->output(),
-              "supporfor graph with reduction is limited to single output from reduction node");
           auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
           TORCH_INTERNAL_ASSERT(
               dims_list.has_value(), "reduction axes should be constant");
@@ -496,10 +649,12 @@ FusionExecutorCache* GraphCache::createFusionExecutorCache(
 
 GraphCache::GraphCache(std::shared_ptr<Graph> graph)
     : graph_(std::move(graph)) {
+  FUSER_PERF_SCOPE("GraphCache::GraphCache");
+
   // [ NOTE - reduction in graph ]
   //
   // reduction complicates our permutation in integration, it addes two things:
-  // 1. we need to adjust output_permutation_;
+  // 1. we need to adjust xxx_output_permutation_;
   //    because of dimension elimination during permutation (not necessarily,
   //    given the `keepdim` argument.) this needs to be accommodated later when
   //    we added the support.
@@ -511,50 +666,99 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
   // compile a kernel if we have enough information from graph (profiling
   // record)
   if (IsNewExecutorEnabled()) {
-    createFusionExecutorCache(
+    appendFusionExecutorCache(
         InputsRequirement(graph_, toVector(reduction_axes_)));
   }
 }
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  InputsRequirement input_stack(inputs, toVector(reduction_axes_));
+  FUSER_PERF_SCOPE("runGraphWithInputs");
+  // get unique id `unique_id` for given input set `inputs`;
+  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
+  const size_t unique_id = id_lookup_ret.id;
+
+  // if we went over the cache size for short-cut, we evict entries using LRU;
+  if (id_lookup_ret.eviction) {
+    auto index_lookup_iter = code_to_index_lookup_.find(id_lookup_ret.evict_id);
+    TORCH_INTERNAL_ASSERT(
+        index_lookup_iter != code_to_index_lookup_.end(),
+        "evicting cache entry not found in lookup table");
+    // evict nested cache in FusionExecutorCache
+    fe_cache_[index_lookup_iter->second]->evictCache(index_lookup_iter->first);
+    code_to_index_lookup_.erase(index_lookup_iter);
+  }
+
   FusionExecutorCache* fusion_executor_cache = nullptr;
 
-  // TODO: hash indexing;
-  for (size_t i = 0; i < fe_cache_.size(); i++) {
-    if (input_stack.complyWith(input_stacks_[i])) {
-      fusion_executor_cache = fe_cache_[i].get();
-      break;
+  if (code_to_index_lookup_.count(unique_id) == 0) {
+    InputsRequirement input_stack(inputs, toVector(reduction_axes_));
+    for (size_t i = 0; i < fe_cache_.size(); i++) {
+      if (input_stack.complyWith(input_stacks_[i])) {
+        // found compliable fe_cache_ entry
+        fusion_executor_cache = fe_cache_[i].get();
+        // record short cut to designated fusion executor
+        code_to_index_lookup_[unique_id] = i;
+        break;
+      }
     }
+    if (!fusion_executor_cache) {
+      // This is the ugly bit, each level of cache has their own entry. At this
+      // point, we are creating an instance of FusionExecutorCache as well as a
+      // cache entry for GraphCache;
+      // But we are not creating any cache entry for nested structures. We only
+      // create cache entry below when we later call
+      // `fusion_executor_cache->runFusionWithInputs`
+      fusion_executor_cache = appendFusionExecutorCache(input_stack);
+      // record short cut to designated fusion executor
+      code_to_index_lookup_[unique_id] = fe_cache_.size() - 1;
+    }
+  } else {
+    // take short cut to designated fusion executor
+    fusion_executor_cache = fe_cache_[code_to_index_lookup_[unique_id]].get();
   }
-  if (!fusion_executor_cache) {
-    fusion_executor_cache = createFusionExecutorCache(input_stack);
-  }
+  InputsRequirement* input_requirement =
+      &input_stacks_[code_to_index_lookup_[unique_id]];
 
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing
-  if (input_stack.requiresPermutation()) {
+  if (input_requirement->requiresPermutation()) {
     std::vector<IValue> permuted_inputs;
     permuted_inputs.reserve(inputs.size());
     for (const auto& input : inputs) {
       if (input.isTensor()) {
         permuted_inputs.emplace_back(
-            input.toTensor().permute(input_stack.input_permutation_));
+            input.toTensor().permute(input_requirement->input_permutation_));
       } else {
         permuted_inputs.emplace_back(input);
       }
     }
-    auto outputs = fusion_executor_cache->runFusionWithInputs(permuted_inputs);
+    auto outputs =
+        fusion_executor_cache->runFusionWithInputs(permuted_inputs, unique_id);
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {
-      permuted_outputs.emplace_back(
-          output.permute(input_stack.output_permutation_));
+      // This is to address the issue that not all outputs from a reduction
+      // fusion are reduced tensor; We support intermediate tensors to be output
+      if (static_cast<size_t>(output.dim()) ==
+          input_requirement->pw_output_permutation_.size()) {
+        permuted_outputs.emplace_back(
+            output.permute(input_requirement->pw_output_permutation_));
+      } else if (
+          static_cast<size_t>(output.dim()) ==
+          input_requirement->reduction_output_permutation_.size()) {
+        permuted_outputs.emplace_back(
+            output.permute(input_requirement->reduction_output_permutation_));
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Something went wrong with integration permutation, can't find a consistent permutation for output in fusion",
+            *graph_);
+      }
     }
     return permuted_outputs;
   } else {
-    return fusion_executor_cache->runFusionWithInputs(inputs);
+    return fusion_executor_cache->runFusionWithInputs(inputs, unique_id);
   }
 }
 
