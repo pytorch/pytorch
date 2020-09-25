@@ -572,6 +572,9 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
+    """ Converts an observed standalone module to quantized standalone module
+    by calling convert_fx on the observed standalone module.
+    """
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
