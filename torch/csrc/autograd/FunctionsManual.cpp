@@ -211,6 +211,44 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
+Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
+  if (self.is_complex()) {
+    auto abs = at::abs(self);
+    // C -> C
+    // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
+    return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
+  } else {
+    return at::zeros_like(grad, at::MemoryFormat::Preserve);
+  }
+}
+
+Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  auto result = grad * other.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  auto result = grad / other.conj();
+  if (!at::isComplexType(self_st) && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  auto result = -grad * ((self / other) / other).conj();
+  if (!other.is_complex() && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+  return result;
+}
+
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();
@@ -554,7 +592,12 @@ Tensor sum_tensorlist(TensorList tl) {
   return sum;
 }
 
-Tensor repeat_backward(Tensor grad, int64_t input_dims, IntArrayRef repeats) {
+Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
+  auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
+  if (find_iter != repeats.cend()) {
+    return at::zeros(input_shape, grad.options());
+  }
+  const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
@@ -2115,7 +2158,7 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
 Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                     bool complex_input, bool complex_output,
                     bool inverse, IntArrayRef checked_signal_sizes,
-                    bool normalized, bool onesided,
+                    int64_t normalization, bool onesided,
                     IntArrayRef output_sizes) {
   Tensor gI;
   if (!complex_input && complex_output) {
@@ -2147,12 +2190,12 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
       }
       gI = _fft_with_size(complex_full_grad, signal_ndim,
                           /* complex_input */ true, /* complex_output */ true,
-                          !inverse, checked_signal_sizes, normalized,
+                          !inverse, checked_signal_sizes, normalization,
                           /* onesided */ false, complex_full_grad.sizes()).select(-1, 0);
     } else {
       gI = _fft_with_size(grad, signal_ndim, /* complex_input */ true,
                           /* complex_output */ true, !inverse,
-                          checked_signal_sizes, normalized,
+                          checked_signal_sizes, normalization,
                           /* onesided */ false, grad.sizes()).select(-1, 0);
     }
   } else if (complex_input && !complex_output && onesided) {
@@ -2185,7 +2228,7 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
     //               = 1, 2, ..., N - onesided_length
     gI = _fft_with_size(grad, signal_ndim, /* complex_input */ false,
                         /* complex_output */ true, /* inverse */ false,
-                        checked_signal_sizes, normalized, /* onesided */ true,
+                        checked_signal_sizes, normalization, /* onesided */ true,
                         self.sizes());
     int64_t double_length = checked_signal_sizes[signal_ndim - 1] - self.size(signal_ndim);
     if (double_length > 0) {  // also covers case when signal size is zero
@@ -2193,24 +2236,10 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
     }
   } else {
     gI = _fft_with_size(grad, signal_ndim, complex_output, complex_input,
-                        !inverse, checked_signal_sizes, normalized, onesided,
+                        !inverse, checked_signal_sizes, normalization, onesided,
                         self.sizes());
   }
-  if (normalized) {
-    // If normalized, backward is exactly calling fft with inversed argument as
-    // the forward because both are unitary.
-    return gI;
-  } else {
-    // If not normalized, in backward, we need to upscale or downscale gI basing
-    // on whether the forward is an inverse fft.
-    auto signal_numel = std::accumulate(checked_signal_sizes.begin(),
-                    checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
-    if (!inverse) {
-      return gI.mul_(static_cast<double>(signal_numel));
-    } else {
-      return gI.div_(static_cast<double>(signal_numel));
-    }
-  }
+  return gI;
 }
 
 // Helper for batchnorm_double_backward

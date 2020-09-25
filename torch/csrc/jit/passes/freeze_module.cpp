@@ -97,12 +97,7 @@ class AttributePropagator {
       auto graph = function->graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        optimizeSubGraphs(
-            graph,
-            std::bind(
-                &AttributePropagator::inlineInterfaceCalls,
-                *this,
-                std::placeholders::_1));
+        inlineInterfaceCalls(graph);
       }
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
@@ -379,6 +374,14 @@ class AttributePropagator {
           inlineInterfaceCall(n, attr);
           // Reset the GetAttr to concrete module type.
           n->output()->setType(attr.type());
+        } else if (n->kind() == prim::fork) {
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::inlineInterfaceCalls,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
@@ -476,18 +479,20 @@ class AttributePropagator {
     auto node = n->inputs()[0]->node();
     // Check if first parameter of fork is a module. This module is used
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
-    if (node->kind() != prim::GetAttr) {
-      return;
+    //  Otherwise freezing is applied using module_
+    if (node->kind() == prim::GetAttr &&
+        node->output()->type()->cast<ClassType>()) {
+      auto name = node->s(attr::name);
+      auto input = node->inputs()[0];
+      if (!findConstantAttr(input, name, attrModule, graph)) {
+        // Module needs to be preserved.
+        return;
+      }
+      attrModule = attrModule.attr(name).toModule();
+      std::swap(module_, attrModule);
     }
-    auto name = node->s(attr::name);
-    auto input = node->inputs()[0];
-    if (!findConstantAttr(input, name, attrModule, graph)) {
-      // Module needs to be preserved.
-      return;
-    }
-    attrModule = attrModule.attr(name).toModule();
+
     auto subgraph = n->g(attr::Subgraph);
-    std::swap(module_, attrModule);
     func(subgraph);
     module_ = attrModule;
   }
@@ -501,6 +506,31 @@ class AttributePropagator {
     return false;
   }
 
+  void removeExtraWaitCalls(Block* b) {
+    auto nodes = b->nodes();
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      if (node->kind() != aten::wait) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+      // If input type is not a from aten::fork call then the
+      // aten::wait operator can be deleted.
+      if (node->input()->type()->kind() != TypeKind::FutureType) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+      }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      for (auto sub_b : node->blocks()) {
+        removeExtraWaitCalls(sub_b);
+      }
+    }
+  }
+
   // cleanupFrozenModule function cleans up the Frozen module. It performs the
   // following:
   // 1) Remove unused attributes.
@@ -511,6 +541,7 @@ class AttributePropagator {
       auto graph = function->graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
+      removeExtraWaitCalls(graph->block());
     }
     removeUnusedAttrs();
   }

@@ -367,7 +367,7 @@ void testCudaTestRand01() {
     sum1 += v;
     sum2 += v * v;
     sum3 += v * v * v;
-    ASSERT_TRUE(v >= 0 && v < 1, "invalid value: ", i, ", ", v);
+    ASSERT_TRUE(v >= 0 && v < 1);
   }
   sum1 /= N;
   sum2 /= N;
@@ -762,6 +762,25 @@ void testCudaSharedMemReduce_1() {
 
   // TODO: check the generated code for correctness.
   CudaCodeGen cuda_cg(loop_k1, a, b);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Check the c write is not masked, but the d write is.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: c_ = 0
+# CHECK: for (int m = 0; m < 128
+# CHECK:   c_ = c_ +
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<1
+# CHECK:   b[blockIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: atomicAdd(&b[blockIdx.x], c_)
+)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   PaddedBuffer<float> a_v(1, M, N, "a_v");
   PaddedBuffer<float> b_v(1, "b_v");
   PaddedBuffer<float> b_ref(1, "b_ref");
@@ -964,6 +983,55 @@ void testCudaHalfSupport() {
   cudaFree(bDev);
   cudaFree(cDev);
   cudaFree(dDev);
+}
+
+void testCudaHalfPropagation() {
+  KernelScope kernel_scope;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+    return Max::make(a(i), ExprHandle(new HalfImm(0)), true);
+  });
+
+  LoopNest l({relu});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, relu});
+
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  // Check the types used by the Max are Float.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK:  float v = float(a[n]);
+# CHECK:  relu[n] = half(Max(v, 0.f
+# CHECK: })IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<at::Half> reluData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* reluDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto reluSize = reluData.size() * sizeof(reluData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&reluDev, reluSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, reluDev});
+  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(aData, reluData);
+
+  cudaFree(aDev);
+  cudaFree(reluDev);
 }
 
 void testCudaPrioritizeDependents() {
