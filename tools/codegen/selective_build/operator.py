@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, cast
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 # This class holds information about model metadata. Used to track
@@ -10,9 +10,13 @@ class PyTorchModelMetadata:
     version: str
 
     @staticmethod
-    def from_yaml(data: Dict[str, str]) -> 'PyTorchModelMetadata':
+    def from_yaml(data: Dict) -> 'PyTorchModelMetadata':
         name = data['name']
+        assert isinstance(name, str)
+
         version = data['version']
+        assert isinstance(version, str)
+
         return PyTorchModelMetadata(name, version)
 
 
@@ -46,12 +50,19 @@ class SelectiveBuildOperator():
 
     @staticmethod
     def from_yaml_dict(op_name: str, op_info: Dict[str, object]) -> 'SelectiveBuildOperator':
-        is_root_operator = cast(bool, op_info.get('is_root_operator', True))
-        is_used_for_training = cast(bool, op_info.get('is_used_for_training', True))
-        include_all_overloads = cast(bool, op_info.get('include_all_overloads', True))
+        is_root_operator = op_info.get('is_root_operator', True)
+        assert isinstance(is_root_operator, bool)
+
+        is_used_for_training = op_info.get('is_used_for_training', True)
+        assert isinstance(is_used_for_training, bool)
+
+        include_all_overloads = op_info.get('include_all_overloads', True)
+        assert isinstance(include_all_overloads, bool)
+
         models: Optional[List[PyTorchModelMetadata]] = None
         if 'models' in op_info:
-            models_list = cast(List[Dict[str, str]], op_info['models'])
+            models_list = op_info['models']
+            assert isinstance(models_list, list)
             models = list(map(
                 lambda x: PyTorchModelMetadata.from_yaml(x),
                 models_list,

@@ -1,4 +1,4 @@
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Optional
 import yaml
 
 from dataclasses import dataclass
@@ -43,16 +43,23 @@ class SelectiveBuilder:
             raise Exception("Got unexpected top level keys: {}".format(
                 ",".join(top_level_keys - valid_top_level_keys),
             ))
-        include_all_operators = cast(bool, data.get('include_all_operators', False))
+        include_all_operators = data.get('include_all_operators', False)
+        assert isinstance(include_all_operators, bool)
+
         models = None
         if 'models' in data:
-            models_list = cast(List[Dict[str, str]], data['models'])
+            models_list = data['models']
+            assert isinstance(models_list, list)
+
             models = list(map(
                 lambda x: PyTorchModelMetadata.from_yaml(x),
                 models_list,
             ))
         operators = {}
-        for (k, v) in cast(Dict[str, Dict[str, object]], data.get('operators', {})).items():
+        operators_dict = data.get('operators', {})
+        assert isinstance(operators_dict, dict)
+
+        for (k, v) in operators_dict.items():
             operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
         return SelectiveBuilder(include_all_operators, models, operators)
 
