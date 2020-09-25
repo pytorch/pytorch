@@ -5,7 +5,7 @@ import warnings
 from math import inf, nan, isnan
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
@@ -56,11 +56,12 @@ class TestLinalg(TestCase):
 
         # NOTE: det requires a 2D+ tensor
         t = torch.randn(1, device=device, dtype=dtype)
-        with self.assertRaises(IndexError):
+        with self.assertRaises(RuntimeError):
             op(t)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
+    @skipCUDAIfNoMagma
     def test_norm_dtype(self, device):
         def run_test_case(input_size, ord, keepdim, from_dtype, to_dtype, compare_dtype):
             msg = (
@@ -154,6 +155,7 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their matrix norm results match
+    @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float, torch.double)
     def test_norm_matrix(self, device, dtype):
@@ -400,6 +402,8 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -440,14 +444,14 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
 
                 if is_broken_matrix_norm_case(ord, x):
-                    self.assertNotEqual(result, result_n, msg=msg)
+                    continue
                 else:
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):
