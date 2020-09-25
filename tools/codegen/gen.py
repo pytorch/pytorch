@@ -1116,7 +1116,10 @@ def main() -> None:
                     # contextually clear
                     registrations.extend(
                         mapMaybe(
-                            compute_type_method(mb_dispatch, target=Target.REGISTRATION, selector=SelectiveBuilder.get_nop_selector()),
+                            compute_type_method(
+                                mb_dispatch,
+                                target=Target.REGISTRATION,
+                                selector=SelectiveBuilder.get_nop_selector()),
                             fs))
                 return {
                     'extra_headers': extra_headers,

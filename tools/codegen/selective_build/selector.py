@@ -1,39 +1,9 @@
-from typing import Dict, Optional, Any, Set
+from typing import Dict, Set
 import yaml
 
 from dataclasses import dataclass
-from enum import Enum
 
 from tools.codegen.selective_build.operator import *
-
-# The SelectiveBuildOperators class encapsulates information about
-# a specific version of selective build and includes information about
-#
-# [1] The models that contribute to the set of operators, and
-# [2] The set of operators themselves.
-#
-@dataclass(frozen=True)
-class SelectiveBuildOperators:
-
-    # If true, then the build is not selective, and includes all
-    # operators.
-    include_all_operators: bool
-
-    # The set of models that participate in this selective build.
-    # Used only for debugging in we want to know if a specific model's
-    # operators were included in thie build.
-    model_names: Set[str]
-
-    # A dictionary of operator -> operator metadata.
-    operators: Dict[str, SelectiveBuildOperator]
-
-    @staticmethod
-    def from_yaml(data: Dict[str, object]) -> 'SelectiveBuildOperators':
-        model_names = set(data.get('model_names', []))
-        operators = {}
-        for (k, v) in data.get('operators', {}).items():
-            operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
-        return SelectiveBuildOperators(model_names, operators)
 
 # A SelectiveBuilder holds information extracted from the selective build
 # YAML specification.
@@ -52,7 +22,7 @@ class SelectiveBuilder:
     # The set of models that participate in this selective build.
     # Used only for debugging in we want to know if a specific model's
     # operators were included in thie build.
-    model_names: Set[str]
+    models: Optional[List[PyTorchModelMetadata]]
 
     # A dictionary of operator -> operator metadata.
     operators: Dict[str, SelectiveBuildOperator]
@@ -63,12 +33,27 @@ class SelectiveBuilder:
 
     @staticmethod
     def from_yaml_dict(data: Dict[str, object]) -> 'SelectiveBuilder':
+        valid_top_level_keys = {
+            'include_all_operators',
+            'models',
+            'operators',
+        }
+        top_level_keys = set(data.keys())
+        if len(top_level_keys - valid_top_level_keys) > 0:
+            raise Exception("Got unexpected top level keys: {}".format(
+                ",".join(top_level_keys - valid_top_level_keys),
+            ))
         include_all_operators = data.get('include_all_operators', False)
-        model_names = set(data.get('model_names', []))
+        models = None
+        if 'models' in data:
+            models = map(
+                lambda x: PyTorchModelMetadata.from_yaml(x),
+                data['models'],
+            )
         operators = {}
         for (k, v) in data.get('operators', {}).items():
             operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
-        return SelectiveBuilder(include_all_operators, model_names, operators)
+        return SelectiveBuilder(include_all_operators, models, operators)
 
     @staticmethod
     def from_yaml_str(config_contents: str) -> 'SelectiveBuilder':
