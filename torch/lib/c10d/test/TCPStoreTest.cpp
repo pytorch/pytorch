@@ -51,6 +51,7 @@ void testHelper(const std::string& prefix = "") {
     EXPECT_FALSE(delFailure);
     numKeys = serverStore->getNumKeys();
     EXPECT_EQ(numKeys, 4);
+    EXPECT_THROW(serverStore->get("key0"), std::runtime_error);
   });
 
   // Hammer on TCPStore
