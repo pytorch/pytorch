@@ -370,8 +370,8 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m = RefM()
         original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
-        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
-        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         m = CustomTracer().trace(original_m).eval()
         qconfig_dict = {'': default_qconfig}
@@ -379,17 +379,17 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, qconfig_dict)
         # calibration
         m(data)
-        # input and output of first conv, observer for custom module
-        # will be inserted in the custom module itself
+        # input and output of first conv, observer for standalone module
+        # will be inserted in the standalone module itself
         count_check = {
             ns.call_module(torch.quantization.MinMaxObserver): 2
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-        # for output of conv in the custom module
+        # for output of conv in the standalone module
         count_check = {
             ns.call_module(torch.quantization.MinMaxObserver): 1
         }
-        self.checkGraphModuleNodes(m.custom, expected_node_occurrence=count_check)
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
 
         # check converted/quantized model
         m = convert_fx(m)
@@ -406,7 +406,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # dequantization for output happens in parent module
             ns.call_method('dequantize') : 0,
         }
-        self.checkGraphModuleNodes(m.custom, expected_node_occurrence=count_check)
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
         res = m(data)
 
         # quantize the reference model
