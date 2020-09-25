@@ -2096,6 +2096,14 @@ class DistributedTest:
                         param += param.grad
                     param.grad = None
 
+        def _model_step_with_zero_grad(self, model):
+            for param in model.parameters():
+                if param.grad is not None:
+                    with torch.no_grad():
+                        param += param.grad
+                    param.grad.requires_grad_(False)
+                    param.grad.zero_()
+
         def _prepare_dummy_data(self, local_bs):
             # global_bs for DDP should be divisible by WORLD_SIZE
             world_size = int(os.environ["WORLD_SIZE"])
@@ -2118,7 +2126,8 @@ class DistributedTest:
                 self.assertEqual(p_gpu, p_DDP)
 
         def _test_DDP_5iter(
-            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
+            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
+            offset=None, world_size=0, zero_grad=False
         ):
             for idx in range(5):
                 # single cpu/gpu training
@@ -2137,8 +2146,12 @@ class DistributedTest:
                 )
 
                 # Update weights and run a second iteration to shake out errors
-                self._model_step(model_base)
-                self._model_step(model_DDP)
+                if zero_grad:
+                    self._model_step_with_zero_grad(model_base)
+                    self._model_step_with_zero_grad(model_DDP)
+                else:
+                    self._model_step(model_base)
+                    self._model_step(model_DDP)
                 self._assert_equal_param(
                     list(model_base.parameters()), list(model_DDP.module.parameters())
                 )
@@ -2159,7 +2172,7 @@ class DistributedTest:
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
-        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
+        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None, gradient_as_bucket_view=False):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
@@ -2174,7 +2187,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(model)
             model_DDP.cuda(gpu_subset[0])
             model_DDP = nn.parallel.DistributedDataParallel(
-                model_DDP, device_ids=gpu_subset
+                model_DDP, device_ids=gpu_subset, gradient_as_bucket_view=gradient_as_bucket_view
             )
 
             # test serializable/unserializable
@@ -2196,14 +2209,11 @@ class DistributedTest:
                 local_bs,
                 rank,
                 global_bs,
-                True
+                True,
             )
             self._barrier()
 
-        @unittest.skipIf(
-            BACKEND == "nccl", "nccl does not support DDP on CPU models"
-        )
-        def test_DistributedDataParallelCPU(self):
+        def _test_DistributedDataParallelCPU(self, gradient_as_bucket_view=False):
             # Run a simple end to end DDP-CPU model, use result of single node
             # model as baseline
             group, group_id, rank = self._init_global_test()
@@ -2213,7 +2223,8 @@ class DistributedTest:
 
             # DDP-CPU training setup
             model_DDP = copy.deepcopy(model_base)
-            model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_DDP, gradient_as_bucket_view=gradient_as_bucket_view)
 
             # dummy data initialization
             local_bs = 2
@@ -2221,9 +2232,21 @@ class DistributedTest:
 
             # check two model parameters over 5 iterations
             self._test_DDP_5iter(
-                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
+                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False, zero_grad=True
             )
             self._barrier()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU(self):
+            self._test_DistributedDataParallelCPU()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU_grad_is_view(self):
+            self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -2287,6 +2310,25 @@ class DistributedTest:
             # test device_ids
             gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        @skip_if_rocm
+        def test_DistributedDataParallel_with_grad_is_view(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = list(rank_to_GPU[rank])
+            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, gradient_as_bucket_view=True)
+
+            # test output_device
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+
+            # test device_ids
+            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
         def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
             # Run a simple end to end DDP model, use result of single node model
