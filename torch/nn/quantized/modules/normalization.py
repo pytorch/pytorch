@@ -16,7 +16,7 @@ class LayerNorm(torch.nn.LayerNorm):
             normalized_shape, eps=eps, elementwise_affine=elementwise_affine)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('scale', torch.Tensor([scale]).float())
         self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
@@ -51,7 +51,7 @@ class GroupNorm(torch.nn.GroupNorm):
         super(GroupNorm, self).__init__(num_groups, num_channels, eps, affine)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('scale', torch.Tensor([scale]).float())
         self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
@@ -86,7 +86,7 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('scale', torch.Tensor([scale]).float())
         self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
@@ -121,7 +121,7 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('scale', torch.Tensor([scale]).float())
         self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
@@ -156,7 +156,7 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
             num_features, eps, momentum, affine, track_running_stats)
         self.weight = weight
         self.bias = bias
-        self.register_buffer('scale', torch.Tensor(scale))
+        self.register_buffer('scale', torch.Tensor([scale]).float())
         self.register_buffer('zero_point', torch.Tensor([zero_point]).int())
 
     def forward(self, input):
