@@ -71,6 +71,7 @@ namespace jit {
   _(MobileTypeParser)                             \
   _(LiteInterpreterBuiltinFunction)               \
   _(LiteInterpreterPrim)                          \
+  _(LiteInterpreterPrimScalar)                    \
   _(LiteInterpreterLoadOrigJit)                   \
   _(LiteInterpreterWrongMethodName)               \
   _(LiteInterpreterParams)                        \
