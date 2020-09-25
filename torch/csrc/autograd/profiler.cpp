@@ -467,7 +467,9 @@ void enableProfiler(const ProfilerConfig& new_config) {
   state->mark("__start_profile", false);
 }
 
-thread_event_lists disableProfiler(bool cleanupTLSState, bool consolidate) {
+thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
+  auto cleanupTLSState = profilerDisableOptions ? profilerDisableOptions->cleanupTLSState : true;
+  auto consolidate = profilerDisableOptions ? profilerDisableOptions->consolidate : true;
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   std::shared_ptr<c10::DebugInfoBase> state;
   if (cleanupTLSState) {
