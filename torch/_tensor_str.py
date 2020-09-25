@@ -98,7 +98,7 @@ class _Formatter(object):
             nonzero_finite_max = nonzero_finite_abs.max().double()
 
             for value in nonzero_finite_vals:
-                if value != torch.ceil(value):
+                if value != torch.ceil(value.double()):
                     self.int_mode = False
                     break
 
