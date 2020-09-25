@@ -405,8 +405,9 @@ class Quantizer:
                     self.modules[node.target] = observed_custom_module
 
 
-                # don't need to insert observer for output in dynamic quantization
-                if activation_is_dynamically_quantized(qconfig):
+                # don't need to insert observer for output if activation does not
+                # need to be statically quantized
+                if not activation_is_statically_quantized(qconfig):
                     continue
 
                 # inserting observers for output of observed module, or mark the output
@@ -477,10 +478,10 @@ class Quantizer:
         model = GraphModule(model, observed_graph)
         self.save_state(model)
         if is_child_module:
-            # indicate whether output is observed or not.
-            # This used for correctly quantize child modules
             assert isinstance(model.graph.result, Node), \
                 'child module returning dict is not yet supported'
+            # indicator for whether output is observed or not.
+            # This used for correctly quantize child modules
             output_is_observed = model.graph.result.name in observed_node_names_set
             model._observed_input_idxs = observed_input_idxs
             model._output_is_observed = output_is_observed
@@ -651,8 +652,7 @@ class Quantizer:
                             'CopyNode of type ' + node.op + ' is not handled'
                         quantized = is_quantized(node.args[0])
 
-                    # output of dynamic quantization is not quantized
-                    if activation_is_dynamically_quantized(qconfig):
+                    if not activation_is_statically_quantized(qconfig):
                         quantized = False
 
                 if quantized:

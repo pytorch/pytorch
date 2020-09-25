@@ -281,7 +281,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
                 qlinear = nnq.Linear if activation_statically_quantized else nnqd.Linear
             elif type(self.linear) in [torch.nn.intrinsic.LinearReLU, torch.nn.intrinsic.qat.LinearReLU]:
-                assert not is_dynamic_quant, 'LinearReLU does not support dynamic quantization'
+                assert activation_statically_quantized, \
+                    'Only static quantization is supported for LinearReLU'
                 qlinear = torch.nn.intrinsic.quantized.LinearReLU
             else:
                 raise Exception("unhandled linear type:", type(self.linear))
