@@ -108,8 +108,9 @@ class SubgraphSlicer {
     }
 
     // merge adjacent subgraphs thaat don't have a dependency on each other
-    Node * prev_autodiff_group = nullptr;
-    for (auto it = block_->nodes().end()->reverseIterator(); it != block_->nodes().begin()->reverseIterator();) {
+    Node* prev_autodiff_group = nullptr;
+    for (auto it = block_->nodes().end()->reverseIterator();
+         it != block_->nodes().begin()->reverseIterator();) {
       Node* n = *it;
       it++;
 
