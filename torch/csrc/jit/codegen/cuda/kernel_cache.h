@@ -8,11 +8,72 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <type_traits>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+//! Encoding an input set to unique id, which is used to short-cut cache entry
+//! selection in our nested cache implementation to cut off overhead.
+//!
+//! We have implemented naive LRU cache eviction policy here, since each entry
+//! in `InputsIdLookup` is attached to a static input shape/stride, and could
+//! grow gigantic when we have input shapes that does not stabalize to a finite
+//! set.
+//!
+//! \note the uniqueness of the ide generated for a given input set is only
+//!   local to the instance of `InputsIdLookup`.
+//!
+class TORCH_CUDA_API InputsIdLookup {
+ public:
+  // constructor where maximum cache size is fixed during init
+  explicit InputsIdLookup(size_t max_cache_size = 10)
+      : max_cache_size_(max_cache_size){};
+
+  // struct to hold return value for lookupId.
+  struct IdLookupReturn {
+    size_t id = 0;
+    size_t evict_id = 0;
+    bool eviction = false;
+  };
+
+  // encode each input sets to with an unique id;
+  // Returned data structure also indicates whether eviction has happened within
+  // the lookup cache. This is needed because lookup shortcut is also cached in
+  // nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
+  // see [ Note -- 2 level cache implementation ]
+  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+
+  // debugging API
+  size_t size() const {
+    return encoding_lookup_.size();
+  }
+
+ private:
+  // entry stored in `encoding_lookup_` to implement LRU
+  struct EncodingEntry {
+    size_t id;
+    std::list<std::string>::iterator lru_iter;
+  };
+
+  // maximum cache size for LRU
+  const size_t max_cache_size_;
+
+  // next available unique id, we monotonically increase `current_id_` avoid
+  // conflicts
+  size_t current_id_ = 1;
+
+  // entry in the cache, This is used to implement LRU cache, where entries in
+  // the list is ordered by their recent usage (freshly used entry is placed at
+  // the beginning)
+  std::list<std::string> used_entry_;
+
+  // map from `std::string` to a unique id `size_t` (packaged in `EncodingEntry`
+  // ). We store an iterator to `used_entry_` to implement LRU
+  std::unordered_map<std::string, EncodingEntry> encoding_lookup_;
+};
 
 // [ Note -- 2 level cache implementation ]
 //
@@ -65,7 +126,19 @@ class FusionExecutorCache {
 
   // Execute fusion graph with given inputs, create `FusionExecutor` as needed;
   std::vector<at::Tensor> runFusionWithInputs(
-      const at::ArrayRef<IValue>& inputs);
+      const at::ArrayRef<IValue>& inputs,
+      size_t unique_id);
+
+  // evict cached short cut entry in `code_to_fe_lookup_`;
+  inline void evictCache(size_t cache_id) {
+    auto iter = code_to_fe_lookup_.find(cache_id);
+    TORCH_INTERNAL_ASSERT(
+        iter != code_to_fe_lookup_.end(),
+        "evict cache failed to find an entry");
+    // evict nested lookup entry in nested FusionExecutor
+    (iter->second)->evictCache(cache_id);
+    code_to_fe_lookup_.erase(iter);
+  };
 
  private:
   // device_ where compiled binaries are loaded on & inputs are expected to
@@ -74,6 +147,16 @@ class FusionExecutorCache {
 
   // original un-scheduled `Fusion`;
   std::unique_ptr<Fusion> fusion_;
+
+  // I'm trading the const model in favor of assigning `has_reduction_` in the
+  // body of constructor, instead of the initializer list;
+  // Because of the move statement used in the constructor, it's tricky to
+  // maintain the code if we have `has_reduction_` as a const member and
+  // initizlize it in the initializer list, where the order of initialization
+  // is controled by the order of declaration instead of their order in the list
+  //
+  // cache fusion->hasReduction() because it's expensive;
+  bool has_reduction_;
 
   // TODO: ugly logic for now. We should integrate the hashing of cache for
   //       different kernels. (alternatively we could do so in scheduler).
@@ -84,14 +167,12 @@ class FusionExecutorCache {
   //    `pw_fusion_executor_cache_`
   // 2. For reduction fusion we have a hash table with ReductionParams as entry
   //    pointing to the actual `FusionExecutor` in `red_fusion_executor_cache_`
-  //
-  // Unfortunately, at run-time in order to search compatible `FusionExecutor`,
-  // we have to call `scheduleReduction` in order to get an instance of
-  // `ReductionParams` for indexing. This is not very efficient. Hence the TODO:
-  // add a direct cache from inputs shapes to `FusionExecutor` entries.
   std::unique_ptr<FusionExecutor> pw_fusion_executor_cache_;
   std::unordered_map<ReductionParams, FusionExecutor, ReductionParamsHash>
       red_fusion_executor_cache_;
+
+  // short cut to FusionExecutor for input set encoded with id;
+  std::unordered_map<size_t, FusionExecutor*> code_to_fe_lookup_;
 };
 
 class GraphCache {
@@ -121,7 +202,8 @@ class GraphCache {
 
     // common permutation order used for dimension coalescing;
     at::DimVector input_permutation_;
-    at::DimVector output_permutation_;
+    at::DimVector pw_output_permutation_;
+    at::DimVector reduction_output_permutation_;
 
     // construct InputsRequirement from `Graph`, this is used for constructing
     // `GraphCache` entry using profiling record
@@ -136,18 +218,23 @@ class GraphCache {
         const at::ArrayRef<IValue>& inputs,
         const std::vector<size_t>& reduction_axes);
 
-    // bool operator==(const InputsRequirement& other);
     bool complyWith(const InputsRequirement& expect);
 
     // helper function used at run-time to check whether a common permutation is
     // present, this is used to take the short-cut to skip permutation logic.
     bool requiresPermutation();
+
+    // extract permutation for input output tensor from accumulcated tensor type
+    // pointer on all inputs;
+    void extractPermutation(
+        const TensorTypePtr& acc_type,
+        const std::vector<size_t>& reduction_axes);
   };
 
   // construct FusionExecutorCache per InputsRequirement.
   // This function makes sure that we properly insert both `input_stacks_` and
   // `fe_cache_` at the same time.
-  FusionExecutorCache* createFusionExecutorCache(
+  FusionExecutorCache* appendFusionExecutorCache(
       const InputsRequirement& input_stack);
 
  private:
@@ -156,10 +243,16 @@ class GraphCache {
   // TODO: poor name, we should use `eliminated_axes_` instead;
   at::DimVector reduction_axes_;
 
+  // short cut to index of stack for input set encoded with id;
+  std::unordered_map<size_t, size_t> code_to_index_lookup_;
+
   // TODO: we should really hash instead of iterative check. Optimize later...
   //       unordered_map<InputsRequirement, FusionExecutorCache>;
   std::vector<InputsRequirement> input_stacks_;
   std::vector<std::unique_ptr<FusionExecutorCache>> fe_cache_;
+
+  // inputs to unique_id lookup table;
+  InputsIdLookup inputs_id_lookup_;
 };
 
 } // namespace cuda

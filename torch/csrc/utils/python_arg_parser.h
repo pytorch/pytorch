@@ -397,6 +397,9 @@ inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
 }
 
 inline std::vector<double> PythonArgs::doublelist(int i) {
+  if (!args[i]) {
+    return {};
+  }
   return this->getDoublelist(i);
 }
 
