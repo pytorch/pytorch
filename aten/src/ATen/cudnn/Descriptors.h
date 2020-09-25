@@ -164,7 +164,7 @@ private:
   }
 };
 
-TORCH_CUDA_API std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct TORCH_CUDA_API ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,
