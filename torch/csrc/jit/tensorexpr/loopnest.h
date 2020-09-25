@@ -71,6 +71,10 @@ class TORCH_API LoopNest {
 
   void prepareForCodegen();
 
+  // Find the inner-most loops and vectorize them. Currently, this only works
+  // for the LLVM backend, when no reductions are involved.
+  void vectorizeInnerLoops();
+
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
