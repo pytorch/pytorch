@@ -271,7 +271,7 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
 
 def try_ann_to_type(ann, loc):
     if ann is None:
-        return TensorType.get()
+        return TensorType.getInferred()
     if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
         return TensorType.get()
     if is_tuple(ann):
