@@ -74,6 +74,7 @@ from torch.jit._recursive import wrap_cpp_module
 # Standard library
 import itertools
 import unittest
+import io
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
@@ -1361,6 +1362,52 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         FileCheck().check("quantized::embedding_bag_byte_rowwise_offsets") \
                    .run(m.graph)
 
+    @skipIfNoFBGEMM
+    def test_quantize_fork_wait(self):
+        """ Tests the case where fork and wait calls are in different subgraphs
+        Calling inline fork-wait only removes the fork call and leaves aten::wait
+        calls in the graph, with Tensor as input (instead of Future[Tensor])
+        """
+        class MainModule(nn.Module):
+            def __init__(self):
+                super(MainModule, self).__init__()
+                self.fork_ops = ForkModule()
+
+            def init_values(self, x):
+                shared_module = self.fork_ops(x)
+                self.fork_dict = shared_module
+
+            def forward(self, x):
+                val = torch.jit._wait(self.fork_ops(x))
+                return val
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                w = torch.ones(5, 5)
+                b = torch.zeros(5)
+                return torch.nn.functional.linear(x, w, b)
+
+        class ForkModule(nn.Module):
+            def __init__(self):
+                super(ForkModule, self).__init__()
+                self.test = TestModule()
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.test.forward, x)
+                return fut
+
+        model = MainModule().eval()
+        traced = torch.jit.trace(model, (torch.randn(5, 5),))
+        model = prepare_dynamic_jit(traced, {'' : default_qconfig})
+        model = convert_dynamic_jit(model)
+        FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
+        # Make sure model save works
+        b = io.BytesIO()
+        torch.jit.save(model, b)
 
 class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
