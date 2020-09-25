@@ -1,5 +1,5 @@
 import bisect
-from random import randint
+from random import randint, seed
 import warnings
 
 from torch._utils import _accumulate
@@ -270,14 +270,18 @@ class ShuffleDataset(IterableDataset[T_co]):
     """
     dataset: IterableDataset[T_co]
     buffer_size: int
+    seed: Optional[int]
 
-    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
+    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int, seed: Optional[int] = None) -> None:
         super(ShuffleDataset, self).__init__()
         self.dataset = dataset
         self.buffer_size = buffer_size if buffer_size > 1 else 1
+        self.seed = seed
 
     def __iter__(self) -> Iterator[T_co]:
         buf: List[T_co] = []
+        if self.seed:
+            seed(self.seed)
         for x in self.dataset:
             if len(buf) == self.buffer_size:
                 yield buf.pop(randint(0, self.buffer_size - 1))

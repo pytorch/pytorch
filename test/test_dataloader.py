@@ -1228,6 +1228,13 @@ except RuntimeError as e:
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
                     self.assertEqual(e, d)
+            fetched_seed1 = list(self._get_data_loader(ShuffleDataset(dataset, 5, seed=123), num_workers=num_workers))
+            fetched_seed2 = list(self._get_data_loader(ShuffleDataset(dataset, 5, seed=123), num_workers=num_workers))
+            self.assertEqual(len(fetched_seed1), len(fetched_seed2))
+            for d1, d2 in zip(fetched_seed1, fetched_seed2):
+                self.assertIsInstance(d1, torch.Tensor)
+                self.assertIsInstance(d2, torch.Tensor)
+                self.assertEqual(d1, d2)
 
     def test_multiprocessing_contexts(self):
         reference = [
