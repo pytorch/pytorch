@@ -939,9 +939,11 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       {"quantized::conv3d", conv3d, quantized_conv3d},
       {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
       {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
-      {"quantized::conv_transpose1d", conv_transpose1d,
+      {"quantized::conv_transpose1d",
+       conv_transpose1d,
        quantized_conv_transpose1d},
-      {"quantized::conv_transpose2d", conv_transpose2d,
+      {"quantized::conv_transpose2d",
+       conv_transpose2d,
        quantized_conv_transpose2d},
       {"quantized::linear", linear, quantized_linear},
       {"quantized::linear_relu", linear_relu, quantized_linear_relu},
@@ -1196,11 +1198,12 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
       {"conv1d_prepack_unpack", conv1d_with_quant, conv1d_with_quant_prepack},
       {"conv2d_prepack_unpack", conv2d_with_quant, conv2d_with_quant_prepack},
       {"conv3d_prepack_unpack", conv3d_with_quant, conv3d_with_quant_prepack},
-      {"conv_transpose1d_prepack_unpack", conv_transpose1d_with_quant,
-                                          conv_transpose1d_with_quant_prepack},
-      {"conv_transpose2d_prepack_unpack", conv_transpose2d_with_quant,
-                                          conv_transpose2d_with_quant_prepack}
-  };
+      {"conv_transpose1d_prepack_unpack",
+       conv_transpose1d_with_quant,
+       conv_transpose1d_with_quant_prepack},
+      {"conv_transpose2d_prepack_unpack",
+       conv_transpose2d_with_quant,
+       conv_transpose2d_with_quant_prepack}};
 }
 
 } // namespace jit
