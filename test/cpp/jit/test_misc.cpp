@@ -2168,15 +2168,16 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  s1->addCallback(wrapPropagateTLSState<void>([&profilerEnabledCb] {
+  auto verifyProfilerCb = wrapPropagateTLSState<void>([&profilerEnabledCb] {
     // Ensure the profiler is still enabled in this thread.
     profilerEnabledCb();
     auto t1 = torch::ones({2, 2});
     auto t2 = torch::ones({2, 2});
     torch::add(t1, t2);
     // Don't cleanup TLSState, and just consolidate.
+    auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
     auto thread_event_lists =
-        torch::autograd::profiler::disableProfiler(false, true);
+        torch::autograd::profiler::disableProfiler(std::move(opts));
     // Ensure that the events from this thread are still profiled and we obtain
     // the expected in events in our consolidated list when calling
     // disableProfiler().
@@ -2190,14 +2191,32 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
           found_ones = true;
         }
       }
+      if (found_add && found_ones) {
+        break;
+      }
     }
     ASSERT_TRUE(found_ones);
     ASSERT_TRUE(found_add);
-  }));
+  });
+
+  s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
-  torch::autograd::profiler::disableProfiler(true, false);
+  auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  torch::autograd::profiler::disableProfiler(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
+
+  // Similar to above test, but verifies correctness in the case where
+  // continuation runs on the main thread.
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::CPU, false, false));
+  s1 = c10::make_intrusive<Future>(IntType::get());
+  s1->addCallback(verifyProfilerCb);
+  // Runs callback inline
+  s1->markCompleted(at::IValue(1));
+  opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  torch::autograd::profiler::disableProfiler(std::move(opts));
 }
 
 TEST(IValueKWargsTest, Basic) {
