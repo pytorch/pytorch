@@ -35,7 +35,6 @@ from .pattern_utils import (
 )
 
 from .standalone_module import (
-    is_standalone_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
 )
@@ -327,7 +326,9 @@ class Quantizer:
         self._generate_qconfig_map(model, model.graph, qconfig_dict)
 
         # match the patterns that will get quantized
-        matches = self._find_matches(model.graph, self.modules, self.patterns)
+        standalone_module_names = qconfig_dict.get('standalone_module_name', None)
+        matches = self._find_matches(
+            model.graph, self.modules, self.patterns, standalone_module_names)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -386,22 +387,21 @@ class Quantizer:
 
                 # index for input of custom module that needs to be observed in parent
                 child_module_input_idxs = None
-                if node.op == 'call_module' and \
-                   is_standalone_module(self.modules[node.target]):
-                    # observe custom module
-                    custom_module = self.modules[node.target]
-                    traced_custom_module = symbolic_trace(custom_module)
+                if isinstance(obj, StandaloneModuleQuantizeHandler):
+                    # observe standalone module
+                    standalone_module = self.modules[node.target]
+                    traced_standalone_module = symbolic_trace(standalone_module)
                     if self.is_dynamic_quant:
                         prepare = torch.quantization.prepare_dynamic_child_module_fx
                     else:
                         prepare = torch.quantization.prepare_child_module_fx
-                    observed_custom_module = prepare(traced_custom_module, {'': qconfig})
-                    observed_custom_module.qconfig = qconfig
-                    mark_observed_standalone_module(observed_custom_module)
-                    child_module_input_idxs = observed_custom_module._observed_input_idxs
+                    observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
+                    observed_standalone_module.qconfig = qconfig
+                    mark_observed_standalone_module(observed_standalone_module)
+                    child_module_input_idxs = observed_standalone_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
-                    setattr(self.modules[parent_name], name, observed_custom_module)
-                    self.modules[node.target] = observed_custom_module
+                    setattr(self.modules[parent_name], name, observed_standalone_module)
+                    self.modules[node.target] = observed_standalone_module
 
 
                 # don't need to insert observer for output in dynamic quantization
@@ -785,7 +785,7 @@ class Quantizer:
             quantized = self._fold_weight(quantized)
         return quantized
 
-    def _find_matches(self, graph, modules, patterns):
+    def _find_matches(self, graph, modules, patterns, standalone_module_names=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -840,10 +840,15 @@ class Quantizer:
                 match_map[node.name] = (
                     node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
-        # add traceable custom modules to the match
+        def is_standalone_module(module_path):
+            if standalone_module_names is None:
+                return False
+            return module_path in standalone_module_names
+
+        # add standalone modules to the match
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_standalone_module(self.modules[node.target]) or
+               (is_standalone_module(node.target) or
                     is_observed_standalone_module(self.modules[node.target])):
                 # add node to matched nodes
                 custom_module_qconfig = self.qconfig_map[node.name]
@@ -895,8 +900,7 @@ class Quantizer:
                     map_arg(matched[-1].args, visit(matched[-1], qconfig))
                     map_arg(matched[-1].kwargs, visit(matched[-1], qconfig))
                     # output
-                    if node.op == 'call_module' and \
-                       is_standalone_module(self.modules[node.target]):
+                    if isinstance(obj, StandaloneModuleQuantizeHandler):
                         # we don't insert observer for output of custom
                         # module
                         continue
