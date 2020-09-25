@@ -98,7 +98,11 @@ class DistributedSampler(Sampler[T_co]):
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
-            indices += indices[:(self.total_size - len(indices))]
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
+            else:
+                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
         else:
             # remove tail of data to make it evenly divisible.
             indices = indices[:self.total_size]
