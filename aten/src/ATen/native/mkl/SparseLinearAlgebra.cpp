@@ -42,7 +42,6 @@ namespace at { namespace native {
 
 namespace at { namespace native {
     using namespace at::sparse;
-
     
     static inline void sparse_mm_mkl_impl(float * res, int * indices, int * pointers, float * values,
                                           float * dense, float * t, float alpha, float beta, int64_t nrows,

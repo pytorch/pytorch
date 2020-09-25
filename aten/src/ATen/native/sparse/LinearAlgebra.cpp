@@ -46,7 +46,12 @@ namespace at { namespace native {
         }
     });
 
-    at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);
+    if (at::hasMKL()) {
+      at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);    
+    }
+    else {
+      
+    }
 
     return res;
   }
