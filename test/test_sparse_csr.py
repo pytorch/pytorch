@@ -138,13 +138,23 @@ class TestSparseGCS(TestCase):
         sparse = self.make_sparse_gcs(multi_dim)
         self.assertEqual(sparse.to_dense(), multi_dim)
 
-    def test_gcs_matmul(self):
+    def test_gcs_matvec(self):
         side = 1000
         gcs = self.gen_sparse_gcs((side, side), 1000)
         vec = torch.randn(side)
 
         res = gcs.matmul(vec)
         expected = gcs.to_dense().matmul(vec)
+
+        self.assertEqual(res, expected)
+
+    def test_gcs_matmul(self):
+        side = 1000
+        gcs = self.gen_sparse_gcs((side, side), 1000)
+        mat = torch.randn((side, 50))
+
+        res = gcs.matmul(mat)
+        expected = gcs.to_dense().matmul(mat)
 
         self.assertEqual(res, expected)
 

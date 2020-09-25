@@ -52,7 +52,7 @@ namespace at { namespace native {
     });
 
     if (at::hasMKL()) {
-      at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);    
+      at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);
     }
     else {
       int64_t dense_stride0 = dense.stride(0);
