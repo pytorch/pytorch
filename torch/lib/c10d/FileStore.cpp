@@ -3,16 +3,9 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <stdint.h>
-#include <sys/stat.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <fileapi.h>
-#include <io.h>
-#else
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 #include <chrono>
 #include <cstdio>
@@ -27,40 +20,6 @@
   if ((rv) < 0) {                                                          \
     throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
   }
-
-#ifdef _WIN32
-#define LOCK_EX 0x00000001
-#define LOCK_SH 0x00000010
-#define LOCK_UN 0x00000100
-
-int flock_(int fd, int op) {
-    HANDLE hdl = (HANDLE) _get_osfhandle(fd);
-    DWORD low = 1, high = 0;
-    OVERLAPPED offset = {0, 0, 0, 0, NULL};
-
-    if (hdl < 0)
-      return -1;
-
-    switch (op) {
-      case LOCK_EX:
-        if (LockFileEx(hdl, LOCKFILE_EXCLUSIVE_LOCK, 0, low, high, &offset))
-          return 0;
-        break;
-      case LOCK_SH:
-        if (LockFileEx(hdl, 0, 0, low, high, &offset))
-          return 0;
-        break;
-      case LOCK_UN:
-        if(UnlockFileEx(hdl, 0, low, high, &offset) != 0)
-          return 0;
-        break;
-      default:
-        break;
-    }
-    errno = EINVAL;
-    return -1;
-}
-#endif
 
 namespace c10d {
 
@@ -120,11 +79,7 @@ class Lock {
   int fd_{-1};
 
   void flock(int operation) {
-#ifdef _WIN32
-    auto rv = syscall(std::bind(::flock_, fd_, operation));
-#else
     auto rv = syscall(std::bind(::flock, fd_, operation));
-#endif
     SYSASSERT(rv, "flock");
   }
 };
@@ -137,11 +92,7 @@ class File {
       std::chrono::milliseconds timeout) {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
-#ifdef _WIN32
-      fd_ = syscall(std::bind(::open, path.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE));
-#else
       fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
-#endif
       // Only retry when the file doesn't exist, since we are waiting for the
       // file to be created in this case to address the following issue:
       // https://github.com/pytorch/pytorch/issues/13750

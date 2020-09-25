@@ -45,15 +45,14 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  HashStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
+  TCPStore.cpp
   Utils.cpp
   )
-
-if(NOT WIN32)
-  list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp TCPStore.cpp)
-endif()
 
 set(C10D_LIBS torch)
 
@@ -78,17 +77,14 @@ endif()
 add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
-
-if(NOT MSVC)
-  target_compile_options(c10d PUBLIC
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    -Wno-missing-field-initializers
-    -Wno-write-strings
-    -Wno-unknown-pragmas
-    )
-endif()
+target_compile_options(c10d PUBLIC
+  -Wall
+  -Wextra
+  -Wno-unused-parameter
+  -Wno-missing-field-initializers
+  -Wno-write-strings
+  -Wno-unknown-pragmas
+  )
 
 add_dependencies(c10d torch)
 
@@ -122,18 +118,16 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
+copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
-endif()
-if(NOT WIN32)
-  copy_header(HashStore.hpp)
-  copy_header(TCPStore.hpp)
 endif()
 
 if(USE_C10D_NCCL)

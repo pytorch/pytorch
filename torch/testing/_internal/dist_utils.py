@@ -7,7 +7,6 @@ import sys
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import _rref_context_get_debug_info  # type: ignore[attr-defined]
-from torch.testing._internal.common_utils import FILE_SCHEMA
 
 
 if not dist.is_available():
@@ -15,7 +14,7 @@ if not dist.is_available():
     sys.exit(0)
 
 
-INIT_METHOD_TEMPLATE = FILE_SCHEMA + "{file_name}"
+INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,

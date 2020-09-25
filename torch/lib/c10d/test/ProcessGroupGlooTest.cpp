@@ -1,10 +1,7 @@
-#ifndef _WIN32
 #include <signal.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#endif
-
-#include <sys/types.h>
 
 #include <condition_variable>
 #include <iostream>
@@ -24,7 +21,6 @@ using namespace c10d::test;
 constexpr auto kSendDelay = std::chrono::milliseconds(100);
 constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
 
-#ifndef _WIN32
 class SignalTest {
  public:
   SignalTest(const std::string& path) : path_(path) {}
@@ -96,7 +92,6 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
   test.arm(fork.pid, signal);
   return test.run(0, 2);
 }
-#endif
 
 class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
  public:
@@ -461,7 +456,6 @@ void testRecv(const std::string& path) {
   EXPECT_TRUE(recvCompleted);
 }
 
-#ifndef _WIN32
 TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
   // Fork() and TSAN don't play well together, so skip the test if we're testing
@@ -491,7 +485,6 @@ TEST(ProcessGroupGlooTest, testSIGKILLException) {
   EXPECT_FALSE(work->isSuccess());
   EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
 }
-#endif
 
 TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {
