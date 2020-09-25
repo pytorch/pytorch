@@ -2,12 +2,14 @@
 #include <c10/core/DefaultDtype.h>
 
 namespace c10 {
-static caffe2::TypeMeta default_dtype = caffe2::TypeMeta::Make<float>();
-static caffe2::TypeMeta default_complex_dtype = caffe2::TypeMeta::Make<c10::complex<float>>();
+static auto default_dtype = caffe2::TypeMeta::Make<float>();
+static auto default_dtype_as_scalartype = default_dtype.toScalarType();
+static auto default_complex_dtype = caffe2::TypeMeta::Make<c10::complex<float>>();
 
 void set_default_dtype(caffe2::TypeMeta dtype) {
   default_dtype = dtype;
-  switch (default_dtype.toScalarType()) {
+  default_dtype_as_scalartype = default_dtype.toScalarType();
+  switch (default_dtype_as_scalartype) {
     case ScalarType::Half:
       default_complex_dtype = ScalarType::ComplexHalf;
       break;
@@ -22,6 +24,9 @@ void set_default_dtype(caffe2::TypeMeta dtype) {
 
 const caffe2::TypeMeta get_default_dtype() {
   return default_dtype;
+}
+ScalarType get_default_dtype_as_scalartype() {
+  return default_dtype_as_scalartype;
 }
 const caffe2::TypeMeta get_default_complex_dtype() {
   return default_complex_dtype;
