@@ -118,7 +118,8 @@ int64_t gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& out,
   return index;
 }
 
-Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const SparseTensor& src, Scalar alpha) {
+Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
+                                     const SparseTensor& src, Scalar alpha) {
   AT_ASSERT(!out.is_sparse());
   AT_ASSERT(!dense.is_sparse());
   AT_ASSERT(src.is_sparse());
