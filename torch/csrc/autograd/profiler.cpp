@@ -65,301 +65,301 @@ namespace {
       "aten::size"
       };
 
-  CUDAStubs default_stubs;
-  constexpr CUDAStubs* default_stubs_addr = &default_stubs;
-  // Constant initialization, so it is guaranteed to be initialized before
-  // static initialization calls which may invoke registerCUDAMethods
-  static CUDAStubs* cuda_stubs = default_stubs_addr;
+CUDAStubs default_stubs;
+constexpr CUDAStubs* default_stubs_addr = &default_stubs;
+// Constant initialization, so it is guaranteed to be initialized before
+// static initialization calls which may invoke registerCUDAMethods
+static CUDAStubs* cuda_stubs = default_stubs_addr;
 
-  // We decompose the profiler logic into the following components:
-  //
-  // ThreadLocalDebugInfo:
-  //
-  // ThreadLocalDebugInfo is a thread local mapping from slots into
-  // the debug information structs.
-  // ThreadLocalDebugInfo is automatically propagated across thread
-  // boundaries, including the cases of:
-  //  - launching async jobs with at::launch
-  //  - executing JIT continuations
-  //  - moving from the forward threads into autograd (backward) threads
-  //
-  // Entries in ThreadLocalDebugInfo are managed by DebugInfoGuard
-  // which can be used to add or overwrite an entry in the thread local
-  // mapping. A corresponding entry is removed when the guard is destroyed,
-  // potentially revealing the previously set value for the same slot.
-  //
-  // For the async tasks, slots previuosly set in the main thread before
-  // launching of an async task are shared and visible in the async task.
-  //
-  // On the other hand, any adding or overwriting of the mapping by the
-  // async task is not visible to the main thread and any modification
-  // (including removal of the entries) in the main thread is not visible
-  // to the async task if it happends after launching the task.
-  //
-  // We use ThreadLocalDebugInfo (slot PROFILER_STATE) to store profiler config,
-  // as well as a list of events that happen during profiling.
-  // An instance of ThreadLocalDebugInfo is created each time we enter
-  // profiler (i.e. enter profiling context manager/call enableConfig) and
-  // uniquely identifies a profiling run.
-  //
-  // We automatically propagate ThreadLocalDebugInfo into async tasks,
-  // as well as across JIT continuations and autograd thread, so all
-  // the operations that happen between profiling start and end
-  // (not necessarily within the same thread) are recorded.
-  // Unless the profiling slot is overwritten as in the case of nested
-  // profiling ranges (in this case events for the subrange are handled
-  // by the nested profiler)
-  //
-  // When we exit a profiling range (either by exiting profiling context
-  // manager or by calling disableProfiler), we remove the previously set
-  // profiling entry for the given thread local mapping, and consolidate
-  // events in the profiling result
-  //
-  //
-  // ThreadLocalState:
-  //
-  // ThreadLocalState takes a 'snapshot' of thread local variables
-  // using provided getters. It is used together with ThreadLocalStateGuard
-  // to transfer the snapshot across thread boundary and set the thread local
-  // values as in the parent task.
-  //
-  // Profiler uses ThreadLocalState to propagate profiler's thread local state.
-  // ThreadLocalState also automatically propagates profiler callbacks.
-  //
-  //
-  // at::RecordFunction and observers
-  //
-  // Profiler uses observers mechanism to add a pair of thread local callbacks
-  // that are executed on a number of predetermined ranges, including:
-  //  - c10/ATen ops
-  //  - TorchScript functions/methods
-  //  - user defined named ranges (see `record_function` python context manager)
-  //
-  // Profiler setups a pair of callbacks that record profiling events and save
-  // them into the thread local profiler struct (ThreadLocalDebugInfo,
-  // PROFILER_STATE slot)
-  //
-  //
-  // Thus, the overall logic is:
-  //
-  // enableProfiler:
-  //  - checks that profiler is not enabled (otherwise throws)
-  //  - pushes new ThreadLocalDebugInfo (slot PROFILER_STATE) as the profiler
-  //    config for the current thread
-  //  - pushes profiling callbacks for the current thread
-  //
-  // disableProfiler:
-  //  - pops PROFILER_STATE slot from the current ThreadLocalDebugInfo and
-  //    consolidates events
-  //  - removes profiling callbacks
-  //
-  // ThreadLocalState:
-  //  - propagates ThreadLocalDebugInfo across threads
-  //  - propagates profiler callbacks across threads
-  //
-  // Profiler callbacks:
-  //  - get the current profiling state (PROFILER slot in ThreadLocalDebugInfo)
-  //  - save profiling events into the profiling state
-  //
+// We decompose the profiler logic into the following components:
+//
+// ThreadLocalDebugInfo:
+//
+// ThreadLocalDebugInfo is a thread local mapping from slots into
+// the debug information structs.
+// ThreadLocalDebugInfo is automatically propagated across thread
+// boundaries, including the cases of:
+//  - launching async jobs with at::launch
+//  - executing JIT continuations
+//  - moving from the forward threads into autograd (backward) threads
+//
+// Entries in ThreadLocalDebugInfo are managed by DebugInfoGuard
+// which can be used to add or overwrite an entry in the thread local
+// mapping. A corresponding entry is removed when the guard is destroyed,
+// potentially revealing the previously set value for the same slot.
+//
+// For the async tasks, slots previuosly set in the main thread before
+// launching of an async task are shared and visible in the async task.
+//
+// On the other hand, any adding or overwriting of the mapping by the
+// async task is not visible to the main thread and any modification
+// (including removal of the entries) in the main thread is not visible
+// to the async task if it happends after launching the task.
+//
+// We use ThreadLocalDebugInfo (slot PROFILER_STATE) to store profiler config,
+// as well as a list of events that happen during profiling.
+// An instance of ThreadLocalDebugInfo is created each time we enter
+// profiler (i.e. enter profiling context manager/call enableConfig) and
+// uniquely identifies a profiling run.
+//
+// We automatically propagate ThreadLocalDebugInfo into async tasks,
+// as well as across JIT continuations and autograd thread, so all
+// the operations that happen between profiling start and end
+// (not necessarily within the same thread) are recorded.
+// Unless the profiling slot is overwritten as in the case of nested
+// profiling ranges (in this case events for the subrange are handled
+// by the nested profiler)
+//
+// When we exit a profiling range (either by exiting profiling context
+// manager or by calling disableProfiler), we remove the previously set
+// profiling entry for the given thread local mapping, and consolidate
+// events in the profiling result
+//
+//
+// ThreadLocalState:
+//
+// ThreadLocalState takes a 'snapshot' of thread local variables
+// using provided getters. It is used together with ThreadLocalStateGuard
+// to transfer the snapshot across thread boundary and set the thread local
+// values as in the parent task.
+//
+// Profiler uses ThreadLocalState to propagate profiler's thread local state.
+// ThreadLocalState also automatically propagates profiler callbacks.
+//
+//
+// at::RecordFunction and observers
+//
+// Profiler uses observers mechanism to add a pair of thread local callbacks
+// that are executed on a number of predetermined ranges, including:
+//  - c10/ATen ops
+//  - TorchScript functions/methods
+//  - user defined named ranges (see `record_function` python context manager)
+//
+// Profiler setups a pair of callbacks that record profiling events and save
+// them into the thread local profiler struct (ThreadLocalDebugInfo,
+// PROFILER_STATE slot)
+//
+//
+// Thus, the overall logic is:
+//
+// enableProfiler:
+//  - checks that profiler is not enabled (otherwise throws)
+//  - pushes new ThreadLocalDebugInfo (slot PROFILER_STATE) as the profiler
+//    config for the current thread
+//  - pushes profiling callbacks for the current thread
+//
+// disableProfiler:
+//  - pops PROFILER_STATE slot from the current ThreadLocalDebugInfo and
+//    consolidates events
+//  - removes profiling callbacks
+//
+// ThreadLocalState:
+//  - propagates ThreadLocalDebugInfo across threads
+//  - propagates profiler callbacks across threads
+//
+// Profiler callbacks:
+//  - get the current profiling state (PROFILER slot in ThreadLocalDebugInfo)
+//  - save profiling events into the profiling state
+//
 
-  // Profiler state
-  struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
-    explicit ProfilerThreadLocalState(const ProfilerConfig& config)
-        : config_(config), remoteProfiledEvents_{c10::nullopt} {}
-    ~ProfilerThreadLocalState() override = default;
+// Profiler state
+struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+  explicit ProfilerThreadLocalState(const ProfilerConfig& config)
+      : config_(config), remoteProfiledEvents_{c10::nullopt} {}
+  ~ProfilerThreadLocalState() override = default;
 
-    inline const ProfilerConfig& config() const {
-      return config_;
+  inline const ProfilerConfig& config() const {
+    return config_;
+  }
+
+  thread_event_lists consolidate() {
+    std::lock_guard<std::mutex> g(state_mutex_);
+    thread_event_lists result;
+    for (auto& kv : event_lists_map_) {
+      auto& list = kv.second;
+      result.emplace_back(list->consolidate());
     }
-
-    thread_event_lists consolidate() {
-      std::lock_guard<std::mutex> g(state_mutex_);
-      thread_event_lists result;
-      for (auto& kv : event_lists_map_) {
-        auto& list = kv.second;
-        result.emplace_back(list->consolidate());
-      }
-      // Consolidate remote events if applicable as well.
-      if (remoteProfiledEvents_) {
-        result.insert(
-            result.end(),
-            std::make_move_iterator(remoteProfiledEvents_->begin()),
-            std::make_move_iterator(remoteProfiledEvents_->end()));
-      }
-      return result;
+    // Consolidate remote events if applicable as well.
+    if (remoteProfiledEvents_) {
+      result.insert(
+          result.end(),
+          std::make_move_iterator(remoteProfiledEvents_->begin()),
+          std::make_move_iterator(remoteProfiledEvents_->end()));
     }
+    return result;
+  }
 
-    void mark(std::string name, bool include_cuda = true) {
-      if (config_.state == ProfilerState::Disabled) {
-        return;
-      }
-      if (config_.state == ProfilerState::NVTX) {
-        cuda_stubs->nvtxMarkA(name.c_str());
-      } else {
-        Event evt(
-            EventKind::Mark,
-            at::StringView(std::move(name)),
-            at::RecordFunction::currentThreadId(),
-            include_cuda && config_.state == ProfilerState::CUDA);
-        evt.setNodeId(at::RecordFunction::getDefaultNodeId());
-        getEventList().record(std::move(evt));
-      }
+  void mark(std::string name, bool include_cuda = true) {
+    if (config_.state == ProfilerState::Disabled) {
+      return;
     }
+    if (config_.state == ProfilerState::NVTX) {
+      cuda_stubs->nvtxMarkA(name.c_str());
+    } else {
+      Event evt(
+          EventKind::Mark,
+          at::StringView(std::move(name)),
+          at::RecordFunction::currentThreadId(),
+          include_cuda && config_.state == ProfilerState::CUDA);
+      evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      getEventList().record(std::move(evt));
+    }
+  }
 
-    void setOrAddRemoteProfiledEvents(
-        std::vector<Event>&& remoteProfiledEvents) {
-      // Lock to serialize access from multiple callback threads.
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      if (remoteProfiledEvents_) {
-        (*remoteProfiledEvents_).emplace_back(remoteProfiledEvents);
-      } else {
-        remoteProfiledEvents_ = {std::move(remoteProfiledEvents)};
+  void setOrAddRemoteProfiledEvents(
+      std::vector<Event>&& remoteProfiledEvents) {
+    // Lock to serialize access from multiple callback threads.
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    if (remoteProfiledEvents_) {
+      (*remoteProfiledEvents_).emplace_back(remoteProfiledEvents);
+    } else {
+      remoteProfiledEvents_ = {std::move(remoteProfiledEvents)};
+    }
+  }
+
+  void pushRange(
+      const at::StringView& name,
+      const bool record_cuda,
+      const char* msg = "",
+      int64_t sequence_nr = -1,
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      at::RecordFunctionHandle handle = 0) {
+    if (config_.state == ProfilerState::Disabled) {
+      return;
+    }
+    if (config_.state == ProfilerState::NVTX) {
+      cuda_stubs->nvtxRangePushA(
+          getNvtxStr(name, msg, sequence_nr, shapes).c_str());
+    } else {
+      Event evt(
+          EventKind::PushRange,
+          name,
+          at::RecordFunction::currentThreadId(),
+          record_cuda,
+          handle,
+          std::move(shapes),
+          at::RecordFunction::getDefaultNodeId());
+      evt.setSequenceNr(sequence_nr);
+      getEventList().record(std::move(evt));
+    }
+  }
+
+  void popRange(
+      uint64_t thread_id,
+      const bool record_cuda,
+      at::RecordFunctionHandle handle) {
+    if (config_.state == ProfilerState::Disabled) {
+      return;
+    }
+    if (config_.state == ProfilerState::NVTX) {
+      cuda_stubs->nvtxRangePop();
+    } else {
+      // In some cases RecordFunction (and popRange) may be
+      // called on a different thread than pushRange
+      // As a convention, we put the async pop on the original
+      // thread and save current thread id in pop event
+      Event evt(
+          EventKind::PopRange,
+          at::StringView(""),
+          at::RecordFunction::currentThreadId(),
+          record_cuda,
+          handle);
+      evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      getEventList(thread_id).record(std::move(evt));
+    }
+  }
+
+  void setCallbackHandle(at::CallbackHandle handle) {
+    handle_ = handle;
+  }
+
+  at::CallbackHandle callbackHandle() const {
+    return handle_;
+  }
+
+  void reportMemoryUsage(
+      void* /* unused */,
+      int64_t alloc_size,
+      c10::Device device) override {
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+      uint64_t thread_id = at::RecordFunction::currentThreadId();
+      Event evt(
+          EventKind::MemoryAlloc,
+          at::StringView(""),
+          thread_id,
+          config_.state == ProfilerState::CUDA);
+      evt.updateMemoryStats(alloc_size, device);
+      getEventList(thread_id).record(std::move(evt));
+    }
+  }
+
+  bool memoryProfilingEnabled() const override {
+    return config_.profile_memory;
+  }
+
+  private:
+  std::string getNvtxStr(
+      const at::StringView& name,
+      const char* msg,
+      int64_t sequence_nr,
+      const std::vector<std::vector<int64_t>>& shapes) const {
+    if (sequence_nr >= 0 || shapes.size() > 0) {
+      std::stringstream s;
+      if (sequence_nr >= 0) {
+        s << name.str() << msg << sequence_nr;
       }
-    }
-
-    void pushRange(
-        const at::StringView& name,
-        const bool record_cuda,
-        const char* msg = "",
-        int64_t sequence_nr = -1,
-        std::vector<std::vector<int64_t>>&& shapes = {},
-        at::RecordFunctionHandle handle = 0) {
-      if (config_.state == ProfilerState::Disabled) {
-        return;
-      }
-      if (config_.state == ProfilerState::NVTX) {
-        cuda_stubs->nvtxRangePushA(
-            getNvtxStr(name, msg, sequence_nr, shapes).c_str());
-      } else {
-        Event evt(
-            EventKind::PushRange,
-            name,
-            at::RecordFunction::currentThreadId(),
-            record_cuda,
-            handle,
-            std::move(shapes),
-            at::RecordFunction::getDefaultNodeId());
-        evt.setSequenceNr(sequence_nr);
-        getEventList().record(std::move(evt));
-      }
-    }
-
-    void popRange(
-        uint64_t thread_id,
-        const bool record_cuda,
-        at::RecordFunctionHandle handle) {
-      if (config_.state == ProfilerState::Disabled) {
-        return;
-      }
-      if (config_.state == ProfilerState::NVTX) {
-        cuda_stubs->nvtxRangePop();
-      } else {
-        // In some cases RecordFunction (and popRange) may be
-        // called on a different thread than pushRange
-        // As a convention, we put the async pop on the original
-        // thread and save current thread id in pop event
-        Event evt(
-            EventKind::PopRange,
-            at::StringView(""),
-            at::RecordFunction::currentThreadId(),
-            record_cuda,
-            handle);
-        evt.setNodeId(at::RecordFunction::getDefaultNodeId());
-        getEventList(thread_id).record(std::move(evt));
-      }
-    }
-
-    void setCallbackHandle(at::CallbackHandle handle) {
-      handle_ = handle;
-    }
-
-    at::CallbackHandle callbackHandle() const {
-      return handle_;
-    }
-
-    void reportMemoryUsage(
-        void* /* unused */,
-        int64_t alloc_size,
-        c10::Device device) override {
-      if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
-        uint64_t thread_id = at::RecordFunction::currentThreadId();
-        Event evt(
-            EventKind::MemoryAlloc,
-            at::StringView(""),
-            thread_id,
-            config_.state == ProfilerState::CUDA);
-        evt.updateMemoryStats(alloc_size, device);
-        getEventList(thread_id).record(std::move(evt));
-      }
-    }
-
-    bool memoryProfilingEnabled() const override {
-      return config_.profile_memory;
-    }
-
-   private:
-    std::string getNvtxStr(
-        const at::StringView& name,
-        const char* msg,
-        int64_t sequence_nr,
-        const std::vector<std::vector<int64_t>>& shapes) const {
-      if (sequence_nr >= 0 || shapes.size() > 0) {
-        std::stringstream s;
-        if (sequence_nr >= 0) {
-          s << name.str() << msg << sequence_nr;
-        }
-        if (shapes.size() > 0) {
-          s << ", sizes = [";
-          for (size_t idx = 0; idx < shapes.size(); ++idx) {
-            if (shapes[idx].size() > 0) {
-              s << "[";
-              for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
-                s << shapes[idx][dim];
-                if (dim < shapes[idx].size() - 1) {
-                  s << ", ";
-                }
+      if (shapes.size() > 0) {
+        s << ", sizes = [";
+        for (size_t idx = 0; idx < shapes.size(); ++idx) {
+          if (shapes[idx].size() > 0) {
+            s << "[";
+            for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+              s << shapes[idx][dim];
+              if (dim < shapes[idx].size() - 1) {
+                s << ", ";
               }
-              s << "]";
-            } else {
-              s << "[]";
             }
-            if (idx < shapes.size() - 1) {
-              s << ", ";
-            }
+            s << "]";
+          } else {
+            s << "[]";
           }
-          s << "]";
+          if (idx < shapes.size() - 1) {
+            s << ", ";
+          }
         }
-        return s.str();
-      } else {
-        return name.str();
+        s << "]";
       }
+      return s.str();
+    } else {
+      return name.str();
     }
+  }
 
-    RangeEventList& getEventList(int64_t thread_id = -1) {
-      if (thread_id < 0) {
-        thread_id = at::RecordFunction::currentThreadId();
-      }
-      RangeEventList* list_ptr = nullptr;
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      auto it = event_lists_map_.find(thread_id);
-      if (it != event_lists_map_.end()) {
-        list_ptr = it->second.get();
-      } else {
-        auto event_list = std::make_shared<RangeEventList>();
-        event_lists_map_[thread_id] = event_list;
-        list_ptr = event_list.get();
-      }
-      return *list_ptr;
+  RangeEventList& getEventList(int64_t thread_id = -1) {
+    if (thread_id < 0) {
+      thread_id = at::RecordFunction::currentThreadId();
     }
+    RangeEventList* list_ptr = nullptr;
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    auto it = event_lists_map_.find(thread_id);
+    if (it != event_lists_map_.end()) {
+      list_ptr = it->second.get();
+    } else {
+      auto event_list = std::make_shared<RangeEventList>();
+      event_lists_map_[thread_id] = event_list;
+      list_ptr = event_list.get();
+    }
+    return *list_ptr;
+  }
 
-    std::mutex state_mutex_;
-    std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
-        event_lists_map_;
+  std::mutex state_mutex_;
+  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
+      event_lists_map_;
 
-    ProfilerConfig config_ =
-        ProfilerConfig(ProfilerState::Disabled, false, false);
-    at::CallbackHandle handle_ = 0;
-    c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
+  ProfilerConfig config_ =
+      ProfilerConfig(ProfilerState::Disabled, false, false);
+  at::CallbackHandle handle_ = 0;
+  c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
