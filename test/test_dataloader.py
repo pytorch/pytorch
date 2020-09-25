@@ -1218,12 +1218,12 @@ except RuntimeError as e:
         dataset = CountingIterableDataset(20)
         expected = list(range(20))
         buffer_sizes = [1, 5, 20, 25]
-        shuffle_enables = [False, True, True, True]
+        shuffled_enables = [False, True, True, True]
         for num_workers in [0, 1]:
-            for i in range(3):
-                fetched = list(self._get_data_loader(ShuffleDataset(dataset, buffer_sizes[i]), num_workers=num_workers))
+            for buffer_size, shuffled in zip(buffer_sizes, shuffled_enables):
+                fetched = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers))
                 self.assertEqual(len(fetched), len(expected))
-                if (shuffle_enables[i]) :
+                if shuffled:
                     fetched = sorted(fetched)
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
