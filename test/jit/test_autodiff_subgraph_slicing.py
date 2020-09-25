@@ -192,3 +192,10 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
             .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_adjacent_independent_subgrapahs_merged(self):
+        def foo(a, b, c, d):
+            return a + b, c + d
+
+        graph = self._perform_ad_subgraph_slicing(foo, [2, 2], [2, 2], [2, 2], [2, 2])
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)

@@ -107,6 +107,30 @@ class SubgraphSlicer {
       }
     }
 
+    // merge adjacent subgraphs thaat don't have a dependency on each other
+    Node * prev_autodiff_group = nullptr;
+    for (auto it = block_->nodes().end()->reverseIterator(); it != block_->nodes().begin()->reverseIterator();) {
+      Node* n = *it;
+      it++;
+
+      if (n->kind() != prim::DifferentiableGraph) {
+        continue;
+      }
+
+      if (!prev_autodiff_group) {
+        prev_autodiff_group = n;
+        continue;
+      }
+
+      if (auto merged_node = tryMerge(prev_autodiff_group, n)) {
+        prev_autodiff_group = *merged_node;
+        it = prev_autodiff_group->reverseIterator();
+        it++;
+      } else {
+        prev_autodiff_group = n;
+      }
+    }
+
     // Construct Subgraphs Recursively
     for (Node* n : block_->nodes()) {
       for (auto subBlock : n->blocks()) {
