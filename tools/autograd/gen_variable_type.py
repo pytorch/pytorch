@@ -232,7 +232,7 @@ m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_w
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(${class_type}::${type_wrapper_name}))
+       TORCH_FN(${class_type}::${type_wrapper_name})
 );
 """)
 
@@ -240,6 +240,9 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 UNPACK_OPTIONS = CodeTemplate("""\
+auto ${arg_name}_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);""")
+
+LEGACY_UNPACK_OPTIONS = CodeTemplate("""\
 auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
 DECLARE_GRAD_FN = CodeTemplate("""\
@@ -491,8 +494,15 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
+    gather_tensor_options = "TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)"
+
     def dispatch_trace_input(arg_spec):
         name, value, simple_type, nullable = arg_spec
+        if declaration['use_c10_dispatcher'] == 'full':
+            if value == "options":
+                value = gather_tensor_options
+        else:
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
         # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
         if simple_type == 'TensorList' and nullable:
             return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, value, "true")
@@ -515,7 +525,13 @@ def format_trace_inputs(declaration):
     if is_out_overload(declaration):
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        inplace = ADD_TRACE_INPUT.substitute(name=out_input['name'], input=out_input['name'])
+        value = out_input['name']
+        if declaration['use_c10_dispatcher'] == 'full':
+            if value == "options":
+                value = gather_tensor_options
+        else:
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        inplace = ADD_TRACE_INPUT.substitute(name=out_input['name'], input=value)
 
         # for outplace: do nothing, except if the declaration is a factory.
         # Factories are a bit special because their out-of-place overloads
@@ -681,12 +697,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
-        type_declarations.append(METHOD_DECLARATION.substitute(declaration))
+        if declaration['use_c10_dispatcher'] == 'full':
+            formals = declaration['schema_order_formals']
+        else:
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+            formals = declaration['formals']
+        type_declarations.append(METHOD_DECLARATION.substitute(declaration, formals=formals))
         strategy = dispatch_strategy(declaration)
         if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
-                declaration, type_definition_body=body))
+                declaration, type_definition_body=body, formals=formals))
             if declaration['use_c10_dispatcher'] == 'full':
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
@@ -702,7 +723,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         if declaration['name'] not in MANUAL_TRACER:
             trace_body = emit_trace_body(declaration)
             trace_method_definitions.append(METHOD_DEFINITION.substitute(
-                declaration, type_definition_body=trace_body))
+                declaration, type_definition_body=trace_body, formals=formals))
 
             if declaration['use_c10_dispatcher'] == 'full':
                 trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
@@ -1224,7 +1245,11 @@ def unpack_args(env, declaration):
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
-            body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+            if declaration['use_c10_dispatcher'] == 'full':
+                body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                body.append(LEGACY_UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
