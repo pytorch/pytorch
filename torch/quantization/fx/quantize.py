@@ -476,10 +476,10 @@ class Quantizer:
         model = GraphModule(model, observed_graph)
         self.save_state(model)
         if is_child_module:
-            # indicate whether output is observed or not.
-            # This used for correctly quantize child modules
             assert isinstance(model.graph.result, Node), \
                 'child module returning dict is not yet supported'
+            # indicator for whether output is observed or not.
+            # This used for correctly quantize child modules
             output_is_observed = model.graph.result.name in observed_node_names_set
             model._observed_input_idxs = observed_input_idxs
             model._output_is_observed = output_is_observed
