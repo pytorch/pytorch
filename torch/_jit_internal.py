@@ -223,8 +223,7 @@ def can_compile_class(cls):
     names = cls.__dict__
     fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
-    fx_class = 'fx' in cls.__module__ if hasattr(cls, "__module__") else False
-    return all(has_code) and not fx_class
+    return all(has_code)
 
 
 def createResolutionCallbackForClassMethods(cls):

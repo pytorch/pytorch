@@ -1265,25 +1265,3 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
             self.checkScript(fn, ())
-
-    def test_recursive_scripting(self):
-        """
-        Test that class types are recursively scripted when an Python instance of one
-        is encountered as a module attribute.
-        """
-        class Class(object):
-            def __init__(self, a: int):
-                self.a = a
-
-            def get_a(self) -> int:
-                return self.a
-
-        class M(torch.nn.Module):
-            def __init__(self, obj):
-                super().__init__()
-                self.obj = obj
-
-            def forward(self) -> int:
-                return self.obj.get_a()
-
-        self.checkModule(M(Class(4)), ())
