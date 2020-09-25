@@ -146,7 +146,7 @@ class _ConvNd(nn.Module):
 
     @classmethod
     def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
-        r"""Creates a qconv object and returns it. 
+        r"""Creates a qconv object and returns it.
         """
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()

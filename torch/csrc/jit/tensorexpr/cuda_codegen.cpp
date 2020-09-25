@@ -453,7 +453,11 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  os() << "maximum(";
+  if (is_integral(v->dtype().scalar_type())) {
+    os() << "max(";
+  } else {
+    os() << "maximum(";
+  }
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -461,7 +465,11 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  os() << "minimum(";
+  if (is_integral(v->dtype().scalar_type())) {
+    os() << "min(";
+  } else {
+    os() << "minimum(";
+  }
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);

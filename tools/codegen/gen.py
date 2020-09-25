@@ -2,7 +2,7 @@ import os
 import contextlib
 import textwrap
 import itertools
-from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, DefaultDict, Union, Sequence
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, Union, Sequence
 import yaml
 from enum import Enum
 from collections import OrderedDict
@@ -290,7 +290,7 @@ def compute_type_method(
             assert returns_type == dispatcher.returns_type(f.func.returns)
             dispatcher_args = dispatcher.arguments(f.func)
             dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
-            if dispatch is None:
+            if dispatch is None or dispatch == 'Math':
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -811,6 +811,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
+        ('has_math_kernel', f.dispatch is not None and 'Math' in f.dispatch),
     ])
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -914,11 +915,6 @@ def main() -> None:
         help='filter dispatch backend by the whitelist (if set), '
              'e.g.: CPU CUDA QuantizedCPU ...')
     parser.add_argument(
-        '--per_op_registration',
-        action='store_true',
-        help='group function registrations by op name and write to separate files; '
-             'must also set --op_registration_whitelist param')
-    parser.add_argument(
         '--force_schema_registration',
         action='store_true',
         help='force it to generate schema-only registrations for all ops, including'
@@ -1010,23 +1006,36 @@ def main() -> None:
             'function_registrations': list(mapMaybe(
                 compute_type_method(
                     dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
-                native_functions
-            )) if not options.per_op_registration else [],
+                native_functions)),
         })
         del fm
 
     cpu_fm.write('TypeDefault.h', lambda: {
-        'type_method_declarations': list(mapMaybe(
+        'type_method_declarations':
+        list(mapMaybe(
             compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('Math', target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
+
     })
     cpu_fm.write('TypeDefault.cpp', lambda: {
-        'type_method_definitions': list(mapMaybe(
+        'type_method_definitions':
+        list(mapMaybe(
             compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
+
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
-            native_functions)) if not options.per_op_registration else [],
+            native_functions)),
+
+        'math_function_registrations': list(mapMaybe(
+            compute_type_method('Math', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)),
     })
     cpu_fm.write('Functions.h', lambda: {
         'function_declarations': list(mapMaybe(compute_function(target=Target.DECLARATION), native_functions)),
@@ -1064,45 +1073,6 @@ def main() -> None:
                 'schema_registrations': schema_registrations,
             }
         cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
-
-    if options.per_op_registration:
-        def gen_per_op_registration_filename(opname: str) -> str:
-            return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
-
-        if op_registration_whitelist is None:
-            raise Exception("Must set --op_registration_whitelist for per-op registration.")
-
-        # First, group all native functions by unoverloaded operator name
-        grouped_functions : DefaultDict[str, List[NativeFunction]] = DefaultDict(list)
-        for f in native_functions:
-            grouped_functions[f"aten::{f.func.name.name}"].append(f)
-        extra_headers = []
-        for b in backends:
-            extra_headers.append(f'#include <ATen/{b}Type.h>')
-
-        # Next, generate registration for each one
-        for name in op_registration_whitelist:
-            def computePerOpRegistration() -> Dict[str, object]:
-                fs = grouped_functions[name]
-                registrations: List[str] = []
-                for mb_dispatch in itertools.chain([None], backends):
-                    # or you could pass in op_registration_whitelist, it doesn't
-                    # matter!
-                    # NB: Use of compute_type_method here is kind of an abuse;
-                    # this is why we have to unconditionally write in
-                    # torch::dispatch in the registration when it should be
-                    # contextually clear
-                    registrations.extend(
-                        mapMaybe(
-                            compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None),
-                            fs))
-                return {
-                    'extra_headers': extra_headers,
-                    'function_registrations': registrations,
-                }
-
-            cpu_fm.write_with_template(
-                gen_per_op_registration_filename(name), 'PerOpRegistration.cpp', computePerOpRegistration)
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
 

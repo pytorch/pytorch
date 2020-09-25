@@ -716,6 +716,9 @@ TupleType::TupleType(
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        if (!v) {
+          throw std::runtime_error("Can not create tuple with None type");
+        }
         return v->hasFreeVariables();
       });
   if (schema_) {

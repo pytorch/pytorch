@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import unittest
 
@@ -101,11 +101,15 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=batch_size,
-            max_seq_size=batch_size * np.max(lengths),
+            max_seq_size=np.max(lengths),
             debug=True,
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
@@ -211,6 +215,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
