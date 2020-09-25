@@ -5,9 +5,9 @@ import warnings
 from math import inf, nan, isnan
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack)
+    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -17,21 +17,143 @@ if TEST_NUMPY:
 class TestLinalg(TestCase):
     exact_dtype = True
 
-    # TODO: test out variant
-    # Tests torch.ger, and its alias, torch.outer, vs. NumPy
+    # Tests torch.outer, and its alias, torch.ger, vs. NumPy
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.float)
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_dtypes()))
     def test_outer(self, device, dtype):
-        a = torch.randn(50, device=device, dtype=dtype)
-        b = torch.randn(50, device=device, dtype=dtype)
+        def run_test_case(a, b):
+            if dtype == torch.bfloat16:
+                a_np = a.to(torch.double).cpu().numpy()
+                b_np = b.to(torch.double).cpu().numpy()
+            else:
+                a_np = a.cpu().numpy()
+                b_np = b.cpu().numpy()
+            expected = np.outer(a_np, b_np)
 
-        ops = (torch.ger, torch.Tensor.ger,
-               torch.outer, torch.Tensor.outer)
+            self.assertEqual(torch.outer(a, b), expected)
+            self.assertEqual(torch.Tensor.outer(a, b), expected)
 
-        expected = np.outer(a.cpu().numpy(), b.cpu().numpy())
-        for op in ops:
-            actual = op(a, b)
-            self.assertEqual(actual, expected)
+            self.assertEqual(torch.ger(a, b), expected)
+            self.assertEqual(torch.Tensor.ger(a, b), expected)
+
+            # test out variant
+            out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
+            torch.outer(a, b, out=out)
+            self.assertEqual(out, expected)
+
+            out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
+            torch.ger(a, b, out=out)
+            self.assertEqual(out, expected)
+
+        a = torch.randn(50).to(device=device, dtype=dtype)
+        b = torch.randn(50).to(device=device, dtype=dtype)
+        run_test_case(a, b)
+
+        # test 0 strided tensor
+        zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
+        run_test_case(zero_strided, b)
+        run_test_case(a, zero_strided)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_dtypes()))
+    def test_addr(self, device, dtype):
+        def run_test_case(m, a, b, beta=1, alpha=1):
+            if dtype == torch.bfloat16:
+                a_np = a.to(torch.double).cpu().numpy()
+                b_np = b.to(torch.double).cpu().numpy()
+                m_np = m.to(torch.double).cpu().numpy()
+            else:
+                a_np = a.cpu().numpy()
+                b_np = b.cpu().numpy()
+                m_np = m.cpu().numpy()
+
+            if beta == 0:
+                expected = alpha * np.outer(a_np, b_np)
+            else:
+                expected = beta * m_np + alpha * np.outer(a_np, b_np)
+
+            self.assertEqual(torch.addr(m, a, b, beta=beta, alpha=alpha), expected)
+            self.assertEqual(torch.Tensor.addr(m, a, b, beta=beta, alpha=alpha), expected)
+
+            result_dtype = torch.addr(m, a, b, beta=beta, alpha=alpha).dtype
+            out = torch.empty_like(m, dtype=result_dtype)
+            torch.addr(m, a, b, beta=beta, alpha=alpha, out=out)
+            self.assertEqual(out, expected)
+
+        a = torch.randn(50).to(device=device, dtype=dtype)
+        b = torch.randn(50).to(device=device, dtype=dtype)
+        m = torch.randn(50, 50).to(device=device, dtype=dtype)
+
+        # when beta is zero
+        run_test_case(m, a, b, beta=0., alpha=2)
+
+        # when beta is not zero
+        run_test_case(m, a, b, beta=0.5, alpha=2)
+
+        # test transpose
+        m_transpose = torch.transpose(m, 0, 1)
+        run_test_case(m_transpose, a, b, beta=0.5, alpha=2)
+
+        # test 0 strided tensor
+        zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
+        run_test_case(m, zero_strided, b, beta=0.5, alpha=2)
+
+        # test scalar
+        m_scalar = torch.tensor(1, device=device, dtype=dtype)
+        run_test_case(m_scalar, a, b)
+
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
+                               torch.testing.get_all_dtypes()))
+    def test_outer_type_promotion(self, device, dtypes):
+        a = torch.randn(5).to(device=device, dtype=dtypes[0])
+        b = torch.randn(5).to(device=device, dtype=dtypes[1])
+        for op in (torch.outer, torch.Tensor.outer, torch.ger, torch.Tensor.ger):
+            result = op(a, b)
+            self.assertEqual(result.dtype, torch.result_type(a, b))
+
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
+                               torch.testing.get_all_dtypes()))
+    def test_addr_type_promotion(self, device, dtypes):
+        a = torch.randn(5).to(device=device, dtype=dtypes[0])
+        b = torch.randn(5).to(device=device, dtype=dtypes[1])
+        m = torch.randn(5, 5).to(device=device,
+                                 dtype=torch.result_type(a, b))
+        for op in (torch.addr, torch.Tensor.addr):
+            # pass the integer 1 to the torch.result_type as both
+            # the default values of alpha and beta are integers (alpha=1, beta=1)
+            desired_dtype = torch.result_type(m, 1)
+            result = op(m, a, b)
+            self.assertEqual(result.dtype, desired_dtype)
+
+            desired_dtype = torch.result_type(m, 2.)
+            result = op(m, a, b, beta=0, alpha=2.)
+            self.assertEqual(result.dtype, desired_dtype)
+
+    # Tests migrated from test_torch.py
+    # 1) test the shape of the result tensor when there is empty input tensor
+    # 2) test the Runtime Exception when there is scalar input tensor
+    def test_outer_ger_addr_legacy_tests(self, device):
+        for size in ((0, 0), (0, 5), (5, 0)):
+            a = torch.rand(size[0], device=device)
+            b = torch.rand(size[1], device=device)
+
+            self.assertEqual(torch.outer(a, b).shape, size)
+            self.assertEqual(torch.ger(a, b).shape, size)
+
+            m = torch.empty(size, device=device)
+            self.assertEqual(torch.addr(m, a, b).shape, size)
+
+        m = torch.randn(5, 6, device=device)
+        a = torch.randn(5, device=device)
+        b = torch.tensor(6, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.outer(a, b))
+        self.assertRaises(RuntimeError, lambda: torch.outer(b, a))
+        self.assertRaises(RuntimeError, lambda: torch.ger(a, b))
+        self.assertRaises(RuntimeError, lambda: torch.ger(b, a))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, a, b))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, b, a))
 
     # Tests torch.det and its alias, torch.linalg.det, vs. NumPy
     @skipCUDAIfNoMagma
@@ -56,11 +178,12 @@ class TestLinalg(TestCase):
 
         # NOTE: det requires a 2D+ tensor
         t = torch.randn(1, device=device, dtype=dtype)
-        with self.assertRaises(IndexError):
+        with self.assertRaises(RuntimeError):
             op(t)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
+    @skipCUDAIfNoMagma
     def test_norm_dtype(self, device):
         def run_test_case(input_size, ord, keepdim, from_dtype, to_dtype, compare_dtype):
             msg = (
@@ -154,6 +277,7 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their matrix norm results match
+    @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float, torch.double)
     def test_norm_matrix(self, device, dtype):
@@ -400,6 +524,8 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -440,14 +566,14 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
 
                 if is_broken_matrix_norm_case(ord, x):
-                    self.assertNotEqual(result, result_n, msg=msg)
+                    continue
                 else:
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):

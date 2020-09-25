@@ -99,6 +99,9 @@ allow_list = [
     ("preprocess", datetime.date(2020, 10, 1)),
     ("compile", datetime.date(2020, 10, 1)),
     ("execute", datetime.date(2020, 10, 1)),
+    ("aten::_addr", datetime.date(2020, 10, 31)),
+    ("aten::_addr_", datetime.date(2020, 10, 31)),
+    ("aten::_addr.out", datetime.date(2020, 10, 31)),
 ]
 
 
