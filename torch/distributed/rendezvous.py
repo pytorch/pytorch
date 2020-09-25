@@ -6,12 +6,9 @@ except ImportError:
 import torch._six as six
 import numbers
 import os
-import sys
-from . import FileStore
+from . import FileStore, TCPStore
 from .constants import default_pg_timeout
 
-if sys.platform != 'win32':
-    from . import TCPStore
 
 _rendezvous_handlers = {}
 
@@ -93,10 +90,6 @@ def _file_rendezvous_handler(url, **kwargs):
 
     result = urlparse(url)
     path = result.path
-    if sys.platform == 'win32':
-        import urllib.request
-        path = urllib.request.url2pathname(result.path)
-
     if not path:
         raise _error("path missing")
     query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
@@ -182,8 +175,7 @@ def _env_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using env:// method")
 
-if sys.platform != 'win32':
-    register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
-    register_rendezvous_handler("env", _env_rendezvous_handler)
 
 register_rendezvous_handler("file", _file_rendezvous_handler)
+register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
+register_rendezvous_handler("env", _env_rendezvous_handler)

@@ -53,10 +53,6 @@ from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
-FILE_SCHEMA = "file://"
-if sys.platform == 'win32':
-    FILE_SCHEMA = "file:///"
-
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 class ProfilingMode(Enum):

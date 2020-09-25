@@ -1,8 +1,6 @@
 #include <c10d/test/StoreTestCommon.hpp>
 
-#ifndef _WIN32
 #include <unistd.h>
-#endif
 
 #include <iostream>
 #include <thread>
@@ -12,11 +10,6 @@
 #include <c10d/FileStore.hpp>
 #include <c10d/PrefixStore.hpp>
 
-#ifdef _WIN32
-std::string tmppath() {
-  return c10d::test::autoGenerateTmpFilePath();
-}
-#else
 std::string tmppath() {
   const char* tmpdir = getenv("TMPDIR");
   if (tmpdir == nullptr) {
@@ -36,7 +29,6 @@ std::string tmppath() {
   close(fd);
   return std::string(tmp.data(), tmp.size());
 }
-#endif
 
 void testGetSet(std::string path, std::string prefix = "") {
   // Basic Set/Get on File Store

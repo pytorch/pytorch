@@ -1,8 +1,6 @@
 #pragma once
 
-#ifndef _WIN32
 #include <sys/socket.h>
-#endif
 #include <sys/types.h>
 
 #include <chrono>
@@ -482,7 +480,6 @@ class ResourceGuard {
   bool released_;
 };
 
-#ifndef _WIN32
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
@@ -612,5 +609,4 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
-#endif
 } // namespace c10d

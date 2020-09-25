@@ -1,11 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
-#ifndef _WIN32
 #include <c10d/HashStore.hpp>
-#include <c10d/TCPStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
-#endif
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -21,6 +17,8 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <c10d/TCPStore.hpp>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -325,7 +323,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&, int>());
 
-#ifndef _WIN32
   shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
       .def(py::init<>());
 
@@ -343,7 +340,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
-#endif
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
@@ -611,7 +607,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
 
-#ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
       [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
@@ -625,7 +620,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::arg("process_groups"),
       py::call_guard<py::gil_scoped_release>());
-#endif
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(

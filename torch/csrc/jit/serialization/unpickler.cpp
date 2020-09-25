@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_RPC
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
@@ -549,7 +549,7 @@ void Unpickler::readGlobal(
     stack_.emplace_back(int64_t(globals_.size() - 1));
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
-#ifdef USE_RPC
+#ifdef USE_DISTRIBUTED
     return rebuildRRef();
 #else
     TORCH_INTERNAL_ASSERT(
@@ -669,7 +669,7 @@ void Unpickler::rebuildTensor(bool quantized) {
   });
 }
 
-#ifdef USE_RPC
+#ifdef USE_DISTRIBUTED
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
     // It is the same as how rref is unpickled in python,

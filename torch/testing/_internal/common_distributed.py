@@ -16,7 +16,7 @@ import torch
 import torch.distributed as c10d
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -143,21 +143,8 @@ def skip_if_rocm(func):
 
     return wrapper
 
-def skip_if_win32():
-    return unittest.skipIf(
-        sys.platform == 'win32',
-        "This unit test case is not supportted on Windows platform",
-    )
-
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
-
-
-def create_device(interface=None):
-    if sys.platform == 'win32' or interface is None:
-        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
-    else:
-        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
 def get_timeout(test_id):
@@ -219,7 +206,7 @@ def initialize_temp_directories(init_method=None):
     if init_method is not None:
         os.environ["INIT_METHOD"] = init_method
     else:
-        os.environ["INIT_METHOD"] = FILE_SCHEMA + os.path.join(
+        os.environ["INIT_METHOD"] = "file://" + os.path.join(
             init_dir_path, "shared_init_file"
         )
 
