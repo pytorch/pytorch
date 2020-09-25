@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -847,6 +848,8 @@ struct CudaGraphFuser {
 };
 
 void compileFusionRecursive(Block* block) {
+  FUSER_PERF_SCOPE("compileFusionRecursive");
+
   for (auto node : block->nodes()) {
     if (node->kind() == prim::CudaFusionGroup) {
       fuser::cuda::compileFusionGroup(node);
@@ -858,6 +861,8 @@ void compileFusionRecursive(Block* block) {
 }
 
 void PeepholeOptimizeShapeExpressions(Block* block) {
+  FUSER_PERF_SCOPE("PeepholeOptimizeShapeExpressions");
+
   auto nodes = block->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* node = *it;
@@ -912,6 +917,8 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("CudaFuseGraph");
+
   CudaGraphFuser(graph->block(), graph).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

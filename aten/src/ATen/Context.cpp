@@ -230,4 +230,27 @@ Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
 
+// override_allow_tf32_flag = true
+//    means the allow_tf32 flags are overrided and tf32 is force disabled
+// override_allow_tf32_flag = false
+//    means the original allow_tf32 flags are followed
+thread_local bool override_allow_tf32_flag = false;
+
+NoTF32Guard::NoTF32Guard() {
+  if (!override_allow_tf32_flag) {
+    changed = true;
+    override_allow_tf32_flag = true;
+  }
+}
+
+NoTF32Guard::~NoTF32Guard() {
+  if (changed) {
+    override_allow_tf32_flag = false;
+  }
+}
+
+bool NoTF32Guard::should_disable_tf32() {
+  return override_allow_tf32_flag;
+}
+
 } // namespace at

@@ -74,9 +74,6 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
     if r is not None:
         return r
 
-    if str(t) == 'Tensor' and mutable and local.hack_const_mutable_self():
-        return 'const Tensor &'
-
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
@@ -243,7 +240,9 @@ class CppSignature:
     # - PASS_THROUGH: Don't do anything, just handle them as regular arguments
     # - SCATTER: Expect a `TensorOptions options` in the scope and scatter it into `options.dtype, ...`
     # - GATHER: Expect `dtype, ...` in the scope and gather them into a TensorOptions for calling
-    def exprs_str(self, process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH) -> str:
+    def exprs_str(self,
+                  process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH
+                  ) -> str:
         args = self.cpp_arguments()
         exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=process_tensoroptions)
         return ', '.join(map(lambda a: a.expr, exprs))
