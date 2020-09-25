@@ -38,7 +38,7 @@ Note that we are working on eliminating tools/build_pytorch_libs.sh in favor of 
 Building libtorch using CMake
 --------------------------------------
 
-You can build C++ libtorch.so without relying on Python.  For example to build a v1.6.0 Release version that uses (system-installed) CUDA and CUDDN, and install it in the directory specified by CMAKE_INSTALL_PREFIX below, you can use
+You can build C++ libtorch.so directly with cmake.  For example, to build a v1.6.0 Release version that uses CUDA and CUDDN, and install it in the directory specified by CMAKE_INSTALL_PREFIX below, you can use
 ::
    git clone https://github.com/pytorch/pytorch.git
    cd pytorch
@@ -47,5 +47,11 @@ You can build C++ libtorch.so without relying on Python.  For example to build a
    git submodule update --init --recursive
    mkdir ../pytorch-build
    cd ../pytorch-build
-   cmake -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DUSE_CUDA:BOOL=ON -DUSE_CUDNN:BOOL=ON -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install ../pytorch
+   cmake -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DPYTHON_EXECUTABLE=`which python3` -DUSE_CUDA:BOOL=ON -DUSE_CUDNN:BOOL=ON -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install ../pytorch
    cmake --build . --target install
+
+You can build the `Debug` version instead of `Release` and you can turn options off with `OFF` instead of `ON`.  Currently USE_CUDNN and USE_CUDA default to `ON` when those packages are available, and these and other options need not be specified when the default values are desired.
+
+Also note that if you want to build the current `master` version then the `git checkout ...` and `git clean ...` commands are not needed.  Furthermore in this case, `git submodule ...` is not needed if the `git clone ...` command is changed to `git clone --recurse-submodules https://github.com/pytorch/pytorch.git` instead.
+
+You will get errors if you do not have needed dependencies such as Python3's PyYAML package.
