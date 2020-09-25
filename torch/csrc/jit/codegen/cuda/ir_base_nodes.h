@@ -36,6 +36,7 @@ namespace jit {
 namespace fuser {
 
 using StmtNameType = unsigned int;
+
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
     std::numeric_limits<unsigned int>::max();
 
