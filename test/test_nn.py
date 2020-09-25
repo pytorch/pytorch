@@ -13,6 +13,7 @@ from itertools import repeat, product
 from functools import reduce
 from operator import mul
 from collections import OrderedDict
+import torch.distributed as dist
 
 import torch
 

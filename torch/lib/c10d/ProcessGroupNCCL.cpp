@@ -1025,6 +1025,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         inputs[i].storage().data_ptr(), ncclStream);
   }
 
+  std::cout << "extra group" << std::endl;
+  C10D_NCCL_CHECK(ncclGroupStart());
   {
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1035,6 +1037,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
           fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
     }
   }
+  C10D_NCCL_CHECK(ncclGroupEnd());
 
   post(ncclStreams_[key]);
 
