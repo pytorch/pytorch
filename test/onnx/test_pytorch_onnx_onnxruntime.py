@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 import onnxruntime  # noqa
 import torch
@@ -901,6 +896,42 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
         torch.set_default_dtype(prev_default)
+
+    # In scripting x, y do not carry shape and dtype info.
+    # The following test only works when onnx shape inference is enabled.
+    @skipIfONNXShapeInference(False)
+    def test_true_div_script(self):
+        class TrueDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                # Add transpose to hide shape/type information
+                # Otherwise shape and type are still avaiable from input.
+                x = x.transpose(1, 2)
+                y = y.transpose(1, 2)
+                return torch.true_divide(x, y)
+
+        x = torch.randn(2, 3, 4).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
+
+        prev_default = torch.get_default_dtype()
+
+        # 1. x,y are int, and output is float.
+        #    This can be handled by the default case, where both are cast to float.
+        #    It works even if type of x, y are unknown.
+        torch.set_default_dtype(torch.float)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+
+        # 2. x,y are int, and output is double.
+        #    This can be handled by the default case, where both are cast to double.
+        #    It works even if type of x, y are unknown.
+        torch.set_default_dtype(torch.double)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+
+        # 3. x is int, y is double, and output is double.
+        #    This can only be handled when both type of x and y are known.
+        torch.set_default_dtype(prev_default)
+        x = torch.randn(2, 3, 4).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
 
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
@@ -2968,6 +2999,44 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_list_pass(self):
+        class Slice(torch.nn.Module):
+            def forward(self, x, y):
+                return x.new_zeros(x.shape[2:] + y.shape[1:])
+
+        x = torch.randn(2, 3, 4, 5)
+        y = torch.randn(1, 2, 3, 4)
+        self.run_test(Slice(), (x, y))
+
+        class Size(torch.nn.Module):
+            def forward(self, x, y):
+                return x.new_zeros(x.shape + y.shape)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(Size(), (x, y))
+
+        class Array(torch.nn.Module):
+            def forward(self, x, y):
+                arr1 = [x.shape[0], x.shape[1], 2]
+                arr2 = [y.shape[0], y.shape[1]]
+                return x.new_zeros(arr1 + arr2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(Array(), (x, y))
+
+        class List(torch.nn.Module):
+            def forward(self, x, y):
+                l1 = list(x.shape)
+                l2 = list(y.shape)
+                return x.new_zeros(l1 + l2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(List(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):

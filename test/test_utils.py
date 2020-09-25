@@ -1,10 +1,10 @@
-from __future__ import print_function
 import sys
 import os
 import re
 import shutil
 import random
 import tempfile
+import textwrap
 import unittest
 import torch
 import torch.nn as nn
@@ -17,6 +17,7 @@ from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
 from urllib.error import URLError
+import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -513,6 +514,20 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
+            source='github',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_local_dir(self):
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(
+            local_dir,
+            'mnist',
+            source='local',
             pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
@@ -608,25 +623,147 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             stmt="torch.ones(())",
         )
-        median = timer.blocked_autorange(min_run_time=0.1).median
+        median = timer.blocked_autorange(min_run_time=0.01).median
         self.assertIsInstance(median, float)
 
+        # We set a very high threshold to avoid flakiness in CI.
+        # The internal algorithm is tested in `test_adaptive_timer`
+        median = timer.adaptive_autorange(threshold=0.5).median
+
+    class _MockTimer:
+        _seed = 0
+
+        _timer_noise_level = 0.05
+        _timer_cost = 100e-9  # 100 ns
+
+        _function_noise_level = 0.05
+        _function_costs = (
+            ("pass", 8e-9),
+            ("cheap_fn()", 4e-6),
+            ("expensive_fn()", 20e-6),
+        )
+
+        def __init__(self, stmt, setup, timer, globals):
+            self._random_state = np.random.RandomState(seed=self._seed)
+            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
+
+        def sample(self, mean, noise_level):
+            return max(self._random_state.normal(mean, mean * noise_level), 5e-9)
+
+        def timeit(self, number):
+            return sum([
+                # First timer invocation
+                self.sample(self._timer_cost, self._timer_noise_level),
+
+                # Stmt body
+                self.sample(self._mean_cost * number, self._function_noise_level),
+
+                # Second timer invocation
+                self.sample(self._timer_cost, self._timer_noise_level),
+            ])
+
     def test_adaptive_timer(self):
-        # Validate both on different sizes validate against blocked_autorange
-        # This looks for relative differences btetween orders of magnitude to
-        # provide a stable/portable test which is somewhat informative.
-        timer = benchmark_utils.Timer(
-            stmt="torch.sum(torch.ones((10,10)))",
+        class MockTimer(benchmark_utils.Timer):
+            _timer_cls = self._MockTimer
+
+        def assert_reprs_match(measurement, expected):
+            measurement_repr = re.sub(
+                "object at 0x[0-9a-fA-F]+>",
+                "object at 0xXXXXXXXXXXXX>",
+                repr(measurement)
+            )
+            self.assertEqual(measurement_repr, textwrap.dedent(expected).strip())
+
+        assert_reprs_match(
+            MockTimer("pass").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            pass
+              Median: 7.98 ns
+              IQR:    0.52 ns (7.74 to 8.26)
+              125 measurements, 10000000 runs per measurement, 1 thread"""
         )
-        small = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
-        timer = benchmark_utils.Timer(
-            stmt="torch.sum(torch.ones((500,500)))",
+
+        assert_reprs_match(
+            MockTimer("pass").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            pass
+              Median: 7.86 ns
+              IQR:    0.71 ns (7.63 to 8.34)
+              6 measurements, 1000000 runs per measurement, 1 thread"""
         )
-        medium = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
-        blocked_medium = timer.blocked_autorange(min_run_time=0.1)
-        self.assertLess(small.median, medium.median)
-        # This acts as a control to compare to a different way to measure the same value.
-        self.assertLess(small.median, blocked_medium.median)
+
+        assert_reprs_match(
+            MockTimer("cheap_fn()").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            cheap_fn()
+              Median: 3.98 us
+              IQR:    0.27 us (3.85 to 4.12)
+              252 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("cheap_fn()").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            cheap_fn()
+              Median: 4.16 us
+              IQR:    0.22 us (4.04 to 4.26)
+              4 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("expensive_fn()").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            expensive_fn()
+              Median: 19.97 us
+              IQR:    1.35 us (19.31 to 20.65)
+              501 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("expensive_fn()").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            expensive_fn()
+              Median: 20.79 us
+              IQR:    1.09 us (20.20 to 21.29)
+              4 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        class _MockCudaTimer(self._MockTimer):
+            # torch.cuda.synchronize is much more expensive than
+            # just timeit.default_timer
+            _timer_cost = 10e-6
+
+            _function_costs = (
+                self._MockTimer._function_costs[0],
+                self._MockTimer._function_costs[1],
+
+                # GPU should be faster once there is enough work.
+                ("expensive_fn()", 5e-6),
+            )
+
+        class MockCudaTimer(benchmark_utils.Timer):
+            _timer_cls = _MockCudaTimer
+
+        configurations = (
+            (7.9903966e-09, 376, 1000000, MockTimer("pass")),
+            (7.8554826e-09, 4, 100000000, MockCudaTimer("pass")),
+            (3.9930536e-06, 752, 1000, MockTimer("cheap_fn()")),
+            (3.9441239e-06, 8, 100000, MockCudaTimer("cheap_fn()")),
+            (1.9994249e-05, 150, 1000, MockTimer("expensive_fn()")),
+            (4.9301076e-06, 6, 100000, MockCudaTimer("expensive_fn()")),
+        )
+
+        for median, repeats, number_per_run, timer_instance in configurations:
+            measurement = timer_instance.blocked_autorange(min_run_time=3)
+            self.assertEqual(measurement.median, median)
+            self.assertEqual(len(measurement.times), repeats)
+            self.assertEqual(measurement.number_per_run, number_per_run)
 
     def test_compare(self):
         compare = benchmark_utils.Compare([
