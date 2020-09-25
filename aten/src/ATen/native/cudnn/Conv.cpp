@@ -287,7 +287,7 @@ struct ConvolutionArgs {
 };
 
 std::string repro_from_args(const ConvolutionArgs& args) {
-  auto pybool = [](bool b) -> std::string { return b ? "True" : "False"; };
+  auto pybool = [](bool b) -> const char* { return b ? "True" : "False"; };
   std::string partial_dtype;
   switch (args.params.dataType) {
     case CUDNN_DATA_FLOAT: partial_dtype = "float"; break;
@@ -295,7 +295,7 @@ std::string repro_from_args(const ConvolutionArgs& args) {
     case CUDNN_DATA_HALF: partial_dtype = "half"; break;
     default: partial_dtype = "unsupported";
   }
-  std::string full_dtype = "torch." + partial_dtype;
+  const std::string full_dtype = "torch." + partial_dtype;
   const int out_channels = args.weight.sizes()[0];
   const int in_channels = args.weight.sizes()[1] * args.params.groups;
   const size_t dim = args.input.sizes().size();
