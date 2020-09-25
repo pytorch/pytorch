@@ -639,8 +639,8 @@ class TestScriptPy3(JitTestCase):
             def ignored_attr(self):
                 return sum([self.a])
 
-            @property
             @torch.jit.unused
+            @property
             def ignored_attr_2(self):
                 return sum([self.a])
 
