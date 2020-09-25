@@ -23,6 +23,13 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
+// NCCL Commmunication type
+enum class NCCLCommType : std::uint8_t {
+  SEND = 0,
+  RECV,
+  COLL,
+};
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -415,6 +422,20 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override;
+
+  static void groupStart();
+
+  static void groupEnd();
+
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -425,16 +446,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
-
-  std::shared_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
-      int dstRank,
-      int tag) override;
-
-  std::shared_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors,
-      int srcRank,
-      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
@@ -450,7 +461,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // a new set of NCCL communicators as a cache entry
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
       const std::string& devicesKey,
-      const std::vector<at::Device>& devices);
+      const std::vector<at::Device>& devices,
+      NCCLCommType commType = NCCLCommType::COLL,
+      int p2pRank = 0);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
@@ -476,6 +489,24 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
+      PreProcess pre,
+      PostProcess post);
+
+  // Helper that encapsulates work shared across point-to-point communication
+  // primitives. It is the same structure as the helper used for collective
+  // communicaiton primitives.
+  template <typename Fn>
+  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      int peer,
+      NCCLCommType commType);
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      int peer,
+      NCCLCommType commType,
       PreProcess pre,
       PostProcess post);
 
@@ -520,6 +551,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   uint64_t ncclCommCounter_{0};
 
   // The NCCL communicator that the process group has cached.
+  //
+  // For collective operations:
   // The key is a list of GPU devices that an operation is operating on
   // The GPU devices are stored in a device sequence and the cache NCCL
   // communicator is associated with this GPU device sequence
@@ -538,6 +571,13 @@ class ProcessGroupNCCL : public ProcessGroup {
   //      "0,4,5,6,7,1,2,3"
   //
   //      Note that the order of the device for the tensor list matters.
+  //
+  // For point-to-point operations:
+  // The key is a string of my current rank and the peer process rank.
+  // e.g. If process 1 and process 2 are involved in a point-to-point communication,
+  // the key will be "1:2" on both processes.
+  // Note: this is for the scenario where there is only 1 GPU per process.
+  // When it comes to multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
@@ -634,6 +674,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Schedule NCCL operations on high priority CUDA streams.
   bool isHighPriorityStream_ = false;
+
+  // The number of active ncclGroupStart() calls. This counter will be increased
+  // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
+  // is called.
+  static thread_local uint64_t ncclActiveGroupCounter_;
 };
 
 } // namespace c10d
