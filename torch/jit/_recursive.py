@@ -104,6 +104,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
+    # Get user-annotated ignored attributes.
+    user_annotated_ignored_attributes = getattr(nn_module, "__ignored_attributes__", set())
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
@@ -123,6 +125,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
+        if name in user_annotated_ignored_attributes:
+            concrete_type_builder.add_ignored_attribute(name)
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         # We currently have the invariant in various places in our code
@@ -134,12 +140,20 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
+        if name in user_annotated_ignored_attributes:
+            concrete_type_builder.add_ignored_attribute(name)
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False, True)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
+        if name in user_annotated_ignored_attributes:
+            concrete_type_builder.add_ignored_attribute(name)
+            continue
+
         attr_type = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
@@ -203,6 +217,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
+            continue
+
+        if name in user_annotated_ignored_attributes:
+            concrete_type_builder.add_ignored_attribute(name)
             continue
 
         if name in added_names:
@@ -390,7 +408,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
-        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
             item = getattr(nn_module, name, None)
@@ -398,6 +416,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 unbound_function = getattr(type(nn_module), name)
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
+            elif concrete_type.is_ignored_attribute(name):
+                setattr(script_module, name, item)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type

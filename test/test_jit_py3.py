@@ -639,6 +639,15 @@ class TestScriptPy3(JitTestCase):
             def ignored_attr(self):
                 return sum([self.a])
 
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
+
             @attr.setter
             def attr(self, a: int):
                 if a > 0:
@@ -668,6 +677,56 @@ class TestScriptPy3(JitTestCase):
 
         with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
             scripted_mod.ignored_attr
+
+    def test_ignoring_module_attributes(self):
+        """
+        Test that module attributes can be ignored.
+        """
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: int) -> int:
+                return sum([a])
+
+        class ModuleWithIgnoredAttr(torch.nn.Module):
+            __ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int, b: int):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.b
+
+            @torch.jit.ignore
+            def ignored_fn(self) -> int:
+                return self.sub.forward(self.a)
+
+        mod = ModuleWithIgnoredAttr(1, 4)
+        scripted_mod = torch.jit.script(mod)
+        self.assertEqual(scripted_mod(), 4)
+        self.assertEqual(scripted_mod.ignored_fn(), 1)
+
+        # Test the error message for ignored attributes.
+        class ModuleUsesIgnoredAttr(torch.nn.Module):
+            __ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.sub(self.b)
+
+        mod = ModuleUsesIgnoredAttr(1)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
+            scripted_mod = torch.jit.script(mod)
+
 
     def test_export_opnames_interface(self):
         global OneTwoModule

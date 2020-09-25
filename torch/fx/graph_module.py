@@ -165,6 +165,7 @@ class GraphModule(torch.nn.Module):
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __ignored_properties__ = ['graph']
+    __ignored_attributes__ = ['_graph']
 
     @property
     def graph(self):
