@@ -122,19 +122,37 @@ if(ANDROID_ABI)
       libclog
   )
 else()
+  find_package(nnpack)
+  find_package(XNNPACK)
+  find_package(pthreadpool)
+  find_package(pytorch_qnnpack)
+
   # Prefer dynamic linking on the host
   set(pytorch_jni_LIBS
       fbjni
       torch
       torch_cpu
       c10
-      nnpack
-      XNNPACK
-      pytorch_qnnpack
-      pthreadpool
       cpuinfo
       clog
   )
+
+  if(nnpack_FOUND)
+    list(APPEND pytorch_jni_LIBS nnpack)
+  endif()
+
+  if(XNNPACK_FOUND)
+    list(APPEND pytorch_jni_LIBS XNNPACK)
+  endif()
+
+  if(pthreadpool_FOUND)
+    list(APPEND pytorch_jni_LIBS pthreadpool)
+  endif()
+
+  if(pytorch_qnnpack_FOUND)
+    list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+  endif()
+
 endif()
 
 if(USE_VULKAN)
