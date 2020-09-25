@@ -561,6 +561,10 @@ void _cufft_clear_plan_cache(int64_t device_index) {
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+  TORCH_WARN_ONCE(
+    "The function torch.fft is deprecated and will be removed in PyTorch 1.8. "
+    "Use the new torch.fft module functions, instead, by importing torch.fft "
+    "and calling torch.fft.fft or torch.fft.fftn.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ false, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none,
@@ -568,6 +572,10 @@ Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized)
 }
 
 Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+  TORCH_WARN_ONCE(
+    "The function torch.ifft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.ifft or torch.fft.ifftn.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ true, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n,
@@ -576,6 +584,10 @@ Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 
 Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
             const bool onesided) {
+  TORCH_WARN_ONCE(
+    "The function torch.rfft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.fft or torch.fft.rfft.");
   return _fft(self, signal_ndim, /* complex_input */ false,
               /* complex_output */ true, /* inverse */ false, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none,
@@ -584,6 +596,10 @@ Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 
 Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
              const bool onesided,  IntArrayRef signal_sizes) {
+  TORCH_WARN_ONCE(
+    "The function torch.irfft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.ifft or torch.fft.irfft.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n,
