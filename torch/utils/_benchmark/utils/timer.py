@@ -61,7 +61,7 @@ class Timer(object):
 
             return common.Measurement(
                 number_per_run=number,
-                raw_times=self._timer.timeit(number=number),
+                raw_times=[self._timer.timeit(number=number)],
                 task_spec=self._task_spec
             )
 

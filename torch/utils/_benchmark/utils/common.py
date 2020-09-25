@@ -33,7 +33,7 @@ class TaskSpec:
     description: Optional[str]
     env: Optional[str]
     num_threads: int
-
+_TASKSPEC_FIELDS = tuple(i.name for i in dataclasses.fields(TaskSpec))
 
 @dataclasses.dataclass(init=True, repr=False)
 class Measurement:
@@ -59,7 +59,7 @@ class Measurement:
 
     def __getattr__(self, name):
         # Forward TaskSpec fields for convenience.
-        if name in dataclasses.fields(TaskSpec):
+        if name in _TASKSPEC_FIELDS:
             return getattr(self.task_spec, name)
         return super().__getattribute__(name)
 
@@ -184,16 +184,15 @@ class Measurement:
         skip_line, newline = "MEASUREMENT_REPR_SKIP_LINE", "\n"
         n = len(self._sorted_times)
         time_unit, time_scale = select_unit(self._median)
-        iqr_filter = '' if n > 4 else skip_line
-        maybe_s = "s" if n > 1 else ""
+        iqr_filter = '' if n >= 4 else skip_line
 
         repr_str = f"""
 {super().__repr__()}
-  {self.title}
+{self.title}
   {self.description or skip_line}
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
-  {n} measurement{maybe_s}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{maybe_s}
+  {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{s if self.num_threads > 1 else ''}
 {newline.join(self._warnings)}""".strip()
 
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
