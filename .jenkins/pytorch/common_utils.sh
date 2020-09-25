@@ -66,7 +66,7 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-TORCHVISION_COMMIT=662373f6057bb0d39eaf6e5fde3083639ed93af3
+TORCHVISION_COMMIT=8dfcff745a5bd2d4886716bf0deff8dcc8e75fed
 
 function install_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit
