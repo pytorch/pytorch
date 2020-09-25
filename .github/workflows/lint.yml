@@ -117,7 +117,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
+          git remote add upstream https://github.com/csarofeen/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
