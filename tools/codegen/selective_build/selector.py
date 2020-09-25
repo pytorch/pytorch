@@ -1,4 +1,4 @@
-from typing import Dict, Set
+from typing import Dict, Set, List
 import yaml
 
 from dataclasses import dataclass
@@ -43,15 +43,16 @@ class SelectiveBuilder:
             raise Exception("Got unexpected top level keys: {}".format(
                 ",".join(top_level_keys - valid_top_level_keys),
             ))
-        include_all_operators = data.get('include_all_operators', False)
+        include_all_operators = cast(bool, data.get('include_all_operators', False))
         models = None
         if 'models' in data:
-            models = map(
+            models_list = cast(List[Dict[str, str]], data['models'])
+            models = list(map(
                 lambda x: PyTorchModelMetadata.from_yaml(x),
-                data['models'],
-            )
+                models_list,
+            ))
         operators = {}
-        for (k, v) in data.get('operators', {}).items():
+        for (k, v) in cast(Dict[str, Dict[str, object]], data.get('operators', {})).items():
             operators[k] = SelectiveBuildOperator.from_yaml_dict(k, v)
         return SelectiveBuilder(include_all_operators, models, operators)
 
@@ -70,9 +71,9 @@ class SelectiveBuilder:
     def from_legacy_op_registration_allow_list(allow_list: Set[str]) -> 'SelectiveBuilder':
         operators = {}
         for op in allow_list:
-            operators[op] = SelectiveBuildOperator.from_legacy_operator_name_without_overload(
-                op,
-            )
+            operators[op] = {
+                'name': op,
+            }
         return SelectiveBuilder.from_yaml_dict({
             'operators': operators,
         })
@@ -98,8 +99,8 @@ class SelectiveBuilder:
         name = strip_operator_overload_name(name)
         if name not in self.operators:
             return False
-        op: SelectiveBuildOperator = self.operators[name]
-        return op.include_all_overloads and op.is_used_for_training
+        base_op: SelectiveBuildOperator = self.operators[name]
+        return base_op.include_all_overloads and base_op.is_used_for_training
 
     def is_root_operator(self, name: str) -> bool:
         if not self.is_operator_selected(name):
@@ -113,5 +114,5 @@ class SelectiveBuilder:
         name = strip_operator_overload_name(name)
         if name not in self.operators:
             return False
-        op: SelectiveBuildOperator = self.operators[name]
-        return op.include_all_overloads and op.is_root_operator
+        base_op: SelectiveBuildOperator = self.operators[name]
+        return base_op.include_all_overloads and base_op.is_root_operator

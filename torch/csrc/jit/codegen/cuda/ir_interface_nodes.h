@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -208,7 +209,10 @@ class TORCH_CUDA_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(TensorDomain* _domain, DataType dtype);
+  TensorView(
+      TensorDomain* _domain,
+      DataType dtype,
+      MemoryType mtype = MemoryType::Local);
 
   TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
@@ -224,6 +228,7 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
@@ -405,7 +410,7 @@ class TORCH_CUDA_API TensorView : public Val {
   // compute at axis in compute at view
   unsigned int relative_compute_at_axis_ = 0;
   unsigned int this_compute_at_axis_ = 0;
-  MemoryType memory_type_ = MemoryType::Global;
+  MemoryType memory_type_ = MemoryType::Local;
 };
 
 } // namespace fuser

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 from dataclasses import dataclass
 
 # This class holds information about model metadata. Used to track
@@ -46,15 +46,16 @@ class SelectiveBuildOperator():
 
     @staticmethod
     def from_yaml_dict(op_name: str, op_info: Dict[str, object]) -> 'SelectiveBuildOperator':
-        is_root_operator = op_info.get('is_root_operator', True)
-        is_used_for_training = op_info.get('is_used_for_training', True)
-        include_all_overloads = op_info.get('include_all_overloads', True)
-        models = None
+        is_root_operator = cast(bool, op_info.get('is_root_operator', True))
+        is_used_for_training = cast(bool, op_info.get('is_used_for_training', True))
+        include_all_overloads = cast(bool, op_info.get('include_all_overloads', True))
+        models: Optional[List[PyTorchModelMetadata]] = None
         if 'models' in op_info:
-            models = map(
+            models_list = cast(List[Dict[str, str]], op_info['models'])
+            models = list(map(
                 lambda x: PyTorchModelMetadata.from_yaml(x),
-                op_info['models'],
-            )
+                models_list,
+            ))
 
         return SelectiveBuildOperator(
             op_name,
@@ -66,12 +67,13 @@ class SelectiveBuildOperator():
 
     @staticmethod
     def from_legacy_operator_name_without_overload(name: str) -> 'SelectiveBuildOperator':
-        return {
-            'name': name,
-            'is_root_operator': True,
-            'is_used_for_training': True,
-            'include_all_overloads': True,
-        }
+        return SelectiveBuildOperator(
+            name,
+            True,
+            True,
+            True,
+            None,
+        )
 
 def combine_operators(
         lhs: 'SelectiveBuildOperator',
@@ -85,10 +87,12 @@ def combine_operators(
         )
 
     models = None
-    if lhs.models is not None:
+    if lhs.models is not None and rhs.models is not None:
+        models = lhs.models[:] + rhs.models[:]
+    elif lhs.models is not None:
         models = lhs.models[:]
-    if rhs.models is not None:
-        models.extend(rhs.models)
+    elif rhs.models is not None:
+        models = rhs.models[:]
 
     return SelectiveBuildOperator(
         lhs.name,
