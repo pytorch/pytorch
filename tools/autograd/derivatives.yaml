@@ -1112,7 +1112,7 @@
 
 # NB: resolve_conj() will implicitly apply contiguous()
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  self: at::view_as_real(grad.resolve_conj()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
