@@ -289,10 +289,12 @@ bool isWeight(Value* v) {
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs(
-          {{"conv1d", 2}, {"conv2d", 2}, {"conv3d", 2},
-           {"conv_transpose1d", 2}, {"conv_transpose2d", 2},
-           {"linear", 2}}),
+      AtenFuncArgs({{"conv1d", 2},
+                    {"conv2d", 2},
+                    {"conv3d", 2},
+                    {"conv_transpose1d", 2},
+                    {"conv_transpose2d", 2},
+                    {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
