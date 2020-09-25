@@ -585,6 +585,12 @@ void addInputs(
 void addInputs(Node* n, const char* name, const std::string& value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<std::string>& value) {
+  detail::genericAddOptionalInput(n, name, value);
+}
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
@@ -688,15 +694,6 @@ void addInputs(
     Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
-}
-
-void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
-  // [TensorOptions in script] - update this when you change how we schematize
-  // TensorOptions
-  addInputs(n, name, options.dtype_opt());
-  addInputs(n, name, options.layout());
-  addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
