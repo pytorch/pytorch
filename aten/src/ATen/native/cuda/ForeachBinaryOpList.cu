@@ -6,9 +6,9 @@ namespace at { namespace native {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2, Scalar alpha = 1) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
-    vec_res.reserve(tensors.size());
+    vec_res.reserve(tensors1.size());
     for (const auto& t: tensors1) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
@@ -30,7 +30,7 @@ std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tenso
 
 template<template<class> class Op>
 void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar alpha = 1) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
 

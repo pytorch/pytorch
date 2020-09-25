@@ -6,7 +6,7 @@ namespace at { namespace native {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<double> scalars) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
@@ -28,7 +28,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<double> s
 
 template<template<class> class Op>
 void foreach_binary_op_(TensorList tensors, at::ArrayRef<double> scalars) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {

@@ -54,7 +54,10 @@ class TestForeach(TestCase):
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
 
-            expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
+            # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+            control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+            expected = [torch_op(tensors1[i].to(dtype=control_dtype),
+                                 tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
             foreach_op_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
@@ -63,7 +66,9 @@ class TestForeach(TestCase):
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
-            expected = [torch_op(tensors1[i]) for i in range(N)]
+            # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+            control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+            expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1)
             foreach_op_(tensors1)
             self.assertEqual(res, tensors1)
@@ -76,26 +81,35 @@ class TestForeach(TestCase):
             tensors2 = self._get_test_data(device, dtype, N)
             value = 2
 
-            expected = [torch_op(tensors[i], tensors1[i], tensors2[i], value=value) for i in range(N)]
+            # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+            control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+            expected = [torch_op(tensors[i].to(dtype=control_dtype),
+                                 tensors1[i].to(dtype=control_dtype),
+                                 tensors2[i].to(dtype=control_dtype), value=value).to(dtype=dtype) for i in range(N)]
 
             res = foreach_op(tensors, tensors1, tensors2, value)
             foreach_op_(tensors, tensors1, tensors2, value)
             self.assertEqual(res, tensors)
             self.assertEqual(tensors, expected)
 
-    def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
-        tensors1 = self._get_test_data(device, dtype, N)
-        tensors2 = self._get_test_data(device, dtype, N)
-        alpha = 2
+    def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
+        for N in [30, 300]:
+            tensors1 = self._get_test_data(device, dtype, N)
+            tensors2 = self._get_test_data(device, dtype, N)
+            alpha = 2
 
-        expected = [torch_op(tensors1[i], torch.mul(tensors2[i], alpha)) for i in range(N)]
-        res = foreach_op(tensors1, tensors2, alpha=alpha)
-        foreach_op_(tensors1, tensors2, alpha=alpha)
-        self.assertEqual(res, tensors1)
+            # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+            control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+            expected = [torch_op(tensors1[i].to(dtype=control_dtype),
+                                 torch.mul(tensors2[i].to(dtype=control_dtype),
+                                 alpha)).to(dtype=dtype) for i in range(N)]
+            res = foreach_op(tensors1, tensors2, alpha=alpha)
+            foreach_op_(tensors1, tensors2, alpha=alpha)
+            self.assertEqual(res, tensors1)
 
-        if dtype == torch.bool:
-            expected = [e.to(torch.bool) for e in expected]
-        self.assertEqual(tensors1, expected)
+            if dtype == torch.bool:
+                expected = [e.to(torch.bool) for e in expected]
+            self.assertEqual(tensors1, expected)
 
     #
     # Unary ops
@@ -179,7 +193,7 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalar)
                     self.assertEqual(tensors, expected)
 
-    # TODO[Fix scalar list]: 
+    # TODO[Fix scalar list]:
     # We need to update codegen to correctly handle function overloads with float[] and int[].
     # As optimizers work with float tensors, the result will always be torch.float32 for now.
     # Current schema is using 'float[]' as scalar list type.
@@ -217,7 +231,7 @@ class TestForeach(TestCase):
                     else:
                         # TODO[type promotion]: Fix once type promotion is enabled.
                         self.assertEqual(res, [e.to(dtype) for e in expected])
-                else: 
+                else:
                     self.assertEqual(res, expected)
 
                 if dtype in torch.testing.integral_types() and self.device_type == 'cpu':
@@ -236,7 +250,13 @@ class TestForeach(TestCase):
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3.3
-                expected = [torch_bin_op(t, scalar) for t in tensors]
+
+                # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+                control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+                expected = [torch_bin_op(t.to(dtype=control_dtype),
+                                         scalar) for t in tensors]
+                if (dtype is torch.float16 or dtype is torch.bfloat16):
+                    expected = [e.to(dtype=dtype) for e in expected]
 
                 if dtype == torch.bool:
                     if foreach_bin_op == torch._foreach_sub:
@@ -266,7 +286,13 @@ class TestForeach(TestCase):
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1.1 for _ in range(N)]
-                expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+
+                # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
+                control_dtype = torch.float32 if (dtype is torch.float16 or dtype is torch.bfloat16) else dtype
+                expected = [torch_bin_op(t.to(dtype=control_dtype),
+                                         s) for t, s in zip(tensors, scalars)]
+                if (dtype is torch.float16 or dtype is torch.bfloat16):
+                    expected = [e.to(dtype=dtype) for e in expected]
 
                 # we dont support bool and complex types on CUDA for now
                 if (dtype in torch.testing.get_all_complex_dtypes() or dtype == torch.bool) and self.device_type == 'cuda':

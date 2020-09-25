@@ -12,13 +12,12 @@ template<> struct get_opmath_t<at::BFloat16> { using opmath_t = float; };
 
 template<typename T>
 struct BinaryOpScalarFunctor_ {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -72,13 +71,12 @@ struct BinaryOpScalarFunctor_ {
 
 template<typename T>
 struct BinaryOpScalarFunctor {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -136,12 +134,11 @@ struct BinaryOpScalarFunctor {
 template<typename T>
 struct BinaryOpScalarListFunctor_ {
     using io_t = T;
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListScalarListMetadata<1>& tl,
+        TensorListScalarListMetadata<opmath_t, 1>& tl,
         Op op) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -196,12 +193,11 @@ struct BinaryOpScalarListFunctor_ {
 template<typename T>
 struct BinaryOpScalarListFunctor {
     using io_t = T;
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
-        TensorListScalarListMetadata<2>& tl,
+        TensorListScalarListMetadata<opmath_t, 2>& tl,
         Op op) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -258,13 +254,12 @@ struct BinaryOpScalarListFunctor {
 
 template<typename T>
 struct BinaryOpListAlphaFunctor_ {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t alpha) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t alpha) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -325,13 +320,12 @@ struct BinaryOpListAlphaFunctor_ {
 
 template<typename T>
 struct BinaryOpListAlphaFunctor {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t alpha) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t alpha) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -395,12 +389,11 @@ struct BinaryOpListAlphaFunctor {
 
 template<typename T>
 struct UnaryOpFunctor_ {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<1>& tl,
         Op op) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -452,12 +445,11 @@ struct UnaryOpFunctor_ {
 
 template<typename T>
 struct UnaryOpFunctor {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<2>& tl,
         Op op) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -512,13 +504,12 @@ struct UnaryOpFunctor {
 
 template<typename T>
 struct PointwiseOpFunctor_ {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
@@ -588,13 +579,12 @@ struct PointwiseOpFunctor_ {
 
 template<typename T>
 struct PointwiseOpFunctor {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<4>& tl,
         Op op,
-        typename get_opmath_t<T>::opmath_t scalar) {
-            using opmath_t = typename get_opmath_t<T>::opmath_t;
-
+        opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];

@@ -6,7 +6,7 @@ namespace at { namespace native {
 
 template <template<class> class Op>
 std::vector<Tensor> foreach_unary_op(TensorList tensors) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
@@ -27,7 +27,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 
 template <template<class> class Op>
 void foreach_unary_op_(TensorList tensors) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
