@@ -73,6 +73,10 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
 
+#ifdef USE_FBGEMM
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+      input, input_rows, input_columns, output_data);
+#else
   for (std::size_t row = 0; row < input_rows; ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
     const float* input_row_scale_zp =
@@ -84,14 +88,17 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
   } // input_rows
+#endif // USE_FBGEMM
   return output;
 }
 
-Tensor _qembeddingbag_nbit_unpack_helper(const Tensor& packed_weight, int BIT_RATE) {
+Tensor _qembeddingbag_nbit_unpack_helper(
+    const Tensor& packed_weight,
+    int BIT_RATE) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
-  int NUM_ELEM_PER_BYTE = 8/BIT_RATE;
+  int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
   // The rest of input_columns is the number of values in the original row.
@@ -105,6 +112,10 @@ Tensor _qembeddingbag_nbit_unpack_helper(const Tensor& packed_weight, int BIT_RA
       packed_weight.options().dtype(kFloat),
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
+#ifdef USE_FBGEMM
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+      BIT_RATE, input_data, input_rows, input_columns, output_data);
+#else
   auto output_columns = output_dimensions[1];
   for (size_t row = 0; row < input_rows; ++row) {
     float* output_row = output_data + row * output_columns;
@@ -122,6 +133,8 @@ Tensor _qembeddingbag_nbit_unpack_helper(const Tensor& packed_weight, int BIT_RA
       output_row[col] = scale * quantized + zero_point;
     } // output_columns
   } // input_rows
+#endif // USE_FBGEMM
+
   return output;
 }
 
