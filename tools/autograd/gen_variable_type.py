@@ -245,7 +245,7 @@ m.impl("${unqual_operator_name_with_overload}",
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
-LEGACY_UNPACK_OPTIONS = CodeTemplate("""\
+LEGACY_WRAP_OPTIONS = CodeTemplate("""\
 auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
 DECLARE_GRAD_FN = CodeTemplate("""\
@@ -1263,7 +1263,7 @@ def unpack_args(env, declaration):
             # (in this case via TensorOptions rather than Variable/Tensor).
             assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper', \
                 "VariableKernel shouldn't take TensorOptions if the op is c10-full"
-            body.append(LEGACY_UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+            body.append(LEGACY_WRAP_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
