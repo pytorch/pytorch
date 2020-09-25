@@ -6,10 +6,6 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-bool can_be_image(const IntArrayRef sizes) {
-  return (1u <= sizes.size()) && (sizes.size() <= 4u);
-}
-
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -25,67 +21,8 @@ VkFormat convert(const caffe2::TypeMeta dtype) {
   return VK_FORMAT_UNDEFINED;
 }
 
-api::Resource::Buffer allocate_staging(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
-  verify(options);
-
-  return context->resource().pool.buffer(
-      api::Resource::Buffer::Descriptor{
-        std::accumulate(
-            sizes.cbegin(),
-            sizes.cend(),
-            1,
-            std::multiplies<int64_t>()),
-        // Usage
-        {
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VMA_MEMORY_USAGE_CPU_ONLY,
-        },
-      });
-}
-
-api::Resource::Buffer maybe_allocate_staging(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  if (context->gpu().adapter->has_unified_memory()) {
-    return api::Resource::Buffer{};
-  }
-
-  return allocate_staging(context, sizes, options);
-}
-
-api::Resource::Buffer allocate_buffer(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
-  verify(options);
-
-  VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-  if (!context->gpu().adapter->has_unified_memory()) {
-    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-             VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  }
-
-  return context->resource().pool.buffer(
-      api::Resource::Buffer::Descriptor{
-        std::accumulate(
-            sizes.cbegin(),
-            sizes.cend(),
-            1,
-            std::multiplies<int64_t>()),
-        // Usage
-        {
-          usage,
-          VMA_MEMORY_USAGE_GPU_ONLY,
-        },
-      });
+bool should_have_image(const IntArrayRef sizes) {
+  return (1u <= sizes.size()) && (sizes.size() <= 4u);
 }
 
 api::Resource::Image allocate_image(
@@ -149,15 +86,60 @@ api::Resource::Image allocate_image(
       });
 }
 
-api::Resource::Image maybe_allocate_image(
+api::Resource::Buffer allocate_buffer(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (!can_be_image(sizes)) {
-    return api::Resource::Image{};
+  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
+  verify(options);
+
+  VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+  if (!context->gpu().adapter->has_unified_memory()) {
+    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+             VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
 
-  return allocate_image(context, sizes, options);
+  return context->resource().pool.buffer(
+      api::Resource::Buffer::Descriptor{
+        std::accumulate(
+            sizes.cbegin(),
+            sizes.cend(),
+            1,
+            std::multiplies<int64_t>()),
+        // Usage
+        {
+          usage,
+          VMA_MEMORY_USAGE_GPU_ONLY,
+        },
+      });
+}
+
+bool should_have_staging(api::Context* const context) {
+  return !context->gpu().adapter->has_unified_memory();
+}
+
+api::Resource::Buffer allocate_staging(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options) {
+  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
+  verify(options);
+
+  return context->resource().pool.buffer(
+      api::Resource::Buffer::Descriptor{
+        std::accumulate(
+            sizes.cbegin(),
+            sizes.cend(),
+            1,
+            std::multiplies<int64_t>()),
+        // Usage
+        {
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VMA_MEMORY_USAGE_CPU_ONLY,
+        },
+      });
 }
 
 api::Resource::Fence allocate_fence(
@@ -231,11 +213,7 @@ void copy_image_to_buffer(
 
 vTensor::vTensor()
   : context_{},
-    image_{},
-    buffer_{},
-    staging_{},
-    fence_{},
-    dirty_{} {
+    view_{} {
   enforce_invariants();
 }
 
@@ -244,35 +222,44 @@ vTensor::vTensor(
     const IntArrayRef sizes,
     const TensorOptions& options)
   : context_(context),
-    image_(maybe_allocate_image(context, sizes, options)),
-    buffer_(allocate_buffer(context, sizes, options)),
-    staging_(maybe_allocate_staging(context, sizes, options)),
-    fence_(allocate_fence(context)),
-    dirty_{} {
+    view_{},
+    sizes_(sizes),
+    options_(options) {
   enforce_invariants();
+
+  view_.should_have.image = should_have_image(sizes_);
+  view_.should_have.staging = should_have_staging(context_);
 }
 
 const vTensor* vTensor::host_impl() const {
   enforce_invariants();
 
-  if (dirty_.image || dirty_.buffer) {
+  if (view_.dirty.image || view_.dirty.buffer) {
     api::Command::Buffer command_buffer =
         context_->command().pool.buffer();
 
     command_buffer.begin();
     {
-      if (dirty_.image) {
-        copy_image_to_buffer(command_buffer, image_.object, buffer_.object);
-        dirty_.image = 0u;
+      if (view_.dirty.image) {
+        copy_image_to_buffer(
+            command_buffer,
+            image_().object,
+            buffer_().object);
 
-        if (staging_) {
-          dirty_.buffer = 1u;
+        view_.dirty.image = 0u;
+
+        if (staging_()) {
+          view_.dirty.buffer = 1u;
         }
       }
 
-      if (dirty_.buffer && staging_) {
-        copy_buffer_to_staging(command_buffer, buffer_.object, staging_.object);
-        dirty_.buffer = 0u;
+      if (view_.dirty.buffer && staging_()) {
+        copy_buffer_to_staging(
+            command_buffer,
+            buffer_().object,
+            staging_().object);
+
+        view_.dirty.buffer = 0u;
       }
     }
     command_buffer.end();
@@ -287,11 +274,11 @@ vTensor* vTensor::host_impl(const Access::Flags access) {
       const_cast<const vTensor&>(*this).host_impl());
 
   if (access & Access::Write) {
-    if (staging_) {
-      dirty_.staging = 1u;
+    if (staging_()) {
+      view_.dirty.staging = 1u;
     }
     else {
-      dirty_.buffer = 1u;
+      view_.dirty.buffer = 1u;
     }
   }
 
@@ -301,7 +288,7 @@ vTensor* vTensor::host_impl(const Access::Flags access) {
 api::Resource::Memory& vTensor::wait_impl() {
   enforce_invariants();
 
-  api::Resource::Buffer& buffer = staging_ ? staging_ : buffer_;
+  api::Resource::Buffer& buffer = staging_() ? staging_() : buffer_();
   TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
 
   return buffer.memory;
@@ -310,33 +297,41 @@ api::Resource::Memory& vTensor::wait_impl() {
 vTensor::Buffer vTensor::buffer() const & {
   enforce_invariants();
 
-  if (dirty_.staging || dirty_.image) {
+  if (view_.dirty.staging || view_.dirty.image) {
     api::Command::Buffer command_buffer =
         context_->command().pool.buffer();
 
     command_buffer.begin();
     {
-      if (dirty_.staging) {
-        copy_staging_to_buffer(command_buffer, staging_.object, buffer_.object);
-        dirty_.staging = 0u;
+      if (view_.dirty.staging) {
+        copy_staging_to_buffer(
+            command_buffer,
+            staging_().object,
+            buffer_().object);
+
+        view_.dirty.staging = 0u;
       }
-      else if (dirty_.image) {
-        copy_image_to_buffer(command_buffer, image_.object, buffer_.object);
-        dirty_.image = 0u;
+      else if (view_.dirty.image) {
+        copy_image_to_buffer(
+            command_buffer,
+            image_().object,
+            buffer_().object);
+
+        view_.dirty.image = 0u;
       }
     }
     command_buffer.end();
     command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
-  return buffer_.object;
+  return buffer_().object;
 }
 
 vTensor::Buffer vTensor::buffer(const Access::Flags access) & {
   const vTensor::Buffer buffer = const_cast<const vTensor&>(*this).buffer();
 
   if (buffer && (access & Access::Write)) {
-    dirty_.buffer = 1;
+    view_.dirty.buffer = 1;
   }
 
   return buffer;
@@ -345,48 +340,90 @@ vTensor::Buffer vTensor::buffer(const Access::Flags access) & {
 vTensor::Image vTensor::image() const & {
   enforce_invariants();
 
-  if (dirty_.staging || dirty_.buffer) {
+  if (view_.dirty.staging || view_.dirty.buffer) {
     api::Command::Buffer command_buffer =
         context_->command().pool.buffer();
 
     command_buffer.begin();
     {
-      if (dirty_.staging) {
-        copy_staging_to_buffer(command_buffer, staging_.object, buffer_.object);
-        dirty_.staging = 0u;
-        dirty_.buffer = 1u;
+      if (view_.dirty.staging) {
+        copy_staging_to_buffer(
+            command_buffer,
+            staging_().object,
+            buffer_().object);
+
+        view_.dirty.staging = 0u;
+        view_.dirty.buffer = 1u;
       }
 
-      if (dirty_.buffer) {
-        copy_buffer_to_image(command_buffer, buffer_.object, image_.object);
-        dirty_.buffer = 0u;
+      if (view_.dirty.buffer) {
+        copy_buffer_to_image(
+            command_buffer,
+            buffer_().object,
+            image_().object);
+
+        view_.dirty.buffer = 0u;
       }
     }
     command_buffer.end();
     command_buffer.submit(context_->gpu().queue, VK_NULL_HANDLE);
   }
 
-  return image_.object;
+  return image_().object;
 }
 
 vTensor::Image vTensor::image(const Access::Flags access) & {
   const vTensor::Image image = const_cast<const vTensor&>(*this).image();
 
   if (image && (access & Access::Write)) {
-    dirty_.image = 1;
+    view_.dirty.image = 1;
   }
 
   return image;
 }
 
 void vTensor::enforce_invariants() const {
-  TORCH_INTERNAL_ASSERT(!context_ || (context_ && buffer_));
-  TORCH_INTERNAL_ASSERT(!dirty_.image || (image_ && dirty_.image));
-  TORCH_INTERNAL_ASSERT(!dirty_.buffer || (buffer_ && dirty_.buffer));
-  TORCH_INTERNAL_ASSERT(!dirty_.staging || (staging_ && dirty_.staging));
+  TORCH_INTERNAL_ASSERT(view_.image || !view_.dirty.image);
+  TORCH_INTERNAL_ASSERT(!view_.image || view_.should_have.image);
+  TORCH_INTERNAL_ASSERT(!(view_.buffer && view_.dirty.buffer));
+  TORCH_INTERNAL_ASSERT(view_.staging || !view_.dirty.staging);
+  TORCH_INTERNAL_ASSERT(!view_.staging || view_.should_have.staging);
   TORCH_INTERNAL_ASSERT(
-      !(dirty_.image || dirty_.buffer || dirty_.staging) ||
-      (dirty_.image ^ dirty_.buffer ^ dirty_.staging));
+      !(view_.dirty.image || view_.dirty.buffer || view_.dirty.staging) ||
+      (view_.dirty.image ^ view_.dirty.buffer ^ view_.dirty.staging));
+}
+
+api::Resource::Image& vTensor::image_() const {
+  if (!view_.image && view_.should_have.image) {
+    view_.image = allocate_image(
+        context_,
+        sizes_,
+        options_);
+  }
+
+  return view_.image;
+}
+
+api::Resource::Buffer& vTensor::buffer_() const {
+  if (!view_.buffer) {
+    view_.buffer = allocate_buffer(
+        context_,
+        sizes_,
+        options_);
+  }
+
+  return view_.buffer;
+}
+
+api::Resource::Buffer& vTensor::staging_() const {
+  if (!view_.staging && view_.should_have.staging) {
+    view_.staging = allocate_staging(
+        context_,
+        sizes_,
+        options_);
+  }
+
+  return view_.staging;
 }
 
 void verify(const TensorOptions& options) {
