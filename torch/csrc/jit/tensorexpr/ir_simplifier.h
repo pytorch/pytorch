@@ -24,7 +24,6 @@ namespace tensorexpr {
 
 // A bunch of helpers for determine the Dtype of the output of a multi argument
 // Term or Polynomial.
-namespace {
 template <class ExprType>
 Dtype promoteTypesVec(const Expr* s, std::vector<const ExprType*>& v) {
   Dtype t = s->dtype();
@@ -86,7 +85,7 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
 }
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
-static const Expr* newBinaryOpOfType(
+inline const Expr* newBinaryOpOfType(
     IRNodeType expr_type,
     const Expr* lhs,
     const Expr* rhs,
@@ -123,7 +122,7 @@ static const Expr* newBinaryOpOfType(
 // Uses the evaluator to fold an Expression with constant terms.
 // E.g. evaluateOp(Add(3, 4)) => 7.
 // Expr v must not have any unbound Vars.
-static Expr* evaluateOp(const Expr* v) {
+inline Expr* evaluateOp(const Expr* v) {
   ExprHandle handle(v);
   ExprEval<SimpleIREvaluator> eval(handle);
 
@@ -133,7 +132,7 @@ static Expr* evaluateOp(const Expr* v) {
     Type val = eval.value<Type>();                            \
     return getImmediateByType(v->dtype().scalar_type(), val); \
   }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
 #undef TYPE_CASE
     default:
       LOG(FATAL) << "Unsupported datatype: " << v->dtype();
@@ -141,8 +140,6 @@ static Expr* evaluateOp(const Expr* v) {
   }
   return nullptr;
 }
-
-} // namespace
 
 // A Term represents a grouping of Exprs through multiplication.
 // E.g. product(scalar, *variables).
@@ -288,10 +285,129 @@ class RoundOff : public BinaryOpNode<RoundOff> {
       : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
 };
 
+class MaxTerm : public ExprNode<MaxTerm> {
+ public:
+  template <class... Args>
+  MaxTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+      : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    addComponent(ts...);
+    uniquefy();
+  }
+
+  MaxTerm(
+      HashProvider& hasher,
+      const Expr* s,
+      bool p,
+      std::vector<const Expr*> v)
+      : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
+        variables_(std::move(v)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    uniquefy();
+  }
+
+  bool propagate_nans() const {
+    return propagate_nans_;
+  }
+
+  const Expr* scalar() const {
+    return scalar_;
+  }
+  const std::vector<const Expr*>& variables() const {
+    return variables_;
+  }
+  HashProvider& hasher() const {
+    return hasher_;
+  }
+
+ private:
+  std::vector<const Expr*> variables_;
+  const Expr* scalar_;
+  HashProvider& hasher_;
+  bool propagate_nans_;
+
+  void addComponent() {}
+  void addComponent(const Expr* e) {
+    variables_.push_back(e);
+  }
+  template <class... Es>
+  void addComponent(const Expr* e, Es... es) {
+    addComponent(e);
+    addComponent(es...);
+  }
+
+  // Uniquefy the terms using their hash.
+  void uniquefy();
+};
+
+class MinTerm : public ExprNode<MinTerm> {
+ public:
+  template <class... Args>
+  MinTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+      : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    addComponent(ts...);
+    uniquefy();
+  }
+
+  MinTerm(
+      HashProvider& hasher,
+      const Expr* s,
+      bool p,
+      std::vector<const Expr*> v)
+      : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
+        variables_(std::move(v)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    uniquefy();
+  }
+
+  bool propagate_nans() const {
+    return propagate_nans_;
+  }
+
+  const Expr* scalar() const {
+    return scalar_;
+  }
+  const std::vector<const Expr*>& variables() const {
+    return variables_;
+  }
+  HashProvider& hasher() const {
+    return hasher_;
+  }
+
+ private:
+  std::vector<const Expr*> variables_;
+  const Expr* scalar_;
+  HashProvider& hasher_;
+  bool propagate_nans_;
+
+  void addComponent() {}
+  void addComponent(const Expr* e) {
+    variables_.push_back(e);
+  }
+  template <class... Es>
+  void addComponent(const Expr* e, Es... es) {
+    addComponent(e);
+    addComponent(es...);
+  }
+
+  // Uniquefy the terms using their hash.
+  void uniquefy();
+};
+
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
   virtual ~IRSimplifierBase() {}
+
   Stmt* mutate(const Block* v) override;
 
   Stmt* mutate(const Cond* v) override;
@@ -414,8 +530,7 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
   static const Expr* simplify(const Expr* e);
   static ExprHandle simplify(const ExprHandle& e);
   static Stmt* simplify(Stmt* e);
-
-}; // namespace tensorexpr
+};
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.
@@ -439,6 +554,12 @@ class TORCH_API TermExpander : public IRSimplifierBase {
   // Expand Polynomials out to a series of Adds.
   const Expr* mutate(const Polynomial* v) override;
 
+  // Expand MaxTerms to a series of Max ops.
+  const Expr* mutate(const MaxTerm* v) override;
+
+  // Expand MinTerms to a series of Min ops.
+  const Expr* mutate(const MinTerm* v) override;
+
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
   const Expr* mutate(const RoundOff* v) override;
 
@@ -446,6 +567,11 @@ class TORCH_API TermExpander : public IRSimplifierBase {
   Stmt* mutate(const Allocate* v) override;
 
   Stmt* mutate(const Free* v) override;
+
+  // Override to enable condition fusing.
+  Block* fuseConditions(Block* v);
+  Stmt* fuseSyncThreads(Block* block);
+  Stmt* mutate(const Block* v) override;
 };
 
 class TORCH_API IRSimplifier {
@@ -471,6 +597,9 @@ class TORCH_API IRSimplifier {
   static Stmt* simplify(Stmt* s) {
     PolynomialTransformer simplifier;
     s = s->accept_mutator(&simplifier);
+    if (s == nullptr) {
+      return nullptr;
+    }
 
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);

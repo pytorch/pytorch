@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -74,6 +72,7 @@ _(aten, _embedding_bag_sparse_backward) \
 _(aten, _erf) \
 _(aten, _erfc) \
 _(aten, _exp) \
+_(aten, _exp2) \
 _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
@@ -109,7 +108,6 @@ _(aten, _rsqrt) \
 _(aten, _s_where) \
 _(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
-_(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \
 _(aten, _sin) \
 _(aten, _sinh) \
@@ -134,7 +132,6 @@ _(aten, _sum) \
 _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
-_(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
@@ -240,6 +237,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, _conj) \
+_(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
@@ -293,8 +292,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \
@@ -343,7 +340,6 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, gcd) \
-_(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
@@ -359,7 +355,6 @@ _(aten, grid_sampler_3d_backward) \
 _(aten, group_norm) \
 _(aten, gru) \
 _(aten, gru_cell) \
-_(aten, gt) \
 _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
@@ -369,11 +364,14 @@ _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
+_(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
 _(aten, hstack) \
 _(aten, hypot) \
+_(aten, i0) \
+_(aten, i0_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -401,6 +399,7 @@ _(aten, isreal) \
 _(aten, istft) \
 _(aten, isposinf) \
 _(aten, isneginf) \
+_(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -409,7 +408,6 @@ _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
 _(aten, lcm) \
-_(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
@@ -436,7 +434,6 @@ _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
-_(aten, lt) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
@@ -495,8 +492,6 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
-_(aten, mul) \
-_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -518,7 +513,6 @@ _(aten, native_pow) \
 _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
-_(aten, ne) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
@@ -559,6 +553,7 @@ _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
+_(aten, nanquantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -616,6 +611,7 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -656,8 +652,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \

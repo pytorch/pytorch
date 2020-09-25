@@ -63,7 +63,7 @@ void testLiteInterpreterAdd() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("add_it", bcinputs);
+    res = bc.get_method("add_it")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -83,7 +83,7 @@ void testLiteInterpreterConv() {
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
-      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True)
+      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
   )");
 
   inputs.push_back(torch::ones({1, 1, 28, 28}));
@@ -95,7 +95,7 @@ void testLiteInterpreterConv() {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.run_method("forward", inputs);
+    res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -119,7 +119,7 @@ void testLiteInterpreterInline() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("foo3", inputs);
+  auto output = bc.get_method("foo3")(inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
@@ -137,7 +137,7 @@ void testLiteInterpreterTuple() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
@@ -155,7 +155,7 @@ void testLiteInterpreterDict() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
@@ -173,7 +173,7 @@ void testLiteInterpreterPrimOverload() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
   */
 }
@@ -196,7 +196,33 @@ void testLiteInterpreterPrim() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
+  }
+
+  auto resi = res.toInt();
+  auto refi = ref.toInt();
+  AT_ASSERT(resi == refi);
+}
+
+void testLiteInterpreterPrimScalar() {
+  Module m("m");
+  m.define(R"JIT(
+        def forward(self, x):
+            return int(x.item())
+  )JIT");
+
+  std::vector<IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resi = res.toInt();
@@ -231,7 +257,7 @@ void testLiteInterpreterWrongMethodName() {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
+  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
 }
 
 void testLiteInterpreterSetState() {
@@ -262,7 +288,7 @@ void testLiteInterpreterSetState() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -296,7 +322,7 @@ void testLiteInterpreterBuiltinFunction() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
-      bc.run_method("forward", std::vector<IValue>{torch::zeros({3, 4})});
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
@@ -585,12 +611,79 @@ void testLiteInterpreterEval() {
   bc.eval();
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.run_method("forward", inputs);
+    res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
+void testLiteInterpreterFindWrongMethodName() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+}
+
+void testLiteInterpreterFindAndRunMethod() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.get_method("add_it")(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    auto method = bc.find_method("add_it");
+    AT_ASSERT(method != c10::nullopt);
+    res = (*method)(std::move(bcinputs));
+  }
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
+}
+
+void testLiteInterpreterRunMethodVariadic() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_three(self, x, y):
+      return self.foo + x + y
+  )");
+
+  std::vector<IValue> inputs;
+  auto inputx = 5 * torch::ones({});
+  auto inputy = 4 * torch::ones({});
+  auto ref = m.run_method("add_three", inputx, inputy);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res = bc.run_method("add_three", inputx, inputy);
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
 }
 
 namespace {

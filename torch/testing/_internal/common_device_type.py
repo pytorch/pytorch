@@ -4,6 +4,7 @@ import inspect
 import runpy
 import threading
 from functools import wraps
+from typing import List, Any, ClassVar
 import unittest
 import os
 import torch
@@ -13,7 +14,7 @@ from torch.testing import \
     (get_all_dtypes)
 
 try:
-    import psutil
+    import psutil  # type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -163,7 +164,10 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-device_type_test_bases = []
+
+# set type to List[Any] due to mypy list-of-union issue:
+# https://github.com/python/mypy/issues/3351
+device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -181,7 +185,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
     return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type = 'generic_device_type'
+    device_type: str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -225,36 +229,48 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, name, test):
+    def instantiate_test(cls, name, test, *, generic_cls=None):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
-
-            # wraps test with op decorators
-            if op is not None and op.decorators is not None:
-                for decorator in op.decorators:
-                    test = decorator(test)
 
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
+            # wraps instantiated test with op decorators
+            # NOTE: test_wrapper exists because we don't want to apply
+            #   op-specific decorators to the original test.
+            #   Test-sepcific decorators are applied to the original test,
+            #   however.
+            if op is not None and op.decorators is not None:
+                @wraps(test)
+                def test_wrapper(*args, **kwargs):
+                    return test(*args, **kwargs)
+
+                for decorator in op.decorators:
+                    test_wrapper = decorator(test_wrapper)
+
+                test_fn = test_wrapper
+            else:
+                test_fn = test
+
             # Constructs the test
             @wraps(test)
-            def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
-                if op is not None and op.should_skip(name, self.device_type, dtype):
+            def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
+                if op is not None and op.should_skip(generic_cls.__name__, name,
+                                                     self.device_type, dtype):
                     self.skipTest("Skipped!")
 
-                device_arg = cls.get_primary_device()
-                if hasattr(test, 'num_required_devices'):
+                device_arg: str = cls.get_primary_device()
+                if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
                 try:
-                    self.precision = self._get_precision_override(test, dtype)
-                    args = (device_arg, dtype, op)
-                    args = (arg for arg in args if arg is not None)
-                    result = test(self, *args)
+                    self.precision = self._get_precision_override(test_fn, dtype)
+                    args = (arg for arg in (device_arg, dtype, op) if arg is not None)
+                    result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
 
@@ -306,6 +322,11 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    primary_device: ClassVar[str]
+    cudnn_version: ClassVar[Any]
+    no_magma: ClassVar[bool]
+    no_cudnn: ClassVar[bool]
+
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -405,7 +426,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-        device_type_test_class = type(class_name, (base, empty_class), {})
+
+        # type set to Any and suppressed due to unsupport runtime class:
+        # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+        device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -416,8 +440,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     test = test.__func__
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
+                sig = inspect.signature(device_type_test_class.instantiate_test)
+                if len(sig.parameters) == 3:
+                    # Instantiates the device-specific tests
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
+                else:
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 

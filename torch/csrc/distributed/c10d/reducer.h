@@ -30,7 +30,8 @@ class Reducer {
       std::shared_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
-      bool find_unused_parameters);
+      bool find_unused_parameters,
+      bool gradient_as_bucket_view);
 
   ~Reducer() noexcept(false);
 
@@ -59,17 +60,55 @@ class Reducer {
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
+  // Returns a vector of tensors in each bucket in sequential order.
+  std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
+
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // according to when tensors received grads in the backward pass.
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible. Returns true if the buckets were
+  // rebuilt.
+  bool rebuild_buckets();
+
+  // Returns true if we should rebuild buckets, else false. We only rebuild
+  // buckets once after the first iteration and never rebuild them if
+  // find_unused_parameters_.
+  inline bool should_rebuild_buckets() const {
+    return !find_unused_parameters_ && !has_rebuilt_bucket_;
+  }
+
+  // Pushes all parameters to be rebuilt.
+  void push_rebuilt_params_for_all_indices();
+
+  // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
+  // corresponding tensor being reduced.
+  void set_forward_pass_work_handle(
+      std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      bool useStaticWorldSize);
+
+  // Retrieve on-device tensors used to track locally unused parameters. For
+  // each replica, it is a tensor where index i = 1 if the Variable with that
+  // index has been used.
+  std::vector<at::Tensor> get_local_used_maps_on_device() const;
+
  protected:
   // Forward declaration.
   struct Bucket;
-
   // Locates a specific variable by replica index and variable index.
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
   };
 
-  std::mutex mutex_;
+  void push_rebuilt_params(const VariableIndex& index);
+
+  mutable std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
@@ -86,6 +125,7 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
+  const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -126,16 +166,6 @@ class Reducer {
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible.
-  std::vector<std::vector<size_t>> rebuildBuckets();
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
@@ -151,9 +181,8 @@ class Reducer {
   // and on the same device can be batched. The tensor that represents the
   // flattened gradient uses the same type and is placed on the same device.
   // Buckets are filled as the gradients they hold are computed (triggered by
-  // autograd hooks). Buckets are reduced in a predetemined order that is
+  // autograd hooks). Buckets are reduced in a predetermined order that is
   // identical across processes.
-  //
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
@@ -192,22 +221,29 @@ class Reducer {
     // std::vector<at::cuda::CUDAEvent> events;
   };
 
-  // This function is called inside `initialize_buckets` and
-  // `finalize_backward`. The function call in `initialize_bucket` creates both
-  // views_in and views_out into the contents tensor for each variable's grad.
-  // Views serve as entry points to copy_ each grad's data in/out of the flat
-  // contents tensor. The function call in `finalize_backward` happens only if
-  // DDP communication hook was registered to recrate just views_out with the
-  // result of `future_work`. If called from `finalize_backward`,
-  // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
-  // `bucket_views_in` referring to replica's contents and
-  // `bucket_view_in.copy_(grad)` call inside reducer's
-  // `mark_variable_ready_dense` will work as expected. Note that before the
-  // call in `finalize_backward`, views_out must be cleared.
-  void initialize_bucket_views(
-      BucketReplica& replica,
-      at::Tensor& contents,
-      bool populate_bucket_views_in);
+  // This function is called inside `initialize_buckets`, it initializes both
+  // bucket_views_in and bucket_views_out into the contents tensor for each
+  // variable's grad. Views serve as entry points to copy_ each grad's data
+  // in/out of the flat contents tensor.
+  void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
+
+  // This function is called inside `finalize_backward`, it happens only if
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
+  void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
+
+  // If gradient_as_bucket_view_ is false, after allreduce buckets,
+  // copy bucket results back to grads.
+  void copy_bucket_to_grad(
+      torch::autograd::Variable& variable,
+      Reducer::BucketReplica& replica,
+      size_t intra_bucket_index,
+      bool global_unused);
+  // Check layout of grad and bucket_view before calling copy_grad_to_bucket
+  void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
+  // If gradient_as_bucket_view_ is false, before allreduce buckets,
+  // copy grads to buckets.
+  void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
@@ -272,11 +308,34 @@ class Reducer {
   };
   RpcContext rpc_context_;
 
+  // A struct containing work handle and tensor for allreduce scheduled in
+  // forward pass, if applicable.
+  struct ForwardPassAllreduceWork {
+    std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
+    at::Tensor resultTensor;
+    // whether we should divide by the initial world_size or the no. of
+    // remaining DDP ranks.
+    bool useStaticWorldSize;
+  };
+
+  // Handle for the currently scheduled allreduce in the forward pass, if
+  // applicable.
+  ForwardPassAllreduceWork forwardPassWorkHandle_;
+
+  // Division factor for reduction of gradients.
+  int divFactor_;
+
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
 };
 
+// This is equivalent to take_tensors but returns indices into the
+// tensor list argument for bucket assignment. Also, it is aware
+// of device placement and will not allow buckets to span devices.
+// The index of tensors[i] assigned to bucket is tensor_indices[i],
+// when tensor_indices is empty, the index of tensors[i] assigned to
+// bucket is i.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,

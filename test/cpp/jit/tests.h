@@ -9,46 +9,29 @@
 namespace torch {
 namespace jit {
 #define TH_FORALL_TESTS(_)                        \
-  _(ADFormulas)                                   \
   _(Attributes)                                   \
   _(Blocks)                                       \
   _(CallStack)                                    \
   _(CallStackCaching)                             \
-  _(CodeTemplate)                                 \
   _(ControlFlow)                                  \
-  _(CreateAutodiffSubgraphs)                      \
-  _(CustomOperators)                              \
-  _(CustomOperatorAliasing)                       \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
   _(SchemaMatching)                               \
-  _(Differentiate)                                \
-  _(DifferentiateWithRequiresGrad)                \
   _(FromQualString)                               \
   _(InternedStrings)                              \
   _(PassManagement)                               \
   _(Proto)                                        \
-  _(RegisterFusionCachesKernel)                   \
   _(SchemaParser)                                 \
   _(TopologicalIndex)                             \
-  _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
   _(SubgraphUtilsVmap)                            \
-  _(AliasAnalysis)                                \
-  _(ContainerAliasing)                            \
-  _(AliasRegistration)                            \
-  _(WriteTracking)                                \
-  _(Wildcards)                                    \
-  _(MemoryDAG)                                    \
   _(IRParser)                                     \
-  _(ConstantPooling)                              \
-  _(CleanUpPasses)                                \
   _(THNNConv)                                     \
   _(ATenNativeBatchNorm)                          \
   _(NoneSchemaMatch)                              \
-  _(ClassParser)                                  \
   _(UnifyTypes)                                   \
   _(Profiler)                                     \
+  _(FallbackGraphs)                               \
   _(InsertAndEliminateRedundantGuards)            \
   _(LoopPeeler)                                   \
   _(InsertBailOuts)                               \
@@ -66,15 +49,10 @@ namespace jit {
   _(ModuleDeepcopyAliasing)                       \
   _(ModuleDefine)                                 \
   _(QualifiedName)                                \
-  _(ClassImport)                                  \
-  _(ScriptObject)                                 \
   _(ExtraFilesHookPreference)                     \
   _(SaveExtraFilesHook)                           \
   _(TypeTags)                                     \
-  _(DCE)                                          \
   _(CustomFusionNestedBlocks)                     \
-  _(ClassDerive)                                  \
-  _(SaveLoadTorchbind)                            \
   _(ModuleInterfaceSerialization)                 \
   _(ModuleCloneWithModuleInterface)               \
   _(ClassTypeAddRemoveAttr)                       \
@@ -89,9 +67,11 @@ namespace jit {
   _(DefaultArgTypeHinting)                        \
   _(Futures)                                      \
   _(TLSFutureCallbacks)                           \
+  _(ProfilerDisableInCallback)                    \
   _(MobileTypeParser)                             \
   _(LiteInterpreterBuiltinFunction)               \
   _(LiteInterpreterPrim)                          \
+  _(LiteInterpreterPrimScalar)                    \
   _(LiteInterpreterLoadOrigJit)                   \
   _(LiteInterpreterWrongMethodName)               \
   _(LiteInterpreterParams)                        \
@@ -104,21 +84,18 @@ namespace jit {
   _(LiteInterpreterHierarchyModuleInfo)           \
   _(LiteInterpreterDuplicatedClassTypeModuleInfo) \
   _(LiteInterpreterEval)                          \
-  _(TorchbindIValueAPI)                           \
   _(LiteInterpreterDict)                          \
+  _(LiteInterpreterFindAndRunMethod)              \
+  _(LiteInterpreterFindWrongMethodName)           \
   _(MobileNamedParameters)                        \
   _(MobileSaveLoadData)                           \
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
-  _(LiteSequentialSampler)                        \
-  _(FusionAliasing)
+  _(LiteSequentialSampler)
 
 #if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)                     \
-  _(ArgumentSpec)                                   \
-  _(CompleteArgumentSpec)                           \
-  _(Fusion)                                         \
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
@@ -158,7 +135,16 @@ namespace jit {
   _(GPU_FusionCompoundOps)                          \
   _(GPU_FusionCastOps)                              \
   _(GPU_FusionAdvancedComputeAt)                    \
+  _(GPU_FusionComputeAtMultiConsumers)              \
+  _(GPU_FusionComputeAtCommonConsumer1)             \
+  _(GPU_FusionComputeAtCommonConsumer2)             \
+  _(GPU_FusionComputeAtCommonConsumer3)             \
+  _(GPU_FusionComputeAtNoCommonConsumer)            \
   _(GPU_FusionScalarInputs)                         \
+  _(GPU_FusionBCastConcretizeBasic)                 \
+  _(GPU_FusionBCastConcretizeRfactor)               \
+  _(GPU_FusionProveIdEqBasic)                       \
+  _(GPU_FusionProveIdEqRfactor)                     \
   _(GPU_FusionRFactorReplay)                        \
   _(GPU_FusionReduction)                            \
   _(GPU_FusionReduction2)                           \
@@ -206,6 +192,12 @@ namespace jit {
   _(GPU_FusionSmemReduce)                           \
   _(GPU_FusionSmemBlockGemm)                        \
   _(GPU_FusionSmemBlockGemmCache)                   \
+  _(GPU_FusionSmemDynamicReductionSymbolic)         \
+  _(GPU_FusionSmemDynamicReductionSymbolicArg)      \
+  _(GPU_FusionSmemDynamicPwiseMulSymbolicArgWAR)    \
+  _(GPU_FusionSmemDynamicTiledGemm)                 \
+  _(GPU_FusionGlobalIntermediate)                   \
+  _(GPU_FusionGlobalIntermediateDefaultSchedule)    \
   _(GPU_FusionConstCheck)                           \
   _(GPU_FusionSymbolicReduction)                    \
   _(GPU_FusionUnrollWithAlloc)                      \
@@ -220,12 +212,13 @@ namespace jit {
   _(GPU_FusionTraversalOrder6)                      \
   _(GPU_FusionTraversalOrder7)                      \
   _(GPU_FusionBranches)                             \
-  _(GPU_FusionThreadPredicate)
+  _(GPU_FusionThreadPredicate)                      \
+  _(GPU_FusionLSTMCell)                             \
+  _(GPU_FusionComputeAtMultiBCast)                  \
+  _(GPU_FusionReductionHalf)                        \
+  _(GPU_FusionInputsIdLookup)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
-  _(ArgumentSpec)               \
-  _(CompleteArgumentSpec)       \
-  _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)                     \
