@@ -637,7 +637,6 @@ class Quantizer:
                     result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
                 else:
-
                     result = obj.convert(self, node, load_arg)
                     if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
                         quantized = self.modules[node.target]._output_is_observed
