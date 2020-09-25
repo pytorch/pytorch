@@ -91,24 +91,12 @@ class _ConvNd(nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
+        state = self.__dict__
         (w, b) = self._weight_bias()
-        return (
-            self.in_channels,
-            self.out_channels,
-            self.kernel_size,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.transposed,
-            self.output_padding,
-            self.groups,
-            self.padding_mode,
-            w,
-            b,
-            self.scale,
-            self.zero_point,
-            self.training
-        )
+        state["w"] = w
+        state["b"] = b
+        state.pop("_packed_params")
+        return state
 
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized
@@ -129,20 +117,11 @@ class _ConvNd(nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        self.in_channels = state[0]
-        self.out_channels = state[1]
-        self.kernel_size = state[2]
-        self.stride = state[3]
-        self.padding = state[4]
-        self.dilation = state[5]
-        self.transposed = state[6]
-        self.output_padding = state[7]
-        self.groups = state[8]
-        self.padding_mode = state[9]
-        self.set_weight_bias(state[10], state[11])
-        self.scale = state[12]
-        self.zero_point = state[13]
-        self.training = state[14]
+        self.__dict__.update(state)
+        self.set_weight_bias(state.pop("w"), state.pop("b"))
+        self.__dict__.pop("w")
+        self.__dict__.pop("b")
+        super(_ConvNd, self).__setstate__(state)
 
     @classmethod
     def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
