@@ -169,7 +169,7 @@ class PackageExporter:
             return False
 
     def _write_dep_graph(self, failing_module=None, output_file=None):
-        depended_on : Dict[str, str] = {}
+        depended_on : Dict[str, List[str]] = {}
         for f, t in self.debug_deps:
             if t not in depended_on:
                 depended_on[t] = []
@@ -177,7 +177,7 @@ class PackageExporter:
                 depended_on[f] = []
             depended_on[t].append(f)
 
-        level : Dict[str, str] = {}
+        level : Dict[str, int] = {}
 
         def visit(x: str):
             if x in level:
