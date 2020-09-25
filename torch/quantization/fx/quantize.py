@@ -304,7 +304,7 @@ class Quantizer:
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
-    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_child_module):
+    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_standalone_module):
         if not inplace:
             model = copy.deepcopy(model)
         self.is_dynamic_quant = is_dynamic_quant
@@ -386,19 +386,19 @@ class Quantizer:
                     setattr(self.modules[parent_name], name, observed_custom_module)
 
                 # index for input of custom module that needs to be observed in parent
-                child_module_input_idxs = None
+                standalone_module_input_idxs = None
                 if isinstance(obj, StandaloneModuleQuantizeHandler):
                     # observe standalone module
                     standalone_module = self.modules[node.target]
                     traced_standalone_module = symbolic_trace(standalone_module)
                     if self.is_dynamic_quant:
-                        prepare = torch.quantization.prepare_dynamic_child_module_fx
+                        prepare = torch.quantization.quantize_fx._prepare_dynamic_standalone_module_fx
                     else:
-                        prepare = torch.quantization.prepare_child_module_fx
+                        prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
                     observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
                     mark_observed_standalone_module(observed_standalone_module)
-                    child_module_input_idxs = observed_standalone_module._observed_input_idxs
+                    standalone_module_input_idxs = observed_standalone_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_standalone_module)
                     self.modules[node.target] = observed_standalone_module
@@ -440,9 +440,9 @@ class Quantizer:
                     device = assert_and_get_unique_device(model)
                     insert_observer(node, new_observer, device)
 
-                # insert observer for input of child module
-                if child_module_input_idxs is not None:
-                    for idx in child_module_input_idxs:
+                # insert observer for input of standalone module
+                if standalone_module_input_idxs is not None:
+                    for idx in standalone_module_input_idxs:
                         if node.args[idx].name not in observed_node_names_set:
                             new_observer = qconfig.activation()
                             device = assert_and_get_unique_device(model)
@@ -451,8 +451,8 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
             if node.name not in observed_node_names_set and node.name in quants:
-                if is_child_module and node.name in graph_inputs:
-                    # we'll insert observer for input of child module
+                if is_standalone_module and node.name in graph_inputs:
+                    # we'll insert observer for input of standalone module
                     # in parent graph
                     observed_input_idxs.append(graph_inputs.index(node.name))
                     continue
@@ -475,11 +475,11 @@ class Quantizer:
         observed_graph.output(load_arg(model.graph.result))
         model = GraphModule(model, observed_graph)
         self.save_state(model)
-        if is_child_module:
+        if is_standalone_module:
             assert isinstance(model.graph.result, Node), \
-                'child module returning dict is not yet supported'
+                'standalone module returning dict is not yet supported'
             # indicator for whether output is observed or not.
-            # This used for correctly quantize child modules
+            # This used for correctly quantize standalone modules
             output_is_observed = model.graph.result.name in observed_node_names_set
             model._observed_input_idxs = observed_input_idxs
             model._output_is_observed = output_is_observed
@@ -502,11 +502,11 @@ class Quantizer:
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map
 
-    def prepare(self, model, qconfig_dict, inplace=False, is_child_module=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False, is_child_module=is_child_module)
+    def prepare(self, model, qconfig_dict, inplace=False, is_standalone_module=False):
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False, is_standalone_module=is_standalone_module)
 
-    def prepare_dynamic(self, model, qconfig_dict, inplace=False, is_child_module=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True, is_child_module=is_child_module)
+    def prepare_dynamic(self, model, qconfig_dict, inplace=False, is_standalone_module=False):
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True, is_standalone_module=is_standalone_module)
 
     def _run_weight_observers(self, observed):
         r''' Extract the subgraph that produces the weight for dynamically quantized
@@ -527,11 +527,10 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_child_module=False):
+    def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_standalone_module=False):
         self.restore_state(model)
-        # TODO: uncomment after deepcopy is fixed
-        # if not inplace:
-        #     model = copy.deepcopy(model)
+        if not inplace:
+            model = copy.deepcopy(model)
         self.is_dynamic_quant = is_dynamic_quant
         # run weight observers before inserting quant dequant nodes
         # for dynamic quantization
@@ -689,7 +688,7 @@ class Quantizer:
                         load_non_quantized(node.args[0]), observer_module)
                     continue
 
-            if is_child_module and node.op == 'placeholder' and \
+            if is_standalone_module and node.op == 'placeholder' and \
                graph_inputs.index(node.name) in model._observed_input_idxs:
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
@@ -697,8 +696,8 @@ class Quantizer:
                 # dequantize inputs for the node that are not quantized
                 env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
-        if is_child_module:
-            # result are kepted quantized in the quantized child module
+        if is_standalone_module:
+            # result are kepted quantized in the quantized standalone module
             graph_output = map_arg(model.graph.result, load_x)
         else:
             graph_output = map_arg(model.graph.result, load_non_quantized)
@@ -779,8 +778,8 @@ class Quantizer:
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
-    def convert(self, model, inplace=False, debug=False, is_dynamic=False, is_child_module=False):
-        quantized = self._convert(model, inplace, debug, is_dynamic, is_child_module)
+    def convert(self, model, inplace=False, debug=False, is_dynamic=False, is_standalone_module=False):
+        quantized = self._convert(model, inplace, debug, is_dynamic, is_standalone_module)
         if not debug:
             quantized = self._fold_weight(quantized)
         return quantized
