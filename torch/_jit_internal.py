@@ -8,7 +8,6 @@ import contextlib
 import collections
 import enum
 import inspect
-import math
 import weakref
 import warnings
 import torch
@@ -878,7 +877,7 @@ def _is_exception(obj):
     return issubclass(obj, Exception)
 
 def safe_unwrap(obj):
-    if getattr(obj, "__wrapped__", None):
-        return inspect.unwrap(obj)
+    if obj is torch.ops:
+        return obj
 
-    return obj
+    return inspect.unwrap(obj)
