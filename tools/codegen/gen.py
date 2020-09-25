@@ -816,7 +816,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
 @with_native_function
 def compute_registration_declarations(f: NativeFunction) -> str:
-    name = cpp.name(f.func)
+    name = dispatcher.name(f.func)
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
     args_str = ', '.join(map(str, args))
@@ -1131,7 +1131,9 @@ def main() -> None:
                 gen_per_op_registration_filename(name), 'PerOpRegistration.cpp', computePerOpRegistration)
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
-    cpu_fm.write('RegistrationDeclarations.h', lambda: ''.join(list(map(compute_registration_declarations, native_functions))))
+    cpu_fm.write('RegistrationDeclarations.h', lambda: {
+        'registration_declarations': list(map(compute_registration_declarations, native_functions)),
+    })
 
     if options.output_dependencies:
         cpu_fm.write_outputs(options.output_dependencies)
