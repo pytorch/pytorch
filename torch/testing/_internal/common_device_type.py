@@ -522,20 +522,10 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
 
-
-# Only runs on cuda, and only run when there is enough GPU RAM
-def largeCUDATensorTest(size):
-    if isinstance(size, str):
-        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
-        size = 1024 ** 3 * int(size[:-2])
-    valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
-    return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
-
-
 def _has_sufficient_memory(device, size):
     if device.startswith('cuda'):
         return (torch.cuda.is_available() and
-                torch.cuda.get_device_properties(0).total_memory >= size)
+                torch.cuda.get_device_properties(0).total_memory >= size * 1.1)
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 
