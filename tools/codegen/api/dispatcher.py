@@ -72,7 +72,8 @@ def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
             for la in legacy_dispatcher.arguments(func)
         ]
 
-class ProcessTensoroptions:
+class ProcessTensoroptions(Enum):
+    # TODO GATHER is only needed for non-c10-full ops, remove later.
     GATHER = 0
     SCATTER = 1
     PASS_THROUGH = 2
