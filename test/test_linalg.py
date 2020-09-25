@@ -181,6 +181,16 @@ class TestLinalg(TestCase):
         with self.assertRaises(RuntimeError):
             op(t)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.double)
+    def test_kron(self, device, dtype):
+        a = torch.rand((4,), dtype=dtype, device=device)
+        b = torch.rand((5,), dtype=dtype, device=device)
+
+        expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+        actual = torch.kron(a, b)
+        self.assertEqual(actual, expected)
+
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
     @skipCUDAIfNoMagma

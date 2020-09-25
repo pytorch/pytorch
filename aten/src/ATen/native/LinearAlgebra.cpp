@@ -1686,5 +1686,55 @@ Tensor chain_matmul(TensorList matrices) {
   }
 }
 
+/*
+Calculates the Kronecker product between two Tensors.
+*/
+Tensor kron(const Tensor& a, const Tensor& b) {
+  // TODO: Rewrite the following comment.
+  /*
+  We can obtain the kron result using tensordot or einsum.
+  In einsum notation suppose we have a with dim 4 and b with dim 2
+  the result of below tensordot is einsum 0123, 45 -> 012345.
+  To obtain the correct kron we need to permute and reshape the array.
+  The permutation rule is the following: going from right to left
+  take axes in turn to form the permutation
+  with our example the correct permutation is 012435 and
+  the kron shape is (shape_a[0], shape_a[1], shape_a[3]*shape_b[0], shape_a[4]*shape_b[1])
+  */
+  std::vector<int64_t> a_sizes = a.sizes().vec();
+  std::vector<int64_t> b_sizes = b.sizes().vec();
+  int64_t a_ndim = a.dim();
+  int64_t b_ndim = b.dim();
+
+  std::vector<int64_t> kron_permutation(a_ndim+b_ndim);
+  std::iota(std::begin(kron_permutation), std::end(kron_permutation), 0);
+  for (int64_t i = 1; i < b_ndim; i+=2) {
+    std::swap(kron_permutation[a_ndim+b_ndim-i-1], kron_permutation[a_ndim+b_ndim-i-2]);
+    i++;
+  }
+
+  int64_t res_ndim = a_ndim > b_ndim ? a_ndim : b_ndim;
+  std::vector<int64_t> res_shape(res_ndim);
+  for (int64_t i = 0; i < res_ndim; i++) {
+    if (a_ndim == b_ndim) {
+      res_shape[res_ndim-1-i] = a_sizes[a_ndim-1-i] * b_sizes[b_ndim-1-i];
+    }
+    else if (i >= b_ndim) {
+      res_shape[res_ndim-1-i] = a_sizes[a_ndim-1-i];
+    }
+    else {
+      res_shape[res_ndim-1-i] = b_sizes[b_ndim-1-i];
+    }
+  }
+
+  Tensor result = at::tensordot(a, b, {}, {});
+  // Step 2: now permute result
+  result = result.permute(kron_permutation);
+  // Step 3: reshape
+  result = result.reshape(res_shape);
+
+  return result;
+}
+
 } // namespace native
 } // namespace at

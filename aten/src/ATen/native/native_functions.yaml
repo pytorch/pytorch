@@ -1944,6 +1944,9 @@
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
+- func: kron(Tensor self, Tensor other) -> Tensor
+  variants: function
+
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
