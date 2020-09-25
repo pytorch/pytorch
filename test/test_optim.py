@@ -297,6 +297,9 @@ class TestOptim(TestCase):
             )
 
     def test_multi_tensor_optimizers(self):
+        if not torch.cuda.is_available():
+            return
+
         orig_optimizers = [optim.Adam, optim.AdamW,
                            optim.SGD, optim.RMSprop,
                            optim.Rprop, optim.ASGD,
