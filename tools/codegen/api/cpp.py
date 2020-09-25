@@ -1,7 +1,10 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
 import tools.codegen.local as local
+from tools.codegen.api import dispatcher
 from typing import Optional, Sequence, Union, Callable, List
+import copy
+import dataclasses
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -195,9 +198,87 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
     else:
         assert_never(a)
 
-def arguments(
-    func: FunctionSchema, *, method: bool = False, gathered: bool = False,
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
+@dataclass(frozen=True)
+class CppSignature:
+    arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]
+
+    def cpp_arguments(self) -> Sequence[CppArgument]:
+        return list(map(argument, self.arguments))
+
+    # Return arguments as a comma separated list, i.e. like they would be in a C++
+    # function signature. Include default values for arguments.
+    def cpp_arguments_str(self) -> str:
+        return ', '.join(map(str, self.cpp_arguments()))
+
+    # Return a copy of the CppSignature with the `this` argument removed
+    def exclude_this(self) -> 'CppSignature':
+        return CppSignature(
+            arguments=[a for a in self.arguments if not isinstance(a, ThisArgument)]
+        )
+
+    # Return a copy of the CppSignature with all default values removed from the signature
+    def no_defaults(self) -> 'CppSignature':
+        arguments: List[Union[Argument, TensorOptionsArguments, ThisArgument]] = []
+        for argument in self.arguments:
+            if isinstance(argument, Argument) or isinstance(argument, ThisArgument):
+                arguments.append(dataclasses.replace(
+                    argument,
+                    default=None))
+            elif isinstance(argument, TensorOptionsArguments):
+                arguments.append(dataclasses.replace(
+                    argument,
+                    dtype=dataclasses.replace(argument.dtype, default=None),
+                    layout=dataclasses.replace(argument.layout, default=None),
+                    device=dataclasses.replace(argument.device, default=None),
+                    pin_memory=dataclasses.replace(argument.pin_memory, default=None),
+                ))
+            else:
+                raise "Unhandled case"
+        return CppSignature(arguments=arguments)
+
+    # Return a string with a comma separated list of expressions that could be used
+    # to call this operator. This can be used to generate code that wraps operators
+    # and calls back into them. The process_tensoroptions argument determines how
+    # tensor options should be treated. They can be
+    # - PASS_THROUGH: Don't do anything, just handle them as regular arguments
+    # - SCATTER: Expect a `TensorOptions options` in the scope and scatter it into `options.dtype, ...`
+    # - GATHER: Expect `dtype, ...` in the scope and gather them into a TensorOptions for calling
+    def exprs_str(self, process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH) -> str:
+        args = self.cpp_arguments()
+        exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=process_tensoroptions)
+        return ', '.join(map(lambda a: a.expr, exprs))
+
+    def types_str(self) -> str:
+        args = self.cpp_arguments()
+        exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+        return ', '.join(map(lambda a: a.type, exprs))
+
+@dataclass(frozen=True)
+class CppBinding:
+    # arguments contains the arguments for the C++ signature as it is represented
+    # in the JIT schema.
+    signature: CppSignature
+
+    # gathered_signature is an alternative C++ signature in which TensorOptions are
+    # gathered into one TensorOptions object instead of being scattered into
+    # ScalarType, Layout, Device. This is only present for factory operators,
+    # other operators have this set to None. This can be used to generate a
+    # convenience API in the C++ frontend so users can call using TensorOptions objects.
+    gathered_signature: Optional[CppSignature]
+
+    # If it is a factory op, this returns the arguments for the convenience API
+    # that takes TensorOptions. If it is not a factory op and doesn't have
+    # a gathered signature, then this returns the regular signature instead.
+    def signature_prefer_gathered(self) -> CppSignature:
+        if self.gathered_signature is not None:
+            return self.gathered_signature
+        else:
+            return self.signature
+
+
+def binding(
+    func: FunctionSchema, *, method: bool = False,
+) -> CppBinding:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
     args.extend(func.out_arguments)
 
@@ -206,40 +287,48 @@ def arguments(
     else:
         args.extend(func.arguments)
 
-    if gathered:
-        # group up arguments for tensor options
+    gathered_args = copy.deepcopy(args)
 
-        def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
-            return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
-        predicates = [  # order matters
-            pred('dtype', Type.parse('ScalarType')),
-            pred('layout', Type.parse('Layout')),
-            pred('device', Type.parse('Device')),
-            pred('pin_memory', Type.parse('bool')),
-        ]
+    # group up arguments for tensor options
+    def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
+        return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
+    predicates = [  # order matters
+        pred('dtype', Type.parse('ScalarType')),
+        pred('layout', Type.parse('Layout')),
+        pred('device', Type.parse('Device')),
+        pred('pin_memory', Type.parse('bool')),
+    ]
 
-        i = 0
-        while i < len(func.kwarg_only_arguments):
-            # If there is enough space...
-            if i <= len(func.kwarg_only_arguments) - len(predicates):
-                # And the next len(predicates) arguments look like TensorOptions arguments
-                if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
-                    # Group them together as one argument
-                    args.append(TensorOptionsArguments(
-                        dtype=func.kwarg_only_arguments[i],
-                        layout=func.kwarg_only_arguments[i + 1],
-                        device=func.kwarg_only_arguments[i + 2],
-                        pin_memory=func.kwarg_only_arguments[i + 3],
-                    ))
-                    i += len(predicates)
-                    continue
-            args.append(func.kwarg_only_arguments[i])
-            i += 1
+    has_tensoroptions_argument = False
+    i = 0
+    while i < len(func.kwarg_only_arguments):
+        # If there is enough space...
+        if i <= len(func.kwarg_only_arguments) - len(predicates):
+            # And the next len(predicates) arguments look like TensorOptions arguments
+            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
+                has_tensoroptions_argument = True
+                # Group them together as one argument
+                gathered_args.append(TensorOptionsArguments(
+                    dtype=func.kwarg_only_arguments[i],
+                    layout=func.kwarg_only_arguments[i + 1],
+                    device=func.kwarg_only_arguments[i + 2],
+                    pin_memory=func.kwarg_only_arguments[i + 3],
+                ))
+                i += len(predicates)
+                continue
+        gathered_args.append(func.kwarg_only_arguments[i])
+        i += 1
+
+    args.extend(func.kwarg_only_arguments)
+
+    if has_tensoroptions_argument:
+        return CppBinding(
+            signature=CppSignature(arguments=args),
+            gathered_signature=CppSignature(arguments=gathered_args),
+        )
     else:
-        args.extend(func.kwarg_only_arguments)
-
-    return args
-
-# Convert arguments to C++ API form
-def cpp_arguments(func: FunctionSchema, *, method: bool = False, gathered: bool = False) -> Sequence[CppArgument]:
-    return list(map(argument, arguments(func, method=method, gathered=gathered)))
+        assert gathered_args == args
+        return CppBinding(
+            signature=CppSignature(arguments=args),
+            gathered_signature=None,
+        )
