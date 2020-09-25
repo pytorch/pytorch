@@ -102,6 +102,10 @@ allow_list = [
     ("aten::_addr", datetime.date(2020, 10, 31)),
     ("aten::_addr_", datetime.date(2020, 10, 31)),
     ("aten::_addr.out", datetime.date(2020, 10, 31)),
+    ("aten::_foreach_add", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_div", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
 ]
 
 
