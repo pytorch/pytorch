@@ -34,10 +34,10 @@ from .pattern_utils import (
     get_dynamic_quant_patterns,
 )
 
-from .traceable_custom_module import (
-    is_traceable_custom_module,
-    mark_observed_traceable_custom_module,
-    is_observed_traceable_custom_module
+from .standalone_module import (
+    is_standalone_module,
+    mark_observed_standalone_module,
+    is_observed_standalone_module,
 )
 
 from .quantization_patterns import *
@@ -387,7 +387,7 @@ class Quantizer:
                 # index for input of custom module that needs to be observed in parent
                 child_module_input_idxs = None
                 if node.op == 'call_module' and \
-                   is_traceable_custom_module(self.modules[node.target]):
+                   is_standalone_module(self.modules[node.target]):
                     # observe custom module
                     custom_module = self.modules[node.target]
                     traced_custom_module = symbolic_trace(custom_module)
@@ -397,7 +397,7 @@ class Quantizer:
                         prepare = torch.quantization.prepare_child_module_fx
                     observed_custom_module = prepare(traced_custom_module, {'': qconfig})
                     observed_custom_module.qconfig = qconfig
-                    mark_observed_traceable_custom_module(observed_custom_module)
+                    mark_observed_standalone_module(observed_custom_module)
                     child_module_input_idxs = observed_custom_module._observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
@@ -428,7 +428,7 @@ class Quantizer:
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed_node_names_set:
                         observed_node_names_set.add(node.name)
-                elif isinstance(obj, TraceableCustomModuleQuantizeHandler):
+                elif isinstance(obj, StandaloneModuleQuantizeHandler):
                     assert node.op == 'call_module'
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
@@ -637,8 +637,9 @@ class Quantizer:
                     result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
                 else:
+
                     result = obj.convert(self, node, load_arg)
-                    if node.op == 'call_module' and is_observed_traceable_custom_module(self.modules[node.target]):
+                    if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
                         quantized = self.modules[node.target]._output_is_observed
                     else:
                         quantized = True
@@ -843,12 +844,12 @@ class Quantizer:
         # add traceable custom modules to the match
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_traceable_custom_module(self.modules[node.target]) or
-                    is_observed_traceable_custom_module(self.modules[node.target])):
+               (is_standalone_module(self.modules[node.target]) or
+                    is_observed_standalone_module(self.modules[node.target])):
                 # add node to matched nodes
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
-                    node, [node], TraceableCustomModuleQuantizeHandler(self, node), custom_module_qconfig)
+                    node, [node], StandaloneModuleQuantizeHandler(self, node), custom_module_qconfig)
 
         return match_map
 
@@ -896,7 +897,7 @@ class Quantizer:
                     map_arg(matched[-1].kwargs, visit(matched[-1], qconfig))
                     # output
                     if node.op == 'call_module' and \
-                       is_traceable_custom_module(self.modules[node.target]):
+                       is_standalone_module(self.modules[node.target]):
                         # we don't insert observer for output of custom
                         # module
                         continue

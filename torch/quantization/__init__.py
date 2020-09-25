@@ -10,9 +10,9 @@ from .quantize_fx import *
 from .quantization_mappings import *
 from .fuser_method_mappings import *
 from .custom_module_class_mappings import *
-from .fx.traceable_custom_module import (
-    register_traceable_custom_module_class,
-    is_traceable_custom_module,
+from .fx.standalone_module import (
+    register_standalone_module_class,
+    is_standalone_module,
 )
 
 def default_eval_fn(model, calib_data):
@@ -51,8 +51,8 @@ _all__ = [
     'get_quantized_custom_module_class',
     'is_custom_module_class',
     'is_observed_custom_module',
-    'register_traceable_custom_module_class',
-    'is_traceable_custom_module',
+    'register_standalone_module_class',
+    'is_standalone_module',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',

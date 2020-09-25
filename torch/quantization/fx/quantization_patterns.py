@@ -531,19 +531,19 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-class TraceableCustomModuleQuantizeHandler(QuantizeHandler):
+class StandaloneModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         assert node.op == 'call_module'
         if quantizer.is_dynamic_quant:
             convert = torch.quantization.convert_dynamic_child_module_fx
         else:
             convert = torch.quantization.convert_child_module_fx
-        observed_custom_module = quantizer.modules[node.target]
-        quantized_custom_module = convert(observed_custom_module, debug=debug)
+        observed_standalone_module = quantizer.modules[node.target]
+        quantized_standalone_module = convert(observed_standalone_module, debug=debug)
         parent_name, name = _parent_name(node.target)
         # update the modules dict
-        setattr(quantizer.modules[parent_name], name, quantized_custom_module)
-        quantizer.modules[node.target] = quantized_custom_module
+        setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
+        quantizer.modules[node.target] = quantized_standalone_module
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 

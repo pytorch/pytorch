@@ -24,8 +24,8 @@ from torch.quantization import (
     prepare_qat_fx,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
-    register_traceable_custom_module_class,
-    is_traceable_custom_module,
+    register_standalone_module_class,
+    is_standalone_module,
 )
 
 from torch.quantization import (
@@ -324,8 +324,8 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_static_fx(m)
         m(dict_input)
 
-    def test_traceable_custom_module_class(self):
-        class CustomModule(torch.nn.Module):
+    def test_standalone_module_class(self):
+        class StandaloneModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -337,20 +337,20 @@ class TestQuantizeFx(QuantizationTestCase):
             def is_leaf_module(self, m, module_qualified_name):
                 return (m.__module__.startswith('torch.nn') and
                         not isinstance(m, torch.nn.Sequential)) or \
-                    isinstance(m, CustomModule)
+                    isinstance(m, StandaloneModule)
 
-        register_traceable_custom_module_class(CustomModule)
-        self.assertTrue(is_traceable_custom_module(CustomModule()))
+        register_standalone_module_class(StandaloneModule)
+        self.assertTrue(is_standalone_module(StandaloneModule()))
 
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.custom = CustomModule()
+                self.standalone = StandaloneModule()
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.custom(x)
+                x = self.standalone(x)
                 return x
 
         class RefM(torch.nn.Module):
