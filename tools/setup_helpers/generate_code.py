@@ -2,9 +2,6 @@ import argparse
 import os
 import sys
 
-from tools.autograd.utils import load_op_list_and_strip_overload
-from tools.codegen.selective_build.selector import *
-
 source_files = {'.py', '.cpp', '.h'}
 
 DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
@@ -28,13 +25,12 @@ def generate_code(ninja_global=None,
                   subset=None,
                   disable_autograd=False,
                   force_schema_registration=False,
-                  operator_selector=SelectiveBuilder.get_nop_selector()):
-    # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
+                  operator_selector=None):
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -54,6 +50,9 @@ def generate_code(ninja_global=None,
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
+
+    if operator_selector is None:
+        operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
 
@@ -77,6 +76,26 @@ def generate_code(ninja_global=None,
             declarations_path or DECLARATIONS_PATH,
             python_install_dir,
             autograd_dir)
+
+def get_selector(selected_op_list, selected_op_list_path):
+    # cwrap depends on pyyaml, so we can't import it earlier
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root)
+    from tools.autograd.utils import load_op_list_and_strip_overload
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
+    selected_op_list = load_op_list_and_strip_overload(
+        selected_op_list,
+        selected_op_list_path,
+    )
+
+    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
+    if selected_op_list is not None:
+        selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
+            selected_op_list
+        )
+
+    return selector
 
 
 def main():
@@ -114,17 +133,6 @@ def main():
     )
     options = parser.parse_args()
 
-    selected_op_list = load_op_list_and_strip_overload(
-        options.selected_op_list,
-        options.selected_op_list_path,
-    )
-
-    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
-    if selected_op_list is not None:
-        selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            selected_op_list
-        )
-
     generate_code(
         options.ninja_global,
         options.declarations_path,
@@ -133,7 +141,7 @@ def main():
         options.subset,
         options.disable_autograd,
         options.force_schema_registration,
-        operator_selector=selector,
+        operator_selector=get_selector(options.selected_op_list, options.selected_op_list_path),
     )
 
 
