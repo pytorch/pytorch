@@ -91,7 +91,9 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], 
                 DispatcherExpr(type=argument_type(ta.pin_memory), expr=f'{a.name}.pinned_memory_opt()'),  # weird discrep
             ]
         elif process_tensoroptions == ProcessTensoroptions.GATHER:
-            return [DispatcherExpr(type='const TensorOptions &', expr="TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)")]
+            return [DispatcherExpr(
+                        type='const TensorOptions &',
+                        expr="TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)")]
         else:
             assert process_tensoroptions == ProcessTensoroptions.PASS_THROUGH
             return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
@@ -119,11 +121,19 @@ def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) ->
         process_tensoroptions = ProcessTensoroptions.SCATTER
     else:
         process_tensoroptions = ProcessTensoroptions.PASS_THROUGH
-    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args], process_tensoroptions=process_tensoroptions)
+    return cpparguments_exprs([CppArgument(type=a.type,
+                                           name=a.name,
+                                           default=None,
+                                           argument=a.argument) for a in args],
+                              process_tensoroptions=process_tensoroptions)
 
 def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
     if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         process_tensoroptions = ProcessTensoroptions.SCATTER
     else:
         process_tensoroptions = ProcessTensoroptions.PASS_THROUGH
-    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args], process_tensoroptions=process_tensoroptions)
+    return cpparguments_exprs([CppArgument(type=a.type,
+                                           name=a.name,
+                                           default=None,
+                                           argument=a.argument) for a in args],
+                              process_tensoroptions=process_tensoroptions)
