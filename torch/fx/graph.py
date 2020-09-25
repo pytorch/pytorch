@@ -148,7 +148,15 @@ class Graph:
             # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
             name = node.name
         else:
-            name = self._name(node.target)
+            sanitized_name = node.name
+            if '_' in node.name:
+                base, maybe_idx = node.name.rsplit('_', 1)
+                try:
+                    int(maybe_idx)
+                    sanitized_name = base
+                except:
+                    pass
+            name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
