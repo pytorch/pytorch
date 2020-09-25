@@ -89,10 +89,7 @@ Reducer::Reducer(
       for (size_t variable_index = 0; variable_index < variable_count;
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
-        const auto index = VariableIndex{
-            .replica_index = replica_index,
-            .variable_index = variable_index,
-        };
+        const auto index = VariableIndex(replica_index, variable_index);
 
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
@@ -100,15 +97,19 @@ Reducer::Reducer(
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
 
+#ifndef _WIN32
         using torch::distributed::autograd::ThreadLocalDistAutogradContext;
+#endif
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<torch::autograd::utils::LambdaPostHook>(
                     [=](const torch::autograd::variable_list& outputs,
                         const torch::autograd::variable_list& /* unused */) {
+#ifndef _WIN32
                       this->rpc_context_.set(
                           ThreadLocalDistAutogradContext::getContextPtr());
+#endif
                       this->autograd_hook(index);
                       return outputs;
                     })),
@@ -477,10 +478,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
     const auto variable_count = replicas_[replica_index].size();
     for (size_t variable_index = 0; variable_index < variable_count;
          ++variable_index) {
-      const auto index = VariableIndex{
-          .replica_index = replica_index,
-          .variable_index = variable_index,
-      };
+      const auto index = VariableIndex(replica_index, variable_index);
       push_rebuilt_params(index);
     }
   }
@@ -850,10 +848,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] = VariableLocator{
-          .bucket_index = bucket_index,
-          .intra_bucket_index = intra_bucket_index++,
-      };
+      variable_locators_[variable_index] = VariableLocator(
+        bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
@@ -1235,7 +1231,9 @@ void Reducer::runGradCallbackForVariable(
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
+#ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+#endif
   }
 }
 
