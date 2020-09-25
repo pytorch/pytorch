@@ -5,7 +5,6 @@ from torch.quantization import (
     PerChannelMinMaxObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
-    MinMaxDynamicQuantObserver,
     HistogramObserver,
     RecordingObserver,
     PlaceholderObserver,
@@ -265,25 +264,6 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           reduce_range=st.booleans())
-    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
-
-        X, (scale, zero_point, torch_type) = X
-        x = torch.from_numpy(X)
-
-        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
-
-        result = obs(x)
-        qparams = obs.calculate_qparams()
-        ref = torch._choose_qparams_per_tensor(x, reduce_range)
-
-        self.assertEqual(ref[0], qparams[0])
-        self.assertEqual(ref[1], qparams[1])
-
-
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -394,7 +374,7 @@ class TestObserver(QuantizationTestCase):
 
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 
@@ -423,7 +403,7 @@ class TestObserver(QuantizationTestCase):
             [device_cpu, device_cuda],
             [device_cpu, device_cuda],
             [MinMaxObserver, MovingAverageMinMaxObserver,
-             MinMaxDynamicQuantObserver, PerChannelMinMaxObserver,
+             PerChannelMinMaxObserver,
              MovingAveragePerChannelMinMaxObserver,
              # TODO: enable this (separate PR)
              # HistogramObserver,
@@ -1417,7 +1397,6 @@ class TestDistributed(QuantizationTestCase):
         observer_types = [
             torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.MinMaxDynamicQuantObserver.with_args(dtype=torch.qint8),
             torch.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
@@ -1535,6 +1514,21 @@ class TestDistributed(QuantizationTestCase):
             self.assertTrue(
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
+
+    def test_syncbn_preserves_qconfig(self):
+        """
+        Makes sure that if a BatchNorm is not fused and a qconfig exists,
+        convering the module to SyncBatchNorm preserves the qconfig.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.BatchNorm2d(1),
+        )
+        m[1].qconfig = torch.quantization.default_qconfig
+        m = torch.nn.SyncBatchNorm.convert_sync_batchnorm(m)
+        self.assertTrue(
+            hasattr(m[1], "qconfig"),
+            "missing qconfig after SyncBatchNorm conversion")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
