@@ -609,6 +609,40 @@ void testExprSplitWithMask01() {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
+// Tests the case where we split a loop cleanly multiple times, we should not
+// insert any masks.
+void testExprSplitWithMaskRepeatedNoMask() {
+  KernelScope kernel_scope;
+  const int M = 64;
+  Buffer a_buf("a", kFloat, {M});
+  Buffer b_buf("b", kFloat, {M});
+  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+    return a_buf(m) + b_buf(m) + 1.0f;
+  });
+
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  For *outer, *mid, *inner;
+  l.splitWithMask(loops[0], 4, &outer, &inner);
+  l.splitWithMask(outer, 4, &outer, &mid);
+
+  Stmt* stmt1 = IRSimplifier::simplify(l.root_stmt());
+  std::ostringstream oss;
+  oss << *stmt1;
+
+  // Two splits mean 3 loops, but should need no masks in this case.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK-NOT: if (
+# CHECK:   for (
+# CHECK-NOT: if (
+# CHECK:     for (
+# CHECK-NOT: if (
+# CHECK:       f[)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 void testSplitWithTailWithLoopOptions() {
   KernelScope kernel_scope;
   const int M = 21;

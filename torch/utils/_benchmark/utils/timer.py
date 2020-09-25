@@ -20,6 +20,8 @@ else:
 
 
 class Timer(object):
+    _timer_cls = timeit.Timer
+
     def __init__(
         self,
         stmt="pass",
@@ -41,7 +43,7 @@ class Timer(object):
         globals = dict(globals or {})
         globals.setdefault("torch", torch)
 
-        self._timer = timeit.Timer(stmt=stmt, setup=setup, timer=timer, globals=globals)
+        self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
         self._task_spec = common.TaskSpec(
             stmt=stmt,
             setup=setup,
