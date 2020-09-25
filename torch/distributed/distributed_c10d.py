@@ -2032,6 +2032,6 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    pg.barrier()
+    barrier()
 
     return pg
