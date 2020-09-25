@@ -1126,6 +1126,16 @@ struct PythonPrintImpl {
         stmt << useOf(node->input(0)) << ".tolist()"
              << ")";
       } break;
+      case prim::EnumValue:
+        // Note: This CAN NOT be printed as raw operator ops.prim.EnumValue
+        // because its return type depends on type of enum and must be further
+        // resolved, but ops.prim.EnumValue construction does not provide such
+        // functionality.
+        stmt << "(" << useOf(node->input()) << ").value";
+        break;
+      case prim::EnumName:
+        stmt << "(" << useOf(node->input()) << ").name";
+        break;
       default: {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
