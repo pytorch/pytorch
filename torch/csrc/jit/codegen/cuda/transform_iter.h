@@ -154,6 +154,8 @@ class TORCH_CUDA_API BestEffortReplay {
   size_t counter = 0;
 
  public:
+  // replay_map: mapping of target root domains to corresponding
+  // replay root domains
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,

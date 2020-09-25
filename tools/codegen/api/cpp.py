@@ -71,9 +71,6 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
     if r is not None:
         return r
 
-    if str(t) == 'Tensor' and mutable and local.hack_const_mutable_self():
-        return 'const Tensor &'
-
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
