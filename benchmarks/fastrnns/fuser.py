@@ -6,7 +6,7 @@ def set_fuser(fuser_name, executor_name):
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_profiling_mode(True)
         torch._C._jit_set_bailout_depth(20)
-        torch._C._jit_set_num_profiled_runs(2)
+        torch._C._jit_set_num_profiled_runs(1)
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
