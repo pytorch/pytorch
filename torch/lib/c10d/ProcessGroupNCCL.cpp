@@ -196,6 +196,7 @@ ncclResult_t ncclAlltoallv(
     ncclDataType_t type,
     ncclComm_t comm,
     cudaStream_t stream) {
+  std::cout << "ncclAlltoallv?" << std::endl;
   int numranks;
   C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
   C10D_NCCL_CHECK(ncclGroupStart());
