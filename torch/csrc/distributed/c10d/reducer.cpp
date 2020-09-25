@@ -710,8 +710,10 @@ void Reducer::initialize_buckets(
   // bucket_view, then it needs to check rpc context ptr is nullptr or not,
   // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
   // mutate grad in rpc context.
+#ifndef _WIN32
   using torch::distributed::autograd::ThreadLocalDistAutogradContext;
   this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
+#endif
 
   // This shouldn't be called if we're expecting autograd hooks to fire.
   TORCH_CHECK(
