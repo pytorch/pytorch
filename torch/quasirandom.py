@@ -56,7 +56,7 @@ class SobolEngine(object):
 
         self.sobolstate = torch.zeros(dimension, self.MAXBIT, device=cpu, dtype=torch.long)
         torch._sobol_engine_initialize_state_(self.sobolstate, self.dimension)
-
+        
         if self.scramble:
             g: Optional[Any] = None
             if self.seed is not None:
