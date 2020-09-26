@@ -143,7 +143,8 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    bool forceDisableProfiling) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
@@ -153,7 +154,7 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
   std::shared_ptr<FutureMessage> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
-  if (torch::autograd::profiler::profilerEnabled()) {
+  if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
     auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),

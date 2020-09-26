@@ -4,6 +4,7 @@ import itertools
 import os
 import inspect
 import logging
+import warnings
 
 import torch
 
@@ -315,30 +316,28 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
-        parameters_to_ignore (List[torch.nn.Parameter]): Parameters that should
-                                                         not be part of any
-                                                         synchronization in DDP,
-                                                         i.e. these parameters
-                                                         are entirely ignored in
-                                                         DDP logic. For example,
-                                                         if it is known that
-                                                         certain model parameters
-                                                         will not be used at all
-                                                         during training, or you
-                                                         want to handle gradient
-                                                         synchronization for
-                                                         certain parameters in a
-                                                         custom manner, then
-                                                         those parameters can be
-                                                         passed into this argument
-                                                         instead of setting
-                                                         ``find_unused_parameters=True``.
-                                                         In this case, performance
-                                                         is improved since using
-                                                         ``find_unused_parameters=True``
-                                                         would incur an extra autograd
-                                                         graph traversal every iteration.
-
+        gradient_as_bucket_view (bool): this is a prototype feature. When set to ``True``,
+                      gradients will be views pointing to different offsets of
+                      allreduce communication buckets. This can reduce peak memory
+                      usage, where the saved memory size will be equal to the total
+                      gradients size. Moreover, it avoids the overhead of copying
+                      between gradients and allreduce communication buckets.
+                      When gradients are views, ``detach_()`` cannot be called on the
+                      gradients. If hitting such errors, please fix it by referring to
+                      the :meth:`~torch.optim.Optimizer.zero_grad` function in
+                      ``torch/optim/optimizer.py`` as the solution.
+                      Warning! It is also found that ``gradient_as_bucket_view = true``
+                      does not work as expected when ``apex.amp`` is used for
+                      mixed precision training. ``apex.amp`` maintained stashed gradients
+                      that are used for unscaling gradients. These stashed gradients
+                      are pointed to gradients (will be communication buckets when
+                      ``gradient_as_bucket_view = true``) before starting new iteration.
+                      In new iteration, the communication buckets are mutated and thus
+                      these stashed gradients will be unexpectedly mutated as well,
+                      the unexpectedly muated stashed gradients may result in wrong
+                      results. To fix it, these stashed gradients should not be pointed
+                      to gradients, instead they should be copied from gradients when
+                      ``gradient_as_bucket_view = true``.
 
     Attributes:
         module (Module): the module to be parallelized
@@ -354,7 +353,7 @@ class DistributedDataParallel(Module):
                  bucket_cap_mb=25,
                  find_unused_parameters=False,
                  check_reduction=False,
-                 parameters_to_ignore=None):
+                 gradient_as_bucket_view=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -405,7 +404,12 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
-        self.parameters_to_ignore = parameters_to_ignore if parameters_to_ignore is not None else []
+        self.gradient_as_bucket_view = gradient_as_bucket_view
+        if hasattr(module, '_ddp_params_and_buffers_to_ignore'):
+            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
+        else:
+            self.parameters_to_ignore = []
+        print(f"DDP constructor: got params to ignore {self.parameters_to_ignore}")
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -425,20 +429,10 @@ class DistributedDataParallel(Module):
         self._ddp_init_helper()
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
-        if not self.parameters_to_ignore:
-            # Broadcast state dict if no parameters to ignore, otherwise filter out
-            # ignored parameters before broadcasting.
-            module_states = list(self.module.state_dict().values())
-        else:
-            module_states = []
-            # Have to use data ptrs since direct "is" comparison on the tensors
-            # won't work.
-            params_to_ignore_data_ptrs = set(
-                t.data_ptr() for t in self.parameters_to_ignore
-            )
-            for tensor in self.module.state_dict().values():
-                if tensor.data_ptr() not in params_to_ignore_data_ptrs:
-                    module_states.append(tensor)
+        module_states = []
+        for name, param in self.module.state_dict().items():
+            if name not in self.parameters_to_ignore:
+                module_states.append(param)
 
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
@@ -471,7 +465,6 @@ class DistributedDataParallel(Module):
 
         if self.device_ids and len(self.device_ids) > 1:
 
-            import warnings
             warnings.warn(
                 "Single-Process Multi-GPU is not the recommended mode for "
                 "DDP. In this mode, each DDP instance operates on multiple "
@@ -506,20 +499,30 @@ class DistributedDataParallel(Module):
             self._module_copies = [self.module]
 
         self.modules_params = [list(parameters(m)) for m in self._module_copies]
-        self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
-
-        def _should_ignore_param(p):
-            return any(p is ignore for ignore in self.parameters_to_ignore)
-
+        # Collect buffers for modules, filtering out buffers that should be ignored.
+        named_module_buffers = [
+            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
+            for m in self._module_copies
+        ]
+        self.modules_buffers = [
+            [
+                buffer
+                for (buffer, buffer_name) in module_buffers
+                if buffer_name not in self.parameters_to_ignore
+            ]
+            for module_buffers in named_module_buffers
+        ]
         # Build tuple of (module, parameter) for all parameters that require grads.
         modules_and_parameters = [
             [
                 (module, parameter)
-                for module in replica.modules()
+                for module_name, module in replica.named_modules()
                 for parameter in [
                     param
-                    for param in parameters(module, recurse=False)
-                    if param.requires_grad and not _should_ignore_param(param)
+                    # for name, param in named_parameters(module, recurse=False)
+                    for param_name, param in module.named_parameters(recurse=False)
+                    if param.requires_grad
+                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
                 ]
             ]
             for replica in self._module_copies
@@ -563,7 +566,8 @@ class DistributedDataParallel(Module):
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
-            self.find_unused_parameters)
+            self.find_unused_parameters,
+            self.gradient_as_bucket_view)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
@@ -628,7 +632,7 @@ class DistributedDataParallel(Module):
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, ones, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_join_divide_by_initial_world_size
             )
 
         # Calling _rebuild_buckets before forward compuation,
@@ -862,8 +866,20 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                # Schedules allreduce to match fwd pass allreduce in non-joined procs
+                i = 0
+                WARN_THRESHOLD = 1000
+                warnings.simplefilter("once")
                 while not all_procs_joined:
+                    if i > WARN_THRESHOLD:
+                        my_rank = dist.get_rank(self.process_group)
+                        warnings.warn(
+                            "Detected uneven input skew of greater "
+                            f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
+                            f"has at least {WARN_THRESHOLD} fewer inputs than "
+                            "other currently active ranks. This level of skew could "
+                            "lead to performance degradation during training."
+                        )
+                    # Schedules allreduce to match fwd pass allreduce in non-joined procs
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
                         all_procs_joined = True
@@ -900,6 +916,7 @@ class DistributedDataParallel(Module):
                             self._match_unused_params_allreduce()
                         # It will push rebuilt params only once during training period
                         self.reducer._push_all_rebuilt_params()
+                        i += 1
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
@@ -1107,3 +1124,12 @@ class DistributedDataParallel(Module):
             raise ValueError(
                 "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
             )
+
+    @staticmethod
+    def _set_params_and_buffers_to_ignore_for_model(
+        module, params_and_buffers_to_ignore
+    ):
+        # This is a workaround to set parameters and buffers DDP should ignore
+        # during synchronization. It will be removed when the API is finalized
+        # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
+        module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore

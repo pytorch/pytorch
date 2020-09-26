@@ -2096,6 +2096,14 @@ class DistributedTest:
                         param += param.grad
                     param.grad = None
 
+        def _model_step_with_zero_grad(self, model):
+            for param in model.parameters():
+                if param.grad is not None:
+                    with torch.no_grad():
+                        param += param.grad
+                    param.grad.requires_grad_(False)
+                    param.grad.zero_()
+
         def _prepare_dummy_data(self, local_bs):
             # global_bs for DDP should be divisible by WORLD_SIZE
             world_size = int(os.environ["WORLD_SIZE"])
@@ -2118,7 +2126,8 @@ class DistributedTest:
                 self.assertEqual(p_gpu, p_DDP)
 
         def _test_DDP_5iter(
-            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
+            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
+            offset=None, world_size=0, zero_grad=False
         ):
             for idx in range(5):
                 # single cpu/gpu training
@@ -2137,8 +2146,12 @@ class DistributedTest:
                 )
 
                 # Update weights and run a second iteration to shake out errors
-                self._model_step(model_base)
-                self._model_step(model_DDP)
+                if zero_grad:
+                    self._model_step_with_zero_grad(model_base)
+                    self._model_step_with_zero_grad(model_DDP)
+                else:
+                    self._model_step(model_base)
+                    self._model_step(model_DDP)
                 self._assert_equal_param(
                     list(model_base.parameters()), list(model_DDP.module.parameters())
                 )
@@ -2159,7 +2172,7 @@ class DistributedTest:
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
-        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
+        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None, gradient_as_bucket_view=False):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
@@ -2174,7 +2187,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(model)
             model_DDP.cuda(gpu_subset[0])
             model_DDP = nn.parallel.DistributedDataParallel(
-                model_DDP, device_ids=gpu_subset
+                model_DDP, device_ids=gpu_subset, gradient_as_bucket_view=gradient_as_bucket_view
             )
 
             # test serializable/unserializable
@@ -2196,14 +2209,11 @@ class DistributedTest:
                 local_bs,
                 rank,
                 global_bs,
-                True
+                True,
             )
             self._barrier()
 
-        @unittest.skipIf(
-            BACKEND == "nccl", "nccl does not support DDP on CPU models"
-        )
-        def test_DistributedDataParallelCPU(self):
+        def _test_DistributedDataParallelCPU(self, gradient_as_bucket_view=False):
             # Run a simple end to end DDP-CPU model, use result of single node
             # model as baseline
             group, group_id, rank = self._init_global_test()
@@ -2213,7 +2223,8 @@ class DistributedTest:
 
             # DDP-CPU training setup
             model_DDP = copy.deepcopy(model_base)
-            model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_DDP, gradient_as_bucket_view=gradient_as_bucket_view)
 
             # dummy data initialization
             local_bs = 2
@@ -2221,9 +2232,21 @@ class DistributedTest:
 
             # check two model parameters over 5 iterations
             self._test_DDP_5iter(
-                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
+                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False, zero_grad=True
             )
             self._barrier()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU(self):
+            self._test_DistributedDataParallelCPU()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU_grad_is_view(self):
+            self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -2287,6 +2310,25 @@ class DistributedTest:
             # test device_ids
             gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        @skip_if_rocm
+        def test_DistributedDataParallel_with_grad_is_view(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = list(rank_to_GPU[rank])
+            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, gradient_as_bucket_view=True)
+
+            # test output_device
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+
+            # test device_ids
+            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
         def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
             # Run a simple end to end DDP model, use result of single node model
@@ -3286,19 +3328,50 @@ class DistributedTest:
                     return x
 
             device_id = self.rank
-            # Ensure the test works for both find_unused_parameter settings.
-            for find_unused in [False, True]:
+            # Ensure the test works for both find_unused_parameter and broadcast_buffer settings.
+            print("Rank {self.rank} entering test.")
+            for i, (find_unused, broadcast_buffers) in enumerate(
+                itertools.product([True, False], [True, False])
+            ):
+                print(f"==========Iteration {i} ===========")
                 model = TestModel(self.rank).float().to(device_id)
+                model.fc2.register_buffer(
+                    "ignore_buffer", torch.zeros(5 + self.rank, device=self.rank)
+                )
                 proxy_params = list(model.fc2.parameters())
+                proxy_buffers = list(model.fc2.buffers())
+                model_fc2_name = [
+                    module_name
+                    for module_name, module in model.named_modules()
+                    if module is model.fc2
+                ][0]
+                proxy_param_names = [
+                    f"{model_fc2_name}.{param_name}"
+                    for param_name, _ in model.fc2.named_parameters()
+                ]
+                proxy_buffer_names = [
+                    f"{model_fc2_name}.{buf_name}"
+                    for buf_name, _ in model.fc2.named_buffers()
+                ]
+                print(
+                    f"Rank {self.rank} got proxy_param_names {proxy_param_names} and proxy_buf_names {proxy_buffer_names}"
+                )
+                # Specify that we should ignore proxy_params since it will be
+                # materialized later.
+                torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                    model, proxy_param_names + proxy_buffer_names
+                )
+
+                print(
+                    f"Rank {self.rank} Running with find_unused={find_unused} brodcast_buffers={broadcast_buffers}."
+                )
                 ddp = torch.nn.parallel.DistributedDataParallel(
                     model,
                     device_ids=[device_id],
-                    # Specify that we should ignore proxy_params since it will be
-                    # materialized later.
-                    parameters_to_ignore=proxy_params,
-                    find_unused_parameters=find_unused,
+                    find_unused_parameters=False,
+                    broadcast_buffers=True,
                 )
-
+                print(f"Rank {self.rank} completed DDP init.")
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
@@ -3311,13 +3384,21 @@ class DistributedTest:
                     local_model(inp).sum().backward()
                     # materialized param grad is not touched by DDP, so its grad should
                     # be the same as if running locally.
-                    for materialized_param, local_param in zip(ddp.module.fc2.parameters(), local_model.fc2.parameters()):
+                    for materialized_param, local_param in zip(
+                        ddp.module.fc2.parameters(), local_model.fc2.parameters()
+                    ):
                         self.assertEqual(materialized_param.grad, local_param.grad)
 
                     # fc1 parameter grad should still be different, due to allreduce.
-                    for synced_param, local_param in zip(ddp.module.fc1.parameters(), local_model.fc1.parameters()):
+                    for synced_param, local_param in zip(
+                        ddp.module.fc1.parameters(), local_model.fc1.parameters()
+                    ):
                         self.assertFalse(synced_param.grad == local_param.grad)
 
                     # Proxy module grad should not be touched
                     for proxy_param in proxy_params:
                         self.assertTrue(proxy_param.grad is None)
+
+                # Synchronize since we run multiple iterations of this test, to
+                # isolate failure hangs.
+                torch.cuda.synchronize(device=self.rank)

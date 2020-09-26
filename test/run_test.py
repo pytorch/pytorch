@@ -41,6 +41,7 @@ TESTS = [
     'test_foreach',
     'test_indexing',
     'test_jit',
+    'test_linalg',
     'test_logging',
     'test_mkldnn',
     'test_multiprocessing',
@@ -89,7 +90,8 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
-    'test_functional_autograd_benchmark'
+    'test_functional_autograd_benchmark',
+    'test_package',
 ]
 
 WINDOWS_BLOCKLIST = [
