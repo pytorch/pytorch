@@ -53,7 +53,6 @@ if __name__ == "__main__":
     else:
         outfile = open(args.outfile, "a")
 
-    print(args, file=outfile)
     test_count = args.test_count
     m = args.m
     nnz_ratio = args.nnz_ratio
