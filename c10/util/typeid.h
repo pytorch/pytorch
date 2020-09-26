@@ -490,7 +490,9 @@ private:
   [[noreturn]] static void error_unsupported_typemeta(caffe2::TypeMeta dtype);
 
   // hard limit number of registered types
-  static constexpr size_t MaxTypeIndex = UINT8_MAX;
+  // note: constexpr provokes Windows compilation error "member may not be initialized"
+  // static constexpr size_t MaxTypeIndex = UINT8_MAX;
+  #define MaxTypeIndex UINT8_MAX
 
   static std::atomic<uint16_t> nextTypeIndex;
 
