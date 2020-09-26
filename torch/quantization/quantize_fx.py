@@ -25,8 +25,11 @@ def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant, is_standa
     Args:
       graph_module, qconfig_dict, inplace: see docs for :func:`~torch.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
-      quantizing a standalone module or not, the way we quantize standalone module
-      is described in :func:`~torch.quantization.prepare_standalone_module_fx`
+      quantizing a standalone module or not, a standalone module
+      is a submodule of the parent module that is not inlined in the
+forward graph of the parent module,
+      the way we quantize standalone module is described in:
+      :func:`~torch.quantization._prepare_standalone_module_fx`
     """
     _check_is_graph_module(graph_module)
     graph_module = fuse_fx(graph_module, inplace)
@@ -36,13 +39,14 @@ def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic_quant, is_standa
 
 def _prepare_standalone_module_fx(graph_module, qconfig_dict, inplace=False):
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
-    parent module. Used in custom module support
+    parent module.
+    standalone_module means it a submodule that is not inlined in parent module,
+        and will be quantized separately as one unit.
 
     input of the module is quantized in parent module, output of the module
     is quantized in the standalone module.
-    Returns:
-      model(GraphModule): prepared standalone module with following attributes:
-        _observed_input_idxs(List[Int]): a list of indexs for the graph inputs that
+    Extra attributes in output GraphModule while preparing a standalone module:
+        _standalone_module_observed_input_idxs(List[Int]): a list of indexs for the graph inputs that
                                          needs to be observed in parent module
         _output_is_observed(Bool): a boolean variable indicate whether the output of the
                                    custom module is observed or not
@@ -117,12 +121,12 @@ def _convert_standalone_module_fx(graph_module, inplace=False, debug=False):
     r""" [Internal use only] Convert a model produced by :func:`~torch.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
-    The inputs will be quantized by parent module, checks `_observed_input_idxs` of
+    The inputs will be quantized by parent module, checks `_standalone_module_observed_input_idxs` of
     input model and will treat these inputs as quantized
     also will not dequantize the final output
     Return:
       A quantized standalone module which accepts quantized input(if needed)
-      and produces quantized output
+      and produces quantized output (if needed).
     """
     return _convert_fx(graph_module, inplace, debug, is_dynamic_quant=False, is_standalone_module=True)
 
