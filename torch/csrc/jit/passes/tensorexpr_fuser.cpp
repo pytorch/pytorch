@@ -386,7 +386,7 @@ class TensorExprFuser {
       auto shapes = fmap(tensor_inputs, [&](Value* v) {
         GRAPH_DEBUG("Getting aten::size for %", v->debugName());
         all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of[v];
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
       });
 
       if (!all_inputs_have_sizes) {
