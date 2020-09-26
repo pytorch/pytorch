@@ -320,7 +320,7 @@ inline InferredType tryToInferType(py::handle input) {
   if (py::isinstance<Object>(input)) {
     auto object = py::cast<Object>(input);
     return InferredType(object.type());
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
   } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
@@ -716,7 +716,7 @@ inline IValue toIValue(
       }
     }
     case TypeKind::RRefType: {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
       AT_ERROR("RRef is only supported with the distributed package");
@@ -896,7 +896,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     return std::move(py_dict);
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     auto RRefPtr =
         c10::dynamic_intrusive_pointer_cast<torch::distributed::rpc::RRef>(
             std::move(ivalue).toRRef());
@@ -942,7 +942,7 @@ inline py::object toPyObject(IValue ivalue) {
     auto py_class = getScriptedClassOrError(qualified_class_name);
     return py_class.attr(enum_holder->name().c_str());
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     return py::cast(torch::distributed::rpc::PyRRef(
         c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
             ivalue.toRRef())));
