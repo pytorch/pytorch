@@ -593,7 +593,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   throw ErrorReport(loc)
       << "Module '"
       << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
-      << " has no attribute '" << field << "', " << hint;
+      << " has no attribute '" << field << "' " << hint;
 }
 
 SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
