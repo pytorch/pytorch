@@ -7528,12 +7528,12 @@ class TestNN(NNTestCase):
                         if padding_mode == 'zeros':
                             if align_corners:
                                 groundtruth = torch.tensor(
-                                    [[[[-4.5, -6.], [-4.5, 6.], [2.7257, 0.7409], [2.7257, -0.7409]],
-                                      [[1.5, 0.], [1.5, 0.], [1.9279, -0.0569], [1.9279, 0.0569]]]]).view(1, 2, 4, 2)
+                                    [[[[-4.5, -6.], [-4.5, 6.], [2.725679, 0.740878], [2.725679, -0.740878]],
+                                      [[1.5, 0.], [1.5, 0.], [1.927921, -0.05688], [1.927921, 0.05688]]]]).view(1, 2, 4, 2)
                             else:
                                 groundtruth = torch.tensor(
-                                    [[[[-5.8594, -5.8887], [-5.8594, 5.8887], [-5.6250, -7.5000], [-5.6250, 7.5000]],
-                                      [[-0.2344, -0.2637], [-0.2344, 0.2637], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[-5.859375, -5.888672], [-5.859375, 5.888672], [-5.6250, -7.5000], [-5.6250, 7.5000]],
+                                      [[-0.234375, -0.263672], [-0.234375, 0.263672], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
                         elif padding_mode == 'border':
                             if align_corners:
                                 groundtruth = torch.tensor(
@@ -7541,8 +7541,8 @@ class TestNN(NNTestCase):
                                       [[1.5, 0.], [1.5, 0.], [1.74, 0.], [1.74, 0.]]]]).view(1, 2, 4, 2)
                             else:
                                 groundtruth = torch.tensor(
-                                    [[[[-0.4688, 0.], [-0.4688, 0.], [1.8750, 0.], [1.8750, 0.]],
-                                      [[-0.4688, 0.], [-0.4688, 0.], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[-0.46875, 0.], [-0.46875, 0.], [1.8750, 0.], [1.8750, 0.]],
+                                      [[-0.46875, 0.], [-0.46875, 0.], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
                         elif padding_mode == 'reflection':
                             if align_corners:
                                 groundtruth = torch.tensor(
@@ -7558,7 +7558,7 @@ class TestNN(NNTestCase):
                         raise AssertionError("missing gradient groundtruth test for interpolation mode '{}'".format(mode))
                     F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                   align_corners=align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth, atol=1e-4, rtol=0,
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
 
@@ -7569,7 +7569,7 @@ class TestNN(NNTestCase):
                         F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
                         F.GRID_SAMPLE_PADDING_MODES[padding_mode],
                         align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth, atol=1e-4, rtol=0)
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0)
 
                     # do gradcheck
                     N = random.randint(2, 8)
