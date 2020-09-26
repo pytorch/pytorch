@@ -344,6 +344,9 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):	
+            optim.Adam(None, lr=1e-2, weight_decay=-1)
+
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
             self._test_basic_cases(
