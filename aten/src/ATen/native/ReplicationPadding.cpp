@@ -576,7 +576,7 @@ static inline void shapeCheck3d(
       (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
       (input.dim() == 5 && valid_dims && input.size(4) != 0),
       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-      input_.sizes());
+      input.sizes());
 
   if (input.dim() == 5)
   {
