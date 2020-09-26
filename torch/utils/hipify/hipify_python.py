@@ -736,13 +736,13 @@ def preprocessor(output_directory, filepath, all_files, includes, stats, hip_cla
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
             # if filename is one of the files being hipified for this extension
-            if (is_pytorch_extension and any(s.endswith(f) for s in all_files)):
+            if (is_pytorch_extension and any(s.endswith(filename) for s in all_files)):
                 header_dir = None
                 header_filepath = None
                 # If include_current_dir True, look first in same dir as the including source file
                 if include_current_dir:
                     header_dir_to_check = os.path.dirname(fin_path)
-                    header_path_to_check = os.path.join(header_dir_to_check, f)
+                    header_path_to_check = os.path.abspath(os.path.join(header_dir_to_check, f))
                     if os.path.exists(header_path_to_check):
                         header_dir = header_dir_to_check
                         header_filepath = header_path_to_check
@@ -750,7 +750,7 @@ def preprocessor(output_directory, filepath, all_files, includes, stats, hip_cla
                 if header_filepath is None:
                     for include in includes:
                         header_dir_to_check = os.path.join(output_directory, os.path.dirname(include))
-                        header_path_to_check = os.path.join(header_dir_to_check, f)
+                        header_path_to_check = os.path.abspath(os.path.join(header_dir_to_check, f))
                         if os.path.exists(header_path_to_check):
                             header_dir = header_dir_to_check
                             header_filepath = header_path_to_check
