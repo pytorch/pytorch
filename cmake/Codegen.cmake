@@ -144,7 +144,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
 
-  file(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
