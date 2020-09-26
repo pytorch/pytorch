@@ -795,5 +795,13 @@ class TestBenchmarkUtils(TestCase):
                 x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch.Assert(False, "bar")
+
+
 if __name__ == '__main__':
     run_tests()
