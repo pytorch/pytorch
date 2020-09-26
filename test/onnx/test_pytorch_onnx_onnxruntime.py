@@ -746,9 +746,13 @@ class TestONNXRuntime(unittest.TestCase):
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
 
-    def test_squeeze_no_op_without_additional_inputs(self):
+    def test_squeeze_no_op_static_axes(self):
         x_noop = torch.randn(2, 1, 4)
-        self.squeeze_model_tests(2, x_noop, None)
+        class Squeeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.squeeze(x, dim=2)
+
+        self.run_test(Squeeze(), x_noop)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
