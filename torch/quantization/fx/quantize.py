@@ -306,6 +306,19 @@ class Quantizer:
                 self.qconfig_map[node.name] = module_qconfig
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_standalone_module):
+        """ standalone_module means it a submodule that is not inlined in parent module,
+        and will be quantized separately as one unit.
+
+        When we are preparing a standalone module:
+        input of the module is observed in parent module, output of the module
+        is observed in the standalone module.
+        Returns:
+            model(GraphModule): prepared standalone module with following attributes:
+                _standalone_module_observed_input_idxs(List[Int]): a list of indexs for the graph inputs that
+                                         needs to be observed in parent module
+                _output_is_observed(Bool): a boolean variable indicate whether the output of the
+                                   custom module is observed or not
+        """
         if not inplace:
             model = copy.deepcopy(model)
         self.patterns = get_quant_patterns()
@@ -341,7 +354,7 @@ class Quantizer:
             return map_arg(a, lambda node: env[node.name])
 
         # indexes for the inputs that needs to be observed
-        observed_input_idxs = []
+        standalone_module_observed_input_idxs = []
         graph_inputs = []
         for node in model.graph.nodes:
             if node.op == 'placeholder':
@@ -395,7 +408,7 @@ class Quantizer:
                     observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
                     mark_observed_standalone_module(observed_standalone_module)
-                    standalone_module_input_idxs = observed_standalone_module._observed_input_idxs
+                    standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_standalone_module)
                     self.modules[node.target] = observed_standalone_module
@@ -452,7 +465,7 @@ class Quantizer:
                 if is_standalone_module and node.name in graph_inputs:
                     # we'll insert observer for input of standalone module
                     # in parent graph
-                    observed_input_idxs.append(graph_inputs.index(node.name))
+                    standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
                     continue
                 get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                 observer_name = get_new_observer_name(model)
@@ -479,7 +492,7 @@ class Quantizer:
             # indicator for whether output is observed or not.
             # This used for correctly quantize standalone modules
             output_is_observed = model.graph.result.name in observed_node_names_set
-            model._observed_input_idxs = observed_input_idxs
+            model._standalone_module_observed_input_idxs = standalone_module_observed_input_idxs
             model._output_is_observed = output_is_observed
         return model
 
@@ -526,6 +539,15 @@ class Quantizer:
         return
 
     def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_standalone_module=False):
+        """ standalone_module means it a submodule that is not inlined in parent module,
+        and will be quantized separately as one unit.
+        For standalone module: the inputs will be quantized by parent module,
+        checks `_standalone_module_observed_input_idxs` of
+        input observed model and will treat these inputs as quantized
+        also will not dequantize the final output.
+        Returns a quantized standalone module which accepts quantized input(if needed)
+        and produces quantized output (if needed).
+        """
         self.restore_state(model)
         if not inplace:
             model = copy.deepcopy(model)
@@ -684,7 +706,7 @@ class Quantizer:
                     continue
 
             if is_standalone_module and node.op == 'placeholder' and \
-               graph_inputs.index(node.name) in model._observed_input_idxs:
+               graph_inputs.index(node.name) in model._standalone_module_observed_input_idxs:
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:

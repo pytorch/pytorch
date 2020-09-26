@@ -603,6 +603,22 @@ class TestFX(JitTestCase):
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
 
+    def test_symbolic_trace_assert(self):
+        message = "assert_foobar"
+
+        class AssertsTensorShape(torch.nn.Module):
+            def forward(self, x):
+                torch.Assert(x.shape[1] > 4, message)
+                return x
+
+        m = AssertsTensorShape()
+        # verify traceability
+        traced = symbolic_trace(m)
+        # verify assertion on traced model works correctly at runtime
+        traced(torch.rand(4, 5))
+        with self.assertRaisesRegex(AssertionError, message):
+            traced(torch.rand(4, 3))
+
 
 if __name__ == '__main__':
     run_tests()
