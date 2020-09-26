@@ -334,11 +334,11 @@ class RendezvousTest(TestCase):
 @skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
+    @requires_nccl()
     def test_common_errors(self):
-        # TODO remove this hack
-        if not hasattr(c10d, "ProcessGroupNCCL"):
-            raise unittest.SkipTest("C10D is not built with NCCL process group,"
-                                    " skipping test")
+        if torch.cuda.device_count() == 0:
+            raise unittest.SkipTest("No GPUs available, skipping test")
+
         vars = {
             "WORLD_SIZE": "1",
             "RANK": "0",
@@ -579,6 +579,8 @@ class TimeoutTest(TestCase):
     @requires_nccl()
     @retry_on_connect_failures
     def test_default_store_timeout_nccl(self):
+        if torch.cuda.device_count() == 0:
+            raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout('nccl')
 
     @requires_gloo()
