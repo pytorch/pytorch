@@ -285,6 +285,8 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
+        if BACKEND == 'nccl' and not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -2283,7 +2285,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_non_default_stream(self):
-            stream = torch.cuda.Stream()
+            stream = torch.cuda.Stream(self.rank)
             rank = self.rank
             with torch.cuda.stream(stream):
                 net = torch.nn.parallel.DistributedDataParallel(
@@ -3020,7 +3022,7 @@ class DistributedTest:
             rank = self.rank
             sync_interval = test_case.sync_interval
             # Ensure all outsanding GPU work is comlete so this test runs independently.
-            torch.cuda.synchronize()
+            dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
             # there are many buckets.
             net = torch.nn.parallel.DistributedDataParallel(
