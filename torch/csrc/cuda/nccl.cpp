@@ -114,6 +114,7 @@ struct AutoNcclGroup {
     NCCL_CHECK(from_nccl_result(ncclGroupStart()));
     std::cout << "AutoNcclGroup start nccl.cpp" << std::endl;
 #endif
+    std::cout << "group guard?" << std::endl;
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
