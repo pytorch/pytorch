@@ -914,12 +914,11 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
                       const TensorAccessor<scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
-    Vec x, y, gx_mult, gy_mult;
-    std::tie(x, gx_mult) = compute_W.apply_get_grad(grid_x);
-    std::tie(y, gy_mult) = compute_H.apply_get_grad(grid_y);
 
-    x = compute_W.unnormalize(grid_x);
-    y = compute_H.unnormalize(grid_y);
+    Vec x = compute_W.unnormalize(grid_x);
+    Vec y = compute_H.unnormalize(grid_y);
+    Vec gx_mult = Vec(compute_W.scaling_factor);
+    Vec gy_mult = Vec(compute_H.scaling_factor);
 
     auto ix = x.floor();
     auto iy = y.floor();

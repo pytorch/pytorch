@@ -668,8 +668,8 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
 
-            ix = grid_sampler_unnormalize(x, inp_W, align_corners);
-            iy = grid_sampler_unnormalize(y, inp_H, align_corners);
+            ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
+            iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
 
             scalar_t ix_nw = std::floor(ix);
             scalar_t iy_nw = std::floor(iy);

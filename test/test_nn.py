@@ -7370,7 +7370,7 @@ class TestNN(NNTestCase):
             W = random.randint(3, IW + 2)
             test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
 
-        for mode in ('bilinear', 'nearest'):
+        for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
                     # test known input on CPU
@@ -7537,21 +7537,21 @@ class TestNN(NNTestCase):
                         elif padding_mode == 'border':
                             if align_corners:
                                 groundtruth = torch.tensor(
-                                    [[[[0., 0.], [0., 0.], [1.74, 0.], [1.74, 0.]],
-                                      [[0., 0.], [0., 0.], [1.74, 0.], [1.74, 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[1.5, 0.], [1.5, 0.], [1.74, 0.], [1.74, 0.]],
+                                      [[1.5, 0.], [1.5, 0.], [1.74, 0.], [1.74, 0.]]]]).view(1, 2, 4, 2)
                             else:
                                 groundtruth = torch.tensor(
-                                    [[[[-0., 0.], [-0., 0.], [0., 0.], [0., 0.]],
-                                      [[-0., 0.], [-0., 0.], [0., 0.], [0., 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[-0.4688, 0.], [-0.4688, 0.], [1.8750, 0.], [1.8750, 0.]],
+                                      [[-0.4688, 0.], [-0.4688, 0.], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
                         elif padding_mode == 'reflection':
                             if align_corners:
                                 groundtruth = torch.tensor(
-                                    [[[[-0., -0.], [-0., 0.], [1.92, 0.], [1.92, 0.]],
-                                      [[0., 0.], [0., -0.], [1.92, 0.], [1.92, 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[0., 0.], [0., 0.], [1.92, 0.], [1.92, 0.]],
+                                      [[0., 0.], [0., 0.], [1.92, 0.], [1.92, 0.]]]]).view(1, 2, 4, 2)
                             else:
                                 groundtruth = torch.tensor(
-                                    [[[[-0., -0.], [-0., 0.], [0., 0.], [0., 0.]],
-                                      [[0., 0.], [0., -0.], [0., 0.], [0., 0.]]]]).view(1, 2, 4, 2)
+                                    [[[[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]],
+                                      [[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]]]]).view(1, 2, 4, 2)
                         else:
                             raise AssertionError("missing gradient groundtruth test for padding mode '{}'".format(padding_mode))
                     else:
