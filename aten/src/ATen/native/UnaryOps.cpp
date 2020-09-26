@@ -297,7 +297,25 @@ Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
-Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+  if (!(self.scalar_type() == kByte || self.scalar_type() == kBool)) {
+    TORCH_CHECK(
+        (result.scalar_type() != kBool && result.scalar_type() != kByte),
+        "sign: ",
+        result.scalar_type(),
+        " is not a valid dtype for out when input dtype is ",
+        self.scalar_type());
+  }
+  auto iter = TensorIteratorConfig()
+                  .set_check_mem_overlap(true)
+                  .add_output(result)
+                  .add_input(self)
+                  .cast_common_dtype_to_outputs(true)
+                  .enforce_safe_casting_to_output(false)
+                  .build();
+  sign_stub(iter.device_type(), iter);
+  return result;
+}
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
