@@ -1,5 +1,4 @@
 import sys
-import io
 import os
 import re
 import shutil
@@ -796,6 +795,7 @@ class TestBenchmarkUtils(TestCase):
                 (f"fn({i}, {j})", costs[0][0] + costs[0][1] * i * j)
                 for i, j in sizes
             )
+
         class MockTimer_0(benchmark_utils.Timer):
             _timer_cls = _MockTimer_0
 
@@ -805,6 +805,7 @@ class TestBenchmarkUtils(TestCase):
                 (f"fn({i}, {j})", costs[1][0] + costs[1][1] * i * j)
                 for i, j in sizes
             )
+
         class MockTimer_1(benchmark_utils.Timer):
             _timer_cls = _MockTimer_1
 
@@ -814,6 +815,7 @@ class TestBenchmarkUtils(TestCase):
                 (f"fn({i}, {j})", costs[2][0] + costs[2][1] * i * j)
                 for i, j in sizes if i == j
             )
+
         class MockTimer_2(benchmark_utils.Timer):
             _timer_cls = _MockTimer_2
 
@@ -847,20 +849,18 @@ class TestBenchmarkUtils(TestCase):
                     ).blocked_autorange(min_run_time=10)
                 )
 
-        def check_output(output: io.StringIO, expected: str):
+        def check_output(output: str, expected: str):
             # VSCode will strip trailing newlines from `expected`, so we have to match
             # this behavior when comparing output.
             output_str = "\n".join(
-                i.rstrip() for i in output.getvalue().strip().splitlines(keepends=False))
+                i.rstrip() for i in output.strip().splitlines(keepends=False))
 
             self.assertEqual(output_str, textwrap.dedent(expected).strip())
 
         compare = benchmark_utils.Compare(results)
 
-        output = io.StringIO()
-        compare.print(file=output)
         check_output(
-            output,
+            str(compare),
             """
             [------------------------------------------------- fn ------------------------------------------------]
                                          |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
@@ -873,10 +873,8 @@ class TestBenchmarkUtils(TestCase):
         )
 
         compare.trim_significant_figures()
-        output = io.StringIO()
-        compare.print(file=output)
         check_output(
-            output,
+            str(compare),
             """
             [------------------------------------------------- fn ------------------------------------------------]
                                          |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
@@ -889,10 +887,8 @@ class TestBenchmarkUtils(TestCase):
         )
 
         compare.colorize()
-        output = io.StringIO()
-        compare.print(file=output)
         check_output(
-            output,
+            str(compare),
             """
             [------------------------------------------------- fn ------------------------------------------------]
                                          |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
@@ -901,7 +897,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""
+            Times are in microseconds (us)."""  # noqa
         )
 
 

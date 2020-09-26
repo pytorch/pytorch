@@ -1,6 +1,5 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
-import io
 import itertools as it
 import sys
 from typing import DefaultDict, List, Optional, Tuple
@@ -137,7 +136,7 @@ class Table(object):
             colorize: bool,
             trim_significant_figures: bool,
             highlight_warnings: bool
-        ):
+    ):
         assert len(set(r.label for r in results)) == 1
 
         self.results = results
@@ -223,7 +222,7 @@ class Table(object):
             ri.register_columns(columns_tuple)
         return rows_tuple, columns_tuple
 
-    def render(self, file: io.TextIOWrapper):
+    def render(self) -> str:
         string_rows = [[""] + self.column_keys]
         for r in self.rows:
             string_rows.append(r.as_column_strings())
@@ -237,12 +236,15 @@ class Table(object):
         for string_row, row in zip(string_rows[1:], self.rows):
             finalized_columns.extend(row.row_separator(overall_width))
             finalized_columns.append("  |  ".join(row.finalize_column_strings(string_row, col_widths)))
-        print("[" + (" " + (self.label or "") + " ").center(overall_width - 2, "-") + "]", file=file)
-        print("\n".join(finalized_columns), file=file)
-        print(f"\nTimes are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).", file=file)
-        if self._highlight_warnings and any(ri.has_warnings for ri in self.results):
-            print("(! XX%) Measurement has high variance, where XX is the IQR / median * 100.", file=file)
-        print("\n", file=file)
+
+        newline = "\n"
+        has_warnings = self._highlight_warnings and any(ri.has_warnings for ri in self.results)
+        return f"""
+[{(' ' + (self.label or '') + ' ').center(overall_width - 2, '-')}]
+{newline.join(finalized_columns)}
+
+Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
+{'(! XX%) Measurement has high variance, where XX is the IQR / median * 100.' + newline if has_warnings else ""}"""[1:]
 
 
 class Compare(object):
@@ -252,6 +254,9 @@ class Compare(object):
         self._trim_significant_figures = False
         self._colorize = False
         self._highlight_warnings = False
+
+    def __str__(self):
+        return "\n".join(self._render())
 
     def extend_results(self, results):
         for r in results:
@@ -270,14 +275,16 @@ class Compare(object):
     def highlight_warnings(self):
         self._highlight_warnings = True
 
-    def print(self, file: io.TextIOWrapper = sys.stdout):
-        self._render(file=file)
+    def print(self):
+        print(str(self))
 
-    def _render(self, file: io.TextIOWrapper):
+    def _render(self):
         results = common.Measurement.merge(self._results)
         results = self._group_by_label(results)
+        output = []
         for group in results.values():
-            self._layout(group, file)
+            output.append(self._layout(group))
+        return output
 
     def _group_by_label(self, results: List[common.Measurement]):
         grouped_results: DefaultDict[str, List[common.Measurement]] = collections.defaultdict(list)
@@ -285,11 +292,11 @@ class Compare(object):
             grouped_results[r.label].append(r)
         return grouped_results
 
-    def _layout(self, results: List[common.Measurement], file: io.TextIOWrapper):
+    def _layout(self, results: List[common.Measurement]):
         table = Table(
             results,
             self._colorize,
             self._trim_significant_figures,
             self._highlight_warnings
         )
-        table.render(file)
+        return table.render()

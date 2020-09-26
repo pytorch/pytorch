@@ -3,8 +3,7 @@
 import collections
 import contextlib
 import dataclasses
-import logging
-from typing import Any, DefaultDict, Dict, List, Optional
+from typing import DefaultDict, List, Optional
 
 import numpy as np
 import torch
@@ -133,8 +132,8 @@ class Measurement:
             self._p25 = np.percentile(self._sorted_times, 25)
             self._p75 = np.percentile(self._sorted_times, 75)
 
-            rel_iqr = self.iqr / self.median * 100
             def add_warning(msg):
+                rel_iqr = self.iqr / self.median * 100
                 self._warnings += (
                     f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
                     f"of the median measurement.\n           {msg}",
@@ -193,7 +192,7 @@ class Measurement:
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
   {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{s if self.num_threads > 1 else ''}
-{newline.join(self._warnings)}""".strip()
+{newline.join(self._warnings)}""".strip() # noqa
 
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
