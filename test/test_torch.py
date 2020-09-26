@@ -11244,6 +11244,28 @@ class TestTorchDeviceType(TestCase):
         a_bool.sign_()
         self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
 
+    def test_sign_different_out_dtype(self, device):
+        for inp_dtype, out_dtype in permutations(torch.testing.get_all_math_dtypes(device), r=2):
+            if inp_dtype.is_complex or out_dtype.is_complex:
+                continue
+
+            for with_extremal in [True, False]:
+                shape = self._rand_shape(3, 4, 5)
+                print(inp_dtype, out_dtype)
+                x = self._generate_input(shape, inp_dtype, device, with_extremal)
+                out = torch.empty_like(x).to(out_dtype)
+
+                if x.dtype not in [torch.bool, torch.uint8] and out_dtype in [torch.bool, torch.uint8]:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "is not a valid dtype for out when input dtype is"):
+                        torch.sign(x, out=out)
+                    continue
+
+                torch.sign(x, out=out)
+                expected = torch.sign(x)
+
+                self.assertEqual(out, expected, exact_dtype=False)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.torch.testing.get_all_fp_dtypes()))
     def test_signbit_float(self, device, dtype):
