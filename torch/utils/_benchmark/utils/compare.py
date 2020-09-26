@@ -1,7 +1,6 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
 import itertools as it
-import sys
 from typing import DefaultDict, List, Optional, Tuple
 
 import numpy as np

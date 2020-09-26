@@ -117,7 +117,7 @@ class Timer(object):
             max_run_time=10,
             callback: Optional[Callable[[int, float], NoReturn]] = None,
             min_run_time=0.01
-        ):
+    ):
         number = self._estimate_block_size(min_run_time=0.05)
 
         def time_hook() -> float:
