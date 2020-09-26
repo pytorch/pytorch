@@ -17,6 +17,8 @@ class CAFFE2_API FileStoreHandler : public StoreHandler {
 
   virtual int64_t add(const std::string& name, int64_t value) override;
 
+  virtual int64_t getNumKeys() override;
+
   virtual bool check(const std::vector<std::string>& names) override;
 
   virtual void wait(
