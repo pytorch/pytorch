@@ -402,9 +402,15 @@ prior to quantization. This is because currently quantization works on a module
 by module basis. Specifically, for all quantization techniques, the user needs to:
 
 1. Convert any operations that require output requantization (and thus have
-   additional parameters) from functionals to module form.
+   additional parameters) from functionals to module form (for example,
+   using ``torch.nn.ReLU`` instead of ``torch.nn.functional.relu``).
 2. Specify which parts of the model need to be quantized either by assigning
-   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``
+   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``.
+   For example, setting ``model.conv1.qconfig = None`` means that the
+   ``model.conv`` layer will not be quantized, and setting
+   ``model.linear1.qconfig = custom_qconfig`` means that the quantization
+   settings for ``model.linear1`` will be using ``custom_qconfig`` instead
+   of the global qconfig.
 
 For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
