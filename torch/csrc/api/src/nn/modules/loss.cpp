@@ -180,8 +180,8 @@ Tensor TripletMarginLossImpl::forward(
 
 // ============================================================================
 
-TripletMarginWithDistanceLossImpl::TripletMarginWithDistanceLossImpl( // NOLINT(modernize-pass-by-value)
-    const TripletMarginWithDistanceLossOptions& options_)
+TripletMarginWithDistanceLossImpl::TripletMarginWithDistanceLossImpl(
+    const TripletMarginWithDistanceLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {}
 
 void TripletMarginWithDistanceLossImpl::reset() {}
