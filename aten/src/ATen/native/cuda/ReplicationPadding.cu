@@ -218,9 +218,10 @@ void replication_pad1d_out_cuda_template(
 
   int numInputDims = input.ndimension();
   TORCH_CHECK(
-      (numInputDims == 2 && input.size(1) != 0) ||
-      (numInputDims == 3 && input.size(1) != 0 && input.size(2) != 0),
-      "2D or 3D (batch mode) tensor expected for input")
+              (numInputDims == 2 && input.size(0) != 0 && input.size(1) != 0) ||
+              (numInputDims == 3 && input.size(1) != 0 && input.size(2) != 0),
+              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+              input.sizes());
   
   if (numInputDims == 3) {
     numBatch = input.size(0);
@@ -363,9 +364,10 @@ void replication_pad2d_out_cuda_template(
   int numInputDims = input.dim();
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   TORCH_CHECK(
-      (numInputDims == 3 && valid_dims) ||
+      (numInputDims == 3 && input.size(0) != 0 && valid_dims) ||
       (numInputDims == 4 && valid_dims && input.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input)
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
 
   if (numInputDims == 4) {
     numBatch = input.size(0);
@@ -513,9 +515,10 @@ static inline void shapeCheck3d(
 
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
   TORCH_CHECK(
-       (numInputDims == 4 && valid_dims) ||
+       (numInputDims == 4 && input.size(0) != 0 && valid_dims) ||
        (numInputDims == 5 && valid_dims && input.size(4) != 0),
-      "4D or 5D (batch mode) tensor expected for input, but got: ", input);
+       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+       input.sizes());
 
   int planeDim = 0;
   int dimd = 1;
@@ -555,8 +558,9 @@ static inline void shapeAndGradOutputCheck3d(
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
   TORCH_CHECK(
       (numInputDims == 4 && valid_dims) ||
-      (numInputDims == 5 && valid_dims && input.size(4)),
-      "4D or 5D (batch mode) tensor expected for input, but got: ", input);
+      (numInputDims == 5 && valid_dims && input.size(4) != 0),
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
 
   int planeDim = 0;
   int dimd = 1;

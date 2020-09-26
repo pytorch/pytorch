@@ -72,10 +72,10 @@ void replication_pad1d_out_cpu_template(
   int pad_r = paddingSize[1];
 
   // allow empty batch size but not other dimensions.
-  TORCH_CHECK(
-       (input_.dim() == 2 && input_.size(1) != 0) ||
-       (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
-       "2D or 3D (batch mode) tensor expected for input");
+  TORCH_CHECK((input_.dim() == 2 && input_.size(0) != 0 && input_.size(1) != 0) ||
+              (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
+              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+              input_.sizes());
 
   if (input_.ndimension() == 3)
   {
@@ -346,9 +346,10 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   // allow 0 dim batch size and nothing else.
   bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
   TORCH_CHECK(
-      (input_.dim() == 3 && valid_dims) ||
+      (input_.dim() == 3 && input_.size(0) != 0 && valid_dims) ||
       (input_.dim() == 4 && valid_dims && input_.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input_.sizes());
 
   if (input_.dim() == 4)
   {
@@ -572,9 +573,10 @@ static inline void shapeCheck3d(
   // allow batch size of 0-dim.
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
   TORCH_CHECK(
-      (input.dim() == 4 && valid_dims) ||
+      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
       (input.dim() == 5 && valid_dims && input.size(4) != 0),
-      "4D or 5D (batch mode) tensor expected for input, but got: ", input);
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input_.sizes());
 
   if (input.dim() == 5)
   {
