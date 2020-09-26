@@ -1731,7 +1731,9 @@ endif()
 # End ATen checks
 #
 
+set(FMT_INSTALL ON)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+install(TARGETS fmt-header-only EXPORT Caffe2Targets DESTINATION lib)
 
 # Disable compiler feature checks for `fmt`.
 #
@@ -1742,4 +1744,4 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS fmt::fmt-header-only)

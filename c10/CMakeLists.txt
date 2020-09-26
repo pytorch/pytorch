@@ -81,6 +81,8 @@ if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
 
+target_link_libraries(c10 PUBLIC fmt::fmt-header-only)
+
 target_include_directories(
     c10 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>

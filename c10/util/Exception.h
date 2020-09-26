@@ -1,6 +1,8 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
+#include <fmt/format.h>
+
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/Deprecated.h>
@@ -306,6 +308,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 //                                 // explicit error message, as it is more
 //                                 // user friendly.
 //    TORCH_CHECK(x == 0, "Expected x to be 0, but got ", x);
+//    // Use fmtlib to format the error string.
+//    TORCH_CHECK_FMT(x == 0, "Expected {} to be {}", name, expectedValue);
 //
 // On failure, this macro will raise an exception.  If this exception propagates
 // to Python, it will convert into a Python RuntimeError.
@@ -325,6 +329,10 @@ inline std::string if_empty_then(std::string x, std::string y) {
         C10_STRINGIZE(__FILE__)                         \
     );                                                  \
   }
+#define TORCH_CHECK_FMT(cond, ...)                              \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
+    C10_THROW_ERROR(Error, #cond " CHECK FAILED at " __FILE__); \
+  }
 #else
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
@@ -337,10 +345,18 @@ inline std::string if_empty_then(std::string x, std::string y) {
       )                                                               \
     );                                                                \
   }
+// Like TORCH_CHECK, but use Python-like format strings for the error message.
+// Usage:
+//    TORCH_CHECK(should_be_true, "{} had an error: {}", arg1, arg2);
+#define TORCH_CHECK_FMT(cond, fmt_str, ...)                    \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                        \
+    C10_THROW_ERROR(Error, fmt::format(fmt_str, __VA_ARGS__)); \
+  }
+
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
-// An utility macro that does what `TORCH_CHECK` does if compiled in the host code, 
+// An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
 // otherwise does nothing. Supposed to be used in the code shared between host and
 // device code as an alternative for `TORCH_CHECK`.
 #if defined(__CUDACC__) || defined(__HIPCC__)

@@ -1617,13 +1617,12 @@ Node* Graph::createEnumValue(Value* e) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    TORCH_CHECK(
+    TORCH_CHECK_FMT(
         v->type()->isSubtypeOf(elem_type),
-        "Expected a list element that subtypes '",
+        "Expected a list element that subtypes '{}', "
+        "but got an element of type '{}'",
         elem_type->repr_str(),
-        "' but got an element of type '",
-        v->type()->repr_str(),
-        "'");
+        v->type()->repr_str());
   }
   n->output()->setType(ListType::create(elem_type));
   return n;

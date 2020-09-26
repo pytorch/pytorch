@@ -800,6 +800,7 @@ if __name__ == '__main__':
                 'include/c10/hip/impl/*.h',
                 'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
+                'include/fmt/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',
                 'include/torch/csrc/api/include/torch/*.h',
