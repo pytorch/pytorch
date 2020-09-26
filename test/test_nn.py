@@ -7291,8 +7291,8 @@ class TestNN(NNTestCase):
                     self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
 
                     out_fallback.backward(gradients.float())
-                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-5, rtol=5e-5)
-                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-5, rtol=5e-5)
+                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
 
                     if TEST_CUDA:
                         input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
@@ -7558,7 +7558,7 @@ class TestNN(NNTestCase):
                         raise AssertionError("missing gradient groundtruth test for interpolation mode '{}'".format(mode))
                     F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                   align_corners=align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth,
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-4, rtol=0,
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
 
@@ -7569,7 +7569,7 @@ class TestNN(NNTestCase):
                         F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
                         F.GRID_SAMPLE_PADDING_MODES[padding_mode],
                         align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth)
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-4, rtol=0)
 
                     # do gradcheck
                     N = random.randint(2, 8)
