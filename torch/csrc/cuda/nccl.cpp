@@ -112,11 +112,14 @@ struct AutoNcclGroup {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(from_nccl_result(ncclGroupStart()));
+    std::cout << "AutoNcclGroup start nccl.cpp" << std::endl;
 #endif
+    std::cout << "group guard?" << std::endl;
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(from_nccl_result(ncclGroupEnd()));
+    std::cout << "AutoNcclGroup end nccl.cpp" << std::endl;
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
@@ -404,6 +407,7 @@ void broadcast(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
+  ncclGroupStart();
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
     device_guard.set_index(device);
@@ -420,9 +424,11 @@ void broadcast(
         count_max,
         ")");
     ncclComm_t comm = comms[i];
+    std::cout << "issue input: " << i << std::endl;
     NCCL_CHECK(from_nccl_result(ncclBcast(
         tensors[i].data_ptr(), numel, data_type, 0, *(to_nccl_comm(&comm)), stream)));
   }
+  ncclGroupEnd();
 #else
   AT_ERROR("PyTorch built without NCCL support");
 #endif
