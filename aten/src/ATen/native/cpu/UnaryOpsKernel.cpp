@@ -395,12 +395,14 @@ static void nan_to_num_kernel(
         : std::numeric_limits<scalar_t>::lowest();
 
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return at::_isfinite(a)
-          ? a
-          : (at::_isnan(a) ? nan_replacement
-                           : (a == std::numeric_limits<scalar_t>::infinity()
-                                  ? pos_inf_replacement
-                                  : neg_inf_replacement));
+      return (
+          at::_isnan(a)
+              ? nan_replacement
+              : (a == std::numeric_limits<scalar_t>::infinity()
+                     ? pos_inf_replacement
+                     : (a == -std::numeric_limits<scalar_t>::infinity()
+                            ? neg_inf_replacement
+                            : a)));
     });
   });
 }
