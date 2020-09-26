@@ -62,7 +62,7 @@ class TestForeach(TestCase):
             res = foreach_op(tensors1, tensors2)
             foreach_op_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
-            self.assertEqual(tensors1, res)
+            self.assertEqual(tensors1, expected)
 
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
