@@ -50,39 +50,6 @@ inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
   return at::_isnan(static_cast<float>(val));
 }
 
-// isfinite
-template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isfinite(T val) {
-  return true;
-}
-template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isfinite(T val) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return ::isfinite(val);
-#else
-  return std::isfinite(val);
-#endif
-}
-
-template <typename T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isfinite(T val) {
-  return std::isfinite(val.real()) && std::isfinite(val.imag());
-}
-
-template <typename T,
-         typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isfinite(T val) {
-  return at::_isfinite(static_cast<float>(val));
-}
-
-
-inline C10_HOST_DEVICE bool _isfinite(at::BFloat16 val) {
-  return at::_isfinite(static_cast<float>(val));
-}
-
 template <typename T>
 C10_HOST_DEVICE inline T exp(T x) {
   static_assert(!std::is_same<T, double>::value, "this template must be used with float or less precise type");
