@@ -834,6 +834,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     hipified_sources = set()
     if IS_HIP_EXTENSION:
         build_dir = os.getcwd()
+        if not include_dirs:
+            include_dirs = ['*']
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
