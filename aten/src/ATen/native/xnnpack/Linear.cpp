@@ -1,7 +1,7 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Linear.h>
 
 namespace at {
@@ -114,7 +114,7 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input = allocate_padded_contiguous_if_needed(
+  const Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
   TORCH_CHECK(
@@ -126,7 +126,7 @@ Tensor run(
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
   output_size.back() = context.output_channels;
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output = mobile::empty_with_tail_padding(
       output_size,
       padded_input.options().dtype(),
       padded_input.suggest_memory_format(),
@@ -137,15 +137,15 @@ Tensor run(
       Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
       padded_input.data_ptr<float>(),                     // input
       output.data_ptr<float>(),                           // output
-      caffe2::xnnpack_threadpool());                      // threadpool
+      caffe2::pthreadpool_());                            // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_fully_connected_nc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.op.get(),               // operator
-      caffe2::xnnpack_threadpool());  // threadpool
+      context.op.get(),         // operator
+      caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,

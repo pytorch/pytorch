@@ -2,6 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
+#include <torch/custom_class.h>
 
 namespace at {
 namespace native {
@@ -70,7 +71,7 @@ class VulkanConv2dOpContext final : public Conv2dOpContext {
     output_max_ = max;
   }
 
-  Tensor run(const Tensor& input);
+  virtual Tensor run(const Tensor& input) override;
 
   static c10::intrusive_ptr<Conv2dOpContext> create_context(
       Tensor&& weight,

@@ -34,7 +34,7 @@ class IOSNightlyJob:
 
         props_dict = {
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
-            "requires": ["setup"] + extra_requires,
+            "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},
         }
@@ -60,7 +60,7 @@ BUILD_CONFIGS = [
 
 
 WORKFLOW_DATA = BUILD_CONFIGS + [
-    IOSNightlyJob("binary", is_upload=True),
+    # IOSNightlyJob("binary", is_upload=True),
 ]
 
 

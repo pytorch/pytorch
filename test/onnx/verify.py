@@ -227,7 +227,9 @@ class Errors(object):
 
 def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
            test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
-           keep_initializers_as_inputs=True, add_node_names=False):
+           keep_initializers_as_inputs=True, add_node_names=False,
+           operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+           use_new_jit_passes=False):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -269,6 +271,9 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
         opset_version (int, default None): the opset version of the model to
             export. If not specified, the default value in symboli_helper will
             be used in utils._export().
+        operator_export_type (enum, default OperatorExportTypes.ONNX): the operator
+            export type to use when exporting the model. The default value converts
+            all operators to ONNX ops.
     """
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
@@ -348,7 +353,9 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                        example_outputs=example_outputs,
                                        opset_version=opset_version,
                                        keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                       add_node_names=add_node_names)
+                                       add_node_names=add_node_names,
+                                       operator_export_type=operator_export_type,
+                                       use_new_jit_passes=use_new_jit_passes)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -361,7 +368,9 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                            example_outputs=example_outputs,
                                            opset_version=opset_version,
                                            keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                           add_node_names=add_node_names)
+                                           add_node_names=add_node_names,
+                                           operator_export_type=operator_export_type,
+                                           use_new_jit_passes=use_new_jit_passes)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)

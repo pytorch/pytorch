@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -125,6 +125,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.CELU
     nn.GELU
     nn.Sigmoid
+    nn.SiLU
     nn.Softplus
     nn.Softshrink
     nn.Softsign
@@ -268,6 +269,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------
@@ -354,6 +356,7 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
 
     nn.Flatten
+    nn.Unflatten
 
 Quantized Functions
 --------------------

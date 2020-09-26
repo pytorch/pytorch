@@ -107,22 +107,13 @@ inline Tensor mse_loss(
                "This will likely lead to incorrect results due to broadcasting. ",
                "Please ensure they have the same size.");
   }
-  torch::Tensor ret;
-  if (target.requires_grad()) {
-    ret = torch::pow(input - target, 2);
-    if (!c10::get_if<enumtype::kNone>(&reduction)) {
-      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
-    }
-  } else {
-    std::vector<torch::Tensor> broadcast_tensors = torch::broadcast_tensors({input, target});
-    auto expanded_input = broadcast_tensors[0];
-    auto expanded_target = broadcast_tensors[1];
-    ret = torch::mse_loss(
-      expanded_input,
-      expanded_target,
-      enumtype::reduction_get_enum(reduction));
-  }
-  return ret;
+  std::vector<torch::Tensor> broadcast_tensors = torch::broadcast_tensors({input, target});
+  auto expanded_input = broadcast_tensors[0];
+  auto expanded_target = broadcast_tensors[1];
+  return torch::mse_loss(
+    expanded_input,
+    expanded_target,
+    enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -157,15 +148,11 @@ inline Tensor binary_cross_entropy(
   auto reduction_enum = enumtype::reduction_get_enum(reduction);
 
   if (target.sizes() != input.sizes()) {
-    TORCH_WARN("Using a target size (", target.sizes(), ") ",
-               "that is different to the input size (", input.sizes(), ") is deprecated. ",
-               "Please ensure they have the same size.");
-  }
-  if (input.numel() != target.numel()) {
     TORCH_CHECK(
       false,
-      "Target and input must have the same number of elements. target nelement (", target.numel(), ") "
-      "!= input nelement (", input.numel(), ")");
+      "Using a target size (", target.sizes(), ") ",
+      "that is different to the input size (", input.sizes(), ") is deprecated. ",
+      "Please ensure they have the same size.");
   }
 
   auto weight_ = weight;
@@ -320,9 +307,9 @@ inline Tensor cosine_embedding_loss(
 
 // ============================================================================
 
-inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target) {
+inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target, double beta = 1.) {
     auto t = torch::abs(input - target);
-    return torch::where(t < 1, 0.5 * torch::pow(t, 2), t - 0.5);
+    return torch::where(t < beta, 0.5 * torch::pow(t, 2) / beta, t - 0.5 * beta);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -330,25 +317,16 @@ namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    SmoothL1LossFuncOptions::reduction_t reduction) {
+    SmoothL1LossFuncOptions::reduction_t reduction,
+    double beta = 1.) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
                   "This will likely lead to incorrect results due to broadcasting. ",
                   "Please ensure they have the same size.");
   }
 
-  Tensor ret;
-
-  if (target.requires_grad()) {
-    ret = _smooth_l1_loss(input, target);
-    if (!c10::get_if<enumtype::kNone>(&reduction)) {
-      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
-    }
-  } else {
-    std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
-  }
-  return ret;
+  std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
+  return torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction), beta);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -367,8 +345,9 @@ inline Tensor smooth_l1_loss(
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const SmoothL1LossFuncOptions& options = {}) {
-  return detail::smooth_l1_loss(input, target, options.reduction());
+    const SmoothL1LossFuncOptions& options = {},
+    double beta = 1.) {
+  return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 
 // ============================================================================

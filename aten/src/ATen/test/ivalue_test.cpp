@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 
@@ -138,10 +139,10 @@ TEST(IValueTest, FutureExceptions) {
     }
   });
   ivalue::Future::FutureError err("My Error");
-  f3->setError(std::move(err));
+  f3->setError(std::make_exception_ptr(err));
   ASSERT_EQ(calledTimes, 1);
   ASSERT_TRUE(f3->hasError());
-  ASSERT_EQ(std::string(f3->error()->what()), std::string("My Error"));
+  ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
 
 TEST(IValueTest, ValueEquality) {
@@ -257,4 +258,53 @@ TEST(IValueTest, ListNestedEquality) {
   EXPECT_NE(c1, c3);
   EXPECT_NE(c2, c3);
 }
+
+TEST(IValueTest, EnumEquality) {
+  auto cu = std::make_shared<CompilationUnit>();
+  IValue int_ivalue_1(1);
+  IValue int_ivalue_2(2);
+  IValue str_ivalue_1("1");
+  auto int_enum_type1 = EnumType::create(
+      "enum_class_1",
+      IntType::get(),
+      {{"enum_name_1", int_ivalue_1}, {"enum_name_2", int_ivalue_2}},
+      cu);
+  auto int_enum_type2 = EnumType::create(
+      "enum_class_2",
+      IntType::get(),
+      {{"enum_name_1", int_ivalue_1}, {"enum_name_2", int_ivalue_2}},
+      cu);
+  auto string_enum_type = EnumType::create(
+      "enum_class_3", StringType::get(), {{"enum_name_1", str_ivalue_1}}, cu);
+
+  EXPECT_EQ(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_1", int_ivalue_1))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type2, "enum_name_1", int_ivalue_1))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_2", int_ivalue_2))
+  );
+
+  EXPECT_NE(
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
+      IValue(c10::make_intrusive<ivalue::EnumHolder>(
+          string_enum_type, "enum_name_1", str_ivalue_1))
+  );
+}
+
+// TODO(gmagogsfm): Add type conversion test?
 } // namespace c10

@@ -1,7 +1,5 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
-import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -11,9 +9,6 @@ from torch.distributed.optim import DistributedOptimizer
 from torch.testing._internal.dist_utils import dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
-)
-from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
-    TensorPipeRpcAgentTestFixture,
 )
 
 
@@ -98,17 +93,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
 
 
 class DistOptimizerTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
-        def decorator(self):
-            return unittest.skipIf(
-                self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
-                "This test is not yet supported in the Tensorpipe Agent"
-            )(old_func)
-
-        return decorator
-
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
@@ -137,7 +122,6 @@ class DistOptimizerTest(RpcAgentTestFixture):
                 dist_optim.step(context_id)
 
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
@@ -215,9 +199,65 @@ class DistOptimizerTest(RpcAgentTestFixture):
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
 
-class TensorPipeRpcAgentDistOptimizerTest(TensorPipeRpcAgentTestFixture,
-                                          DistOptimizerTest):
 
     @dist_init
-    def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
+    def test_dist_optim_functional(self):
+        # local version
+        module1 = MyModule()
+        module2 = MyModule()
+        params = [module1.get_w(), module2.get_w()]
+        local_optim = optim.Adagrad(params, lr=0.05)
+
+        old_w1 = module1.w.clone().detach()
+        old_w2 = module2.w.clone().detach()
+
+        g_cpu = torch.Generator()
+        g_cpu.manual_seed(0)
+        t1 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+        t2 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+        output1 = module1.forward(t2)
+        output2 = module2.forward(output1)
+        loss = torch.add(output2, t1).sum()
+
+        loss.backward()
+        local_optim.step()
+
+        # distributed version
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+
+        remote_module1 = rpc.remote(owner1, MyModule)
+        remote_module2 = rpc.remote(owner2, MyModule)
+        remote_param1 = remote_method(MyModule.get_w, remote_module1)
+        remote_param2 = remote_method(MyModule.get_w, remote_module2)
+
+        old_w1_remote = remote_param1.to_here()
+
+        # sanity check: local and remote initial weights should match
+        self.assertEqual(old_w1, remote_param1.to_here())
+        self.assertEqual(old_w2, remote_param2.to_here())
+
+        dist_optim = DistributedOptimizer(
+            optim.Adagrad, [remote_param1, remote_param2], lr=0.05
+        )
+
+        with dist_autograd.context() as context_id:
+            g_cpu.manual_seed(0)
+            t1 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+            t2 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+            output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
+            output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
+            loss = torch.add(output2.wait(), t1)
+
+            dist_autograd.backward(context_id, [loss.sum()])
+            dist_optim.step(context_id)
+
+            new_w1 = rpc_async_method(MyModule.get_w, remote_module1).wait()
+            new_w2 = rpc_async_method(MyModule.get_w, remote_module2).wait()
+
+            # ensure optimizer changed weights
+            self.assertNotEqual(old_w1, new_w1)
+            self.assertNotEqual(old_w2, new_w2)
+            # ensure local equals remote
+            self.assertEqual(new_w1, module1.get_w())
+            self.assertEqual(new_w2, module2.get_w())

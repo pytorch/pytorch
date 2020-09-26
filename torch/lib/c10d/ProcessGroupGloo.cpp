@@ -2,16 +2,24 @@
 
 #include <c10d/GlooDeviceFactory.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <gloo/common/win.h>
+#else
 #include <netdb.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
+#endif
+#include <sys/types.h>
 
 #include <type_traits>
 
 #include <gloo/allgather.h>
 #include <gloo/allgatherv.h>
 #include <gloo/allreduce.h>
+#include <gloo/alltoall.h>
+#include <gloo/alltoallv.h>
 #include <gloo/barrier.h>
 #include <gloo/broadcast.h>
 #include <gloo/gather.h>
@@ -34,6 +42,36 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
+#ifdef _WIN32
+#define GENERATE_ALL_TYPES(type, func, ...)            \
+  switch (type) {                                      \
+    case ::at::ScalarType::Float:                      \
+      func<float>(__VA_ARGS__);                        \
+      break;                                           \
+    case ::at::ScalarType::Double:                     \
+      func<double>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Half:                       \
+      func<gloo::float16>(__VA_ARGS__);                \
+      break;                                           \
+    case ::at::ScalarType::Char:                       \
+      func<int8_t>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Byte:                       \
+      func<uint8_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Int:                        \
+      func<int32_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Long:                       \
+      func<int64_t>(__VA_ARGS__);                      \
+      break;                                           \
+    default:                                           \
+      throw std::runtime_error("Invalid scalar type"); \
+  }
+
+#define HOST_NAME_MAX 256
+#else
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
     case ::at::ScalarType::Float:                      \
@@ -60,6 +98,7 @@
     default:                                           \
       throw std::runtime_error("Invalid scalar type"); \
   }
+#endif
 
 namespace c10d {
 
@@ -204,6 +243,16 @@ void setInput(O& opts, at::Tensor& tensor) {
 }
 
 template <typename T, typename O>
+void setInput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setInput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
+void setInput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
+  opts.setInput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
 void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
   opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
 }
@@ -215,6 +264,11 @@ void setOutput(O& opts, at::Tensor& tensor) {
 
 template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setOutput(getDataPointer<T>(tensor), counts);
+}
+
+template <typename T, typename O>
+void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
@@ -238,7 +292,7 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
 // that new work on the new streams is serialized w.r.t. all operations
 // on the tensors.
 void initializeStreamsEvents(
-    std::vector<at::Tensor>& tensors,
+    const std::vector<at::Tensor>& tensors,
     std::vector<at::cuda::CUDAStream>& streams,
     std::vector<at::cuda::CUDAEvent>& events) {
   at::cuda::OptionalCUDAGuard guard;
@@ -333,22 +387,21 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::wait() {
+bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
   bool sendCompleted = false;
   std::exception_ptr exception{nullptr};
   try {
-    sendCompleted = buffer_->waitSend();
+    if (timeout == kNoTimeout) {
+      sendCompleted = buffer_->waitSend();
+    } else {
+      sendCompleted = buffer_->waitSend(timeout);
+    }
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return sendCompleted;
 }
 
@@ -366,22 +419,21 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-bool ProcessGroupGloo::RecvWork::wait() {
+bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
   bool recvCompleted = false;
   std::exception_ptr exception{nullptr};
   try {
-    recvCompleted = buffer_->waitRecv(&srcRank_);
+    if (timeout == kNoTimeout) {
+      recvCompleted = buffer_->waitRecv(&srcRank_);
+    } else {
+      recvCompleted = buffer_->waitRecv(&srcRank_, timeout);
+    }
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
-  std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
+
+  // Completes the Work object and throws the exception.
+  finishAndThrow(exception);
   return recvCompleted;
 }
 
@@ -394,12 +446,19 @@ ProcessGroupGloo::Options::Options()
 
 namespace {
 
+void socketInitialize() {
+#ifdef _WIN32
+  ::gloo::init_winsock();
+#endif
+}
+
 // Gloo assumes that this machine's hostname can always be resolved
 // to an address. If it doesn't it throws a runtime error saying
 // that it can't be resolved. Instead of catching it, we choose
 // to proactively check if an address can be resolved, so we can
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+  socketInitialize();
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -416,7 +475,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
       continue;
     }
     rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+#ifdef _WIN32
+    closesocket(fd);
+#else
     close(fd);
+#endif
     if (rv == -1) {
       continue;
     }
@@ -428,14 +491,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface) {
-  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
+    createDeviceForInterface(const std::string& interface_name) {
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface_name);
 }
-#endif
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   TORCH_CHECK(
@@ -445,14 +505,14 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
       " to a (local) address");
   return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
-#endif
 
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
+  socketInitialize();
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
@@ -781,14 +841,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
-
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
-    for (size_t i = 1; i < inputs.size(); i++) {
-      inputs[i].copy_(inputs[0]);
-    }
+    outputs_ = inputs;
   }
 
   template <typename T>
@@ -803,6 +856,18 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
+
+
+  std::vector<at::Tensor> result() override {
+    TORCH_CHECK(
+        isCompleted(),
+        "Work needs to be completed before calling result(). "
+        "Should call wait() before result().");
+    return outputs_;
+  }
+
+ protected:
+  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -993,7 +1058,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
-  std::vector<at::Tensor> result() const override {
+  std::vector<at::Tensor> result() override {
     return outputs;
   }
 
@@ -1144,17 +1209,14 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Run allreduce on host side tensors.
     allreduce(tmp);
 
-    // Kick off copy back to the CUDA tensors.
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      inputs[i].copy_(tmp[0], /* non_blocking */ true);
+      inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    outputs_ = inputs;
   }
 
   void synchronize() override {
@@ -2244,6 +2306,179 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
   throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+}
+
+namespace {
+
+class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAlltoallWork(
+      const std::shared_ptr<gloo::Context>& context,
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      uint32_t tag)
+      : context(context),
+        outputTensor(outputTensor),
+        inputTensor(inputTensor),
+        outputCounts(std::move(outputCounts)),
+        inputCounts(std::move(inputCounts)),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  at::Tensor outputTensor;
+  at::Tensor inputTensor;
+  std::vector<int64_t> outputCounts;
+  std::vector<int64_t> inputCounts;
+  const uint32_t tag;
+
+  void alltoall(at::Tensor& outputTensor, at::Tensor& inputTensor) {
+    const auto scalarType = outputTensor.scalar_type();
+    if (outputCounts.size() == 0 && inputCounts.size() == 0) {
+      // Gloo alltoall
+      gloo::AlltoallOptions opts(context);
+      opts.setTag(tag);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor);
+      gloo::alltoall(opts);
+    } else {
+      // Gloo alltoallv
+      c10d::checkSplitSizes(inputCounts, inputTensor, context->size);
+      c10d::checkSplitSizes(outputCounts, outputTensor, context->size);
+      std::vector<int64_t> sendCounts(context->size);
+      std::vector<int64_t> recvCounts(context->size);
+      std::vector<int64_t> sendOffsets(context->size);
+      std::vector<int64_t> recvOffsets(context->size);
+      c10d::computeLengthsAndOffsets(
+          inputCounts, inputTensor, &sendCounts, &sendOffsets);
+      c10d::computeLengthsAndOffsets(
+          outputCounts, outputTensor, &recvCounts, &recvOffsets);
+      gloo::AlltoallvOptions opts(context);
+      opts.setTag(tag);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, sendCounts);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor, recvCounts);
+      gloo::alltoallv(opts);
+    }
+  }
+
+  void run() override {
+    alltoall(outputTensor, inputTensor);
+  }
+};
+
+#ifdef USE_CUDA
+
+class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
+ public:
+  AsyncAlltoallCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      uint32_t tag)
+      : AsyncAlltoallWork(
+            context,
+            outputTensor,
+            inputTensor,
+            outputCounts,
+            inputCounts,
+            tag) {
+    initializeStreamsEvents({inputTensor}, inputStreams, inputEvents);
+    initializeStreamsEvents({outputTensor}, outputStreams, outputEvents);
+
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    at::cuda::OptionalCUDAStreamGuard guard;
+    guard.reset_stream(inputStreams.front());
+    cpuInput = pinnedLike(inputTensor).copy_(inputTensor, true);
+
+    guard.reset_stream(outputStreams.front());
+    cpuOutput = pinnedLike(outputTensor);
+  }
+
+  void run() override {
+    // Synchronize with copy operations.
+    at::cuda::OptionalCUDAGuard device_guard;
+    device_guard.set_index(inputTensor.get_device());
+    AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams.front()));
+    device_guard.set_index(outputTensor.get_device());
+    AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams.front()));
+
+    // Run alltoall on host side tensors.
+    alltoall(cpuOutput, cpuInput);
+
+    // Kick off copy back to the CUDA tensors.
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    stream_guard.reset_stream(outputStreams.front());
+    outputTensor.copy_(cpuOutput, /* non_blocking */ true);
+    outputEvents.front().record(outputStreams.front());
+  }
+
+  void synchronize() override {
+    // Synchronize with the copy back to CUDA tensors.
+    at::cuda::OptionalCUDAGuard guard;
+    guard.set_index(static_cast<at::DeviceIndex>(outputTensor.get_device()));
+    outputEvents.front().block(at::cuda::getCurrentCUDAStream());
+  }
+
+  at::Tensor cpuOutput;
+  std::vector<at::cuda::CUDAStream> outputStreams;
+  std::vector<at::cuda::CUDAEvent> outputEvents;
+
+  at::Tensor cpuInput;
+  std::vector<at::cuda::CUDAStream> inputStreams;
+  std::vector<at::cuda::CUDAEvent> inputEvents;
+};
+
+#endif
+
+} // namespace
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    std::vector<int64_t>& outputCounts,
+    std::vector<int64_t>& inputCounts,
+    const AllToAllOptions& /* unused */) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::alltoall_base: " + msg);
+  };
+
+  TORCH_CHECK(
+      outputTensor.device() == inputTensor.device(),
+      "output tensor and input tensor must be on the same type of device");
+  assertDense(invalidArgument, {outputTensor});
+  assertDense(invalidArgument, {inputTensor});
+
+  const auto& device = outputTensor.device();
+  std::shared_ptr<AsyncAlltoallWork> work;
+  auto tag = nextTag();
+  auto context = getContext(tag);
+
+  if (device.type() == at::kCPU) {
+    work = std::make_shared<AsyncAlltoallWork>(
+        std::move(context),
+        outputTensor,
+        inputTensor,
+        outputCounts,
+        inputCounts,
+        tag);
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
+    work = std::make_shared<AsyncAlltoallCUDAWork>(
+        std::move(context),
+        outputTensor,
+        inputTensor,
+        outputCounts,
+        inputCounts,
+        tag);
+#endif
+  } else {
+    invalidArgument(c10::str("unsupported device type ", device.type()));
+  }
+  enqueue(work);
+  return work;
 }
 
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {

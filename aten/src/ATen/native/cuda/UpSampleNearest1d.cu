@@ -13,6 +13,7 @@ namespace {
 
 #define MAX_THREADS 512
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest1d_out_frame(
@@ -43,6 +44,7 @@ __global__ void upsample_nearest1d_out_frame(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 // Backward operation
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -62,8 +64,8 @@ __global__ void upsample_nearest1d_backward_out_frame(
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+  int src_x = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -230,6 +232,33 @@ Tensor upsample_nearest1d_backward_cuda(
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
+  return grad_input;
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor upsample_nearest1d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_w = get_scale_value(scale_factors, 0);
+  upsample_nearest1d_out_cuda_template(output, input, osize, scale_w);
+  return output;
+}
+
+Tensor upsample_nearest1d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_w = get_scale_value(scale_factors, 0);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_nearest1d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_w);
   return grad_input;
 }
 

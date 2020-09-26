@@ -165,7 +165,7 @@ struct ShapeSymbolTable {
   // the dimension value from `new_sizes`
   bool bindSymbolicShapes(
       at::IntArrayRef new_sizes,
-      const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes);
+      const c10::SymbolicShape& sym_shapes);
 };
 
 struct ProfilingRecord {
@@ -176,6 +176,8 @@ struct ProfilingRecord {
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
   TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
+  TORCH_API static void removeProfilingNodes(Block* b);
+  TORCH_API static void removeProfileCounter(Block* b);
 
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
@@ -187,10 +189,11 @@ struct ProfilingRecord {
 
   // A thin wrapper around `partitionSetByDimension` to ensure
   // `new_sizes` and `sym_shapes` are of the same rank
-  std::vector<c10::optional<c10::ShapeSymbol>> mergeSymbolicShapes(
-      const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
-      const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
-      SetPartitioningHelper& symbol_table);
+
+  c10::SymbolicShape mergeSymbolicShapes(
+      const c10::SymbolicShape& new_sizes,
+      const c10::SymbolicShape& sym_shapes,
+      SetPartitioningHelper& partition_helper);
 
   bool ready() const {
     return profiling_count_ == 0;
@@ -203,8 +206,11 @@ struct ProfilingRecord {
   ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
+  ProfileOptionalOp* createProfileOptionalNode(
+      const std::function<void(Stack&)>& fp,
+      at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  void insertShapeProfile(Node* n, Value* i);
+  void insertShapeProfile(Node* n, size_t offset);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 

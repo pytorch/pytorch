@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn object.
+# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
 #
 
 # Code tries to stick to the following rules:
@@ -35,14 +35,10 @@ import re
 from .gen_variable_type import should_trace
 from .utils import write, is_tensor_method
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 #
-# declarations blacklist
+# declarations blocklist
 # We skip codegen for these functions, for various reasons.
 # Future PRs will categorize this list and eliminate or hoist
 # them out of eager-only codegen.
@@ -57,8 +53,7 @@ SKIP_PYTHON_BINDINGS = [
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
-    '_indexCopy_', 'max_values', 'min_values',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
+    '_indexCopy_', '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
     'full(_out)?',
@@ -85,7 +80,9 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 
 NATIVE_NAMESPACE_MAPPING = {
     "torch": "THPVariableFunctionsModule",
-    "torch.nn": "THPNNVariableFunctionsModule"
+    "torch.nn": "THPNNVariableFunctionsModule",
+    "torch.fft": "THPFFTVariableFunctionsModule",
+    "torch.linalg": "THPLinalgVariableFunctionsModule",
 }
 
 def should_generate_python_binding(declaration):
@@ -157,6 +154,55 @@ def gen_py_nn_functions(out, declarations, template_path):
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
+def get_py_fft_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "fft" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_fft_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_fft_functions(out, declarations, template_path):
+    """
+    Generate functions in the "fft" module.
+    """
+    PY_FFT_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_fft_functions.cpp')
+
+    py_fft_functions = get_py_fft_functions(declarations)
+
+    env = create_python_bindings(py_fft_functions, is_python_method=False, module="torch.fft")
+
+    write(out, 'python_fft_functions.cpp', PY_FFT_FUNCTIONS_CPP, env)
+
+def get_py_linalg_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "linalg" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                is_linalg_module_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def gen_py_linalg_functions(out, declarations, template_path):
+    """
+    Generate functions in the "linalg" module.
+    """
+    PY_LINALG_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_linalg_functions.cpp')
+
+    py_linalg_functions = get_py_linalg_functions(declarations)
+
+    env = create_python_bindings(py_linalg_functions, is_python_method=False, module="torch.linalg")
+
+    write(out, 'python_linalg_functions.cpp', PY_LINALG_FUNCTIONS_CPP, env)
+
+
 def get_py_torch_functions(declarations):
     """
     Get declarations (grouped by name) which should be generated
@@ -165,6 +211,8 @@ def get_py_torch_functions(declarations):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 not is_nn_module_function(declaration) and
+                not is_fft_module_function(declaration) and
+                not is_linalg_module_function(declaration) and
                 is_torch_function(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -216,6 +264,8 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
+    'c10::optional<Tensor>': 'optionalTensor',
+    'const c10::optional<Tensor>&': 'optionalTensor',
     'c10::optional<Generator>': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
@@ -226,9 +276,12 @@ UNPACK_METHODS = {
     'c10::optional<Layout>': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
+    'c10::optional<ArrayRef<double>>': 'doublelistOptional',
+    'ArrayRef<double>': 'doublelist',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',
@@ -239,12 +292,14 @@ UNPACK_METHODS = {
     'bool': 'toBool',
     'double': 'toDouble',
     'std::string': 'string',
+    'c10::optional<std::string>': 'stringOptional',
 }
 
 UNPACK_WITH_SIZE_METHODS = {
     'TensorList': 'tensorlist_n<{}>',
     'DimnameList': 'dimnamelist',
     'IntArrayRef': 'intlist',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
@@ -350,6 +405,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
     'std::tuple<double,int64_t>',
+    'std::tuple<double,double>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
@@ -808,7 +864,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -829,7 +885,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
   ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
@@ -843,6 +899,7 @@ PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   ${method_header}
+  ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
 }
@@ -851,7 +908,13 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 TORCH_FUNCTION_CHECK = CodeTemplate("""\
 if(_r.has_torch_function()) {
-  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
+  return handle_torch_function(_r, ${self_}, args, kwargs, ${namespace}, ${modulename});
+}
+""")
+
+TORCH_FUNCTION_CHECK_NOARGS = CodeTemplate("""\
+if(check_has_torch_function(self_)) {
+  return handle_torch_function(self_, ${name});
 }
 """)
 
@@ -877,6 +940,10 @@ def method_impl(name, declarations, is_python_method, module):
 
     method_footer = ['END_HANDLE_TH_ERRORS']
 
+    check_has_torch_function = TORCH_FUNCTION_CHECK_NOARGS.substitute(
+        name='"' + name + '"',
+    ) if is_python_method else ''
+
     # emit dispatch
     if is_noarg_binding(declarations):
         dispatch = emit_single_dispatch(declaration, is_python_method)
@@ -886,6 +953,7 @@ def method_impl(name, declarations, is_python_method, module):
             method_header=method_header,
             dispatch=dispatch,
             method_footer=method_footer,
+            check_has_torch_function=check_has_torch_function,
         )
 
     method_footer = ['Py_RETURN_NONE;'] + method_footer
@@ -910,9 +978,14 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
             namespace=NATIVE_NAMESPACE_MAPPING[module],
             modulename='"' + module + '"',
+            self_="self_" if is_python_method else "nullptr",
         )
     else:
-        check_has_torch_function = ''
+        check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
+            namespace="THPVariableClass",
+            modulename='"torch.Tensor"',
+            self_="self_" if is_python_method else "nullptr",
+        )
 
     max_args = max([get_python_argc(decl) for decl in declarations])
     traceable = 'true' if all(should_trace(d) for d in declarations) else 'false'
@@ -927,6 +1000,7 @@ def method_impl(name, declarations, is_python_method, module):
         check_has_torch_function=check_has_torch_function,
         dispatch=dispatch,
         method_footer=method_footer,
+        self_="self_" if is_python_method else "nullptr",
     )
 
 
@@ -1067,30 +1141,11 @@ def group_overloads(declarations, is_python_method):
 # See Note[Order of overloads matters]
 def sort_declarations(grouped_decls):
 
-    # TODO: This is a hack!
-    #
-    # For some reason, when you specify a Scalar argument in a native
-    # function, you get a Declarations.yaml entry that looks like this:
-    #
-    #   - default: 1
-    #     dynamic_type: Scalar
-    #     is_nullable: false
-    #     kwarg_only: true
-    #     name: alpha
-    #     type: Scalar
-    #
-    # This is contrast to when there is a 'real' argument in TH
-    # Declarations.cwrap; this gets (correctly?) translated into
-    # dynamic_type: real, and type: Scalar.  I would like to fix this
-    # at the source but I have never understood what dynamic_type is
-    # supposed to be.
-    def normalized_dynamic_type(arg):
-        if arg['dynamic_type'] == 'real':
-            return 'Scalar'
+    def dynamic_type(arg):
         return arg['dynamic_type']
 
     def is_coord_smaller(arg1, arg2):
-        return normalized_dynamic_type(arg1) == 'Scalar' and arg2['dynamic_type'] == 'Tensor'
+        return dynamic_type(arg1) == 'Scalar' and arg2['dynamic_type'] == 'Tensor'
 
     def is_smaller(d1, d2):
         """Returns True if d1 < d2 in the partial order."""
@@ -1098,7 +1153,7 @@ def sort_declarations(grouped_decls):
         if len(args1) != len(args2):
             return False
         any_smaller = any(is_coord_smaller(arg1, arg2) for arg1, arg2 in zip(args1, args2))
-        all_smaller_or_equal = all(normalized_dynamic_type(arg1) == normalized_dynamic_type(arg2) or
+        all_smaller_or_equal = all(dynamic_type(arg1) == dynamic_type(arg2) or
                                    is_coord_smaller(arg1, arg2)
                                    for arg1, arg2 in zip(args1, args2))
         return any_smaller and all_smaller_or_equal
@@ -1153,7 +1208,10 @@ def get_schema_formal(arg, is_python_method):
 
     size = arg.get('size')
     if size is not None:
-        typename = '{}[{}]'.format(typename, size)
+        if typename.endswith('?'):
+            typename = '{}[{}]?'.format(typename[:-1], size)
+        else:
+            typename = '{}[{}]'.format(typename, size)
 
     # default
     default = arg.get('default')
@@ -1452,6 +1510,13 @@ def is_torch_function(declaration):
 
 def is_nn_module_function(declaration):
     return declaration.get('python_module') == 'nn'
+
+
+def is_fft_module_function(declaration):
+    return declaration.get('python_module') == 'fft'
+
+def is_linalg_module_function(declaration):
+    return declaration.get('python_module') == 'linalg'
 
 
 def function_namespace(declaration):

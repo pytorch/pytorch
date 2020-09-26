@@ -14,6 +14,7 @@ import zipfile
 import functools
 
 # Testing utils
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
@@ -23,6 +24,7 @@ from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
 from torch._six import StringIO
+from typing import Any, Dict
 
 import inspect
 import io
@@ -35,6 +37,14 @@ import textwrap
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+RUN_CUDA_HALF = RUN_CUDA
+# HIP supports half, no version check necessary
+if torch.cuda.is_available() and not torch.version.hip:
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(torch.cuda.device_count()):
+        major = torch.cuda.get_device_capability(d)[0]
+        if (major < 6):
+            RUN_CUDA_HALF = False
 
 def execWrapper(code, glob, loc):
     exec(code, glob, loc)
@@ -53,6 +63,31 @@ def get_execution_plan(graph_executor_state):
         raise RuntimeError('This test assumes this GraphExecutor should '
                            'only have one execution plan, got: {}'.format(num_plans))
     return execution_plans[0]
+
+class _AssertRaisesRegexWithHighlightContext(object):
+    """
+    A context manager that is useful for checking that error messages highlight
+    the correct part of the source code.
+    """
+
+    def __init__(self, test_case, exception, regex, highlight):
+        self.test_case = test_case
+        self.exception_type = exception
+        self.regex = regex
+        self.highlight = highlight
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        with self.test_case.assertRaisesRegex(self.exception_type, self.regex):
+            if type:
+                raise value
+
+        if self.highlight:
+            FileCheck().check_source_highlighted(self.highlight).run(str(value))
+
+        return True
 
 
 class JitTestCase(TestCase):
@@ -114,18 +149,18 @@ class JitTestCase(TestCase):
             self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             # unwrap all the code files into strings
-            code_files = filter(lambda x: x.endswith('.py'), files)
-            code_files = map(lambda f: archive.open(f), code_files)
-            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+            code_files_str = filter(lambda x: x.endswith('.py'), files)
+            code_files_stream = map(lambda f: archive.open(f), code_files_str)
+            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files_stream)
 
             # unpickled all the debug files
-            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files = map(lambda f: archive.open(f), debug_files)
-            debug_files = map(lambda f: pickle.load(f), debug_files)
+            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files_stream = map(lambda f: archive.open(f), debug_files_str)
+            debug_files = map(lambda f: pickle.load(f), debug_files_stream)
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             try:
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
@@ -236,9 +271,17 @@ class JitTestCase(TestCase):
                            consider_subgraphs)
             return
 
-        nodes = [node for node in graph.nodes()
-                 if node.kind() == kind]
-        perform_assert(graph, kind, len(nodes), num_kind_nodes,
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        perform_assert(graph, kind, len(out_nodes), num_kind_nodes,
                        consider_subgraphs)
 
     def assertExpectedONNXGraph(self, g, *args, **kwargs):
@@ -294,14 +337,21 @@ class JitTestCase(TestCase):
 
     def get_frame_vars(self, frames_up):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars = {}
+        defined_vars: Dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
+
+    def assertRaisesRegexWithHighlight(self, exception, regex, highlight):
+        return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
                                outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
@@ -363,7 +413,7 @@ class JitTestCase(TestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals = {}
+                    the_locals: Dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -631,7 +681,14 @@ def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
 
-op_alias_mappings = {
-    "absolute" : "abs",
-    "absolute_" : "abs_",
-}
+def warmup_backward(f, *args):
+    profiling_count = 2
+    results = []
+    for i in range(profiling_count):
+        if len(args) > 0:
+            r = torch.autograd.grad(f, *args)
+            results.append(r)
+        else:
+            f.backward(retain_graph=True)
+
+    return results

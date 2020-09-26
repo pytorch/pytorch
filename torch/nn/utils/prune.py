@@ -4,14 +4,9 @@ Pruning methods
 from abc import abstractmethod
 import numbers
 import torch
-# For Python 2 and 3 support
-try:
-    from abc import ABC
-    from collections.abc import Iterable
-except ImportError:
-    from abc import ABCMeta
-    ABC = ABCMeta('ABC', (), {})
-    from collections import Iterable
+from abc import ABC
+from collections.abc import Iterable
+from typing import Tuple
 
 class BasePruningMethod(ABC):
     r"""Abstract base class for creation of new pruning techniques.
@@ -19,6 +14,8 @@ class BasePruningMethod(ABC):
     Provides a skeleton for customization requiring the overriding of methods
     such as :meth:`compute_mask` and :meth:`apply`.
     """
+    _tensor_name: str
+
     def __init__(self):
         pass
 
@@ -233,7 +230,8 @@ class BasePruningMethod(ABC):
         weight = self.apply_mask(module)  # masked weights
 
         # delete and reset
-        delattr(module, self._tensor_name)
+        if hasattr(module, self._tensor_name):
+            delattr(module, self._tensor_name)
         orig = module._parameters[self._tensor_name + "_orig"]
         orig.data = weight.data
         del module._parameters[self._tensor_name + "_orig"]
@@ -251,7 +249,7 @@ class PruningContainer(BasePruningMethod):
     """
 
     def __init__(self, *args):
-        self._pruning_methods = tuple()
+        self._pruning_methods: Tuple['BasePruningMethod', ...] = tuple()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
@@ -274,7 +272,7 @@ class PruningContainer(BasePruningMethod):
             raise TypeError(
                 "{} is not a BasePruningMethod subclass".format(type(method))
             )
-        elif self._tensor_name != method._tensor_name:
+        elif method is not None and self._tensor_name != method._tensor_name:
             raise ValueError(
                 "Can only add pruning methods acting on "
                 "the parameter named '{}' to PruningContainer {}.".format(
@@ -301,13 +299,14 @@ class PruningContainer(BasePruningMethod):
         that were not zeroed out by the ``default_mask``.
         Which portions of the tensor ``t`` the new mask will be calculated from
         depends on the ``PRUNING_TYPE`` (handled by the type handler):
-            * for 'unstructured', the mask will be computed from the raveled
-            list of nonmasked entries;
 
-            * for 'structured', the mask will be computed from the nonmasked
-            channels in the tensor;
+        * for 'unstructured', the mask will be computed from the raveled
+          list of nonmasked entries;
 
-            * for 'global', the mask will be computed across all entries.
+        * for 'structured', the mask will be computed from the nonmasked
+          channels in the tensor;
+
+        * for 'global', the mask will be computed across all entries.
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
@@ -1180,7 +1179,7 @@ def _validate_pruning_amount_init(amount):
 
     if (isinstance(amount, numbers.Integral) and amount < 0) or (
         not isinstance(amount, numbers.Integral)  # so it's a float
-        and (amount > 1.0 or amount < 0.0)
+        and (float(amount) > 1.0 or float(amount) < 0.0)
     ):
         raise ValueError(
             "amount={} should either be a float in the "

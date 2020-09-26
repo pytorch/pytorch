@@ -49,15 +49,16 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       const float rpcTimeoutSeconds =
           torch::distributed::rpc::kUnsetRpcTimeout) override;
 
-  // Overrides ProcessGroupAgent's enqueueSend to inject delays.
-  void enqueueSend(SendWork work) override;
-
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use
   // the faulty send or not.
   virtual bool shouldFailMessage(MessageType type) const;
 
  private:
+  // Overrides ProcessGroupAgent's enqueueSend to inject delays.
+  void enqueueSend(SendWork work) override;
+  // Override ProcessGroupAgent's sendToSelf to inject delays.
+  void sendToSelf(Message&& message) override;
   // This function parses the list of strings passed in by the python tests and
   // resolves the Message Types that must use the faulty send.
   std::vector<MessageType> parseMessagesToFailInput(

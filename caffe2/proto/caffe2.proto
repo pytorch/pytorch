@@ -194,6 +194,12 @@ message TensorBoundShapes {
   optional int64 max_feature_len = 3;
 }
 
+message AOTConfig{
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {
@@ -365,7 +371,8 @@ message NetDef {
   // in parallel.
   // Note: This is to be deprecated. Using the arg field with "num_workers" as
   // key.
-  optional int32 num_workers = 4 [deprecated=true];
+  // Note 2: The old uses of this were never actually cleaned up
+  optional int32 num_workers = 4;
 
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the

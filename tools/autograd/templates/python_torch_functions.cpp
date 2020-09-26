@@ -44,6 +44,7 @@ using at::Generator;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
+using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
@@ -186,9 +187,13 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (r.idx == 0) {
-    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
-        "and will be removed in 0.5. Note that arange generates values in [start; end), "
-        "not [start; end].", 1);
+    auto ret = PyErr_WarnEx(
+        PyExc_UserWarning,
+        "torch.range is deprecated and will be removed in a future release "
+        "because its behavior is inconsistent with Python's range builtin. "
+        "Instead, use torch.arange, which produces values in [start, end).",
+        1);
+    if (ret != 0) throw python_error();
     if (r.isNone(3)) {
       const auto options = TensorOptions()
           .dtype(r.scalartype(4))
@@ -255,8 +260,7 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
       .dtype(r.scalartypeOptional(3))
       .layout(r.layout(4))
       .device(r.device(5))
-      .pinned_memory(r.toBool(6))
-      .requires_grad(r.toBool(7));
+      .pinned_memory(r.toBool(6));
 
   if (r.idx == 0) {
     // full
@@ -432,6 +436,14 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on python object to allow torch.tensor to be constructed with arbitrarily nested
 // python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -493,6 +505,8 @@ static PyMethodDef torch_functions[] = {
   {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_sparse_coo_tensor_unsafe", (PyCFunction)(void(*)(void))THPVariable__sparse_coo_tensor_unsafe, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_validate_sparse_coo_tensor_args", (PyCFunction)(void(*)(void))THPVariable__validate_sparse_coo_tensor_args, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

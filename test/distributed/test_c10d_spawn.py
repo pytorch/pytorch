@@ -10,8 +10,10 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_gloo
-from torch.testing._internal.common_utils import TestCase, load_tests, run_tests
+from torch.testing._internal.common_distributed import requires_gloo, \
+    create_device
+from torch.testing._internal.common_utils import TestCase, load_tests, \
+    run_tests, skipIfRocm
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
 
 
@@ -20,12 +22,12 @@ from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests')
+    print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
 if NO_MULTIPROCESSING_SPAWN:
-    print('spawn not available, skipping tests')
+    print('spawn not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
@@ -39,7 +41,7 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface="lo")]
+        opts.devices = [create_device(interface='lo')]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -241,7 +243,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         for i, j in zip(ddp.parameters(), net.parameters()):
             self.assertTrue(i.allclose(j))
 
-        for _ in range(1):
+        for _ in range(10):
             net_out = net(*inp)
             ddp_out = ddp(*inp)
 
@@ -266,6 +268,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
     @requires_gloo()
     @unittest.skipIf(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    @skipIfRocm
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268

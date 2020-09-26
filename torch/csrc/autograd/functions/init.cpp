@@ -29,6 +29,13 @@ struct DelayedErrorCtor {
   }
 };
 
+struct UndefinedGradCtor {
+  UndefinedGrad* operator()(PyObject* args) {
+    TORCH_CHECK(PyTuple_GET_SIZE(args) == 0, "Requires zero arguments, got ", PyTuple_GET_SIZE(args));
+    return new UndefinedGrad();
+  }
+};
+
 struct NoCtor {
   Node* operator()(PyObject* args) {
     throw std::runtime_error("Cannot construct");
@@ -102,6 +109,12 @@ void THPAutograd_initFunctions()
 
   static PyTypeObject DelayedErrorClass;
   addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
+
+  static PyTypeObject UndefinedGradBackwardClass;
+  addClass<UndefinedGradBackward, NoCtor>(module, UndefinedGradBackwardClass, "UndefinedGradBackward");
+
+  static PyTypeObject UndefinedGradClass;
+  addClass<UndefinedGrad, UndefinedGradCtor>(module, UndefinedGradClass, "UndefinedGrad");
 
   static PyTypeObject CopyBackwardsClass;
   addClass<CopyBackwards, NoCtor>(module, CopyBackwardsClass, "CopyBackwards");

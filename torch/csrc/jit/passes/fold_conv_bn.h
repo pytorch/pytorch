@@ -11,7 +11,7 @@ namespace jit {
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.
  */
-TORCH_API Module FoldConvBatchNorm2d(const Module& module);
+TORCH_API Module FoldConvBatchNorm(const Module& module);
 
 } // namespace jit
 } // namespace torch

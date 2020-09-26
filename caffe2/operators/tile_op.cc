@@ -8,6 +8,7 @@ template <>
 bool TileOp<CPUContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<
       at::Half,
+      std::uint8_t,
       std::int32_t,
       std::int64_t,
       float,

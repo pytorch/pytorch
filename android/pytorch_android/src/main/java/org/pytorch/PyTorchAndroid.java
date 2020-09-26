@@ -11,6 +11,7 @@ public final class PyTorchAndroid {
       NativeLoader.init(new SystemDelegate());
     }
     NativeLoader.loadLibrary("pytorch_jni");
+    PyTorchCodegenLoader.loadNativeLibs();
   }
 
   /**

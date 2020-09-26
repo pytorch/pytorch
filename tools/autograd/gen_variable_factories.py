@@ -5,19 +5,16 @@
 import re
 
 from .utils import CodeTemplate, write
-from .gen_variable_type import format_trace
 
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
 inline at::Tensor ${name}(${formals}) {
-  ${pre_record_trace}
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     return at::${name}(${actuals});
   })();
   at::Tensor result =
     autograd::make_variable(std::move(tensor), /*requires_grad=*/${requires_grad});
-  ${post_record_trace}
   return result;
 }
 """)
@@ -42,7 +39,7 @@ def fully_qualified_type(argument_type):
     return maybe_optional_type(qualified_type, opt_match)
 
 
-def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
+def gen_variable_factories(out, declarations, template_path):
     function_definitions = []
     for decl in declarations:
         has_tensor_options = any(a["simple_type"] == "TensorOptions" for a in decl["arguments"])
@@ -52,7 +49,6 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
                 process_function(
                     decl,
                     has_tensor_options,
-                    disable_autograd=disable_autograd,
                 )
             )
     write(out,
@@ -61,7 +57,7 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
           {"function_definitions": function_definitions})
 
 
-def process_function(decl, has_tensor_options, disable_autograd):
+def process_function(decl, has_tensor_options):
     formals = []
     actuals = []
     for argument in decl["arguments"]:
@@ -70,16 +66,14 @@ def process_function(decl, has_tensor_options, disable_autograd):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            actual = "at::TensorOptions({})".format(actual)
+            # note: we remove the requires_grad setting from the TensorOptions because
+            # it is ignored anyways (and we actually have an assertion that it isn't set
+            # which would fail otherwise). We handle requires_grad explicitly here
+            # instead of passing it through to the kernel.
+            actual = "at::TensorOptions({}).requires_grad(c10::nullopt)".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
 
-    if not disable_autograd:
-        pre_record_trace, post_record_trace = format_trace(decl)
-    else:
-        pre_record_trace, post_record_trace = '', ''
-
     return FUNCTION_TEMPLATE.substitute(
-        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad,
-        pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
+        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad
     )

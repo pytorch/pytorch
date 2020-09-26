@@ -1,7 +1,7 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
 from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
+import re
 
 class FakeQuantize(Module):
     r""" Simulate the quantize and dequantize operations in training time.
@@ -59,22 +59,28 @@ class FakeQuantize(Module):
         self.register_buffer('zero_point', torch.tensor([0]))
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
-        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
+        self.ch_axis = self.activation_post_process.ch_axis \
+            if hasattr(self.activation_post_process, 'ch_axis') else -1
 
+    @torch.jit.export
     def enable_fake_quant(self, enabled=True):
+        # type: (bool) -> None
         self.fake_quant_enabled[0] = 1 if enabled else 0
-        return self
 
+    @torch.jit.export
     def disable_fake_quant(self):
-        return self.enable_fake_quant(False)
+        self.enable_fake_quant(False)
 
+    @torch.jit.export
     def enable_observer(self, enabled=True):
+        # type: (bool) -> None
         self.observer_enabled[0] = 1 if enabled else 0
-        return self
 
+    @torch.jit.export
     def disable_observer(self):
-        return self.enable_observer(False)
+        self.enable_observer(False)
 
+    @torch.jit.export
     def calculate_qparams(self):
         return self.activation_post_process.calculate_qparams()
 
@@ -100,11 +106,14 @@ class FakeQuantize(Module):
 
     with_args = classmethod(_with_args)
 
+    @torch.jit.export
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={},\
-            scale={}, zero_point={}'.format(
+            quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, \
+        scale={}, zero_point={}'.format(
             self.fake_quant_enabled, self.observer_enabled,
-            self.scale, self.zero_point)
+            self.quant_min, self.quant_max,
+            self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
@@ -146,18 +155,29 @@ default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver
                                                       dtype=torch.quint8,
                                                       qscheme=torch.per_tensor_affine,
                                                       reduce_range=True)
+
+def _is_fake_quant_script_module(mod):
+    ''' Returns true if given mod is an instance of FakeQuantize script module.
+    '''
+    if isinstance(mod, torch.jit.RecursiveScriptModule):
+        # qualified name looks like '__torch__.torch.quantization.fake_quantize.___torch_mangle_2.FakeQuantize'
+        suffix = mod._c.qualified_name.split('.', 1)[1]
+        name = re.sub(r'\.___torch_mangle_\d+', '', suffix)
+        return name == 'torch.quantization.fake_quantize.FakeQuantize'
+    return False
+
 def disable_fake_quant(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
         mod.enable_fake_quant()
 
 def disable_observer(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
         mod.disable_observer()
 
 def enable_observer(mod):
-    if type(mod) == FakeQuantize:
+    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
         mod.enable_observer()

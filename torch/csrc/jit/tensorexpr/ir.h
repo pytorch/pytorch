@@ -577,13 +577,6 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
   }
 
- private:
-  const Expr* lhs_;
-  const Expr* rhs_;
-  const Expr* ret_val1_;
-  const Expr* ret_val2_;
-  CompareSelectOperation compare_op_;
-
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
@@ -600,6 +593,21 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       throw malformed_input("bad dtype in CompareSelect");
     }
   }
+
+  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+      : ExprNodeBase(kInt),
+        lhs_(lhs),
+        rhs_(rhs),
+        ret_val1_(new IntImm(1)),
+        ret_val2_(new IntImm(0)),
+        compare_op_(cmp_op) {}
+
+ private:
+  const Expr* lhs_;
+  const Expr* rhs_;
+  const Expr* ret_val1_;
+  const Expr* ret_val2_;
+  CompareSelectOperation compare_op_;
 };
 
 enum IntrinsicsOp {
@@ -613,6 +621,7 @@ enum IntrinsicsOp {
   kSinh,
   kCosh,
   kTanh,
+  kSigmoid,
   kExp,
   kExpm1,
   kFabs,
@@ -689,6 +698,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "cosh";
       case kTanh:
         return "tanh";
+      case kSigmoid:
+        return "sigmoid";
       case kExp:
         return "exp";
       case kFabs:
@@ -799,6 +810,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 

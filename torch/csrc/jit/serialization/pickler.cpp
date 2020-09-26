@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -130,7 +130,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     TORCH_CHECK(
         torch::distributed::rpc::getAllowJitRRefPickle() == true,
         "RRef jit pickling is only allowed inside RPC calls.");
@@ -139,6 +139,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     TORCH_CHECK(
         false, "RRef pickling is only supported with the distributed package");
 #endif
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    const auto& qualified_class_name =
+        enum_holder->type()->qualifiedClassName();
+    pushGlobal(qualified_class_name.prefix(), qualified_class_name.name());
+    pushIValue(enum_holder->value());
+    push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -159,7 +166,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
@@ -296,7 +303,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 
   // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableTensorData(tensor));
+  tensor_data_.push_back(tensor);
 }
 
 void Pickler::pushBytes(const std::string& string) {
@@ -384,6 +391,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         pushDouble(tensor.q_scale());
         pushInt(tensor.q_zero_point());
         break;
+      case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
         const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
             tensor.quantizer().get());
@@ -497,7 +505,7 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
-  pushString(ivalue.type()->python_str());
+  pushString(ivalue.type()->annotation_str());
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);
@@ -658,7 +666,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
       "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
+      set_schema.returns().at(0).type()->annotation_str());
 
   // Check that the return type of __getstate__ matches the input to
   // __setstate__
@@ -668,9 +676,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       get_type->isSubtypeOf(set_type),
       "'__getstate__'s return type (",
-      get_type->python_str(),
+      get_type->annotation_str(),
       ") does not match '__setstate__'s argument type (",
-      set_type->python_str(),
+      set_type->annotation_str(),
       ")");
 
   return true;

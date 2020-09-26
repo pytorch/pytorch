@@ -53,10 +53,7 @@ __version_info__ = tuple(int(segment) for segment in __version__.split("."))
 import sys
 import os
 
-PY3 = sys.version_info[0] == 3
-
-if PY3:
-    unicode = str
+unicode = str
 
 if sys.platform.startswith('java'):
     import platform
@@ -498,10 +495,7 @@ def _get_win_folder_from_registry(csidl_name):
     registry for this guarantees us the correct answer for all CSIDL_*
     names.
     """
-    if PY3:
-      import winreg as _winreg
-    else:
-      import _winreg
+    import winreg as _winreg
 
     shell_folder_name = {
         "CSIDL_APPDATA": "AppData",

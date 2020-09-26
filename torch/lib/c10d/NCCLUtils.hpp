@@ -17,6 +17,18 @@
 #define ENABLE_NCCL_ERROR_CHECKING
 #endif
 
+// Fix build issues with NCCL P2P - until then disable NCCL send/recv.
+#if defined(ENABLE_NCCL_A2A) && (ENABLE_NCCL_A2A == 1)
+// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
+// and ncclRecv() are not supported in earlier versions.
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 7)
+#define ENABLE_NCCL_P2P_SUPPORT
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_P2P_SUPPORT
+#endif
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd)                                                 \
   do {                                                                       \

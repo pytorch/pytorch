@@ -22,10 +22,8 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
 
 void neg_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "neg_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "neg_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return -a;
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return -a;
     });
   });
 }
@@ -45,8 +43,32 @@ void sign_kernel_cuda(TensorIterator& iter){
   }
 }
 
+void signbit_kernel_cuda(TensorIterator& iter){
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return a < 0; });
+  });
+}
+
+template<typename T>
+__host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> z) {
+  if (z == c10::complex<T>(0, 0)) {
+    return c10::complex<T>(0, 0);
+  } else {
+    return z / std::abs(z);
+  }
+}
+
+void sgn_kernel_cuda(TensorIterator& iter){
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return sgn_wrapper(a);
+      });
+  });
+}
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda);
 
 }} // namespace at::native

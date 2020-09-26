@@ -1,9 +1,12 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -24,7 +27,6 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -47,6 +49,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
@@ -92,9 +99,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // unqualified "hash" function call. However the
           // argument-dependent lookup for the function "hash" doesn't get
           // triggered in this context because it conflicts with the struct
-          // torch::hash, so  we need to use the qualified name
+          // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
-          .def(py::detail::hash(py::self));
+          .def(py::detail::hash(py::self)) // NOLINT
+          .def("__repr__", [](const WorkerInfo& workerInfo) {
+            std::ostringstream os;
+            os << workerInfo;
+            return os.str();
+          });
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -116,7 +128,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+      shared_ptr_class_<PyRRef>(module, "PyRRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
           worker. A ``UserRRef`` will be deleted when 1) no references to it in
@@ -165,7 +177,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
-              >>> rpc.rpc_sync("worker1", f, args(rref,))
+              >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
               py::init<const py::object&, const py::object&>(),
@@ -204,11 +216,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "to_here",
               &PyRRef::toHere,
+              py::arg("timeout") = py::cast(kUnsetRpcTimeout),
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Blocking call that copies the value of the RRef from the owner
                   to the local node and returns it. If the current node is the
                   owner, returns a reference to the local value.
+
+                  Arguments:
+                      timeout (float, optional): Timeout for ``to_here``. If
+                          the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this
+                          argument is not provided, the default RPC timeout
+                          (60s) will be used.
               )")
           .def(
               "local_value",
@@ -273,7 +293,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-                  Create a helper proxy to easily launch an ``remote`` using
+                  Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
@@ -326,6 +346,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_type",
+              // Intentionally not releasing GIL, as most accesses just
+              // retrieve cached type py::object
+              &PyRRef::getRRefType,
+              R"(
+                  Returns the type of the data object referenced by this
+                  ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. On a user, this will trigger an
+                  RPC to fetch the ``type`` object from the owner. After this
+                  function is run once, the ``type`` object is cached by the
+                  ``RRef``, and subsequent invocations no longer trigger RPC.
+              )")
+          .def(
               "_get_future",
               [](const PyRRef& self) {
                 return std::make_shared<jit::PythonFutureWrapper>(
@@ -361,7 +394,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   to the creation of this RRef on the remote node has been recorded.
               )")
           // not releasing GIL to avoid context switch
-          .def("__str__", &PyRRef::str);
+          .def("__repr__", &PyRRef::str);
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -383,25 +416,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   :meth:`~torch.distributed.rpc.rpc_async` if necessary.
               init_method (str, optional): The URL to initialize
                   ``ProcessGroupGloo`` (default: ``env://``).
-
-
-          Example::
-              >>> import datetime, os
-              >>> from torch.distributed import rpc
-              >>> os.environ['MASTER_ADDR'] = 'localhost'
-              >>> os.environ['MASTER_PORT'] = '29500'
-              >>>
-              >>> rpc.init_rpc(
-              >>>     "worker1",
-              >>>     rank=0,
-              >>>     world_size=2,
-              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-              >>>         num_send_recv_threads=16,
-              >>>         20 # 20 second timeout
-              >>>     )
-              >>> )
-              >>>
-              >>> # omitting init_rpc invocation on worker2
       )")
       .def(
           py::init<int, float, std::string>(),
@@ -419,16 +433,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(
-          py::init<
-              std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
-              int,
-              std::chrono::milliseconds>(),
-          py::arg("name"),
-          py::arg("process_group"),
-          py::arg("num_send_recv_threads"),
-          py::arg("rpc_timeout"))
+      .def(py::init([](std::string workerName,
+                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       int numSendRecvThreads,
+                       std::chrono::milliseconds rpcTimeout) {
+        return std::make_unique<ProcessGroupAgent>(
+            std::move(workerName),
+            pg,
+            numSendRecvThreads,
+            rpcTimeout,
+            std::make_unique<RequestCallbackImpl>());
+      }))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -457,26 +472,57 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_TENSORPIPE
+
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
-      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      module, "_TensorPipeRpcBackendOptionsBase", rpcBackendOptions)
       .def(
-          py::init<float, std::string>(),
+          py::init<
+              int,
+              optional<std::vector<std::string>>,
+              optional<std::vector<std::string>>,
+              float,
+              std::string>(),
+          py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
+          py::arg("_transports") = optional<std::vector<std::string>>(),
+          py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod);
+          py::arg("init_method") = kDefaultInitMethod)
+      .def_readwrite(
+          "num_worker_threads",
+          &TensorPipeRpcBackendOptions::numWorkerThreads,
+          R"(
+              The number of threads in the thread-pool used by
+              :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+              requests.
+          )");
+
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init<
-              std::shared_ptr<::c10d::Store> /* addressStore */,
-              std::string /* selfName */,
-              worker_id_t /* selfId */,
-              int /* worldSize */,
-              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      std::string selfName,
+                      worker_id_t selfId,
+                      int worldSize,
+                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      TensorPipeRpcBackendOptions opts) {
+            return std::make_shared<TensorPipeAgent>(
+                store,
+                std::move(selfName),
+                selfId,
+                worldSize,
+                std::move(processGroup),
+                std::move(opts),
+                std::make_unique<RequestCallbackImpl>());
+          }),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",
@@ -500,7 +546,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           "get_worker_infos",
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_reverse_device_maps",
+          // intentionally not releasing GIL to avoid unnecessary context switch
+          &TensorPipeAgent::setReverseDeviceMaps);
+
+#endif // USE_TENSORPIPE
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
@@ -531,11 +583,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "_delete_all_user_rrefs",
+      "_delete_all_user_and_unforked_owner_rrefs",
       [](std::chrono::milliseconds timeoutMillis) {
-        RRefContext::getInstance().delAllUsers(timeoutMillis);
+        RRefContext::getInstance().delAllUsersAndUnforkedOwners(timeoutMillis);
       },
-      py::arg("timeout") = kDeleteAllUsersTimeout);
+      py::arg("timeout") = kDeleteAllUsersTimeout,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method
@@ -571,9 +624,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            pyRpcPythonUdf(
+                dst,
+                pickledPythonUDF,
+                tensors,
+                rpcTimeoutSeconds,
+                isAsyncExecution),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
@@ -596,13 +655,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
             dstWorkerName,
             qualifiedNameStr,
             argsTuple,
             kwargsDict,
-            rpcTimeoutSeconds));
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -614,10 +675,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "_invoke_remote_python_udf",
       &pyRemotePythonUdf,
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("dst"),
-      py::arg("pickledPythonUDF"),
-      py::arg("tensors"));
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_torchscript",
@@ -668,6 +726,42 @@ PyObject* rpc_init(PyObject* /* unused */) {
           Arguments:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
+
+  module.def(
+      "_enable_server_process_global_profiler",
+      &profiler::processglobal::enableServer);
+  module.def(
+      "_disable_server_process_global_profiler",
+      &profiler::processglobal::disableServer);
+
+  module.def("_set_profiler_node_id", &at::RecordFunction::setDefaultNodeId);
+
+  py::class_<
+      RemoteProfilerManager,
+      std::unique_ptr<RemoteProfilerManager, py::nodelete>>(
+      module, "RemoteProfilerManager")
+      .def("set_current_profiling_key", [](const std::string& key) {
+        auto& inst = RemoteProfilerManager::getInstance();
+        inst.setCurrentKey(key);
+      });
+
+  module.def(
+      "_enable_jit_rref_pickle",
+      &enableJitRRefPickle,
+      R"(
+        Allows ``torch.jit.save`` to save a ``torch.jit.ScriptModule`` with
+        pickled RRefs out of RPC contexts.
+
+
+        .. warning::
+            This is dangerous. If the module contains RRefs, the pickled
+            result must be sent over RPC and get unpickled on the receiving side
+            to restore the module. Otherwise, there will be RRef leaks, which
+            can potentially lead to program hang. When using this API, it is
+            applications responsibility to make sure that the above assumption
+            always holds.
+      )");
+  module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
 }

@@ -73,6 +73,9 @@ Creation Ops
     quantize_per_tensor
     quantize_per_channel
     dequantize
+    complex
+    polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,9 +85,12 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dstack
     gather
+    hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -96,6 +102,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vstack
     where
 
 .. _generators:
@@ -245,12 +252,21 @@ Pointwise Ops
     abs
     absolute
     acos
+    arccos
+    acosh
+    arccosh
     add
     addcdiv
     addcmul
     angle
     asin
+    arcsin
+    asinh
+    arcsinh
     atan
+    arctan
+    atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -258,16 +274,21 @@ Pointwise Ops
     bitwise_xor
     ceil
     clamp
+    clip
     conj
     cos
     cosh
+    deg2rad
     div
+    divide
     digamma
     erf
     erfc
     erfinv
     exp
+    exp2
     expm1
+    fix
     floor
     floor_divide
     fmod
@@ -285,11 +306,18 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
+    hypot
+    i0
     mul
+    multiply
     mvlgamma
     neg
+    negative
+    nextafter
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder
@@ -297,10 +325,13 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    signbit
     sin
     sinh
     sqrt
     square
+    sub
+    subtract
     tan
     tanh
     true_divide
@@ -314,13 +345,20 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
     median
     mode
     norm
+    nansum
     prod
+    quantile
+    nanquantile
     std
     std_mean
     sum
@@ -328,6 +366,7 @@ Reduction Ops
     unique_consecutive
     var
     var_mean
+    count_nonzero
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -340,17 +379,25 @@ Comparison Ops
     eq
     equal
     ge
+    greater_equal
     gt
+    greater
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
+    less_equal
     lt
-    max
-    min
+    less
+    maximum
+    minimum
     ne
+    not_equal
     sort
     topk
 
@@ -371,6 +418,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
@@ -380,12 +428,16 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
     bucketize
     cartesian_prod
     cdist
+    clone
     combinations
     cross
     cummax
@@ -399,9 +451,13 @@ Other Operations
     einsum
     flatten
     flip
+    fliplr
+    flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave
@@ -414,6 +470,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations
@@ -447,10 +505,12 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve
@@ -461,6 +521,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------
@@ -471,5 +532,8 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic
+    vmap
+    Assert

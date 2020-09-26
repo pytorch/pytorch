@@ -162,9 +162,25 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
+
 import sys
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    sys.exit(-1)
+if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
+    print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    sys.exit(-1)
+
+import platform
+python_min_version = (3, 6, 1)
+python_min_version_str = '.'.join((str(num) for num in python_min_version))
+python_max_version = (3, 9, 0)
+python_max_version_str = '.'.join((str(num) for num in python_max_version))
+if sys.version_info < python_min_version or sys.version_info >= python_max_version:
+    print("You are using Python {}. Python >={},<{} is required.".format(platform.python_version(),
+                                                                         python_min_version_str,
+                                                                         python_max_version_str))
+    sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
@@ -176,7 +192,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import subprocess
 import shutil
 import os
 import json
@@ -187,6 +202,7 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
+from tools.generate_torch_version import get_torch_version
 
 ################################################################################
 # Parameters parsed from environment
@@ -260,22 +276,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = open('version.txt', 'r').read().strip()
-sha = 'Unknown'
-
-try:
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-except Exception:
-    pass
-
-if os.getenv('PYTORCH_BUILD_VERSION'):
-    assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
-    build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
-    version = os.getenv('PYTORCH_BUILD_VERSION')
-    if build_number > 1:
-        version += '.post' + str(build_number)
-elif sha != 'Unknown':
-    version += '+' + sha[:7]
+version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
 cmake = CMake()
@@ -293,7 +294,6 @@ def build_deps():
             sys.exit(1)
 
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
@@ -315,18 +315,6 @@ def build_deps():
                  cmake_only=CMAKE_ONLY,
                  cmake=cmake)
 
-    version_path = os.path.join(cwd, 'torch', 'version.py')
-    with open(version_path, 'w') as f:
-        f.write("__version__ = '{}'\n".format(version))
-        # NB: This is not 100% accurate, because you could have built the
-        # library code with DEBUG, but csrc without DEBUG (in which case
-        # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(build_type.is_debug())))
-        cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
-        f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
-        f.write("git_version = {}\n".format(repr(sha)))
-        f.write("hip = {}\n".format(repr(cmake_cache_vars['HIP_VERSION'])))
-
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
                '"cmake-gui build" to adjust build options and '
@@ -335,8 +323,8 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    sym_files = ['tools/shared/_utils_internal.py']
+    orig_files = ['torch/_utils_internal.py']
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -352,7 +340,7 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future']
+install_requires = ['future', 'typing_extensions', 'dataclasses']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -567,19 +555,16 @@ def configure_extension_build():
         extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
-        # /Z7 turns on symbolic debugging information in .obj files
         # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/Z7',
-                              '/EHsc', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -604,9 +589,9 @@ def configure_extension_build():
     library_dirs.append(lib_path)
 
     main_compile_args = []
-    main_libraries = ['shm', 'torch_python']
+    main_libraries = ['torch_python']
     main_link_args = []
-    main_sources = ["torch/csrc/stub.cpp"]
+    main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -617,6 +602,7 @@ def configure_extension_build():
 
     if build_type.is_debug():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
@@ -624,6 +610,7 @@ def configure_extension_build():
 
     if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-g']
@@ -647,7 +634,7 @@ def configure_extension_build():
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
-                  language='c++',
+                  language='c',
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
@@ -661,7 +648,7 @@ def configure_extension_build():
         extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementaiton
+    # inside the build_ext implementation
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state'),
@@ -736,11 +723,17 @@ if __name__ == '__main__':
 
     install_requires += extra_install_requires
 
+    # Read in README.md for our long_description
+    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+        long_description = f.read()
+
     setup(
         name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
@@ -783,6 +776,10 @@ if __name__ == '__main__':
                 'include/ATen/detail/*.h',
                 'include/ATen/native/*.h',
                 'include/ATen/native/cpu/*.h',
+                'include/ATen/native/cuda/*.h',
+                'include/ATen/native/cuda/*.cuh',
+                'include/ATen/native/hip/*.h',
+                'include/ATen/native/hip/*.cuh',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/ATen/quantized/*.h',
@@ -862,6 +859,7 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
+                'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
@@ -872,7 +870,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=3.6.1',
+        python_requires='>={},<{}'.format(python_min_version_str, python_max_version_str),
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -880,18 +878,15 @@ if __name__ == '__main__':
             'Intended Audience :: Education',
             'Intended Audience :: Science/Research',
             'License :: OSI Approved :: BSD License',
-            'Programming Language :: C++',
-            'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.6',
-            'Programming Language :: Python :: 3.7',
-            'Programming Language :: Python :: 3.8',
             'Topic :: Scientific/Engineering',
             'Topic :: Scientific/Engineering :: Mathematics',
             'Topic :: Scientific/Engineering :: Artificial Intelligence',
             'Topic :: Software Development',
             'Topic :: Software Development :: Libraries',
             'Topic :: Software Development :: Libraries :: Python Modules',
-        ],
+            'Programming Language :: C++',
+            'Programming Language :: Python :: 3',
+        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], python_max_version[1])],
         license='BSD-3',
         keywords='pytorch machine learning',
     )

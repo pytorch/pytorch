@@ -255,10 +255,6 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
     for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
 
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#endif
-
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'
 // performance. Usually, this will give you a reasonable speed, but if you

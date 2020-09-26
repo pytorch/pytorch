@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
+#include <ATen/core/ivalue_inl.h>
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -57,7 +58,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 // in the 'constants' vector. This table is will be stored in a container format
 // and given to the import_method when restoring the code.
 struct ConstantTableValue : public SugaredValue {
-  ConstantTableValue(const std::vector<at::Tensor>* constants)
+  explicit ConstantTableValue(const std::vector<at::IValue>* constants)
       : constants_(constants) {}
   std::string kind() const override {
     return "CONSTANTS";
@@ -86,14 +87,14 @@ struct ConstantTableValue : public SugaredValue {
   }
 
  private:
-  const std::vector<at::Tensor>* constants_;
+  const std::vector<at::IValue>* constants_;
 };
 
 struct SourceImporterImpl : public Resolver,
                             std::enable_shared_from_this<SourceImporterImpl> {
   SourceImporterImpl(
       const std::shared_ptr<CompilationUnit> cu,
-      const std::vector<at::Tensor>* tensor_table,
+      const std::vector<at::IValue>* constant_table,
       SourceLoader source_loader,
       size_t version)
       : cu_(cu), source_loader_(std::move(source_loader)) {
@@ -102,7 +103,7 @@ struct SourceImporterImpl : public Resolver,
         {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
-        {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
+        {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", SpecialFormValue::create(prim::fork)},
         {"annotate", SpecialFormValue::create(prim::annotate)},
         {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
@@ -195,7 +196,13 @@ struct SourceImporterImpl : public Resolver,
       definitions.emplace_back(def);
       resolvers.emplace_back(shared_from_this());
     }
-    cu_->define(prefix, definitions, resolvers, &self);
+    cu_->define(
+        prefix,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        definitions,
+        resolvers,
+        &self);
   }
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -231,7 +238,13 @@ struct SourceImporterImpl : public Resolver,
   void importFunction(const std::string& qualifier, const Def& def) {
     std::vector<Def> definitions{def};
     std::vector<ResolverPtr> resolvers{shared_from_this()};
-    cu_->define(qualifier, definitions, resolvers, nullptr);
+    cu_->define(
+        qualifier,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        definitions,
+        resolvers,
+        nullptr);
   }
 
   void importNamedType(
@@ -256,6 +269,8 @@ struct SourceImporterImpl : public Resolver,
     } else if (superclass_name == "ModuleInterface") {
       cu_->define_interface(
           qualified_name, class_def, shared_from_this(), /*is_module=*/true);
+    } else if (superclass_name == "Enum") {
+      importEnum(qualified_name, class_def);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -449,7 +464,7 @@ struct SourceImporterImpl : public Resolver,
           const auto type = type_parser.parseTypeFromExpr(assign.type().get());
           const bool is_parameter = parameter_names.count(name);
           const bool is_buffer = buffer_names.count(name);
-          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         } break;
         case TK_SUBSCRIPT: {
           const auto name =
@@ -458,7 +473,7 @@ struct SourceImporterImpl : public Resolver,
           const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
           const bool is_parameter = parameter_names.count(name);
           const bool is_buffer = buffer_names.count(name);
-          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
+          class_type->addAttribute(name, type, is_parameter, is_buffer);
         }
       }
     }
@@ -472,7 +487,76 @@ struct SourceImporterImpl : public Resolver,
 
     cu_->register_type(class_type);
     const auto self = SimpleSelf(class_type);
-    cu_->define(qualified_classname, methods, resolvers, &self);
+    cu_->define(
+        qualified_classname,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        methods,
+        resolvers,
+        &self);
+  }
+
+  void importEnum(
+      const QualifiedName& qualified_name,
+      const ClassDef& enum_def) {
+    std::vector<at::EnumNameValue> names_values;
+
+    TypePtr value_type = nullptr;
+    auto set_or_check_type = [&value_type](
+                                 const TypePtr& t, const SourceRange& loc) {
+      if (!value_type) {
+        value_type = t;
+      } else if (value_type != t) {
+        throw ErrorReport(loc)
+            << "Enum class with varying value types are not supported.";
+      }
+    };
+
+    for (const auto& statement : enum_def.body()) {
+      if (statement.kind() != TK_ASSIGN) {
+        throw ErrorReport(statement.range())
+            << "Unexpected statement in Enum class body: "
+               "only enum attribute definitions are currently supported.";
+      }
+
+      const auto assign = Assign(statement);
+      const auto name = Var(assign.lhs()).name().name();
+
+      IValue ivalue;
+      auto rhs = assign.rhs().get();
+      switch (rhs.kind()) {
+        case TK_STRINGLITERAL:
+          ivalue = IValue(StringLiteral(rhs).text());
+          set_or_check_type(StringType::get(), statement.range());
+          break;
+        case TK_CONST: {
+          auto numeric_const = Const(rhs);
+          if (numeric_const.isFloatingPoint()) {
+            ivalue = IValue(numeric_const.asFloatingPoint());
+            set_or_check_type(FloatType::get(), statement.range());
+          } else if (numeric_const.isIntegral()) {
+            ivalue = IValue(numeric_const.asIntegral());
+            set_or_check_type(IntType::get(), statement.range());
+          }
+          break;
+        }
+        default:
+          throw ErrorReport(rhs.range())
+              << "Unsupported enum value type: " << rhs.kind()
+              << ". Only Integers, Floats and Strings are supported.";
+      }
+
+      names_values.emplace_back(std::make_pair(name, ivalue));
+    }
+
+    if (!value_type) {
+      throw ErrorReport(enum_def.range())
+          << "No enum values defined for " << qualified_name.qualifiedName();
+    }
+
+    auto enum_type = EnumType::create(
+        qualified_name, std::move(value_type), std::move(names_values), cu_);
+    cu_->register_type(enum_type);
   }
 
   void importNamedTuple(
@@ -552,6 +636,8 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
       return std::make_shared<ClassValue>(classType);
     } else if (auto tupleType = serializable_type->cast<TupleType>()) {
       return std::make_shared<NamedTupleConstructor>(tupleType);
+    } else if (auto enumType = serializable_type->cast<EnumType>()) {
+      return std::make_shared<SugaredEnumClass>(enumType);
     }
   }
 
@@ -567,12 +653,12 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
 SourceImporter::SourceImporter(
     // The compilation unit that will own the imported source
     std::shared_ptr<CompilationUnit> cu,
-    const std::vector<at::Tensor>* tensor_table,
+    const std::vector<IValue>* constant_table,
     SourceLoader loader,
     size_t version)
     : pImpl(std::make_shared<SourceImporterImpl>(
           std::move(cu),
-          tensor_table,
+          constant_table,
           std::move(loader),
           version)) {}
 

@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -12,6 +12,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import textwrap
 import ctypes
 
 if sys.version_info < (3,):
@@ -23,7 +24,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type
+from typing import Set, Type, TYPE_CHECKING
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -34,7 +35,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg',
+    'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
 
 ################################################################################
@@ -42,64 +43,88 @@ __all__ = [
 ################################################################################
 
 if sys.platform == 'win32':
+    pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
-    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
-            not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
+    # When users create a virtualenv that inherits the base environment,
+    # we will need to add the corresponding library directory into
+    # DLL search directories. Otherwise, it will rely on `PATH` which
+    # is dependent on user settings.
+    if sys.exec_prefix != sys.base_exec_prefix:
+        base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
+    else:
+        base_py_dll_path = ''
+
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
+
+    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
         nvtoolsext_dll_path = os.path.join(
-            os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
+            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
     else:
         nvtoolsext_dll_path = ''
 
     from .version import cuda as cuda_version
     import glob
-    if cuda_version and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0 and \
-            len(glob.glob(os.path.join(py_dll_path, 'cudart64*.dll'))) == 0:
+    if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
-        default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
+        default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
         cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
     else:
         cuda_path = ''
 
+    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
+
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
     prev_error_mode = kernel32.SetErrorMode(0x0001)
+
+    kernel32.LoadLibraryW.restype = ctypes.c_void_p
+    if with_load_library_flags:
+        kernel32.AddDllDirectory.restype = ctypes.c_void_p
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
         if sys.version_info >= (3, 8):
             os.add_dll_directory(dll_path)
         elif with_load_library_flags:
             res = kernel32.AddDllDirectory(dll_path)
-            if res == 0:
+            if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
                 raise err
 
-    import glob
+    try:
+        ctypes.CDLL('vcruntime140.dll')
+        ctypes.CDLL('msvcp140.dll')
+        if cuda_version not in ('9.2', '10.0'):
+            ctypes.CDLL('vcruntime140_1.dll')
+    except OSError:
+        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False
     for dll in dlls:
         is_loaded = False
         if with_load_library_flags:
-            res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
+            res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
             last_error = ctypes.get_last_error()
-            if res == 0 and last_error != 126:
+            if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
-            elif res != 0:
+            elif res is not None:
                 is_loaded = True
         if not is_loaded:
             if not path_patched:
                 os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
                 path_patched = True
             res = kernel32.LoadLibraryW(dll)
-            if res == 0:
+            if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
 
     kernel32.SetErrorMode(prev_error_mode)
@@ -166,8 +191,33 @@ else:
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
-if False:
+if TYPE_CHECKING:
     import torch._C as _C
+
+# Check to see if we can load C extensions, and if not provide some guidance
+# on what the problem might be.
+try:
+    # _initExtension is chosen (arbitrarily) as a sentinel.
+    from torch._C import _initExtension
+except ImportError:
+    import torch._C as _C_for_compiled_check
+
+    # The __file__ check only works for Python 3.7 and above.
+    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+        raise ImportError(textwrap.dedent('''
+            Failed to load PyTorch C extensions:
+                It appears that PyTorch has loaded the `torch/_C` folder
+                of the PyTorch repository rather than the C extensions which
+                are expected in the `torch._C` namespace. This can occur when
+                using the `install` workflow. e.g.
+                    $ python setup.py install && python -c "import torch"
+
+                This error can generally be solved using the `develop` workflow
+                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                or by running Python from a different directory.
+            ''').strip()) from None
+    raise  # If __file__ is not None the cause is unknown, so just re-raise.
+
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
@@ -246,30 +296,112 @@ def set_default_tensor_type(t):
 
 
 def set_default_dtype(d):
-    r"""Sets the default floating point dtype to :attr:`d`. This type will be
-    used as default floating point type for type inference in
-    :func:`torch.tensor`.
+    r"""Sets the default floating point dtype to :attr:`d`.
+    This dtype is:
+
+    1. The inferred dtype for python floats in :func:`torch.tensor`.
+    2. Used to infer dtype for python complex numbers. The default complex dtype is set to
+       ``torch.complex128`` if default floating point dtype is ``torch.float64``,
+       otherwise it's set to ``torch.complex64``
 
     The default floating point dtype is initially ``torch.float32``.
 
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default
 
-    Example::
-
-        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
+    Example:
+        >>> # initial default for floating point is torch.float32
+        >>> torch.tensor([1.2, 3]).dtype
         torch.float32
+        >>> # initial default for floating point is torch.complex64
+        >>> torch.tensor([1.2, 3j]).dtype
+        torch.complex64
         >>> torch.set_default_dtype(torch.float64)
-        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
+        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        torch.complex128
 
     """
     _C._set_default_dtype(d)
 
-# If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
+def set_deterministic(d):
+    r""" Sets whether native PyTorch operations must use deterministic
+    algorithms. When True, operations without deterministic algorithms
+    will throw a :class:RuntimeError when called.
+
+    .. warning::
+        This feature is a beta feature, so it does not affect every
+        nondeterministic operation yet. The following operations are
+        affected by this flag.
+
+    The following normally-nondeterministic operations will act
+    deterministically when `d=True`:
+
+        * :class:`torch.nn.Conv1d` when called on CUDA tensor
+        * :class:`torch.nn.Conv2d` when called on CUDA tensor
+        * :class:`torch.nn.Conv3d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
+        * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+
+    The following normally-nondeterministic operations will throw a
+    :class:`RuntimeError` when `d=True`:
+
+        * :class:`torch.nn.AvgPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveAvgPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveAvgPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.MaxPool3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.AdaptiveMaxPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
+        * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
+            and one of the following modes is used:
+            - `linear`
+            - `bilinear`
+            - `bicubic`
+            - `trilinear`
+        * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad2d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.ReplicationPad3d` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.CTCLoss` when called on a CUDA tensor that requires grad
+        * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
+        * :func:`torch.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_select` when called on a CUDA tensor that requires grad
+        * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
+        * :func:`torch.histc` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor
+
+    A handful of CUDA operations are nondeterministic if the CUDA version is
+    10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
+    or `CUBLAS_WORKSPACE_CONFIG=:16:8` is set. See the CUDA documentation for more
+    details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+    If one of these environment variable configurations is not set, a :class:`RuntimeError`
+    will be raised from these operations when called with CUDA tensors:
+
+        * :func:`torch.mm`
+        * :func:`torch.mv`
+        * :func:`torch.bmm`
+
+    Note that deterministic operations tend to have worse performance than
+    non-deterministic operations.
+
+    Args:
+        d (:class:`bool`): If True, force operations to be deterministic.
+                           If False, allow non-deterministic operations.
+    """
+    _C._set_deterministic(d)
+
+def is_deterministic():
+    r"""Returns True if the global deterministic flag is turned on. Refer to
+    :func:`torch.set_deterministic` documentation for more details.
+    """
+    return _C._get_deterministic()
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -343,6 +475,10 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+# If you edit these imports, please update torch/__init__.py.in as well
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
+from .serialization import save, load
+from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
@@ -366,8 +502,11 @@ del manager_path
 # Note that we will see "too many" functions when reexporting this way; there
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
-if False:
-    from torch._C._VariableFunctions import *
+if TYPE_CHECKING:
+    # Some type signatures pulled in from _VariableFunctions here clash with
+    # signatures already imported. For now these clashes are ignored; see
+    # PR #43339 for details.
+    from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -407,6 +546,8 @@ del ComplexFloatStorageBase
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
+# import torch.fft  # TODO: enable once torch.fft() is removed
+import torch.futures
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
@@ -416,6 +557,7 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.linalg
 import torch.hub
 import torch.random
 import torch.distributions
@@ -463,8 +605,19 @@ del register_after_fork
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
 
+from ._vmap_internals import vmap
+
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from .overrides import has_torch_function, handle_torch_function
+
+def Assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(Assert, (condition,), condition, message)
+    assert condition, message

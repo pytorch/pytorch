@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from test_pytorch_common import TestCase, run_tests
 
 import torch
@@ -252,10 +247,9 @@ class TestONNXOpset(TestCase):
 
         ops = [{"op_name" : "Constant"},
                {"op_name" : "ConstantOfShape"},
-               {"op_name" : "Cast"},
                {"op_name" : "Add"}]
         ops = {9 : ops, 10 : ops}
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
     def test_interpolate(self):

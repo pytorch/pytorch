@@ -22,6 +22,7 @@ using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::QSchemeType;
+using c10::QuantizerType;
 using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,6 +42,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
       {"QScheme", QSchemeType::get()},
+      {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
        IntType::get()}, // TODO This type should be removed from the schema
                         // parser, it should use the custom class mechanism
@@ -55,6 +57,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
+      {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -144,6 +147,36 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
+c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
+  c10::optional<c10::Device> device;
+  L.expect('=');
+  const std::string& dev = L.expect(TK_IDENT).text();
+
+  if (dev == "cpu") {
+    return c10::Device(at::kCPU);
+  }
+
+  if (dev == "cuda") {
+    c10::DeviceIndex device_idx = -1;
+    if (L.cur().kind == ':') {
+      L.expect(':');
+      const std::string& num = L.expect(TK_NUMBER).text();
+      std::string::size_type num_len;
+      device_idx = c10::stoi(num, &num_len);
+    }
+    return c10::Device(at::kCUDA, device_idx);
+  }
+
+  throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
+}
+
+c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
+  L.expect('=');
+  const std::string& num = L.expect(TK_NUMBER).text();
+  std::string::size_type num_len;
+  return (bool)c10::stoi(num, &num_len);
+}
+
 TypePtr SchemaTypeParser::parseRefinedTensor() {
   auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
   AT_ASSERT(maybe_dtype);
@@ -151,53 +184,93 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr ptr;
   L.expect('(');
   TypePtr tensor_type;
-  if (L.cur().kind == '*') {
-    size_t num_dims = 0;
-    parseList(TK_NOTHING, ',', ')', [&] {
-      L.expect('*');
-      num_dims++;
-    });
-    ptr =
-        at::TensorType::create(dtype, DeviceType::CPU, num_dims, c10::nullopt);
-  } else {
-    std::vector<int64_t> dims;
-    bool seen_strides = false;
-    std::vector<int64_t> strides;
-    parseList(TK_NOTHING, ',', ')', [&] {
+  c10::optional<c10::Device> device;
+  c10::optional<bool> requires_grad;
+  // Parse a type with either no ranks, known ranks with sizes, ranks with
+  // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
+  // known sizes and strides. The type might also have requires_grad and/or
+  // device option. Examples of types we're handling here:
+  //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
+  //   Float(10, *, 20, device=cuda:1)
+  //   Float(requires_grad=1)
+  std::vector<c10::optional<int64_t>> dims;
+  bool seen_strides = false;
+  std::vector<int64_t> strides;
+  parseList(TK_NOTHING, ',', ')', [&] {
+    // Extra handling for options like 'device' and 'requires_grad'
+    if (L.cur().kind == TK_IDENT) {
+      const std::string& field = L.expect(TK_IDENT).text();
+      if (field == "device") {
+        auto parsed_device = tryToParseDeviceType();
+        if (parsed_device.has_value()) {
+          if (device.has_value()) {
+            throw ErrorReport(L.cur()) << "'device' is specified twice";
+          }
+          device = parsed_device;
+        }
+        return;
+      }
+      if (field == "requires_grad") {
+        auto parsed_requires_grad = tryToParseRequiresGrad();
+        if (parsed_requires_grad.has_value()) {
+          if (requires_grad.has_value()) {
+            throw ErrorReport(L.cur()) << "'requires_grad' is specified twice";
+          }
+          requires_grad = parsed_requires_grad;
+        }
+        return;
+      }
+      throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+    }
+    if (device.has_value() || requires_grad.has_value()) {
+      throw ErrorReport(L.cur())
+          << "'device' and 'requires_grad' should come after dimensions in the type specification";
+    }
+
+    // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
+    // ranks
+    if (L.cur().kind == '*') {
+      dims.emplace_back(c10::nullopt);
+      L.next();
+      if (L.cur().kind == ':') {
+        throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
+      }
+      return;
+    }
+    const std::string& num = L.expect(TK_NUMBER).text();
+    std::string::size_type num_len;
+    size_t dim = c10::stoi(num, &num_len);
+    dims.emplace_back(dim);
+    if (seen_strides || L.cur().kind == ':') {
+      L.expect(':');
+      seen_strides = true;
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
-      size_t dim = c10::stoi(num, &num_len);
-      dims.push_back(dim);
-      if (seen_strides || L.cur().kind == ':') {
-        L.expect(':');
-        seen_strides = true;
-        const std::string& num = L.expect(TK_NUMBER).text();
-        std::string::size_type num_len;
-        size_t stride = c10::stoi(num, &num_len);
-        strides.push_back(stride);
-      }
-    });
-    at::IntArrayRef dims_ref(dims);
-    if (seen_strides) {
-      at::IntArrayRef strides_ref(strides);
-      if (strides.size() != dims.size()) {
-        throw ErrorReport(L.cur())
-            << "Strides info is specified for some but not for all dimensions";
-      }
-      ptr = at::TensorType::create(
-          dtype,
-          DeviceType::CPU,
-          c10::VaryingShape<int64_t>(dims),
-          c10::VaryingShape<int64_t>(strides),
-          c10::nullopt);
-    } else {
-      ptr = at::TensorType::create(
-          dtype,
-          DeviceType::CPU,
-          c10::VaryingShape<int64_t>(dims_ref),
-          c10::VaryingShape<int64_t>(dims.size()),
-          c10::nullopt);
+      size_t stride = c10::stoi(num, &num_len);
+      strides.push_back(stride);
     }
+  });
+  if (seen_strides) {
+    at::IntArrayRef strides_ref(strides);
+    if (strides.size() != dims.size()) {
+      // note: mixing unsized ranks and ranks with strides will always trigger
+      // this
+      throw ErrorReport(L.cur())
+          << "Strides info is specified for some but not for all dimensions";
+    }
+    ptr = at::TensorType::create(
+        dtype,
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(strides),
+        requires_grad);
+  } else {
+    ptr = at::TensorType::create(
+        dtype,
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(dims.size()),
+        requires_grad);
   }
   return ptr;
 }

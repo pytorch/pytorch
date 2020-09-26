@@ -36,6 +36,8 @@ enum IRNodeType {
   kPolynomial,
   kTerm,
   kRoundOff,
+  kMaxTerm,
+  kMinTerm,
   kNone,
   kExtra
 };
@@ -280,6 +282,7 @@ TORCH_API ExprHandle atan(const ExprHandle& v);
 TORCH_API ExprHandle sinh(const ExprHandle& v);
 TORCH_API ExprHandle cosh(const ExprHandle& v);
 TORCH_API ExprHandle tanh(const ExprHandle& v);
+TORCH_API ExprHandle sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
 TORCH_API ExprHandle fabs(const ExprHandle& v);

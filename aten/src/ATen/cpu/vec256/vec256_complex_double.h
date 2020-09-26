@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
@@ -134,6 +134,16 @@ public:
     auto angle = _mm256_permute_pd(angle_(), 0x05); // angle    90-angle
     return _mm256_and_pd(angle, real_mask);         // angle    0
   }
+  Vec256<c10::complex<double>> sgn() const {
+    auto abs = abs_();
+    auto zero = _mm256_setzero_pd();
+    auto mask = _mm256_cmp_pd(abs, zero, _CMP_EQ_OQ);
+    auto abs_val = Vec256(abs);
+
+    auto div = values / abs_val.values;       // x / abs(x)
+
+    return blendv(div, zero, mask);
+  }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
@@ -239,9 +249,15 @@ public:
   Vec256<c10::complex<double>> floor() const {
     return _mm256_floor_pd(values);
   }
+  Vec256<c10::complex<double>> hypot(const Vec256<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
+  }
+  Vec256<c10::complex<double>> nextafter(const Vec256<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
   }
   Vec256<c10::complex<double>> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));

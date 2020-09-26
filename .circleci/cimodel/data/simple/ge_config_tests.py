@@ -45,7 +45,7 @@ class GeConfigTestJob:
         props_dict = {
             "name": full_name,
             "build_environment": build_env,
-            "requires": ["setup"] + self.extra_requires,
+            "requires": self.extra_requires,
             "resource_class": resource_class,
             "docker_image": docker_image,
         }

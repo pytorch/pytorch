@@ -1,21 +1,23 @@
-from __future__ import print_function
 import sys
 import os
 import re
 import shutil
 import random
 import tempfile
+import textwrap
 import unittest
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+import torch.utils._benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import skipIfRocm, load_tests, retry, IS_SANDCASTLE
-from urllib.error import HTTPError
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
+from urllib.error import URLError
+import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -123,8 +125,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        # python_error in case of py2_7_9.
-        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -332,13 +333,17 @@ class TestFFI(TestCase):
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
-    def _run(self, command):
+    def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
-        output, err = p.communicate()
+        try:
+            output, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            output, err = p.communicate()
         rc = p.returncode
         output = output.decode("ascii")
         err = err.decode("ascii")
@@ -413,7 +418,6 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
         self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
@@ -505,17 +509,31 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
+            source='github',
             pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_local_dir(self):
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(
+            local_dir,
+            'mnist',
+            source='local',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_branch(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example:ci/test_slash',
@@ -525,7 +543,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
@@ -539,12 +557,12 @@ class TestHub(TestCase):
         assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
         shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_download_url_to_file(self):
         temp_file = os.path.join(tempfile.gettempdir(), 'temp')
         hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
@@ -552,13 +570,13 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3, skip_after_retries=True)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_zip_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -568,15 +586,221 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_state_dict_from_url_with_name(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            file_name = 'test_file'
+            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
+            self.assertEqual(sum_of_state_dict(loaded_state),
+                             SUM_OF_HUB_EXAMPLE)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
+
+
+class TestBenchmarkUtils(TestCase):
+    def test_timer(self):
+        timer = benchmark_utils.Timer(
+            stmt="torch.ones(())",
+        )
+        median = timer.blocked_autorange(min_run_time=0.01).median
+        self.assertIsInstance(median, float)
+
+        # We set a very high threshold to avoid flakiness in CI.
+        # The internal algorithm is tested in `test_adaptive_timer`
+        median = timer.adaptive_autorange(threshold=0.5).median
+
+    class _MockTimer:
+        _seed = 0
+
+        _timer_noise_level = 0.05
+        _timer_cost = 100e-9  # 100 ns
+
+        _function_noise_level = 0.05
+        _function_costs = (
+            ("pass", 8e-9),
+            ("cheap_fn()", 4e-6),
+            ("expensive_fn()", 20e-6),
+        )
+
+        def __init__(self, stmt, setup, timer, globals):
+            self._random_state = np.random.RandomState(seed=self._seed)
+            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
+
+        def sample(self, mean, noise_level):
+            return max(self._random_state.normal(mean, mean * noise_level), 5e-9)
+
+        def timeit(self, number):
+            return sum([
+                # First timer invocation
+                self.sample(self._timer_cost, self._timer_noise_level),
+
+                # Stmt body
+                self.sample(self._mean_cost * number, self._function_noise_level),
+
+                # Second timer invocation
+                self.sample(self._timer_cost, self._timer_noise_level),
+            ])
+
+    def test_adaptive_timer(self):
+        class MockTimer(benchmark_utils.Timer):
+            _timer_cls = self._MockTimer
+
+        def assert_reprs_match(measurement, expected):
+            measurement_repr = re.sub(
+                "object at 0x[0-9a-fA-F]+>",
+                "object at 0xXXXXXXXXXXXX>",
+                repr(measurement)
+            )
+            self.assertEqual(measurement_repr, textwrap.dedent(expected).strip())
+
+        assert_reprs_match(
+            MockTimer("pass").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            pass
+              Median: 7.98 ns
+              IQR:    0.52 ns (7.74 to 8.26)
+              125 measurements, 10000000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("pass").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            pass
+              Median: 7.86 ns
+              IQR:    0.71 ns (7.63 to 8.34)
+              6 measurements, 1000000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("cheap_fn()").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            cheap_fn()
+              Median: 3.98 us
+              IQR:    0.27 us (3.85 to 4.12)
+              252 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("cheap_fn()").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            cheap_fn()
+              Median: 4.16 us
+              IQR:    0.22 us (4.04 to 4.26)
+              4 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("expensive_fn()").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            expensive_fn()
+              Median: 19.97 us
+              IQR:    1.35 us (19.31 to 20.65)
+              501 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("expensive_fn()").adaptive_autorange(),
+            """
+            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            expensive_fn()
+              Median: 20.79 us
+              IQR:    1.09 us (20.20 to 21.29)
+              4 measurements, 1000 runs per measurement, 1 thread"""
+        )
+
+        class _MockCudaTimer(self._MockTimer):
+            # torch.cuda.synchronize is much more expensive than
+            # just timeit.default_timer
+            _timer_cost = 10e-6
+
+            _function_costs = (
+                self._MockTimer._function_costs[0],
+                self._MockTimer._function_costs[1],
+
+                # GPU should be faster once there is enough work.
+                ("expensive_fn()", 5e-6),
+            )
+
+        class MockCudaTimer(benchmark_utils.Timer):
+            _timer_cls = _MockCudaTimer
+
+        configurations = (
+            (7.9903966e-09, 376, 1000000, MockTimer("pass")),
+            (7.8554826e-09, 4, 100000000, MockCudaTimer("pass")),
+            (3.9930536e-06, 752, 1000, MockTimer("cheap_fn()")),
+            (3.9441239e-06, 8, 100000, MockCudaTimer("cheap_fn()")),
+            (1.9994249e-05, 150, 1000, MockTimer("expensive_fn()")),
+            (4.9301076e-06, 6, 100000, MockCudaTimer("expensive_fn()")),
+        )
+
+        for median, repeats, number_per_run, timer_instance in configurations:
+            measurement = timer_instance.blocked_autorange(min_run_time=3)
+            self.assertEqual(measurement.median, median)
+            self.assertEqual(len(measurement.times), repeats)
+            self.assertEqual(measurement.number_per_run, number_per_run)
+
+    def test_compare(self):
+        compare = benchmark_utils.Compare([
+            benchmark_utils.Timer(
+                "torch.ones((n,))", globals={"n": n},
+                description="ones", label=str(n)).timeit(3)
+            for n in range(3)
+        ])
+        compare.print()
+
+    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
+    def test_fuzzer(self):
+        fuzzer = benchmark_utils.Fuzzer(
+            parameters=[
+                benchmark_utils.FuzzedParameter(
+                    "n", minval=1, maxval=16, distribution="loguniform")],
+            tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
+            seed=0,
+        )
+
+        expected_results = [
+            (0.7821, 0.0536, 0.9888, 0.1949, 0.5242, 0.1987, 0.5094),
+            (0.7166, 0.5961, 0.8303, 0.005),
+        ]
+
+        for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
+            x = tensors["x"]
+            self.assertEqual(
+                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+
+
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch.Assert(False, "bar")
 
 
 if __name__ == '__main__':

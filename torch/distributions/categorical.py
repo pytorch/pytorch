@@ -51,6 +51,7 @@ class Categorical(Distribution):
         else:
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
+            # Normalize
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
@@ -115,7 +116,9 @@ class Categorical(Distribution):
         return log_pmf.gather(-1, value).squeeze(-1)
 
     def entropy(self):
-        p_log_p = self.logits * self.probs
+        min_real = torch.finfo(self.logits.dtype).min
+        logits = torch.clamp(self.logits, min=min_real)
+        p_log_p = logits * self.probs
         return -p_log_p.sum(-1)
 
     def enumerate_support(self, expand=True):

@@ -33,6 +33,31 @@
   #define __ubsan_ignore_signed_int_overflow__
 #endif
 
+
+// Detect address sanitizer as some stuff doesn't work with it
+#undef C10_ASAN_ENABLED
+
+// for clang
+#if defined(__has_feature)
+#if ((__has_feature(address_sanitizer)))
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+
+// for gcc
+#if defined(__SANITIZE_ADDRESS__)
+#if __SANITIZE_ADDRESS__
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+#endif
+
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 0
+#endif
+
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define C10_DISABLE_COPY_AND_ASSIGN(classname) \
@@ -149,6 +174,16 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_UNLIKELY(expr)  (expr)
 #endif
 
+/// C10_NOINLINE - Functions whose declaration is annotated with this will not
+/// be inlined.
+#ifdef __GNUC__
+#define C10_NOINLINE __attribute__((__noinline__))
+#elif _MSC_VER
+#define C10_NOINLINE __declspec(noinline)
+#else
+#define C10_NOINLINE
+#endif
+
 #include <sstream>
 #include <string>
 
@@ -161,7 +196,7 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 // The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
 // but 2048 for previous architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
-#if __CUDA_ARCH__ >= 750
+#if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -211,20 +246,30 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
-// code that when building Release.
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+// code that would otherwise be suppressed when building Release.
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
-// TODO: This should be defined but I don't have the environment to properly
-// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
-#define CUDA_KERNEL_ASSERT(cond)
+#if defined(NDEBUG)
+extern "C" {
+  C10_IMPORT
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+    __host__ __device__
+#endif // __CUDA_ARCH__
+ void _wassert(
+    wchar_t const* _Message,
+    wchar_t const* _File,
+    unsigned _Line);
+}
+#endif
+#define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
-#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
-  [[noreturn]]
-#endif
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
@@ -259,6 +304,9 @@ __host__ __device__
 #endif // ANDROID / IOS
 
 // Portably determine if a type T is trivially copyable or not.
+// Warning: __has_trivial_copy for GCC may not always detect the non-POD
+// correctly. For example, T = std::unique_ptr may evaluate to true and be
+// treated as POD. This can cause unexpected behavior.
 #if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
@@ -298,7 +346,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
@@ -306,7 +354,7 @@ __host__ __device__
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr

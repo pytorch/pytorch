@@ -4,6 +4,10 @@
 Distributed communication package - torch.distributed
 =====================================================
 
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
+
 .. automodule:: torch.distributed
 .. currentmodule:: torch.distributed
 
@@ -313,13 +317,19 @@ Collective functions
 
 .. autofunction:: broadcast
 
+.. autofunction:: broadcast_object_list
+
 .. autofunction:: all_reduce
 
 .. autofunction:: reduce
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_object
+
 .. autofunction:: gather
+
+.. autofunction:: gather_object
 
 .. autofunction:: scatter
 

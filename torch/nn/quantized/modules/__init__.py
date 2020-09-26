@@ -2,11 +2,14 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6, Hardswish
+from .activation import ReLU, ReLU6, Hardswish, ELU
 from .batchnorm import BatchNorm2d, BatchNorm3d
-from .normalization import LayerNorm
+from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
+    InstanceNorm2d, InstanceNorm3d
 from .conv import Conv1d, Conv2d, Conv3d
+from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
+from .embedding_ops import Embedding, EmbeddingBag
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -83,6 +86,8 @@ __all__ = [
     'Conv1d',
     'Conv2d',
     'Conv3d',
+    'ConvTranspose1d',
+    'ConvTranspose2d',
     'DeQuantize',
     'Linear',
     'MaxPool2d',
@@ -90,7 +95,14 @@ __all__ = [
     'ReLU',
     'ReLU6',
     'Hardswish',
+    'ELU',
     'LayerNorm',
+    'GroupNorm',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'Embedding',
+    'EmbeddingBag',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

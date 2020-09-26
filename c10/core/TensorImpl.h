@@ -134,7 +134,7 @@ struct TensorImpl;
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
   virtual bool requires_grad() const = 0;
-  virtual at::Tensor& grad() = 0;
+  virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
 };
@@ -443,6 +443,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
+  bool is_meta() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::Meta);
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
@@ -462,6 +467,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_vulkan() const {
     return key_set_.has(DispatchKey::Vulkan);
+  }
+
+  // TODO: remove this once we don't automatically enabled Autograd dispatch keys
+  //       in TensorImpl constructor.
+  // DON'T USE THIS API!! It's only created for testing purpose in
+  // file aten/src/ATen/core/boxing/impl/test_helpers.h
+  void remove_autograd_key() {
+    key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
   int64_t get_device() const {
@@ -570,7 +583,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  at::Tensor& grad();
+  at::Tensor& mutable_grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
@@ -839,6 +852,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
+    if (named_tensor_meta_ == nullptr) {
+      key_set_ = key_set_.remove(DispatchKey::Named);
+    } else {
+      key_set_ = key_set_.add(DispatchKey::Named);
+    }
   }
 
   /**
@@ -1649,6 +1667,8 @@ protected:
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you

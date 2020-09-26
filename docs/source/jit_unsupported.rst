@@ -25,7 +25,6 @@ are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
   * :func:`torch.tensordot`
-  * :func:`torch.unique_consecutive`
   * :func:`torch.nn.init.calculate_gain`
   * :func:`torch.nn.init.eye_`
   * :func:`torch.nn.init.dirac_`

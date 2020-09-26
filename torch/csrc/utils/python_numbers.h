@@ -45,6 +45,14 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   return (int64_t)value;
 }
 
+inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
+  unsigned long long value = PyLong_AsUnsignedLongLong(obj);
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
+  return (uint64_t)value;
+}
+
 inline bool THPUtils_checkIndex(PyObject *obj) {
   if (PyBool_Check(obj)) {
     return false;
@@ -106,17 +114,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   if (PyFloat_Check(obj)) {
     return PyFloat_AS_DOUBLE(obj);
   }
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking double");
-    }
-    if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      throw std::runtime_error("Precision loss when unpacking double");
-    }
-    return (double)value;
-  }
   double value = PyFloat_AsDouble(obj);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -124,13 +121,13 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   return value;
 }
 
-inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
+inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
   Py_complex value = PyComplex_AsCComplex(obj);
   if (value.real == -1.0 && PyErr_Occurred()) {
     throw python_error();
   }
 
-  return std::complex<double>(value.real, value.imag);
+  return c10::complex<double>(value.real, value.imag);
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {

@@ -18,6 +18,7 @@ class TORCH_API ScriptTypeParser {
   explicit ScriptTypeParser() {}
   explicit ScriptTypeParser(ResolverPtr resolver)
       : resolver_(std::move(resolver)) {}
+
   c10::TypePtr parseTypeFromExpr(const Expr& expr) const;
 
   c10::optional<std::pair<c10::TypePtr, int32_t>> parseBroadcastList(
@@ -30,6 +31,8 @@ class TORCH_API ScriptTypeParser {
   c10::IValue parseClassConstant(const Assign& assign);
 
  private:
+  c10::TypePtr parseTypeFromExprImpl(const Expr& expr) const;
+
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
   at::TypePtr subscriptToType(
       const std::string& typeName,

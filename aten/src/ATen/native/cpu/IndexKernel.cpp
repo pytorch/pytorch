@@ -98,7 +98,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 }
 
 void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
       *(scalar_t*)dst = *(scalar_t*)(src + offset);
@@ -108,11 +108,11 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
       bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (iter.dtype() == at::ScalarType::Float && use_parallel_for) {
+      if (iter.dtype() == ScalarType::Float && use_parallel_for) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
         });
@@ -151,11 +151,11 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);
-      if (mask_dtype == at::ScalarType::Bool) {
+      if (mask_dtype == ScalarType::Bool) {
         cpu_masked_fill_kernel<scalar_t, bool>(iter, scalar_val);
       } else {
         cpu_masked_fill_kernel<scalar_t, unsigned char>(iter, scalar_val);
@@ -186,17 +186,17 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
   iter.serial_for_each(loop, {0, iter.numel()});
 }
 
-void masked_select_serial_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_select", [&] {
       auto mask_dtype = iter.input_dtype(1);
-      if (mask_dtype == at::ScalarType::Bool) {
-        cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+      if (mask_dtype == ScalarType::Bool) {
+        cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       } else {
-        cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
     });
@@ -225,17 +225,17 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
   iter.for_each(loop);
 }
 
-void masked_select_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_select", [&] {
       auto mask_dtype = iter.input_dtype(1);
-      if (mask_dtype == at::ScalarType::Bool) {
-        cpu_masked_select_kernel<scalar_t, bool>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+      if (mask_dtype == ScalarType::Bool) {
+        cpu_masked_select_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       } else {
-        cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+        cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
     });

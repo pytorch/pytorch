@@ -189,12 +189,9 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
       sparse_dim, dense_dim, computed_sizes, indices, values, values.options().layout(kSparse));
 }
 
-// NB: Got rid of the sizes == NULL case
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
   Tensor values = expand_values_if_needed(values_);
 
-  // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
@@ -230,21 +227,25 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
                "size is inconsistent with indices: for dim ", d, ", size is ", dim_size, " but found index ", max_index_in_dim);
     }
   }
+}
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim, dense_dim, size, indices, values, values.options().layout(kSparse));
+// NB: Got rid of the sizes == NULL case
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size, const TensorOptions& options) {
+  // arg checking
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+
+  at::native::_validate_sparse_coo_tensor_args(indices, values, size);
+  return at::native::_sparse_coo_tensor_unsafe(indices, values, size, options);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
 // in that we don't check whether any indices are out of boundaries of `size`, thus avoiding a
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
-// are guaranteed to be within bounds.
+// are guaranteed to be within bounds or if the caller is going to call
+// _validate_sparse_coo_tensor_args before using the tensor.
 // NB: Got rid of the size == NULL case
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
   Tensor values = expand_values_if_needed(values_);
-
-  // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;

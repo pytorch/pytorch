@@ -1,7 +1,8 @@
-# Table of contents
+# Table of Contents
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -37,25 +38,29 @@
 
 ## Contributing to PyTorch
 
-If you are interested in contributing to PyTorch, your contributions will fall
-into two categories:
+Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important
+that you share your intention to contribute with the team, based on the type of contribution:
 
 1. You want to propose a new feature and implement it.
-    - Post about your intended feature, and we shall discuss the design and
-    implementation. Once we agree that the plan looks good, go ahead and implement it.
+    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues),
+    and we shall discuss the design and implementation. Once we agree that the plan looks good,
+    go ahead and implement it.
 2. You want to implement a feature or bug-fix for an outstanding issue.
-    - Search for your issue here: https://github.com/pytorch/pytorch/issues
-    - Pick an issue and comment on the task that you want to work on this feature.
+    - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
+    - Pick an issue and comment that you'd like to work on the feature or bug-fix.
     - If you need more context on a particular issue, please ask and we shall provide.
 
-Once you finish implementing a feature or bug-fix, please send a Pull Request to
-https://github.com/pytorch/pytorch
+Once you implement and test your feature or bug-fix, please submit a Pull Request to
+https://github.com/pytorch/pytorch.
 
 This document covers some of the more technical aspects of contributing
 to PyTorch.  For more non-technical guidance about how to contribute to
 PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
+
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
@@ -86,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -119,6 +122,39 @@ You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+## Nightly Checkout & Pull
+
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `conda` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+conda activate pytorch-deps
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (`--name` or `--prefix`):
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -n my-env
+conda activate my-env
+```
+
+You can also use this tool to pull the nightly commits into the current branch:
+
+```bash
+./tools/nightly.py pull -n my-env
+conda activate my-env
+```
+
+Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
+into the repo directory.
 
 ## Codebase structure
 
@@ -176,7 +212,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
   See [README](tools/README.md) of this directory for more details.
-* [test](tests) - Python unit tests for PyTorch Python frontend.
+* [test](test) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality.
   * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
@@ -203,6 +239,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
 ## Unit testing
+
+`hypothesis` is required to run the tests, `mypy` is an optional dependency,
+and `pytest` may help run tests more selectively. All these packages can be
+installed with `conda` or `pip`.
 
 PyTorch's testing is located under `test/`. Run the entire test suite with
 
@@ -237,7 +277,7 @@ To build the documentation:
 
 1. Build and install PyTorch
 
-2. Install the prequesities
+2. Install the prerequisites
 
 ```bash
 cd docs
@@ -507,23 +547,24 @@ In the PyTorch project, currently only the latter method of masquerading as
 the compiler via symlinks works for CUDA compilation.
 
 Here are the instructions for installing ccache from source (tested at commit
-`7abac8f` of the `ccache` repo):
+`3c302a7` of the `ccache` repo):
 
 ```bash
-# install and export ccache
+#!/bin/bash
+
 if ! ls ~/ccache/bin/ccache
 then
+    set -ex
     sudo apt-get update
-    sudo apt-get install -y automake autoconf
-    sudo apt-get install -y asciidoc
+    sudo apt-get install -y cmake
     mkdir -p ~/ccache
-    pushd /tmp
+    pushd ~/ccache
     rm -rf ccache
     git clone https://github.com/ccache/ccache.git
-    pushd ccache
-    ./autogen.sh
-    ./configure
-    make install prefix=~/ccache
+    mkdir -p ccache/build
+    pushd ccache/build
+    cmake -DCMAKE_INSTALL_PREFIX=${HOME}/ccache -DENABLE_TESTING=OFF -DZSTD_FROM_INTERNET=ON ..
+    make -j$(nproc) install
     popd
     popd
 
@@ -666,8 +707,6 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    ```
 
 
-Hope this helps, and thanks for considering to contribute.
-
 ## Windows development tips
 
 For building from source on Windows, consult
@@ -786,8 +825,9 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See our
-[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+in our CI to make sure that new C++ code is safe, sane and efficient. See the
+[`clang-tidy` job in our GitHub Workflow's
+lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
