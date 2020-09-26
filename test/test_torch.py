@@ -11251,7 +11251,6 @@ class TestTorchDeviceType(TestCase):
 
             for with_extremal in [True, False]:
                 shape = self._rand_shape(3, 4, 5)
-                print(inp_dtype, out_dtype)
                 x = self._generate_input(shape, inp_dtype, device, with_extremal)
                 out = torch.empty_like(x).to(out_dtype)
 
