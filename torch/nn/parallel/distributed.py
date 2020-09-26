@@ -409,7 +409,6 @@ class DistributedDataParallel(Module):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
         else:
             self.parameters_to_ignore = []
-        print(f"DDP constructor: got params to ignore {self.parameters_to_ignore}")
 
         if check_reduction:
             # This argument is no longer used since the reducer

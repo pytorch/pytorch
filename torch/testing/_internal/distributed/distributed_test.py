@@ -3329,11 +3329,8 @@ class DistributedTest:
 
             device_id = self.rank
             # Ensure the test works for both find_unused_parameter and broadcast_buffer settings.
-            print("Rank {self.rank} entering test.")
-            for i, (find_unused, broadcast_buffers) in enumerate(
-                itertools.product([True, False], [True, False])
-            ):
-                print(f"==========Iteration {i} ===========")
+            for (find_unused, broadcast_buffers) in
+                itertools.product([True, False], [True, False]):
                 model = TestModel(self.rank).float().to(device_id)
                 model.fc2.register_buffer(
                     "ignore_buffer", torch.zeros(5 + self.rank, device=self.rank)
@@ -3353,17 +3350,10 @@ class DistributedTest:
                     f"{model_fc2_name}.{buf_name}"
                     for buf_name, _ in model.fc2.named_buffers()
                 ]
-                print(
-                    f"Rank {self.rank} got proxy_param_names {proxy_param_names} and proxy_buf_names {proxy_buffer_names}"
-                )
                 # Specify that we should ignore proxy_params since it will be
                 # materialized later.
                 torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
                     model, proxy_param_names + proxy_buffer_names
-                )
-
-                print(
-                    f"Rank {self.rank} Running with find_unused={find_unused} brodcast_buffers={broadcast_buffers}."
                 )
                 ddp = torch.nn.parallel.DistributedDataParallel(
                     model,
@@ -3371,7 +3361,6 @@ class DistributedTest:
                     find_unused_parameters=False,
                     broadcast_buffers=True,
                 )
-                print(f"Rank {self.rank} completed DDP init.")
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
