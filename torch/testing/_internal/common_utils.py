@@ -15,6 +15,7 @@ import math
 from functools import partial
 import inspect
 import io
+import operator
 import argparse
 import unittest
 import warnings
@@ -32,9 +33,9 @@ from numbers import Number
 import tempfile
 import json
 from urllib.request import urlopen
-import __main__
+import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Iterable, Optional
+from typing import cast, Any, Dict, Iterable, Optional
 
 from torch.testing._internal import expecttest
 from torch.testing import \
@@ -127,8 +128,9 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-torch._C.ScriptFunction.__call__ = prof_func_call
-torch._C.ScriptMethod.__call__ = prof_meth_call
+# TODO fix when https://github.com/python/mypy/issues/2427 is address
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -276,7 +278,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner
+        import xmlrunner  # type: ignore[import]
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
@@ -705,11 +707,11 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-disabled_test_from_issues = None
+disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
     if disabled_test_from_issues is None:
-        disabled_test_from_issues = {}
+        _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
             url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
@@ -720,18 +722,21 @@ def check_disabled(test_name):
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    disabled_test_from_issues[test_name] = item['html_url']
+                    _disabled_test_from_issues[test_name] = item['html_url']
 
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             try:
                 read_and_process()
+                disabled_test_from_issues = _disabled_test_from_issues
             except Exception:
                 print("Couldn't download test skip set, leaving all tests enabled...")
+                disabled_test_from_issues = {}
 
-    if test_name in disabled_test_from_issues:
-        raise unittest.SkipTest(
-            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if disabled_test_from_issues is not None:
+        if test_name in disabled_test_from_issues:
+            raise unittest.SkipTest(
+                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -880,7 +885,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(t._values(), tc._values())
             return tc
 
-        value_map = {}
+        value_map: Dict[Any, Any] = {}
         for idx, val in zip(t._indices().t(), t._values()):
             idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
@@ -889,11 +894,11 @@ class TestCase(expecttest.TestCase):
                 value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
         new_indices = sorted(list(value_map.keys()))
-        new_values = [value_map[idx] for idx in new_indices]
+        _new_values = [value_map[idx] for idx in new_indices]
         if t._values().ndimension() < 2:
-            new_values = t._values().new(new_values)
+            new_values = t._values().new(_new_values)
         else:
-            new_values = torch.stack(new_values)
+            new_values = torch.stack(_new_values)
 
         new_indices = t._indices().new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
@@ -1169,8 +1174,8 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override] 
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1229,7 +1234,7 @@ class TestCase(expecttest.TestCase):
                     msg = 'Caught unexpected warnings:\n'
                     for w in ws:
                         msg += warnings.formatwarning(
-                            w.message, w.category, w.filename, w.lineno, w.line)
+                            str(w.message), w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
 
@@ -1608,7 +1613,8 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     values = torch.randn(nonzero_elements, dtype=dtype, device=device)
     # ensure that the diagonal dominates
     values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    indices_tensor = torch.tensor(indices)
+    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
     return A.coalesce()
 
 
@@ -1665,8 +1671,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
         icoords.append(i)
         jcoords.append(j)
         values.append(v)
-    indices = [icoords, jcoords]
-    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
+    indices_tensor = torch.tensor([icoords, jcoords])
+    return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
