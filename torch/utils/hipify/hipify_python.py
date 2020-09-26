@@ -797,7 +797,7 @@ def preprocessor(output_directory, filepath, all_files, includes, stats, hip_cla
         return {"hipified_path": fin_path, "status": "ok"}
 
     # Add hipify breadcrumb for C-style files to avoid re-hipification
-    if match_extensions(fin_path, (".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".hpp")):
+    if fin_path != fout_path and match_extensions(fin_path, (".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".hpp")):
         output_source = HIPIFY_C_BREADCRUMB + output_source
 
     do_write = True
