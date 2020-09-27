@@ -1376,68 +1376,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   l.prepareForCodegen();
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
-    std::vector<For*> innerLoops;
-    std::vector<For*> worklist;
-
-    // Find outer-most For loops
-    if (For* rootF = dynamic_cast<For*>(l.root_stmt())) {
-      worklist.push_back(rootF);
-    } else if (Block* body = dynamic_cast<Block*>(l.root_stmt())) {
-      std::vector<Block*> blocks = {body};
-      while (blocks.size()) {
-        Block* b = blocks.back();
-        blocks.pop_back();
-
-        for (Stmt* s : *b) {
-          if (For* f = dynamic_cast<For*>(s)) {
-            worklist.push_back(f);
-          } else if (Block* b2 = dynamic_cast<Block*>(s)) {
-            blocks.push_back(b2);
-          }
-        }
-      }
-    }
-
-    // Traverse the For loop nest find inner-most loops, which are
-    // vectorization candidates.
-    while (worklist.size()) {
-      For* f = worklist.back();
-      worklist.pop_back();
-
-      bool containsSubLoops = false;
-      if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : *body) {
-          if (For* f2 = dynamic_cast<For*>(s2)) {
-            containsSubLoops = true;
-            worklist.push_back(f2);
-          }
-        }
-      }
-
-      if (!containsSubLoops) {
-        innerLoops.push_back(f);
-      }
-    }
-
-    // vectorize inner loops.
-    for (For* loop : innerLoops) {
-      For* outer1;
-      For* split1;
-      For* tail1;
-
-      static const int kBodyVectorWidth = 8;
-      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
-      l.vectorize(split1);
-
-      if (tail1) {
-        For* outer2;
-        For* split2;
-        For* tail2;
-        static const int kTailVectorWidth = 4;
-        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
-        l.vectorize(split2);
-      }
-    }
+    l.vectorizeInnerLoops();
   }
 
   Stmt* stmt = l.root_stmt();
