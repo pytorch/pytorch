@@ -1,6 +1,5 @@
 #if defined(USE_CUDA)
-
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
@@ -93,7 +92,7 @@ void checkIntValue(
 // (These tests exercise IrGraphGenerator through a non-trivial IR,
 //  to make sure that it runs w/o crashing. The actual output is not
 //  validated)
-void testGPU_IrGraphGenerator() {
+TEST(NVFuserTest, IrGraphGenerator_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -145,7 +144,7 @@ void testGPU_IrGraphGenerator() {
                    .empty());
 }
 
-void testGPU_FusionDispatch() {
+TEST(NVFuserTest, FusionDispatch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -160,7 +159,7 @@ void testGPU_FusionDispatch() {
 }
 
 // Evaluate basic scalar operations with constant values
-void testGPU_FusionExprEvalConstants() {
+TEST(NVFuserTest, FusionExprEvalConstants_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -177,7 +176,7 @@ void testGPU_FusionExprEvalConstants() {
 }
 
 // Evaluate basic scalar operations with bound values
-void testGPU_FusionExprEvalBindings() {
+TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -222,7 +221,7 @@ void testGPU_FusionExprEvalBindings() {
 }
 
 // Evaluate expressions in a simple IR
-void testGPU_FusionExprEvalBasic() {
+TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -278,7 +277,7 @@ void testGPU_FusionExprEvalBasic() {
 }
 
 // Evaluate expressions in a more complex IR
-void testGPU_FusionExprEvalComplex() {
+TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -330,7 +329,7 @@ void testGPU_FusionExprEvalComplex() {
 }
 
 // Evaluate expressions post lowering
-void testGPU_FusionExprEvalPostLower() {
+TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -387,7 +386,7 @@ void testGPU_FusionExprEvalPostLower() {
   checkIntValue(evaluator, tid_x, 128);
 }
 
-void testGPU_FusionClear() {
+TEST(NVFuserTest, FusionClear_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -467,7 +466,7 @@ void testGPU_FusionClear() {
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-void testGPU_FusionCopy() {
+TEST(NVFuserTest, FusionCopy_CUDA) {
   Fusion original_fusion;
 
   // Create the test IR
@@ -541,7 +540,7 @@ void testGPU_FusionCopy() {
   ASSERT_EQ(original_kernel, clone_kernel);
 }
 
-void testGPU_FusionMove() {
+TEST(NVFuserTest, FusionMove_CUDA) {
   Fusion fusion;
 
   // Create the test IR
@@ -611,7 +610,7 @@ void testGPU_FusionMove() {
   ASSERT_EQ(lowered_ir.str(), moved_lowered_ir.str());
 }
 
-void testGPU_FusionSimpleArith() {
+TEST(NVFuserTest, FusionSimpleArith_CUDA) {
   std::stringstream ss1, ss2;
 
   Fusion fusion;
@@ -640,7 +639,7 @@ void testGPU_FusionSimpleArith() {
       "Error where explicit add nodes don't match implicit add nodes.");
 }
 
-void testGPU_FusionSimpleTypePromote() {
+TEST(NVFuserTest, FusionSimpleTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -663,7 +662,7 @@ class ZeroMutator : public OptOutMutator {
   }
 };
 
-void testGPU_FusionMutator() {
+TEST(NVFuserTest, FusionMutator_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -681,7 +680,7 @@ void testGPU_FusionMutator() {
   TORCH_CHECK(flhs->value().value() == 0.f);
 }
 
-void testGPU_FusionRegister() {
+TEST(NVFuserTest, FusionRegister_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   Float* v1 = new Float{1.f};
@@ -712,7 +711,7 @@ struct DummyExpr : public Expr {
   DummyExpr& operator=(DummyExpr&& other) = delete;
 };
 
-void testGPU_FusionTopoSort() {
+TEST(NVFuserTest, FusionTopoSort_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -779,7 +778,7 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(fusion.origin(v6)->name() == 3);
 }
 
-void testGPU_FusionTensor() {
+TEST(NVFuserTest, FusionTensor_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   Fusion fusion;
@@ -843,7 +842,7 @@ void testGPU_FusionTensor() {
   }
 }
 
-void testGPU_FusionFilterVals() {
+TEST(NVFuserTest, FusionFilterVals_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -881,7 +880,7 @@ void testGPU_FusionFilterVals() {
       "Not expecting any results");
 }
 
-void testGPU_FusionTVSplit() {
+TEST(NVFuserTest, FusionTVSplit_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -907,7 +906,7 @@ void testGPU_FusionTVSplit() {
       static_cast<Int*>(inner->extent())->value().value() == 2);
 }
 
-void testGPU_FusionTVMerge() {
+TEST(NVFuserTest, FusionTVMerge_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -925,7 +924,7 @@ void testGPU_FusionTVMerge() {
           tv->getRootDomain()[2]->extent());
 }
 
-void testGPU_FusionTVReorder() {
+TEST(NVFuserTest, FusionTVReorder_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -972,7 +971,7 @@ void testGPU_FusionTVReorder() {
   TORCH_CHECK(ref[1]->sameAs(tv->axis(1)));
 }
 
-void testGPU_FusionEquality() {
+TEST(NVFuserTest, FusionEquality_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1013,7 +1012,7 @@ void testGPU_FusionEquality() {
   TORCH_CHECK(!neg1->sameAs(neg2));
 }
 
-void testGPU_FusionDependency() {
+TEST(NVFuserTest, FusionDependency_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1083,7 +1082,7 @@ void testGPU_FusionDependency() {
   TORCH_CHECK(dep_chain.empty());
 }
 
-void testGPU_FusionParser() {
+TEST(NVFuserTest, FusionParser_CUDA) {
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
     graph(%0 : Float(2:1),
@@ -1163,7 +1162,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-void testGPU_FusionForLoop() {
+TEST(NVFuserTest, FusionForLoop_CUDA) {
 // TODO(kir): re-enable this test
 //  due to the current "GpuLower guard" approach, we can only create
 //  kernel IR during GpuLower::lower()
@@ -1204,7 +1203,7 @@ void testGPU_FusionForLoop() {
 #endif
 }
 
-void testGPU_FusionCodeGen() {
+TEST(NVFuserTest, FusionCodeGen_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1241,7 +1240,7 @@ void testGPU_FusionCodeGen() {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-void testGPU_FusionCodeGen2() {
+TEST(NVFuserTest, FusionCodeGen2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1283,7 +1282,7 @@ void testGPU_FusionCodeGen2() {
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-void testGPU_FusionSimplePWise() {
+TEST(NVFuserTest, FusionSimplePWise_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   // dimensionality of the problem
@@ -1340,7 +1339,7 @@ void testGPU_FusionSimplePWise() {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-void testGPU_FusionExecKernel() {
+TEST(NVFuserTest, FusionExecKernel_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1394,7 +1393,7 @@ int ceilDiv_(int a, int b) {
   return (a + b - 1) / b;
 }
 
-void testGPU_FusionAdvancedComputeAt() {
+TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -1693,7 +1692,7 @@ void testGPU_FusionAdvancedComputeAt() {
   }
 }
 
-void testGPU_FusionComputeAtMultiConsumers() {
+TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -2
@@ -1754,7 +1753,7 @@ void testGPU_FusionComputeAtMultiConsumers() {
 }
 
 // Similar to ComputeAtMultiConsumers, but with a common consumer.
-void testGPU_FusionComputeAtCommonConsumer1() {
+TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -2
@@ -1825,7 +1824,7 @@ void testGPU_FusionComputeAtCommonConsumer1() {
   TORCH_CHECK(at::allclose(kernel_tv5, t5));
 }
 
-void testGPU_FusionComputeAtCommonConsumer2() {
+TEST(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -1
@@ -1912,7 +1911,7 @@ void testGPU_FusionComputeAtCommonConsumer2() {
 
 // Similar to the above common consumer test but adds an additional
 // tensor that has no common consumer with the other tensors.
-void testGPU_FusionComputeAtCommonConsumer3() {
+TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -1
@@ -2010,7 +2009,7 @@ void testGPU_FusionComputeAtCommonConsumer3() {
 
 // Similar to ComputeAtCommonConsumer1 but with an addtiona ltensor
 // that does not have data dependency with the consumer.
-void testGPU_FusionComputeAtNoCommonConsumer() {
+TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv1 * -2
@@ -2102,7 +2101,7 @@ void checkConcretized(
 
 } // namespace
 
-void testGPU_FusionBCastConcretizeBasic() {
+TEST(NVFuserTest, FusionBCastConcretizeBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2132,7 +2131,7 @@ void testGPU_FusionBCastConcretizeBasic() {
   checkConcretized(tv2_0, 0, tv1, 1, false);
 }
 
-void testGPU_FusionBCastConcretizeRfactor() {
+TEST(NVFuserTest, FusionBCastConcretizeRfactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2181,7 +2180,7 @@ void checkIdProvedEquivalent(
 
 } // namespace
 
-void testGPU_FusionProveIdEqBasic() {
+TEST(NVFuserTest, FusionProveIdEqBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2206,7 +2205,7 @@ void testGPU_FusionProveIdEqBasic() {
   checkIdProvedEquivalent(tv0, 0, tv1, 1, false);
 }
 
-void testGPU_FusionProveIdEqRfactor() {
+TEST(NVFuserTest, FusionProveIdEqRfactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2236,7 +2235,7 @@ void testGPU_FusionProveIdEqRfactor() {
   checkIdProvedEquivalent(tv3, 0, tv0, 0, true);
 }
 
-void testGPU_FusionScalarInputs() {
+TEST(NVFuserTest, FusionScalarInputs_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2323,7 +2322,7 @@ void testGPU_FusionScalarInputs() {
   TORCH_CHECK(at::allclose(kernel_tv4, t4));
 }
 
-void testGPU_FusionLoopUnroll() {
+TEST(NVFuserTest, FusionLoopUnroll_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2564,7 +2563,7 @@ void test_op(
       std::make_index_sequence<size>{});
 }
 
-void testGPU_FusionUnaryOps() {
+TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
@@ -2638,7 +2637,7 @@ void testGPU_FusionUnaryOps() {
       std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
 }
 
-void testGPU_FusionBinaryOps() {
+TEST(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
@@ -2738,7 +2737,7 @@ void testGPU_FusionBinaryOps() {
           std::make_pair(ValType::Scalar, DataType::Float)));
 }
 
-void testGPU_FusionTernaryOps() {
+TEST(NVFuserTest, FusionTernaryOps_CUDA) {
   test_op(
       /*blocks*/ 640,
       /*threads*/ 64,
@@ -2787,7 +2786,7 @@ void testGPU_FusionTernaryOps() {
           std::make_pair(ValType::TensorView, DataType::Float)));
 }
 
-void testGPU_FusionCompoundOps() {
+TEST(NVFuserTest, FusionCompoundOps_CUDA) {
   test_op(
       /*blocks*/ 640,
       /*threads*/ 64,
@@ -2826,7 +2825,7 @@ void testGPU_FusionCompoundOps() {
           std::make_pair(ValType::Scalar, DataType::Float)));
 }
 
-void testGPU_FusionCastOps() {
+TEST(NVFuserTest, FusionCastOps_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2868,7 +2867,7 @@ void testGPU_FusionCastOps() {
 
 // We want split/merge/reorder all tested both on and off rfactor domains, also
 // want compute at into the rfactor domain, and into its consumer
-void testGPU_FusionRFactorReplay() {
+TEST(NVFuserTest, FusionRFactorReplay_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2961,7 +2960,7 @@ void testGPU_FusionRFactorReplay() {
 
 // Start off simple, block on the outer dim
 // block stride + thread all reduce + unrolling on inner dim
-void testGPU_FusionReduction() {
+TEST(NVFuserTest, FusionReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3019,7 +3018,7 @@ void testGPU_FusionReduction() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
-void testGPU_FusionReduction2() {
+TEST(NVFuserTest, FusionReduction2_CUDA) {
   {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -3146,7 +3145,7 @@ void testGPU_FusionReduction2() {
   }
 }
 
-void testGPU_FusionReduction3() {
+TEST(NVFuserTest, FusionReduction3_CUDA) {
   {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -3217,7 +3216,7 @@ void testGPU_FusionReduction3() {
   }
 }
 
-void testGPU_FusionReduction4() {
+TEST(NVFuserTest, FusionReduction4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3269,7 +3268,7 @@ void testGPU_FusionReduction4() {
       aten_output.sub(cg_output).abs().max());
 }
 
-void testGPU_FusionReduction5() {
+TEST(NVFuserTest, FusionReduction5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3330,7 +3329,7 @@ void testGPU_FusionReduction5() {
   TORCH_CHECK(aten_output.allclose(outputs[0]));
 }
 
-void testGPU_FusionReductionTFT() {
+TEST(NVFuserTest, FusionReductionTFT_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3387,7 +3386,7 @@ void testGPU_FusionReductionTFT() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
-void testGPU_FusionBranches() {
+TEST(NVFuserTest, FusionBranches_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3444,7 +3443,7 @@ void testGPU_FusionBranches() {
   TORCH_CHECK(t6.allclose(outputs[0]));
 }
 
-void testGPU_FusionSimpleBCast() {
+TEST(NVFuserTest, FusionSimpleBCast_CUDA) {
   {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -3708,7 +3707,7 @@ void testGPU_FusionSimpleBCast() {
   }
 }
 
-void testGPU_FusionComplexBCast() {
+TEST(NVFuserTest, FusionComplexBCast_CUDA) {
   {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -3811,7 +3810,7 @@ void testGPU_FusionComplexBCast() {
   }
 }
 
-void testGPU_FusionAdvancedIndexing() {
+TEST(NVFuserTest, FusionAdvancedIndexing_CUDA) {
   // Merging left to right is still broken in some instances. Indexing can't
   // complete because we assume we can simply traverse consumer->producer in the
   // index/extent map, but this case breaks this assumption.
@@ -3980,7 +3979,7 @@ void testGPU_FusionAdvancedIndexing() {
 }
 
 // Test a simple Gemm but also play around with fusion executor features
-void testGPU_FusionSimpleGemm() {
+TEST(NVFuserTest, FusionSimpleGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4067,7 +4066,7 @@ void testGPU_FusionSimpleGemm() {
 }
 
 // Softmax with a 1D tensor. Parallelized only with a single thread block.
-void testGPU_FusionSoftmax1D() {
+TEST(NVFuserTest, FusionSoftmax1D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4124,7 +4123,7 @@ void testGPU_FusionSoftmax1D() {
 }
 
 // Softmax with a 1D tensor with input normalization.
-void testGPU_FusionSoftmax1DNormalized() {
+TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4195,7 +4194,7 @@ void testGPU_FusionSoftmax1DNormalized() {
 
 // Softmax with a 3D tensor, where the inner-most 3rd dimension is
 // normalized. Pallelized with multiple thread blocks.
-void testGPU_FusionSoftmax3D() {
+TEST(NVFuserTest, FusionSoftmax3D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4255,7 +4254,7 @@ void testGPU_FusionSoftmax3D() {
 }
 
 // Softmax with a 3D tensor with input normalization.
-void testGPU_FusionSoftmax3DNormalized() {
+TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4329,7 +4328,7 @@ void testGPU_FusionSoftmax3DNormalized() {
       t2.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionSoftmaxComputeAt() {
+TEST(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4355,7 +4354,7 @@ void testGPU_FusionSoftmaxComputeAt() {
 }
 
 // Similar to FusionReduction but uses grid reduction
-void testGPU_FusionGridReduction1() {
+TEST(NVFuserTest, FusionGridReduction1_CUDA) {
   const int gdimx = 32;
   const int bdimx = 128;
 
@@ -4413,7 +4412,7 @@ void testGPU_FusionGridReduction1() {
 }
 
 // Same test as the above but uses BIDy and TIDx for reduction
-void testGPU_FusionGridReduction2() {
+TEST(NVFuserTest, FusionGridReduction2_CUDA) {
   const int gdimy = 32;
   const int bdimx = 128;
 
@@ -4468,7 +4467,7 @@ void testGPU_FusionGridReduction2() {
 }
 
 // Same test but uses BIDy and BIDz for reduction. No TID used.
-void testGPU_FusionGridReduction3dim1() {
+TEST(NVFuserTest, FusionGridReduction3dim1_CUDA) {
   const int gdimz = 32;
   const int gdimy = 128;
 
@@ -4524,7 +4523,7 @@ void testGPU_FusionGridReduction3dim1() {
 }
 
 // Same as testGPU_FusionGridReduction3dim1 but reduces dimension 0
-void testGPU_FusionGridReduction3dim0() {
+TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
   const int rdim = 0;
   const int gdimy = 128;
   const int gdimz = 32;
@@ -4577,7 +4576,7 @@ void testGPU_FusionGridReduction3dim0() {
 }
 
 // This is similar to the FusionReduction, but swaps BIDx and TIDx
-void testGPU_FusionGridReduction4() {
+TEST(NVFuserTest, FusionGridReduction4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4640,7 +4639,7 @@ void testGPU_FusionGridReduction4() {
 
 // Grid reduction with 2D thread blocks but only TIDx and BIDx are
 // mapped to a reduction dim
-void testGPU_FusionGridReduction5() {
+TEST(NVFuserTest, FusionGridReduction5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4692,7 +4691,7 @@ void testGPU_FusionGridReduction5() {
 }
 
 // Similar to FusionGridReduction1 but with 3D tensors
-void testGPU_FusionGridReduction6() {
+TEST(NVFuserTest, FusionGridReduction6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4753,7 +4752,7 @@ void testGPU_FusionGridReduction6() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
-void testGPU_FusionNonRedAxisBind() {
+TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   int bid_x = 3;
   int tid_x = 2;
   int red_dim = 0;
@@ -4788,7 +4787,7 @@ void testGPU_FusionNonRedAxisBind() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionSplitBCast() {
+TEST(NVFuserTest, FusionSplitBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4836,7 +4835,7 @@ void testGPU_FusionSplitBCast() {
   fe.runFusion({t0, t1}, {cg_output});
 }
 
-void testGPU_FusionBCastInnerDim() {
+TEST(NVFuserTest, FusionBCastInnerDim_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4850,7 +4849,7 @@ void testGPU_FusionBCastInnerDim() {
   TORCH_CHECK(!tv2->axis(0)->isReduction() && tv2->axis(1)->isBroadcast());
 }
 
-void testGPU_FusionBCastReduce() {
+TEST(NVFuserTest, FusionBCastReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4866,7 +4865,7 @@ void testGPU_FusionBCastReduce() {
 
 // Multiple consumer reduction with computeAt
 // https://github.com/csarofeen/pytorch/issues/110
-void testGPU_FusionReductionMultiConsumer() {
+TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   TensorView* tv0 = makeDummyTensor(2);
@@ -4883,7 +4882,7 @@ void testGPU_FusionReductionMultiConsumer() {
       tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
 }
 
-void testGPU_FusionComputeAtExprOrder() {
+TEST(NVFuserTest, FusionComputeAtExprOrder_CUDA) {
   {
     for (int i = 0; i < 2; ++i) {
       Fusion fusion;
@@ -4953,7 +4952,7 @@ void testGPU_FusionComputeAtExprOrder() {
   }
 }
 
-void testGPU_FusionZeroDimComputeAt() {
+TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4980,7 +4979,7 @@ void testGPU_FusionZeroDimComputeAt() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionZeroDimBroadcast() {
+TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5016,7 +5015,7 @@ void testGPU_FusionZeroDimBroadcast() {
       aten_output.sub(output).abs().max());
 }
 
-void testGPU_FusionZeroDimReduction() {
+TEST(NVFuserTest, FusionZeroDimReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5053,7 +5052,7 @@ void testGPU_FusionZeroDimReduction() {
       aten_output.sub(output).abs().max());
 }
 
-void testGPU_FusionBCastAfterReduce() {
+TEST(NVFuserTest, FusionBCastAfterReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   const int tidx = 128;
@@ -5104,7 +5103,7 @@ void testGPU_FusionBCastAfterReduce() {
   TORCH_CHECK(t5.allclose(outputs[0], 1e-5, 1e-5));
 }
 
-void testGPU_FusionReductionScheduler() {
+TEST(NVFuserTest, FusionReductionScheduler_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -5142,7 +5141,7 @@ void testGPU_FusionReductionScheduler() {
 }
 
 // Simple reduction parallelized on a symbolic size.
-void testGPU_FusionSymbolicReduction() {
+TEST(NVFuserTest, FusionSymbolicReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5192,7 +5191,7 @@ void testGPU_FusionSymbolicReduction() {
   TORCH_CHECK(aten_output.allclose(outputs[0]));
 }
 
-void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
+TEST(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
   const std::vector<int> red_dims = {0, 2};
   // Copy is because CodeGen requires int and Pytorch requires int64_t
   // for a vector of reduction dimensions
@@ -5232,7 +5231,7 @@ void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionReductionSchedulerMultiDimFastest() {
+TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
   const std::vector<int> red_dims = {1, 3};
   // Copy is because CodeGen requires int and Pytorch requires int64_t
   // for a vector of reduction dimensions
@@ -5270,7 +5269,7 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionReductionSchedulerDimShmoo() {
+TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<bool> fp16_usage = {true, false};
   std::vector<int> red_axis = {1, 0};
   std::vector<int> output_dims = {320, 640};
@@ -5346,7 +5345,7 @@ void testGPU_FusionReductionSchedulerDimShmoo() {
   }
 }
 
-void testGPU_FusionCacheBefore() {
+TEST(NVFuserTest, FusionCacheBefore_CUDA) {
   // TVM Cache Write
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5387,7 +5386,7 @@ void testGPU_FusionCacheBefore() {
       aten_output.sub(outputs[0]).abs().sum());
 }
 
-void testGPU_FusionCacheAfter() {
+TEST(NVFuserTest, FusionCacheAfter_CUDA) {
   // TVM Cache Read
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5428,7 +5427,7 @@ void testGPU_FusionCacheAfter() {
       aten_output.sub(outputs[0]).abs().sum());
 }
 
-void testGPU_FusionCacheIndirect() {
+TEST(NVFuserTest, FusionCacheIndirect_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5477,7 +5476,7 @@ void testGPU_FusionCacheIndirect() {
       aten_output.sub(outputs[0]).abs().sum());
 }
 
-void testGPU_FusionCacheBcast() {
+TEST(NVFuserTest, FusionCacheBcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5536,7 +5535,7 @@ void testGPU_FusionCacheBcast() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionCacheComplex() {
+TEST(NVFuserTest, FusionCacheComplex_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5591,7 +5590,7 @@ void testGPU_FusionCacheComplex() {
       aten_output.sub(outputs[0]).abs().sum());
 }
 
-void testGPU_FusionCacheMultiConsumer() {
+TEST(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5636,7 +5635,7 @@ void testGPU_FusionCacheMultiConsumer() {
       aten_output.sub(outputs[1]).abs().sum());
 }
 
-void testGPU_FusionSmem() {
+TEST(NVFuserTest, FusionSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5691,7 +5690,7 @@ void testGPU_FusionSmem() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
-void testGPU_FusionSmemReduce() {
+TEST(NVFuserTest, FusionSmemReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5742,7 +5741,7 @@ void testGPU_FusionSmemReduce() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
 }
 
-void testGPU_FusionSmemBlockGemm() {
+TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5805,7 +5804,7 @@ void testGPU_FusionSmemBlockGemm() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
-void testGPU_FusionSmemBlockGemmCache() {
+TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5891,7 +5890,7 @@ void testGPU_FusionSmemBlockGemmCache() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
-void testGPU_FusionSmemDynamicReductionSymbolic() {
+TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5940,7 +5939,7 @@ void testGPU_FusionSmemDynamicReductionSymbolic() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
 }
 
-void testGPU_FusionSmemDynamicReductionSymbolicArg() {
+TEST(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6000,7 +5999,7 @@ void testGPU_FusionSmemDynamicReductionSymbolicArg() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
 }
 
-void testGPU_FusionSmemDynamicPwiseMulSymbolicArgWAR() {
+TEST(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6059,7 +6058,7 @@ void testGPU_FusionSmemDynamicPwiseMulSymbolicArgWAR() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(22) == 1);
 }
 
-void testGPU_FusionSmemDynamicTiledGemm() {
+TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6185,7 +6184,7 @@ void testGPU_FusionSmemDynamicTiledGemm() {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(41) == 1);
 }
 
-void testGPU_FusionGlobalIntermediate() {
+TEST(NVFuserTest, FusionGlobalIntermediate_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6233,7 +6232,7 @@ void testGPU_FusionGlobalIntermediate() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionGlobalIntermediateDefaultSchedule() {
+TEST(NVFuserTest, FusionGlobalIntermediateDefaultSchedule_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6273,7 +6272,7 @@ void testGPU_FusionGlobalIntermediateDefaultSchedule() {
       aten_output.sub(outputs[0]).abs().sum());
 }
 
-void testGPU_FusionConstCheck() {
+TEST(NVFuserTest, FusionConstCheck_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6290,7 +6289,7 @@ void testGPU_FusionConstCheck() {
   TORCH_CHECK(one_x4->isConstScalar());
 }
 
-void testGPU_FusionUnrollWithAlloc() {
+TEST(NVFuserTest, FusionUnrollWithAlloc_CUDA) {
   const std::vector<int64_t> tensor_dims_in = {128, 128};
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -6338,7 +6337,7 @@ void testGPU_FusionUnrollWithAlloc() {
 }
 
 // Test isZeroInt
-void testGPU_FusionIsZeroInt() {
+TEST(NVFuserTest, FusionIsZeroInt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6351,7 +6350,7 @@ void testGPU_FusionIsZeroInt() {
 }
 
 // Test isOneInt
-void testGPU_FusionIsOneInt() {
+TEST(NVFuserTest, FusionIsOneInt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6366,7 +6365,7 @@ void testGPU_FusionIsOneInt() {
 // This is to verify no cycle of computeAt is created. A more complex
 // variation of this pattern appears in one of the Python tests
 // (test_random_topo).
-void testGPU_FusionComputeAtNonterminatingOutput() {
+TEST(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6430,7 +6429,7 @@ void testGPU_FusionComputeAtNonterminatingOutput() {
   return;
 }
 
-void testGPU_FusionTraversalOrder1() {
+TEST(NVFuserTest, FusionTraversalOrder1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6478,7 +6477,7 @@ void testGPU_FusionTraversalOrder1() {
       t4.sub(cg_output_tv4).abs().max());
 }
 
-void testGPU_FusionTraversalOrder2() {
+TEST(NVFuserTest, FusionTraversalOrder2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6531,7 +6530,7 @@ void testGPU_FusionTraversalOrder2() {
       t5.sub(cg_output_tv5).abs().max());
 }
 
-void testGPU_FusionTraversalOrder3() {
+TEST(NVFuserTest, FusionTraversalOrder3_CUDA) {
   for (int i = 0; i < 2; ++i) {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -6599,7 +6598,7 @@ void testGPU_FusionTraversalOrder3() {
   }
 }
 
-void testGPU_FusionTraversalOrder4() {
+TEST(NVFuserTest, FusionTraversalOrder4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6663,7 +6662,7 @@ void testGPU_FusionTraversalOrder4() {
       t7.sub(cg_output_tv7).abs().max());
 }
 
-void testGPU_FusionTraversalOrder5() {
+TEST(NVFuserTest, FusionTraversalOrder5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6713,7 +6712,7 @@ void testGPU_FusionTraversalOrder5() {
       t5.sub(cg_output_tv5).abs().max());
 }
 
-void testGPU_FusionTraversalOrder6() {
+TEST(NVFuserTest, FusionTraversalOrder6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6755,7 +6754,7 @@ void testGPU_FusionTraversalOrder6() {
       t4.sub(cg_output_tv4).abs().max());
 }
 
-void testGPU_FusionTraversalOrder7() {
+TEST(NVFuserTest, FusionTraversalOrder7_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6804,7 +6803,7 @@ void testGPU_FusionTraversalOrder7() {
 }
 
 // Test predication of grid reduction
-void testGPU_FusionThreadPredicate() {
+TEST(NVFuserTest, FusionThreadPredicate_CUDA) {
   const int gdimx = 4;
   const int bdimx = 128;
 
@@ -6860,7 +6859,7 @@ void testGPU_FusionThreadPredicate() {
   TORCH_CHECK(aten_output_tv3.allclose(cg_output_tv3));
 }
 
-void testGPU_FusionLSTMCell() {
+TEST(NVFuserTest, FusionLSTMCell_CUDA) {
   const int hidden_features = 512;
   const int batch_size = 64;
 
@@ -6940,7 +6939,7 @@ void testGPU_FusionLSTMCell() {
   TORCH_CHECK(at_hy.allclose(outputs[1], 1e-4, 1e-7));
 }
 
-void testGPU_FusionComputeAtMultiBCast() {
+TEST(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6958,7 +6957,7 @@ void testGPU_FusionComputeAtMultiBCast() {
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 
-void testGPU_FusionReductionHalf() {
+TEST(NVFuserTest, FusionReductionHalf_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7011,7 +7010,7 @@ void testGPU_FusionReductionHalf() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
-void testGPU_FusionInputsIdLookup() {
+TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({16, 8, 8}, options);
   at::Tensor t1 = at::randn({8, 8}, options);

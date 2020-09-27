@@ -502,6 +502,14 @@ void RequestCallbackImpl::processRpcWithErrors(
   }
 }
 
+bool RequestCallbackImpl::cudaAvailable() const {
+  #ifdef USE_CUDA
+  return true;
+  #else
+  return false;
+  #endif
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
