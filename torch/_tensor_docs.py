@@ -333,6 +333,20 @@ addmv_(mat, vec, *, beta=1, alpha=1) -> Tensor
 In-place version of :meth:`~Tensor.addmv`
 """)
 
+add_docstr_all('sspaddmm',
+               r"""
+sspaddmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
+
+See :func:`torch.sspaddmm`
+""")
+
+add_docstr_all('smm',
+               r"""
+smm(mat) -> Tensor
+
+See :func:`torch.smm`
+""")
+
 add_docstr_all('addr',
                r"""
 addr(vec1, vec2, *, beta=1, alpha=1) -> Tensor
@@ -874,6 +888,18 @@ clone(*, memory_format=torch.preserve_format) -> Tensor
 See :func:`torch.clone`
 """.format(**common_args))
 
+add_docstr_all('coalesce',
+               r"""
+coalesce() -> Tensor
+
+If :attr:`self` is a sparse COO tensor (i.e., with
+``torch.sparse_coo`` layout), this returns a coalesced copy if the
+tensor is uncoalesced, otherwise returns self.  If :attr:`self` is not
+a sparse COO tensor, this throws an error.
+
+See :ref:`uncoalesced tensors <sparse-uncoalesed-coo-docs>`.
+""")
+
 add_docstr_all('contiguous',
                r"""
 contiguous(memory_format=torch.contiguous_format) -> Tensor
@@ -1039,10 +1065,10 @@ add_docstr_all('dense_dim',
                r"""
 dense_dim() -> int
 
-If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+If :attr:`self` is a :ref:`sparse tensor <sparse-docs>`,
 this returns the number of dense dimensions. Otherwise, this throws an error.
 
-See also :meth:`Tensor.sparse_dim`.
+See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-docs>`.
 """)
 
 add_docstr_all('diag',
@@ -1737,25 +1763,24 @@ See :func:`torch.index_select`
 
 add_docstr_all('sparse_mask',
                r"""
-sparse_mask(input, mask) -> Tensor
+sparse_mask(mask) -> Tensor
 
-Returns a new SparseTensor with values from Tensor :attr:`input` filtered
-by indices of :attr:`mask` and values are ignored. :attr:`input` and :attr:`mask`
-must have the same shape.
+Returns a new :ref:`sparse tensor <sparse-docs>` with values from
+:attr:`self` tensor filtered by indices of :attr:`mask`. The values of
+:attr:`mask` sparse tensor are ignored. :attr:`self` and :attr:`mask`
+tensors must have the same shape.
 
 Args:
-    input (Tensor): an input Tensor
-    mask (SparseTensor): a SparseTensor which we filter :attr:`input` based on its indices
+    mask (Tensor): a sparse tensor which we filter :attr:`self` tensor based on its indices
 
 Example::
 
-    >>> nnz = 5
-    >>> dims = [5, 5, 2, 2]
-    >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
-                       torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
-    >>> V = torch.randn(nnz, dims[2], dims[3])
-    >>> size = torch.Size(dims)
-    >>> S = torch.sparse_coo_tensor(I, V, size).coalesce()
+    >>> nse = 5
+    >>> dims = (5, 5, 2, 2)
+    >>> I = torch.cat([torch.randint(0, dims[0], size=(nse,)),
+                       torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
+    >>> V = torch.randn(nse, dims[2], dims[3])
+    >>> S = torch.sparse_coo_tensor(I, V, dims).coalesce()
     >>> D = torch.randn(dims)
     >>> D.sparse_mask(S)
     tensor(indices=tensor([[0, 0, 0, 2],
@@ -1828,6 +1853,17 @@ add_docstr_all('isreal',
 isreal() -> Tensor
 
 See :func:`torch.isreal`
+""")
+
+add_docstr_all('is_coalesced',
+               r"""
+is_coalesce() -> bool
+
+Returns True if :attr:`self` tensor is a sparse COO tensor which has
+been coalesced, see :meth:`coalesce`.  If :attr:`self` is not a
+sparse COO tensor, this throws an error.
+
+See :ref:`uncoalesced tensors <sparse-uncoalesed-coo-docs>`.
 """)
 
 add_docstr_all('is_contiguous',
@@ -3216,10 +3252,39 @@ add_docstr_all('sparse_dim',
                r"""
 sparse_dim() -> int
 
-If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+If :attr:`self` is a :ref:`sparse tensor <sparse-docs>`,
 this returns the number of sparse dimensions. Otherwise, this throws an error.
 
-See also :meth:`Tensor.dense_dim`.
+See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-docs>`.
+""")
+
+add_docstr_all('sparse_resize_',
+               r"""
+sparse_resize_(size, sparse_dim, dense_dim) -> Tensor
+
+Resizes :attr:`self` :ref:`sparse tensor <sparse-docs>` to the
+desired (non-shrinking) size and the number of sparse and dense
+dimensions.
+
+Args:
+    size (torch.Size): the desired size.
+    sparse_dim (int): the number of desired sparse dimensions
+    dense_dim (int): the number of desired dense dimensions
+
+If the number of specified elements of :attr:`self` tensor is 0, one
+can specify any desired size and the number of sparse/dense dimensions
+such that ``len(size) == sparse_dim + dense_dim``. Otherwise, the
+desired size must be such that any of its dimensions is greater or
+equal to the the corresponding original dimensions, and the number of
+original sparse/dense dimensions is not altered.
+""")
+
+add_docstr_all('sparse_resize_and_clear_',
+               r"""
+sparse_resize_and_clear_(size, sparse_dim, dense_dim) -> Tensor
+
+Does the same as :meth:`sparse_resize_` plus resets the `indices` and
+`values` to empty tensors.
 """)
 
 add_docstr_all('sqrt',
@@ -3633,11 +3698,33 @@ topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 See :func:`torch.topk`
 """)
 
+add_docstr_all('to_dense',
+               r"""
+to_dense() -> Tensor
+
+Returns a dense copy of the :attr:`self` tensor. Here, a dense tensor
+is a strided tensor (i.e., with `torch.strided` layout).
+
+If the :attr:`self` tensor is already a strided tensor, this throws an error.
+
+Example::
+
+    >>> s = torch.sparse_coo_tensor(
+               torch.tensor([[1, 1],
+                             [0, 2]]),
+               torch.tensor([9, 10]),
+               size=(3, 3))
+    >>> s.to_dense()
+    tensor([[ 0,  0,  0],
+            [ 9,  0, 10],
+            [ 0,  0,  0]])
+""")
+
 add_docstr_all('to_sparse',
                r"""
 to_sparse(sparseDims) -> Tensor
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
-:ref:`coordinate format <sparse-docs>`.
+:ref:`coordinate format <sparse-coo-docs>`.
 
 Args:
     sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
@@ -4281,6 +4368,11 @@ add_docstr_all('is_meta',
                r"""
 Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
 are like normal tensors, but they carry no data.
+""")
+
+add_docstr_all('is_sparse',
+               r"""
+Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
 """)
 
 add_docstr_all('device',

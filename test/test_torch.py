@@ -194,8 +194,6 @@ class AbstractTestCases:
             test_namespace(torch.randn(1),
                            'as_strided_',
                            re.compile('^clamp_(min|max)_?$'),
-                           'coalesce',
-                           'is_coalesced',
                            'is_distributed',
                            'is_nonzero',
                            'is_same_size',
@@ -208,14 +206,9 @@ class AbstractTestCases:
                            'prelu',
                            'resize',
                            'resize_as',
-                           'smm',
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
-                           'sspaddmm',
-                           'to_dense',
-                           'sparse_resize_',
-                           'sparse_resize_and_clear_',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
