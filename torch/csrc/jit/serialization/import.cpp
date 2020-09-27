@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <caffe2/serialize/buffer_adapter.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/istream_adapter.h>
@@ -29,6 +30,7 @@
 namespace torch {
 namespace jit {
 
+using caffe2::serialize::BufferAdapter;
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
@@ -302,6 +304,16 @@ Module import_ir_module(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module load(
+    void* buffer,
+    size_t size,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  auto rai = std::make_unique<BufferAdapter>(buffer, size);
+  auto module = load(std::move(rai), device, extra_files);
+  return module;
 }
 
 Module load(

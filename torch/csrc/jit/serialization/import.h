@@ -36,6 +36,16 @@ TORCH_API Module import_ir_module(
     c10::optional<c10::Device> device = c10::nullopt,
     ExtraFilesMap& extra_files = default_extra_files);
 
+/// Loads a serialized `Module` from the given `buffer`.
+///
+/// The buffer must represent a serialized `Module`, exported via
+/// `torch::jit::ExportModule` in C++.
+TORCH_API Module load(
+    void* buffer,
+    size_t size,
+    c10::optional<c10::Device> device = c10::nullopt,
+    ExtraFilesMap& extra_files = default_extra_files);
+
 /// Loads a serialized `Module` from the given `istream`.
 ///
 /// The istream must contain a serialized `Module`, exported via
