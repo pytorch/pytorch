@@ -736,7 +736,7 @@ jobs:
             export DOCKER_IMAGE=peterjc123/windows-cuda-container:v3.0.0
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
-            export id=$(docker run --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/w:C/w -d ${DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/w:C:/w -d ${DOCKER_IMAGE})
             docker exec -i "$id" sh /c/pytorch/build/win_tmp/ci_build_script.sh
       - persist_to_workspace:
           root: "C:/w"
