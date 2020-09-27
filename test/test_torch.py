@@ -58,7 +58,7 @@ if TEST_SCIPY:
 
 SIZE = 100
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -15287,6 +15287,31 @@ class TestTorchDeviceType(TestCase):
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
+
+    def _test_reduction_out_strides_helper(self, torchfn, device, dtype):
+        perms = list(permutations([0, 1, 2]))
+
+        def invert_perm(perm):
+            inv = torch.empty(len(perm), dtype=torch.long)
+            inv[list(perm)] = torch.arange(len(perm))
+            return inv
+
+        for p1, p2, p3 in product(perms, perms, perms):
+            input_ = torch.randn(5, 5, 5, dtype=dtype, device=device).permute(p1)
+            expect1, expect2 = torchfn(input_, dim=0, keepdim=True)
+            out1 = torch.empty_like(expect1.permute(p2), memory_format=torch.contiguous_format).permute(*invert_perm(p2))
+            out2 = torch.empty_like(expect2.permute(p3), memory_format=torch.contiguous_format).permute(*invert_perm(p3))
+            torchfn(input_, dim=0, keepdim=True, out=(out1, out2))
+            self.assertEqual(out1, expect1)
+            self.assertEqual(out2, expect2)
+
+    @dtypes(torch.float)
+    def test_min_out_strides(self, device, dtype):
+        self._test_reduction_out_strides_helper(torch.min, device, dtype)
+
+    @dtypes(torch.float)
+    def test_max_out_strides(self, device, dtype):
+        self._test_reduction_out_strides_helper(torch.max, device, dtype)
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):

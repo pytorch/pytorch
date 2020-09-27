@@ -786,7 +786,7 @@ void TensorIterator::copy_reduction_outputs(){
     for (auto& op : operands_) {
       if (op.is_output && op.original_tensor.defined()) {
         op.original_tensor.copy_(op.tensor);
-        op.tensor = op.original_tensor;
+        op.tensor=op.original_tensor;
       }
     }
   }
@@ -935,13 +935,17 @@ void TensorIterator::populate_operands(TensorIteratorConfig& config) {
 void TensorIterator::create_reduction_temporaries(){
   //reductions are hardcoded for max 2 outputs
   // 2nd check subsumes the 1st, but 1st is much cheaper and more common, so can be used as a shortcut
-  if ((!operands_[0].tensor.is_contiguous() || !operands_[1].tensor.is_contiguous())
-   && (operands_[0].tensor.strides() !=operands_[0].tensor.strides())){
-     //reduction does not participate in type promotion in TI, so original_tensor won't be overwritten
-     operands_[0].original_tensor = operands_[0].tensor;
-     operands_[0].tensor = operands_[0].tensor.contiguous();
-     operands_[1].original_tensor = operands_[1].tensor.contiguous();
-     operands_[1].tensor = operands_[1].tensor.contiguous();
+  TORCH_INTERNAL_ASSERT(
+      num_outputs_ == 2, "reductions can have a max of 2 outputs");
+  if ((!operands_[0].tensor.is_contiguous() ||
+       !operands_[1].tensor.is_contiguous()) &&
+      (operands_[0].tensor.strides() != operands_[1].tensor.strides())) {
+    // reduction does not participate in type promotion in TI, so
+    // original_tensor won't be overwritten
+    operands_[0].original_tensor = operands_[0].tensor;
+    operands_[0].tensor = operands_[0].tensor.contiguous();
+    operands_[1].original_tensor = operands_[1].tensor;
+    operands_[1].tensor = operands_[1].tensor.contiguous();
   }
 }
 
