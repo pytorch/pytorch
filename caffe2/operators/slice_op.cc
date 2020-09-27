@@ -67,11 +67,11 @@ Y:
     .Input(
         1,
         "starts",
-        "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data")
+        "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data (dimensions following the sliced one might be omitted)")
     .Input(
         2,
         "ends",
-        "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
+        "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data (dimensions following the sliced one might be omitted)")
     .Arg("starts", "(*Tuple(int)*): list of starting indices")
     .Arg("ends", "(*Tuple(int)*): list of ending indices")
     .TensorInferenceFunction([](const OperatorDef& def,
@@ -90,13 +90,14 @@ Y:
 
       for (int i = 0; i < data.dims_size(); ++i) {
         if (i >= starts.size()) {
+          dst_sizes[i] = data.dims(i);
           continue;
         }
-        if (data.dims_size() > 0) {
+        if (data.dims(i) > 0) {
           auto start = starts[i];
           auto end = ends[i];
           if (start < 0) {
-            start = data.dims(i) + 1 + start;
+            start = data.dims(i) + start;
           }
           if (end < 0) {
             end = data.dims(i) + 1 + end;
