@@ -436,6 +436,10 @@ def init_process_group(backend,
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2024,5 +2028,10 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
         global_rank: group_rank
         for group_rank, global_rank in enumerate(ranks)
     }
+
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
     return pg

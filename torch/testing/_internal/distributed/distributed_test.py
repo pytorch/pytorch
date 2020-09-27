@@ -1,5 +1,4 @@
 import copy
-import fcntl
 import itertools
 import random
 import math
@@ -22,6 +21,7 @@ from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
+from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -43,6 +43,10 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
 
 class Foo:
     def __init__(self, x):
@@ -191,10 +195,17 @@ def _lock():
     lockfile = os.path.join(TEMP_DIR, "lockfile")
     with open(lockfile, "w") as lf:
         try:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            yield
+            if sys.platform == 'win32':
+                msvcrt.locking(lf.fileno(), msvcrt.LK_RLCK, 1)
+                yield
+            else:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                yield
         finally:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            if sys.platform == 'win32':
+                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             lf.close()
 
 
@@ -270,10 +281,12 @@ class TestDistBackend(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return "file://{file_name}".format(file_name=self.file_name)
+        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
+        if BACKEND == 'nccl' and not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -2162,8 +2175,13 @@ class DistributedTest:
                 # save the model in the middle and reload
                 if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
                     with tempfile.NamedTemporaryFile() as tmp:
-                        torch.save(model_DDP, tmp.name)
-                        model_DDP = torch.load(tmp.name)
+                        if sys.platform == 'win32':
+                            torch.save(model_DDP, tmp)
+                            tmp.seek(0)
+                            model_DDP = torch.load(tmp)
+                        else:
+                            torch.save(model_DDP, tmp.name)
+                            model_DDP = torch.load(tmp.name)
 
             with tempfile.TemporaryFile() as tmp_file:
                 torch.save(model_DDP, tmp_file)
@@ -2192,8 +2210,13 @@ class DistributedTest:
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
-                torch.save(model_DDP, tmp.name)
-                model_DDP = torch.load(tmp.name)
+                if sys.platform == 'win32':
+                    torch.save(model_DDP, tmp)
+                    tmp.seek(0)
+                    model_DDP = torch.load(tmp)
+                else:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
             # dummy data initialization
             local_bs = len(gpu_subset)
@@ -2262,7 +2285,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_non_default_stream(self):
-            stream = torch.cuda.Stream()
+            stream = torch.cuda.Stream(self.rank)
             rank = self.rank
             with torch.cuda.stream(stream):
                 net = torch.nn.parallel.DistributedDataParallel(
@@ -2350,8 +2373,13 @@ class DistributedTest:
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
-                torch.save(model_DDP, tmp.name)
-                model_DDP = torch.load(tmp.name)
+                if sys.platform == 'win32':
+                    torch.save(model_DDP, tmp)
+                    tmp.seek(0)
+                    model_DDP = torch.load(tmp)
+                else:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
             # data initialization
             input_cpu = torch.randn(global_bs, 2)
@@ -2994,7 +3022,7 @@ class DistributedTest:
             rank = self.rank
             sync_interval = test_case.sync_interval
             # Ensure all outsanding GPU work is comlete so this test runs independently.
-            torch.cuda.synchronize()
+            dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
             # there are many buckets.
             net = torch.nn.parallel.DistributedDataParallel(
