@@ -95,6 +95,12 @@ void Command::Buffer::Buffer::end() {
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
 }
 
+void Command::Buffer::barrier() {
+  vkCmdPipelineBarrier(
+      command_buffer_,
+    );
+}
+
 void Command::Buffer::bind(const VkPipeline pipeline) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       pipeline,

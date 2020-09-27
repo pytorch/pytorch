@@ -68,7 +68,7 @@ void release_buffer(const Resource::Buffer& buffer) {
 }
 
 void release_image(const Resource::Image& image) {
-  // Sampler lifetime managed through the sampler cache.
+  // Sampler is an immutable object. Its lifetime is managed through the cache.
 
   if (VK_NULL_HANDLE != image.object.view) {
     VmaAllocatorInfo allocator_info{};
@@ -231,7 +231,6 @@ Resource::Buffer Resource::Pool::buffer(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_buffer);
@@ -321,7 +320,6 @@ Resource::Image Resource::Pool::image(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_image);

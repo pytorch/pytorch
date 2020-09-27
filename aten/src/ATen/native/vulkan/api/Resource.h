@@ -18,7 +18,6 @@ struct Resource final {
   struct Memory final {
     VmaAllocator allocator;
     VmaAllocation allocation;
-    VmaAllocationInfo allocation_info;
 
     class Scope;
     template<typename Type>
