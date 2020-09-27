@@ -63,17 +63,21 @@ namespace ops {
 
 class C10_EXPORT vTensor final {
  public:
-  vTensor();
+  vTensor() = default;
   vTensor(
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
 
   /*
-    Access
+    Types
   */
 
   typedef api::Resource::Memory::Access Access;
+  typedef api::Resource::Buffer Buffer;
+  typedef api::Resource::Fence Fence;
+  typedef api::Resource::Image Image;
+  typedef api::Resource::Memory Memory;
 
   /*
     Future
@@ -102,7 +106,7 @@ class C10_EXPORT vTensor final {
     Future& operator=(Future<T, A>&&) && = delete;
     ~Future();
 
-    typedef api::Resource::Memory::Data<
+    typedef Memory::Data<
         Access::Pointer<
             Type,
             kAccess>> Payload;
@@ -157,31 +161,36 @@ class C10_EXPORT vTensor final {
     and writes across processor boundaries, and do your best to minimize layout
     transitions as a result of working with images only (as opposed to mixed
     buffer - image usage.)
+    This implementation intentionally restricts user access to the buffer and
+    image objects only, as opposed to their underlying memory, for the sake of
+    predictability of usage and efficiency.
   */
 
-  // Intentionally restricting user access to the buffer and image objects only,
-  // as opposed to their underlying memory, for the sake of predictability and
-  // efficiency.
+  Buffer::Object buffer() const &;
+  Buffer::Object buffer(Access::Flags access) &;
 
-  typedef api::Resource::Buffer::Object Buffer;
-  typedef api::Resource::Image::Object Image;
-
-  Buffer buffer() const &;
-  Buffer buffer(Access::Flags access) &;
-
-  Image image() const &;
-  Image image(Access::Flags access) &;
+  Image::Object image() const &;
+  Image::Object image(Access::Flags access) &;
 
  private:
-  const vTensor* host_impl() const;
-  vTensor* host_impl(Access::Flags access);
-  api::Resource::Memory& wait_impl();
+  // Some overloads below are intentionally disabled to enforce a usage pattern
+  // that ensures the Tensor's lifetime exceeds that of the scope in which the
+  // underlying data is accessed.  Allowing deleted overloads below to be
+  // invoked on a temporary would open the door to the possibility of accessing
+  // the underlying memory out of the expected scope.
 
-  // These overloads are intentionally disabled to enforce a usage pattern
-  // wherein the Tensor's lifetime exceeds that of the scope in which the
-  // underlying data is accessed.  Allowing below overloads to be invoked on
-  // a temporary would open the door to the possibility of accessing the
-  // underlying memory out of the expected scope.
+  /*
+    Future
+  */
+
+  Memory& wait();
+
+  /*
+    Host
+  */
+
+  const vTensor* host() const;
+  vTensor* host(Access::Flags access);
 
   template<typename Type>
   Future<Type, Access::Read> host() const && = delete;
@@ -189,39 +198,62 @@ class C10_EXPORT vTensor final {
   template<typename Type, Access::Flags kAccess>
   Future<Type, kAccess> host() && = delete;
 
-  Buffer buffer() const && = delete;
-  Buffer buffer(Access::Flags access) && = delete;
+  /*
+    Device
+  */
 
-  Image image() const && = delete;
-  Image image(Access::Flags access) && = delete;
+  Buffer::Object buffer() const && = delete;
+  Buffer::Object buffer(Access::Flags access) && = delete;
 
- private:
-  void enforce_invariants() const;
-  api::Resource::Image& image_() const;
-  api::Resource::Buffer& buffer_() const;
-  api::Resource::Buffer& staging_() const;
+  Image::Object image() const && = delete;
+  Image::Object image(Access::Flags access) && = delete;
 
  private:
-  api::Context* context_;
+  class View final {
+   public:
+    View();
+    View(
+        api::Context* context,
+        IntArrayRef sizes,
+        const TensorOptions& options);
 
-  mutable struct {
-    api::Resource::Image image;
-    api::Resource::Buffer buffer;
-    api::Resource::Buffer staging;
-    api::Resource::Fence fence;
-    struct {
-      uint16_t image : 1u;
-      uint16_t buffer : 1u;
-      uint16_t staging : 1u;
-    } dirty;
-    struct {
-      uint16_t image : 1u;
-      uint16_t staging : 1u;
-    } should_have;
+    struct Component final {
+      typedef uint8_t Flags;
+
+      enum Type : Flags {
+        Buffer = 1u << 0u,
+        Image = 1u << 1u,
+        Staging = 1u << 2u,
+      };
+    };
+
+    struct Active final {
+      Component::Type component;
+      Access::Flags access;
+    };
+
+    Buffer& buffer() const;
+    Image& image() const;
+    Buffer& staging() const;
+    Fence& fence() const;
+
+    void transition(Active view) const;
+
+   private:
+    void verify() const;
+
+   private:
+    api::Context* context_;
+    mutable Image image_;
+    mutable Buffer buffer_;
+    mutable Buffer staging_;
+    mutable Fence fence_;
+    Component::Flags required_;
+    mutable Active active_;
+
+    c10::SmallVector<int64_t, 6u> sizes_;
+    TensorOptions options_;
   } view_;
-
-  c10::SmallVector<int64_t, 6u> sizes_;
-  TensorOptions options_;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -276,9 +308,11 @@ vTensor::Future<Type, kAccess>::operator=(
 
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
-  if (tensor_ && (kAccess & vTensor::Access::Write)) {
-    // tensor->upload_eagerly();
-  }
+  // Sync eagerly in an effort to hide latency.
+  tensor_->view_.transition({
+    View::Component::Image,
+    kAccess,
+  });
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
@@ -289,17 +323,17 @@ vTensor::Future<Type, kAccess>::wait() const & {
       "vTensor::Future is in an invalid state!  "
       "Potential reason: This future is moved from.");
 
-  return tensor_->wait_impl().template map<Type, kAccess>();
+  return tensor_->wait().template map<Type, kAccess>();
 }
 
 template<typename Type>
 inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
-  return Future<Type, vTensor::Access::Read>(host_impl());
+  return Future<Type, vTensor::Access::Read>(host());
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess> vTensor::host() & {
-  return Future<Type, kAccess>(host_impl(kAccess));
+  return Future<Type, kAccess>(host(kAccess));
 }
 
 } // namespace ops
