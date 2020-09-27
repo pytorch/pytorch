@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
