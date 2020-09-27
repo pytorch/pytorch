@@ -29,7 +29,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
-    simple_sparse_reduce_tests
+    simple_sparse_reduce_tests, skip_if_win32, create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
     retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
@@ -255,6 +255,7 @@ def create_tcp_store(addr):
     raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
+@skip_if_win32()
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         store = create_tcp_store('localhost')
@@ -272,7 +273,32 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
 
+    def _test_numkeys_delkeys(self, fs):
+        # We start off with one init key in the store to coordinate workers
+        self.assertEqual(fs.num_keys(), 1)
+        fs.add("key", 1)
+        fs.add("key", 2)
+        fs.add("key", 3)
+        fs.set("key0", "value0")
+        fs.add("key3", 1)
+        fs.set("key1", "value1")
+        self.assertEqual(fs.num_keys(), 5)
+        fs.delete_key("key")
+        self.assertEqual(fs.num_keys(), 4)
+        with self.assertRaises(RuntimeError):
+            fs.get("key")
+        fs.delete_key("key0")
+        fs.delete_key("key3")
+        self.assertEqual(fs.num_keys(), 2)
+        fs.set("key4", "value2")
+        self.assertEqual(fs.num_keys(), 3)
+        self.assertEqual(b"value1", fs.get("key1"))
+        self.assertEqual(b"value2", fs.get("key4"))
 
+    def test_numkeys_delkeys(self):
+        self._test_numkeys_delkeys(self._create_store())
+
+@skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -329,13 +355,14 @@ class RendezvousTest(TestCase):
             c10d.rendezvous('invalid://')
 
 
+@skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
+    @requires_nccl()
     def test_common_errors(self):
-        # TODO remove this hack
-        if not hasattr(c10d, "ProcessGroupNCCL"):
-            raise unittest.SkipTest("C10D is not built with NCCL process group,"
-                                    " skipping test")
+        if torch.cuda.device_count() == 0:
+            raise unittest.SkipTest("No GPUs available, skipping test")
+
         vars = {
             "WORLD_SIZE": "1",
             "RANK": "0",
@@ -455,7 +482,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = 'file://%s?world_size=%d' % (file.name, 2)
+            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -474,6 +501,7 @@ class RendezvousFileTest(TestCase):
             self.assertEqual(b"value1", store0.get("key1"))
 
 
+@skip_if_win32()
 class RendezvousTCPTest(TestCase):
 
     def create_tcp_url(self):
@@ -544,9 +572,13 @@ class TimeoutTest(TestCase):
 
     def _init_methods(self):
         f = tempfile.NamedTemporaryFile(delete=False)
-        yield "file://%s" % f.name
-        f.close()
-        yield "tcp://127.0.0.1:%d" % common.find_free_port()
+        if sys.platform == 'win32':
+            yield "file:///%s" % f.name.replace("\\", "/")
+            f.close()
+        else:
+            yield "file://%s" % f.name
+            f.close()
+            yield "tcp://127.0.0.1:%d" % common.find_free_port()
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -571,6 +603,8 @@ class TimeoutTest(TestCase):
     @requires_nccl()
     @retry_on_connect_failures
     def test_default_store_timeout_nccl(self):
+        if torch.cuda.device_count() == 0:
+            raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout('nccl')
 
     @requires_gloo()
@@ -584,11 +618,16 @@ class TimeoutTest(TestCase):
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
-        self._fork_processes()
+
+        # For Windows platform, Python does not support fork, change it to spawn here.
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
+        opts.devices = [create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -598,8 +637,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
         opts.devices = [
-            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
-            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
+            create_device(interface=LOOPBACK),
+            create_device(interface=LOOPBACK),
         ]
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
 
@@ -1514,6 +1553,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
+    @skip_if_win32()
     def test_round_robin(self):
         num_process_groups = 2
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1531,6 +1571,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.broadcast(tensor, root=0).wait()
             self.assertEqual(torch.full([100, 100], 0.), tensor)
 
+    @skip_if_win32()
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
 
@@ -1959,7 +2000,10 @@ class SparseGradientModule(nn.Module):
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        self._fork_processes()
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
@@ -2068,7 +2112,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_gloo_backend(self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device, gradient_as_bucket_view)
 
@@ -3947,7 +3991,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class CommTest(MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
-        self._fork_processes()
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()
@@ -4013,7 +4060,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cuda:%d" % self.rank)
         ranks = list(range(self.world_size))
@@ -4024,7 +4071,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
+        options.devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device("cpu")
         ranks = list(range(self.world_size))
