@@ -52,12 +52,19 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
+PyTorch distributed currently only supports Linux and Windows. By default for Linux, the Gloo and NCCL backends
 are built and included in PyTorch distributed (NCCL only when building with CUDA).
 MPI is an
 optional backend that can only be included if you build PyTorch from source. (e.g.
 building PyTorch on a host that has MPI installed.)
 
+.. note ::
+    On Windows, Pytorch distributed currently only supports Gloo backend, and FileStore as
+    Key/value store accessible to all workers.
+    If you set init_method parameter in torch.distributed.init_process_group method, must use "file:///".
+    For example, create a FilsStore on local file system, init_method="file:///d:/tmp/ddp_filestore",
+    create a FileStore on shared folder, init_method="file://////{machine_name}/{share_folder_name}/ddp_filestore".
+    If you set store parameter in torch.distributed.init_process_group method, must set it as a FileStore.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^

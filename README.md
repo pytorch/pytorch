@@ -184,6 +184,13 @@ On MacOS
 conda install pkg-config libuv
 ```
 
+On Windows
+```bash
+# Add these packages and set libuv_ROOT environment variable if torch.distributed is needed
+conda install -y -q -c rdonnelly libuv
+set libuv_ROOT={conda active env location}\Library
+```
+
 #### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
