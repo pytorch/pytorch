@@ -4,6 +4,7 @@ set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${tmp})
 list(APPEND Caffe2_CPU_SRCS
   ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
   ${CMAKE_CURRENT_SOURCE_DIR}/inline_container.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/buffer_adapter.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/istream_adapter.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/file_adapter.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/crc.cc
