@@ -212,6 +212,9 @@ struct CAFFE2_API TensorIterator {
   // NOTE: only used on CPU
   void cast_outputs();
 
+  // Copies from temporary outputs back to original outputs, only used for GPU reductions
+  void copy_reduction_outputs();
+
   Tensor input(int arg=0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return operands_[num_outputs_ + arg].tensor;
@@ -300,6 +303,7 @@ protected:
 
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
+  void create_reduction_temporaries();
   void mark_outputs();
   void mark_resize_outputs(const TensorIteratorConfig&);
   void compute_mem_overlaps(const TensorIteratorConfig&);

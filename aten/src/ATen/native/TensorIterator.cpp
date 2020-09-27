@@ -781,6 +781,17 @@ void TensorIterator::cast_outputs() {
   }
 }
 
+void TensorIterator::copy_reduction_outputs(){
+  if (num_outputs_ > 1) {
+    for (auto& op : operands_) {
+      if (op.is_output && op.original_tensor.defined()) {
+        op.original_tensor.copy_(op.tensor);
+        op.tensor = op.original_tensor;
+      }
+    }
+  }
+}
+
 void* TensorIterator::data_ptr(int arg) const {
   return operands_[arg].data;
 }
@@ -901,8 +912,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
       " and output2 has ", out2.dim());
   TORCH_CHECK(out1.sizes() == out2.sizes(), "reduce_op(): expected both outputs to have same sizes, but output1 has ", out1.sizes(),
       " and output2 has ", out2.sizes());
-  TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
-      " and output2 has ", out2.strides());
+  //TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
+  //    " and output2 has ", out2.strides());
   return TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .add_output(out1)
@@ -919,6 +930,19 @@ void TensorIterator::populate_operands(TensorIteratorConfig& config) {
     operands_.emplace_back(std::move(config.tensors_[i]));
   }
   num_outputs_ = config.num_outputs_;
+}
+
+void TensorIterator::create_reduction_temporaries(){
+  //reductions are hardcoded for max 2 outputs
+  // 2nd check subsumes the 1st, but 1st is much cheaper and more common, so can be used as a shortcut
+  if ((!operands_[0].tensor.is_contiguous() || !operands_[1].tensor.is_contiguous())
+   && (operands_[0].tensor.strides() !=operands_[0].tensor.strides())){
+     //reduction does not participate in type promotion in TI, so original_tensor won't be overwritten
+     operands_[0].original_tensor = operands_[0].tensor;
+     operands_[0].tensor = operands_[0].tensor.contiguous();
+     operands_[1].original_tensor = operands_[1].tensor.contiguous();
+     operands_[1].tensor = operands_[1].tensor.contiguous();
+  }
 }
 
 void TensorIterator::mark_outputs() {
@@ -1233,6 +1257,9 @@ void TensorIterator::build(TensorIteratorConfig& config) {
 
   // fill in operands_ based on configuration
   populate_operands(config);
+  if (is_reduction_ && num_outputs_ > 1){
+    create_reduction_temporaries();
+  }
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // Check that the outputs have no internal overlap

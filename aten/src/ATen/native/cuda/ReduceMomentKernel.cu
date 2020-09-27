@@ -32,6 +32,7 @@ static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_s
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_cuda", [&]() {
     std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
   });
+  iter.copy_reduction_outputs();
 }
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
