@@ -957,20 +957,24 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
   return output;
 }
 
-Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
+  // special case to protect against a divide-by-zero.
+  if (beta == 0) {
+      return at::zeros(grad.sizes(), grad.options());
+  }
   auto d = (input - target).abs();
-  auto grad_input = grad * (d < 1).type_as(grad);
+  auto grad_input = grad * (d < beta).type_as(grad) / beta;
   if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
   if (reduction == at::Reduction::None) {
-    return smooth_l1_loss_backward(grad, input, target, reduction);
+    return smooth_l1_loss_backward(grad, input, target, reduction, beta);
   }
-  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
+  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction, beta);
   return (r * grad).sum();
 }
 
