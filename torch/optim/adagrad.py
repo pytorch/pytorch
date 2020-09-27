@@ -1,4 +1,5 @@
 import torch
+from . import functional as F
 from .optimizer import Optimizer
 
 
@@ -63,40 +64,29 @@ class Adagrad(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            state_sums = []
+            state_steps = []
+
             for p in group['params']:
-                if p.grad is None:
-                    continue
+                if p.grad is not None:
+                    params_with_grad.append(p)
+                    grads.append(p.grad)
+                    state = self.state[p]
+                    state_sums.append(state['sum'])
+                    # update the steps for each param group update
+                    state['step'] += 1
+                    # record the step after step update
+                    state_steps.append(state['step'])
 
-                grad = p.grad
-                state = self.state[p]
-
-                state['step'] += 1
-
-                if group['weight_decay'] != 0:
-                    if p.grad.is_sparse:
-                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(p, alpha=group['weight_decay'])
-
-                clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
-
-                if grad.is_sparse:
-                    grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                    grad_indices = grad._indices()
-                    grad_values = grad._values()
-                    size = grad.size()
-
-                    def make_sparse(values):
-                        constructor = grad.new
-                        if grad_indices.dim() == 0 or values.dim() == 0:
-                            return constructor().resize_as_(grad)
-                        return constructor(grad_indices, values, size)
-                    state['sum'].add_(make_sparse(grad_values.pow(2)))
-                    std = state['sum'].sparse_mask(grad)
-                    std_values = std._values().sqrt_().add_(group['eps'])
-                    p.add_(make_sparse(grad_values / std_values), alpha=-clr)
-                else:
-                    state['sum'].addcmul_(grad, grad, value=1)
-                    std = state['sum'].sqrt().add_(group['eps'])
-                    p.addcdiv_(grad, std, value=-clr)
+            F.adagrad(params_with_grad,
+                      grads,
+                      state_sums,
+                      state_steps,
+                      group['lr'],
+                      group['weight_decay'],
+                      group['lr_decay'],
+                      group['eps'])
 
         return loss

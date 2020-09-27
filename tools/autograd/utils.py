@@ -1,6 +1,8 @@
 import re
 import os
-import yaml
+# yaml is used below, and YamlLoader used outside of this module, which
+# is why it is needed and used.
+import yaml  # noqa: F401
 from .nested_dict import nested_dict
 
 

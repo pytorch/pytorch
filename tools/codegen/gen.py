@@ -763,6 +763,17 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('has_math_kernel', f.dispatch is not None and 'Math' in f.dispatch),
     ])
 
+@with_native_function
+def compute_registration_declarations(f: NativeFunction) -> str:
+    name = dispatcher.name(f.func)
+    returns_type = dispatcher.returns_type(f.func.returns)
+    args = dispatcher.arguments(f.func)
+    args_str = ', '.join(map(str, args))
+    dispatch = f.dispatch is not None
+    math = dispatch and 'Math' in f.dispatch  # type: ignore
+    return f"""{returns_type} {name}({args_str}); // {{"schema": "aten::{f.func}", "dispatch": "{dispatch}", "math": "{math}"}}
+"""
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                           RUN IT ALL
@@ -1031,6 +1042,9 @@ def main() -> None:
         cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
+    cpu_fm.write('RegistrationDeclarations.h', lambda: {
+        'registration_declarations': list(map(compute_registration_declarations, native_functions)),
+    })
 
     if options.output_dependencies:
         cpu_fm.write_outputs(options.output_dependencies)
