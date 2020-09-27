@@ -705,8 +705,11 @@ jobs:
             # Cleanup disk space
             rm -rf "C:/ProgramData/Microsoft/VisualStudio/Packages"
             rm -rf "C:/Program Files (x86)/Microsoft Visual Studio"
+            
+            mkdir -p /c/Users/circleci/project/build/win_tmp/
+            mkdir -p /c/w/
 
-            cat > /c/Users/circleci/project/ci_build_script.sh \<<EOL
+            cat > /c/Users/circleci/project/build/win_tmp/ci_build_script.sh \<<EOL
             # =================== The following code will be executed inside Docker container ===================
             set -ex
             export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
@@ -733,9 +736,8 @@ jobs:
             export DOCKER_IMAGE=peterjc123/windows-cuda-container:v3.0.0
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
-            export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE})
-            docker cp C:/Users/circleci/project/. $id:C:/pytorch/
-            docker exec -i "$id" sh /c/pytorch/ci_build_script.sh
+            export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE} -v C:/Users/circleci/project:C:/pytorch -v C:/w:C/w)
+            docker exec -i "$id" sh /c/pytorch/build/win_tmp/ci_build_script.sh
       - persist_to_workspace:
           root: "C:/w"
           paths: build-results
