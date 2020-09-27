@@ -20,7 +20,6 @@ struct Resource final {
   struct Memory final {
     VmaAllocator allocator;
     VmaAllocation allocation;
-    VmaAllocationInfo allocation_info;
 
     struct Access final {
       typedef uint8_t Flags;
@@ -198,7 +197,7 @@ struct Resource final {
     size_t id;
 
     operator bool() const;
-    VkFence handle(bool used = true) const;
+    VkFence handle(bool add_to_waitlist = true) const;
     void wait(uint64_t timeout_nanoseconds = UINT64_MAX);
   };
 
@@ -242,10 +241,8 @@ struct Resource final {
 
     struct {
       std::vector<Handle<VkFence, VK_DELETER(Fence)>> pool;
-      struct {
-        mutable std::vector<VkFence> list;
-        size_t position;
-      } used;
+      mutable std::vector<VkFence> waitlist;
+      size_t in_use;
     } fence_;
   } pool;
 
@@ -337,14 +334,14 @@ inline Resource::Fence::operator bool() const {
   return pool;
 }
 
-inline VkFence Resource::Fence::handle(const bool used) const {
+inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       id < pool->fence_.pool.size(),
       "Invalid Vulkan fence!");
 
   const VkFence fence = pool->fence_.pool[id].get();
-  if (used) {
-    pool->fence_.used.list.push_back(fence);
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
   }
 
   return fence;
