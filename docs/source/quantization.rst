@@ -404,7 +404,7 @@ by module basis. Specifically, for all quantization techniques, the user needs t
 1. Convert any operations that require output requantization (and thus have
    additional parameters) from functionals to module form.
 2. Specify which parts of the model need to be quantized either by assigning
-   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``
+   ```.qconfig`` attributes on submodules or by specifying ``qconfig_dict``
 
 For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
@@ -421,13 +421,6 @@ to do the following in addition:
    :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
-
-Best Practices
---------------
-
-1. Set the ``reduce_range`` argument on observers to `True` if you are using the
-   ``fbgemm`` backend.  This argument prevents overflow on some int8 instructions
-   by reducing the range of quantized data type by 1 bit.
 
 
 Modules that provide quantization functions and classes
