@@ -506,6 +506,31 @@ class AttributePropagator {
     return false;
   }
 
+  void removeExtraWaitCalls(Block* b) {
+    auto nodes = b->nodes();
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      if (node->kind() != aten::wait) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+      // If input type is not a from aten::fork call then the
+      // aten::wait operator can be deleted.
+      if (node->input()->type()->kind() != TypeKind::FutureType) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+      }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      for (auto sub_b : node->blocks()) {
+        removeExtraWaitCalls(sub_b);
+      }
+    }
+  }
+
   // cleanupFrozenModule function cleans up the Frozen module. It performs the
   // following:
   // 1) Remove unused attributes.
@@ -516,6 +541,7 @@ class AttributePropagator {
       auto graph = function->graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
+      removeExtraWaitCalls(graph->block());
     }
     removeUnusedAttrs();
   }

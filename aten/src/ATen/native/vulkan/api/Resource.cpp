@@ -176,7 +176,6 @@ Resource::Buffer Resource::Pool::buffer(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_buffer);
@@ -262,7 +261,6 @@ Resource::Image Resource::Pool::image(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_image);
