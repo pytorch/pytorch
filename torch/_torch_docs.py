@@ -515,6 +515,12 @@ of size `m`, then :attr:`input` must be
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
+.. warning::
+    This function is deprecated and may be removed in a future release.
+    It can be implemented using :func:`torch.outer` as
+    ``alpha * torch.outer(vec1, vec2) + beta * input`` when :attr:`beta` is not zero,
+    and as ``alpha * torch.outer(vec1, vec2)`` when :attr:`beta` is zero.
+
 Args:
     input (Tensor): matrix to be added
     vec1 (Tensor): the first vector of the outer product
@@ -2982,13 +2988,6 @@ Keyword args:
 add_docstr(torch.outer, r"""
 outer(input, vec2, *, out=None) -> Tensor
 
-Alias of :func:`torch.ger`.
-""")
-
-add_docstr(torch.ger,
-           r"""
-ger(input, vec2, *, out=None) -> Tensor
-
 Outer product of :attr:`input` and :attr:`vec2`.
 If :attr:`input` is a vector of size :math:`n` and :attr:`vec2` is a vector of
 size :math:`m`, then :attr:`out` must be a matrix of size :math:`(n \times m)`.
@@ -3006,11 +3005,22 @@ Example::
 
     >>> v1 = torch.arange(1., 5.)
     >>> v2 = torch.arange(1., 4.)
-    >>> torch.ger(v1, v2)
+    >>> torch.outer(v1, v2)
     tensor([[  1.,   2.,   3.],
             [  2.,   4.,   6.],
             [  3.,   6.,   9.],
             [  4.,   8.,  12.]])
+""")
+
+add_docstr(torch.ger,
+           r"""
+ger(input, vec2, *, out=None) -> Tensor
+
+Alias of :func:`torch.outer`.
+
+.. warning::
+    This function is deprecated and will be removed in a future PyTorch release.
+    Use :func:`torch.outer` instead.
 """)
 
 add_docstr(torch.solve,
