@@ -25,8 +25,9 @@ struct Command final {
     void begin();
     void end();
 
-    void bind(VkPipeline pipeline);
-    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
+    void barrier();
+    void bind(Pipeline::Object pipeline);
+    void bind(const Descriptor::Set& set);
     void copy(VkBuffer source, VkBuffer destination, size_t size);
     void dispatch(const Shader::WorkGroup& work_group);
 
@@ -34,6 +35,8 @@ struct Command final {
 
    private:
     VkCommandBuffer command_buffer_;
+    struct {
+    } current_;
   };
 
   //

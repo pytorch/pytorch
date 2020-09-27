@@ -68,7 +68,7 @@ void release_buffer(const Resource::Buffer& buffer) {
 }
 
 void release_image(const Resource::Image& image) {
-  // Sampler lifetime managed through the sampler cache.
+  // Sampler is an immutable object. Its lifetime is managed through the cache.
 
   if (VK_NULL_HANDLE != image.object.view) {
     VmaAllocatorInfo allocator_info{};
@@ -178,20 +178,27 @@ Resource::Image::Sampler::Factory::operator()(
 }
 
 void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
-  const VkFence fence = handle(/* used = */ false);
+  const VkFence fence = handle(/* add_to_waitlist = */ false);
 
-  const auto used_itr = std::find(
-      pool->fence_.used.list.cbegin(),
-      pool->fence_.used.list.cend(),
+  const auto waitlist_itr = std::find(
+      pool->fence_.waitlist.cbegin(),
+      pool->fence_.waitlist.cend(),
       fence);
 
-  if (pool->fence_.used.list.cend() != used_itr) {
-    vkWaitForFences(
+  if (pool->fence_.waitlist.cend() != waitlist_itr) {
+    VK_CHECK(vkWaitForFences(
         pool->device_,
         1u,
         &fence,
         VK_TRUE,
-        timeout_nanoseconds);
+        timeout_nanoseconds));
+
+    VK_CHECK(vkResetFences(
+        pool->device_,
+        1u,
+        &fence));
+
+    pool->fence_.waitlist.erase(waitlist_itr);
   }
 }
 
@@ -262,7 +269,6 @@ Resource::Buffer Resource::Pool::buffer(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_buffer);
@@ -352,7 +358,6 @@ Resource::Image Resource::Pool::image(
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_image);
@@ -361,7 +366,7 @@ Resource::Image Resource::Pool::image(
 }
 
 Resource::Fence Resource::Pool::fence() {
-  if (fence_.pool.size() == fence_.used.position) {
+  if (fence_.pool.size() == fence_.in_use) {
     const VkFenceCreateInfo fence_create_info{
       VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
       nullptr,
@@ -384,28 +389,28 @@ Resource::Fence Resource::Pool::fence() {
 
   return Fence{
     this,
-    fence_.used.position++,
+    fence_.in_use++,
   };
 }
 
 void Resource::Pool::purge() {
-  if (!fence_.used.list.empty()) {
+  if (!fence_.waitlist.empty()) {
     VK_CHECK(vkWaitForFences(
         device_,
-        fence_.used.list.size(),
-        fence_.used.list.data(),
+        fence_.waitlist.size(),
+        fence_.waitlist.data(),
         VK_TRUE,
         UINT64_MAX));
 
     VK_CHECK(vkResetFences(
         device_,
-        fence_.used.list.size(),
-        fence_.used.list.data()));
+        fence_.waitlist.size(),
+        fence_.waitlist.data()));
 
-    fence_.used.list.clear();
+    fence_.waitlist.clear();
   }
 
-  fence_.used.position = 0u;
+  fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
 }
