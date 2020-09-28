@@ -11,7 +11,7 @@ import textwrap
 from typing import DefaultDict, Dict, Optional, Tuple
 
 import torch
-from torch.utils.cpp_extension import load_inline
+from torch.utils._benchmark.utils.valgrind_wrapper import callgrind_bindings
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -40,11 +40,10 @@ class CallgrindStats(object):
           Baseline:     {self._counts(base_stats, True):>12}{'':>15}{self._counts(base_stats, False):>12}
         """).strip()
         if not self.built_with_debug_symbols:
-            output += (
-                "Warning: PyTorch was not built with debug symbols."
-                "         Source information may be limited. Rebuild with"
-                "         REL_WITH_DEB_INFO=1 for more detailed results."
-            )
+            output += textwrap.dedent("""
+            Warning: PyTorch was not built with debug symbols.
+                     Source information may be limited. Rebuild with
+                     REL_WITH_DEB_INFO=1 for more detailed results.""")
         return output
 
     def stats(self, inclusive: bool = False) -> Tuple[Tuple[int, str], ...]:
@@ -164,40 +163,8 @@ class CallgrindStats(object):
 
 class _ValgrindWrapper(object):
     def __init__(self):
-        cwd = os.path.split(os.path.abspath(__file__))[0]
-        with open(os.path.join(cwd, "callgrind_bindings.cpp"), "rt") as f:
-            src = f.read()
-
-        # load_inline will automatically search /usr/include, but not conda include.
-        extra_include_paths = []
-        conda_prefix = os.getenv("CONDA_PREFIX")
-        if conda_prefix is not None:
-            extra_include_paths = [os.path.join(conda_prefix, "include")]
-
-        # We use `load_inline` rather than `load` because supports the `functions`
-        # argument and allows the C++ src to use TORCH_CHECK.
-        try:
-            self._callgrind_bindings = load_inline(
-                name="callgrind_bindings",
-                cpp_sources=[src],
-                extra_include_paths=extra_include_paths,
-                functions=["supported_platform", "toggle"],
-            )
-        except RuntimeError as e:
-            if "fatal error: callgrind.h: No such file or directory" in str(e):
-                extra_include_str = textwrap.indent("\n".join(extra_include_paths), " " * 4)
-                raise RuntimeError(
-                    "Failed to locate `valgrind/callgrind.h`.\n"
-                    "The following directories were searched:\n"
-                    "    /usr/include (implicit)\n"
-                    f"{extra_include_str}\n"
-                    "Please install Valgrind.\n"
-                    "(e.g. `conda install valgrind -c conda-forge`)") from None
-            # Unknown error, re-raise.
-            raise
-
         self._commands_available: Dict[str, bool] = {}
-        if self._callgrind_bindings.supported_platform():
+        if callgrind_bindings.supported_platform():
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
@@ -214,22 +181,32 @@ class _ValgrindWrapper(object):
         self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[Tuple[int, str], ...], Tuple[Tuple[int, str], ...]]] = {}
 
     def _validate(self):
-        if not self._callgrind_bindings.supported_platform():
+        if not callgrind_bindings.supported_platform():
             raise OSError("Valgrind is not supported on this platform.")
 
         missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
         if missing_cmds:
             raise OSError("Missing: " + ", ".join(missing_cmds))
 
-    def collect_callgrind(self, stmt: str, setup: str, number: int, num_threads: int):
+    def collect_callgrind(
+        self,
+        stmt: str,
+        setup: str,
+        number: int,
+        num_threads: int,
+        collect_baseline: bool
+    ):
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
-        cache_key = (number, num_threads)
-        if cache_key not in self._baseline_cache:
-            self._baseline_cache[cache_key] = self._invoke(
-                stmt="pass", setup="pass", number=number, num_threads=num_threads)
-        baseline_inclusive_stats, baseline_exclusive_stats = \
-            self._baseline_cache[cache_key]
+        baseline_inclusive_stats: Tuple[Tuple[int, str], ...] = ()
+        baseline_exclusive_stats: Tuple[Tuple[int, str], ...] = ()
+        if collect_baseline:
+            cache_key = (number, num_threads)
+            if cache_key not in self._baseline_cache:
+                self._baseline_cache[cache_key] = self._invoke(
+                    stmt="pass", setup="pass", number=number, num_threads=num_threads)
+            baseline_inclusive_stats, baseline_exclusive_stats = \
+                self._baseline_cache[cache_key]
 
         stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
             stmt=stmt,
@@ -278,7 +255,6 @@ class _ValgrindWrapper(object):
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
         f_stdout_stderr = open(stdout_stderr_log, "wb")
-        shutil.copy(self._callgrind_bindings.__file__, working_dir)
 
         try:
             with open(script_file, "wt") as f:
@@ -378,7 +354,7 @@ class _ValgrindWrapper(object):
             import time
 
             import torch
-            import callgrind_bindings
+            from torch.utils._benchmark.utils.valgrind_wrapper import callgrind_bindings
             torch.set_num_threads({num_threads})
 
             PID = os.getpid()

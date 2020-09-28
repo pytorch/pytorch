@@ -140,7 +140,7 @@ class Timer(object):
                                                 callback=callback)
         return self._construct_measurement(number_per_run=number, times=times)
 
-    def collect_callgrind(self, number=100):
+    def collect_callgrind(self, number=100, collect_baseline=True):
         if not isinstance(self._stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
@@ -159,4 +159,5 @@ class Timer(object):
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
         return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
-            stmt=self._stmt, setup=self._setup, number=number, num_threads=self._num_threads)
+            stmt=self._stmt, setup=self._setup, number=number, num_threads=self._num_threads,
+            collect_baseline=collect_baseline)

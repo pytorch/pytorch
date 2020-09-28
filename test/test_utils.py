@@ -767,10 +767,12 @@ class TestBenchmarkUtils(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows")
     def test_collect_callgrind(self):
-        # Note: this test is incomplete. Pushing in this form in order to
-        # start debugging CI failures.
-        python_only_timer = benchmark_utils.Timer("sum([1, 1])")
-        stats = python_only_timer.collect_callgrind()
+        timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
+
+        # Don't collect baseline to speed up unit test by ~30 seconds.
+        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
+
+        self.assertEqual(stats.counts(include_lookdict_unicode=False), 38830150, atol=0, rtol=0.0001)
 
     def test_compare(self):
         compare = benchmark_utils.Compare([

@@ -667,6 +667,17 @@ def configure_extension_build():
                 sources=[]),
         )
 
+    # This is a placeholder while Nikita and I figure out how to add this to CMake.
+    extensions.append(
+        Extension(
+            name=str('torch.utils._benchmark.utils.valgrind_wrapper.callgrind_bindings'),
+            sources=['torch/utils/_benchmark/utils/valgrind_wrapper/callgrind_bindings.cpp'],
+            include_dirs=[
+                cmake_cache_vars['pybind11_INCLUDE_DIR'],
+                'third_party/valgrind',
+            ]),
+    )
+
     cmdclass = {
         'build_ext': build_ext,
         'clean': clean,
