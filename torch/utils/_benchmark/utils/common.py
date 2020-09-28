@@ -47,14 +47,13 @@ class Measurement:
     task_spec: TaskSpec
     metadata: Optional[dict] = None
 
-    # Wrapping type with ClassVar excludes them from dataclass fields.
-    _sorted_times: ClassVar[Tuple[float, ...]] = ()
-    _warnings: ClassVar[Tuple[str, ...]] = ()
-    _median: ClassVar[float] = -1.0
-    _mean: ClassVar[float] = -1.0
-    _p25: ClassVar[float] = -1.0
-    _p75: ClassVar[float] = -1.0
-
+    def __post_init__(self):
+        self._sorted_times: Tuple[float, ...] = ()
+        self._warnings: Tuple[str, ...] = ()
+        self._median: float = -1.0
+        self._mean: float = -1.0
+        self._p25: float = -1.0
+        self._p75: float = -1.0
 
     def __getattr__(self, name):
         # Forward TaskSpec fields for convenience.
