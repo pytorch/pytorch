@@ -342,8 +342,8 @@ void vTensor::View::transition(const Active view) const {
 
   // All transitions after this point require an explicit synchronization.
 
-  api::Command::Buffer command_buffer = context_->command().pool.buffer();
-  command_buffer->begin();
+  api::Command::Buffer command_buffer = context_->command().pool.allocate();
+  command_buffer.begin();
 
   // WAR (Write after Read) hazards do not need a memory barrier. Execution
   // barriers are sufficient.  This section handles the following 8 WAR
@@ -364,7 +364,7 @@ void vTensor::View::transition(const Active view) const {
       case Component::Image:
         return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 
-      case Stage:
+      case Component::Staging:
         return VK_PIPELINE_STAGE_TRANSFER_BIT;
     }
   };
@@ -373,10 +373,6 @@ void vTensor::View::transition(const Active view) const {
       // Notice how we include Read-Writes, in addition to Writes, as a
       // Write operation in the condition below as well, as we should.
       (active_.access & Memory::Access::Write)) {
-
-    vkCmdPipelineBarrier(
-
-      );
   }
 
   // Handle the remaining 16 RAW or WAW hazards.  Additionally, if transitioning
@@ -405,8 +401,8 @@ void vTensor::View::transition(const Active view) const {
 
   }
 
-  command_buffer->end();
-  command_buffer->submit(context_.gpu().queue(), VK_NULL_HANDLE);
+  command_buffer.end();
+  command_buffer.submit(context_->gpu().queue);
 }
 
 void vTensor::View::verify() const {

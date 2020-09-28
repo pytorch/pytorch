@@ -194,6 +194,30 @@ inline bool operator==(
          (_1.z == _2.z);
 }
 
+inline Shader::Descriptor::Descriptor(const char* const glsl)
+ : type(Type::Source),
+   shader{
+    .source = {
+      glsl,
+      0u,
+    },
+   } {
+  TORCH_CHECK(glsl, "Invalid shader source code!");
+}
+
+inline Shader::Descriptor::Descriptor(
+    const uint32_t* const code,
+    const uint32_t size)
+ : type(Type::Binary),
+   shader{
+    .binary = {
+      code,
+      size,
+    },
+   } {
+  TORCH_CHECK(code && (0u != size), "Invalid shader binary!");
+}
+
 inline bool operator==(
     const Shader::Descriptor& _1,
     const Shader::Descriptor& _2) {
