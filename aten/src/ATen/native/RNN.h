@@ -40,8 +40,7 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
     if (check_dtype) {
       auto t_dtype = t.scalar_type();
       TORCH_CHECK(input_dtype == t_dtype,
-               "Input and ", name, " tensors are not the same dtype, found input tensor with ",
-               input_dtype, " and ", name, " tensor with ", t_dtype);
+               "expected scalar type ", t_dtype, " but found ", input_dtype);
     }
   };
 
