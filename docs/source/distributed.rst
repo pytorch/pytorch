@@ -62,9 +62,11 @@ installed.)
     As of PyTorch v1.7, Windows support for the distributed package only covers collective
     communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
     the `init_method` argument in :func:`init_process_group` must point to a file. This works
-    for both local and shared file systems: local file system example
-    ``init_method="file:///d:/tmp/some_file"``, shared file system example
-    ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``.
+    for both local and shared file systems:
+
+    - Local file system, ``init_method="file:///d:/tmp/some_file"``
+    - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
+
     Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
 
 Which backend to use?
