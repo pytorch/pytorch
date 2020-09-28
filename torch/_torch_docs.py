@@ -3500,6 +3500,33 @@ Examples::
     RuntimeError: bool value of Tensor with no values is ambiguous
 """.format(**common_args))
 
+add_docstr(torch.kron,
+           r"""
+kron(input, other) -> Tensor
+
+Computes the Kronecker product of :attr:`input` and :attr:`other`.
+
+If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`other` is a
+:math:`(k \times l)` tensor, the result will be a :math:`(n*k \times m*l)` tensor.
+
+Arguments:
+    input (Tensor): the first tensor to be multiplied
+    other (Tensor): the second tensor to be multiplied
+
+Returns:
+    Tensor: A tensor made of blocks of the second tensor scaled by the first.
+
+Example::
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.ones(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.]])
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, *, out=None) -> (Tensor, LongTensor)
