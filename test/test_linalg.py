@@ -184,12 +184,18 @@ class TestLinalg(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.double)
     def test_kron(self, device, dtype):
-        a = torch.rand((4,), dtype=dtype, device=device)
-        b = torch.rand((5,), dtype=dtype, device=device)
 
-        expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-        actual = torch.kron(a, b)
-        self.assertEqual(actual, expected)
+        def run_test_case(a_shape, b_shape):
+            a = torch.rand(a_shape, dtype=dtype, device=device)
+            b = torch.rand(b_shape, dtype=dtype, device=device)
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            actual = torch.kron(a, b)
+            self.assertEqual(actual, expected)
+
+        shapes = [(4,), (2, 2,), (1,2,3,), (1,2,3,3,)]
+        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
+            run_test_case(a_shape, b_shape)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
