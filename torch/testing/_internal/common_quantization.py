@@ -29,9 +29,8 @@ from torch.fx import symbolic_trace
 from torch.quantization import (
     QuantType,
     prepare_fx,
-    prepare_dynamic_fx,
+    prepare_qat_fx,
     convert_fx,
-    convert_dynamic_fx,
 )
 
 import copy
@@ -640,18 +639,16 @@ class QuantizationTestCase(TestCase):
             model.eval()
 
         original = symbolic_trace(model)
-        if quant_type == QuantType.DYNAMIC:
-            prepare = prepare_dynamic_fx
-            convert = convert_dynamic_fx
+        if quant_type == QuantType.QAT:
+            prepare = prepare_qat_fx
         else:
             prepare = prepare_fx
-            convert = convert_fx
 
         qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
-        qgraph = convert(prepared)
-        qgraph_debug = convert(prepared, debug=True)
+        qgraph = convert_fx(prepared)
+        qgraph_debug = convert_fx(prepared, debug=True)
 
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)

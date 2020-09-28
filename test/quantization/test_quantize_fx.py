@@ -17,10 +17,6 @@ from torch.quantization import (
     fuse_fx,
     prepare_fx,
     convert_fx,
-    prepare_static_fx,
-    convert_static_fx,
-    quantize_static_fx,
-    quantize_dynamic_fx,
     prepare_qat_fx,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
@@ -181,7 +177,8 @@ class TestQuantizeFx(QuantizationTestCase):
         original = symbolic_trace(m)
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
-        quantized = quantize_dynamic_fx(original, qconfig_dict, debug=True)
+        prepared = prepare_fx(original, qconfig_dict)
+        quantized = convert_fx(prepared, debug=True)
         qparams = (quantized._scale_0, quantized._zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
@@ -228,7 +225,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = ModuleClass(*module_constructor_inputs).eval()
                 m = symbolic_trace(m)
                 qconfig_dict = {"": float16_dynamic_qconfig}
-                m = quantize_dynamic_fx(m, qconfig_dict, debug=debug)
+                m = prepare_fx(m, qconfig_dict)
+                m = convert_fx(m, debug=debug)
                 self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 
@@ -288,13 +286,19 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        model = symbolic_trace(M().eval())
+        model = M().eval()
+        model = symbolic_trace(model)
         qconfig_dict = {'': default_qconfig}
-        non_inplace_model = quantize_static_fx(
-            model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=False)
-        inplace_model = model
-        inplace_model = quantize_static_fx(
-            inplace_model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=True)
+        prepared = prepare_fx(
+            model, qconfig_dict, inplace=False)
+        test_only_eval_fn(model, self.img_data_2d)
+        non_inplace_model = convert_fx(prepared, inplace=True)
+
+        prepared = prepare_fx(
+            model, qconfig_dict, inplace=True)
+        test_only_eval_fn(model, self.img_data_2d)
+        inplace_model = convert_fx(prepared, inplace=True)
+
         non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
         inplace_res = inplace_model(self.img_data_2d[0][0])
         self.assertEqual(non_inplace_res, inplace_res)
@@ -314,9 +318,9 @@ class TestQuantizeFx(QuantizationTestCase):
         dict_input = {"input": torch.randn(1, 1, 1, 1)}
         m = symbolic_trace(M()).eval()
         qconfig_dict = {"": default_qconfig}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         m(dict_input)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(dict_input)
 
     def test_standalone_module_class(self):
@@ -426,10 +430,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = symbolic_trace(m)
         qconfig_dict = {"": default_qconfig,
                         "module_name": [("conv2", None)]}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m(data)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(data)
         # first conv is quantized, second conv is not quantized
         node_list = [
@@ -455,10 +459,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M().eval()
         m = symbolic_trace(m)
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m(data)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(data)
         # first conv is quantized, second conv is not quantized
         node_list = [
@@ -480,10 +484,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M().eval()
         m = symbolic_trace(m)
         qconfig_dict = {"object_type": [(operator.add, default_qconfig)]}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m(data, data)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(data, data)
         # first conv is quantized, second conv is not quantized
         node_list = [
@@ -508,10 +512,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M().eval()
         m = symbolic_trace(m)
         qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m(data)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(data)
         # first conv is quantized, second conv is not quantized
         node_list = [
@@ -553,7 +557,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "object_type": [(nn.Conv2d, object_type_qconfig)],
             "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
             "module_name": [("module_conv2", module_name_qconfig)]}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         self.assertEqual(m.linear.qconfig, global_qconfig)
         self.assertEqual(m.conv.qconfig, object_type_qconfig)
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
@@ -572,10 +576,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = M().eval()
         m = symbolic_trace(m)
         qconfig_dict = {'': default_qconfig}
-        m = prepare_static_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m(data)
-        m = convert_static_fx(m)
+        m = convert_fx(m)
         m(data)
         for name, module in m.named_modules():
             self.assertFalse(hasattr(module, 'qconfig'),
@@ -668,13 +672,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # symbolically trace
         model = symbolic_trace(model)
-        model = prepare_static_fx(model, qconfig_dict)
+        model = prepare_fx(model, qconfig_dict)
 
         # run it through input
         x = torch.randn(5, 5)
         model(x)
 
-        quant = convert_static_fx(model)
+        quant = convert_fx(model)
 
         # save state_dict of model
         import io
@@ -685,12 +689,12 @@ class TestQuantizeFx(QuantizationTestCase):
         # Load the stats into new model
         model_2 = Model().eval()
         model_2 = symbolic_trace(model_2)
-        model_2 = prepare_static_fx(model_2, qconfig_dict)
+        model_2 = prepare_fx(model_2, qconfig_dict)
 
         loaded_dict = torch.load(b)
         model_2.load_state_dict(loaded_dict)
 
-        quant_2 = convert_static_fx(model_2)
+        quant_2 = convert_fx(model_2)
 
         # Verify that loaded state dict produces same results.
         self.assertEqual(quant(x), quant_2(x))
@@ -802,7 +806,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m = CustomTracer().trace(original_m).eval()
             qconfig_dict = {'': default_qconfig}
             # check prepared model
-            m = prepare_static_fx(m, qconfig_dict)
+            m = prepare_fx(m, qconfig_dict)
             # calibration
             m(data)
             # all activation observers are inserted in the top level module
@@ -812,7 +816,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
 
             # check converted/quantized model
-            m = convert_static_fx(m)
+            m = convert_fx(m)
             count_check = {
                 ns.call_function(torch.quantize_per_tensor) : 1,
                 ns.call_module(nnq.Conv2d) : 1,

@@ -139,14 +139,6 @@ def quantize_node(root_module, graph, node, activation_post_process):
         inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
 
-def activation_is_dynamically_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    dynamically quantized or not
-    """
-    assert qconfig is not None
-    activation = qconfig.activation()
-    return activation.dtype in [torch.float32, torch.float16]
-
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     statically quantized or not

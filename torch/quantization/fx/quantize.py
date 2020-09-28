@@ -43,7 +43,6 @@ from .quantization_patterns import *
 from .utils import (
     _parent_name,
     quantize_node,
-    activation_is_dynamically_quantized,
     activation_is_statically_quantized,
 )
 
@@ -305,7 +304,7 @@ class Quantizer:
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
-    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant, is_standalone_module):
+    def _prepare(self, model, qconfig_dict, inplace, is_standalone_module):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
 
@@ -401,10 +400,7 @@ class Quantizer:
                     # observe standalone module
                     standalone_module = self.modules[node.target]
                     traced_standalone_module = symbolic_trace(standalone_module)
-                    if activation_is_dynamically_quantized(qconfig):
-                        prepare = torch.quantization.quantize_fx._prepare_dynamic_standalone_module_fx
-                    else:
-                        prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
+                    prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
                     observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
                     mark_observed_standalone_module(observed_standalone_module)
@@ -514,10 +510,7 @@ class Quantizer:
         self.qconfig_map = observed._qconfig_map
 
     def prepare(self, model, qconfig_dict, inplace=False, is_standalone_module=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False, is_standalone_module=is_standalone_module)
-
-    def prepare_dynamic(self, model, qconfig_dict, inplace=False, is_standalone_module=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True, is_standalone_module=is_standalone_module)
+        return self._prepare(model, qconfig_dict, inplace, is_standalone_module=is_standalone_module)
 
     def _run_weight_observers(self, observed):
         r''' Extract the subgraph that produces the weight for dynamic quant
@@ -538,7 +531,7 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False, is_standalone_module=False):
+    def _convert(self, model, inplace=False, debug=False, is_standalone_module=False):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
         For standalone module: the inputs will be quantized by parent module,
@@ -795,8 +788,8 @@ class Quantizer:
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
-    def convert(self, model, inplace=False, debug=False, is_dynamic=False, is_standalone_module=False):
-        quantized = self._convert(model, inplace, debug, is_dynamic, is_standalone_module)
+    def convert(self, model, inplace=False, debug=False, is_standalone_module=False):
+        quantized = self._convert(model, inplace, debug, is_standalone_module)
         if not debug:
             quantized = self._fold_weight(quantized)
         return quantized
