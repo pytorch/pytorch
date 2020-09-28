@@ -6,6 +6,7 @@ import pickle
 import copy
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch.fx.experimental import GraphManipulation
 
 from torch.fx.proxy import TraceError
 
@@ -628,6 +629,44 @@ class TestFX(JitTestCase):
         out : torch.Tensor = gm(x)
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
+
+    def test_symbolic_trace_assert(self):
+        message = "assert_foobar"
+
+        class AssertsTensorShape(torch.nn.Module):
+            def forward(self, x):
+                torch.Assert(x.shape[1] > 4, message)
+                return x
+
+        m = AssertsTensorShape()
+        # verify traceability
+        traced = symbolic_trace(m)
+        # verify assertion on traced model works correctly at runtime
+        traced(torch.rand(4, 5))
+        with self.assertRaisesRegex(AssertionError, message):
+            traced(torch.rand(4, 3))
+
+    def test_get_all_users_of(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
+        add_param : torch.Tensor = torch.rand(3, 4)
+        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+            {'linear_mod': linear_mod, 'y_attr' : add_param}, graph)
+        expected_uses: Dict[int, List[int]] = {
+            0: [1],
+            1: [3],
+            2: [3],
+            3: [4],
+            4: [],
+        }
+        for i, node in enumerate(graph.nodes):
+            user_indexes = GraphManipulation.get_all_users_of(gm, i)
+            assert user_indexes == expected_uses[i]
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
