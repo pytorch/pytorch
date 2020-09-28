@@ -55,26 +55,32 @@ class TestForeach(TestCase):
             tensors2 = self._get_test_data(device, dtype, N)
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype),
                                  tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
             foreach_op_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
-            self.assertEqual(tensors1, expected)
+            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                self.assertEqual(tensors1, expected, atol=1e-4)
+            else:
+                self.assertEqual(tensors1, expected)
 
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1)
             foreach_op_(tensors1)
             self.assertEqual(res, tensors1)
-            self.assertEqual(tensors1, expected)
+            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                self.assertEqual(tensors1, expected, atol=1e-4)
+            else:
+                self.assertEqual(tensors1, expected)
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
@@ -84,7 +90,7 @@ class TestForeach(TestCase):
             value = 2
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors[i].to(dtype=control_dtype),
                                  tensors1[i].to(dtype=control_dtype),
@@ -93,7 +99,10 @@ class TestForeach(TestCase):
             res = foreach_op(tensors, tensors1, tensors2, value)
             foreach_op_(tensors, tensors1, tensors2, value)
             self.assertEqual(res, tensors)
-            self.assertEqual(tensors, expected)
+            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                self.assertEqual(tensors, expected, atol=1e-4)
+            else:
+                self.assertEqual(tensors, expected)
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
@@ -102,7 +111,7 @@ class TestForeach(TestCase):
             alpha = 2
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype),
                                  torch.mul(tensors2[i].to(dtype=control_dtype),
@@ -113,7 +122,10 @@ class TestForeach(TestCase):
 
             if dtype == torch.bool:
                 expected = [e.to(torch.bool) for e in expected]
-            self.assertEqual(tensors1, expected)
+            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                self.assertEqual(tensors1, expected, atol=1e-4)
+            else:
+                self.assertEqual(tensors1, expected)
 
     #
     # Unary ops
@@ -256,7 +268,7 @@ class TestForeach(TestCase):
                 scalar = 3.3
 
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
                 expected = [torch_bin_op(t.to(dtype=control_dtype),
                                          scalar) for t in tensors]
@@ -273,7 +285,10 @@ class TestForeach(TestCase):
                     return
 
                 res = foreach_bin_op(tensors, scalar)
-                self.assertEqual(res, expected)
+                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(res, expected, atol=1e-4)
+                else:
+                    self.assertEqual(res, expected)
 
                 if dtype in torch.testing.integral_types():
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
@@ -281,7 +296,10 @@ class TestForeach(TestCase):
                     return
 
                 foreach_bin_op_(tensors, scalar)
-                self.assertEqual(tensors, expected)
+                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(tensors, expected, atol=1e-4)
+                else:
+                    self.assertEqual(tensors, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
@@ -293,7 +311,7 @@ class TestForeach(TestCase):
                 scalars = [1.1 for _ in range(N)]
 
                 # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
                 expected = [torch_bin_op(t.to(dtype=control_dtype),
                                          s) for t, s in zip(tensors, scalars)]
@@ -327,7 +345,10 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, res)
                     return
                 else:
-                    self.assertEqual(res, expected)
+                    if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                        self.assertEqual(res, expected, atol=1e-4)
+                    else:
+                        self.assertEqual(res, expected)
 
                 if dtype in torch.testing.integral_types() and self.device_type == "cpu":
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
@@ -335,7 +356,10 @@ class TestForeach(TestCase):
                     return
 
                 foreach_bin_op_(tensors, scalars)
-                self.assertEqual(tensors, expected)
+                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(tensors, expected, atol=1e-4)
+                else:
+                    self.assertEqual(tensors, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
