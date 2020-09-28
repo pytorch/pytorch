@@ -14,6 +14,15 @@ struct Resource final {
   */
 
   struct Memory final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
     VmaAllocator allocator;
     VmaAllocation allocation;
 
@@ -51,6 +60,14 @@ struct Resource final {
 
   struct Buffer final {
     /*
+      Barrier
+    */
+
+    struct Barrier final {
+      Memory::Barrier memory;
+    };
+
+    /*
       Descriptor
     */
 
@@ -74,6 +91,20 @@ struct Resource final {
   */
 
   struct Image final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkImage handle;
+      Memory::Barrier memory;
+
+      struct {
+        VkImageLayout src;
+        VkImageLayout dst;
+      } layout;
+    };
+
     /*
       Descriptor
     */

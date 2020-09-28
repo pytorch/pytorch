@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Descriptor.h>
+#include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
@@ -24,19 +26,19 @@ struct Command final {
 
     void begin();
     void end();
-
-    void barrier();
+    void barrier(const Pipeline::Barrier& barrier);
     void bind(Pipeline::Object pipeline);
     void bind(const Descriptor::Set& set);
     void copy(VkBuffer source, VkBuffer destination, size_t size);
     void dispatch(const Shader::WorkGroup& work_group);
-
     void submit(VkQueue queue, VkFence fence);
 
    private:
     VkCommandBuffer command_buffer_;
     struct {
-    } current_;
+      Pipeline::Object pipeline;
+      VkDescriptorSet descriptor_set;
+    } bound_;
   };
 
   //
@@ -52,7 +54,7 @@ struct Command final {
     Pool& operator=(Pool&&) = default;
     ~Pool() = default;
 
-    Buffer buffer();
+    Buffer allocate();
     void purge();
 
    private:
