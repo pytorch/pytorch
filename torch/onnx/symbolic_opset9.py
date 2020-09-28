@@ -103,11 +103,11 @@ def mul(g, self, other):
 
 
 def div(g, self, other):
-    return g.op("Div", self, other)
+    return true_divide(g, self, other)
 
 
 def floor_divide(g, self, other):
-    out = div(g, self, other)
+    out = g.op('Div', self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
     # (eg. -0.1 should become -0 )
@@ -144,19 +144,19 @@ def true_divide(g, self, other):
     # Case 1: both values are floating
     # Performs div as usual
     if sym_help._is_fp(self) and sym_help._is_fp(other):
-        return div(g, self, other)
+        return g.op("Div", self, other)
 
     # Case 2: self is floating, other is not
     # Casts other to self's dtype
     if sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
-        return div(g, self, other)
+        return g.op("Div", self, other)
 
     # Case 3: other is floating, self is not
     # Casts self to other's dtype
     if sym_help._is_fp(other):
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
-        return div(g, self, other)
+        return g.op("Div", self, other)
 
     # Case 4: neither is floating
     # Casts both inputs to the default scalar type
@@ -168,7 +168,7 @@ def true_divide(g, self, other):
 
     self = g.op("Cast", self, to_i=onnx_scalar_type)
     other = g.op("Cast", other, to_i=onnx_scalar_type)
-    return div(g, self, other)
+    return g.op("Div", self, other)
 
 
 def reciprocal(g, self):
@@ -220,7 +220,7 @@ def sqrt(g, self):
 
 
 def rsqrt(g, self):
-    return div(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
+    return g.op("Div", sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
 
 
 def tanh(g, self):
@@ -1224,7 +1224,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     denominator = sqrt(g, add(g, variance, eps_cst))
 
-    layer_norm = div(g, numerator, denominator)
+    layer_norm = g.op("Div", numerator, denominator)
 
     if not (weight is None or sym_help._is_none(weight)):
         layer_norm = mul(g, layer_norm, weight)
@@ -2475,7 +2475,7 @@ def remainder(g, input, other):
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
-    erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
+    erf = g.op('Erf', g.op('Div', self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
 
