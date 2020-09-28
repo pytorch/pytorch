@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 namespace torch {
@@ -290,6 +291,8 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 } // namespace
 
 bool isFusableCudaFusionGroup(const Node* node) {
+  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+
   if (isFusableNode(node)) {
     return isFusableDevice(node);
   }
@@ -297,6 +300,8 @@ bool isFusableCudaFusionGroup(const Node* node) {
 }
 
 bool isFusableCudaFusionGroup(const Node* fusion, const Node* node) {
+  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
   if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node) &&
