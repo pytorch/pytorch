@@ -1564,6 +1564,21 @@ class TestDistributed(QuantizationTestCase):
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
 
+    def test_syncbn_preserves_qconfig(self):
+        """
+        Makes sure that if a BatchNorm is not fused and a qconfig exists,
+        convering the module to SyncBatchNorm preserves the qconfig.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.BatchNorm2d(1),
+        )
+        m[1].qconfig = torch.quantization.default_qconfig
+        m = torch.nn.SyncBatchNorm.convert_sync_batchnorm(m)
+        self.assertTrue(
+            hasattr(m[1], "qconfig"),
+            "missing qconfig after SyncBatchNorm conversion")
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @override_qengines

@@ -51,6 +51,7 @@ from torch.testing._internal.common_quantization import (
     SkipQuantModel,
     NestedModel,
     ConvModel,
+    ConvTransposeModel,
     default_per_channel_qconfig,
     test_only_eval_fn,
     ConvBnModel,
@@ -62,6 +63,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSkipQuantModel,
     AnnotatedNestedModel,
     AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
     AnnotatedConvBnModel,
 )
 
@@ -1364,6 +1366,53 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .run(m.graph)
 
     @skipIfNoFBGEMM
+    def test_quantize_fork_wait(self):
+        """ Tests the case where fork and wait calls are in different subgraphs
+        Calling inline fork-wait only removes the fork call and leaves aten::wait
+        calls in the graph, with Tensor as input (instead of Future[Tensor])
+        """
+        class MainModule(nn.Module):
+            def __init__(self):
+                super(MainModule, self).__init__()
+                self.fork_ops = ForkModule()
+
+            def init_values(self, x):
+                shared_module = self.fork_ops(x)
+                self.fork_dict = shared_module
+
+            def forward(self, x):
+                val = torch.jit._wait(self.fork_ops(x))
+                return val
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                w = torch.ones(5, 5)
+                b = torch.zeros(5)
+                return torch.nn.functional.linear(x, w, b)
+
+        class ForkModule(nn.Module):
+            def __init__(self):
+                super(ForkModule, self).__init__()
+                self.test = TestModule()
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.test.forward, x)
+                return fut
+
+        model = MainModule().eval()
+        traced = torch.jit.trace(model, (torch.randn(5, 5),))
+        model = prepare_dynamic_jit(traced, {'' : default_qconfig})
+        model = convert_dynamic_jit(model)
+        FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
+        # Make sure model save works
+        b = io.BytesIO()
+        torch.jit.save(model, b)
+
+    @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
         model = LinearModelWithSubmodule().eval()
         scripted = torch.jit.script(model)
@@ -1383,6 +1432,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         torch.quantization.load_observer_state_dict(prep_2, loaded_dict)
         quant_2 = convert_jit(prep_2)
         self.assertEqual(quant(x), quant_2(x))
+
 
 class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
@@ -3145,6 +3195,35 @@ class TestQuantizeJit(QuantizationTestCase):
                 [self.img_data_2d],
                 inplace=False)
             self.assertEqual(model_quantized(self.img_data_2d[0][0]), result_eager)
+
+    @override_qengines
+    def test_conv_transpose(self):
+        r"""Compare the result of quantizing conv_transpose layer in
+        eager mode and graph mode
+        """
+        if not qengine_is_qnnpack():
+            return  # Currently only qnnpack is supported
+        # eager mode
+        annotated_conv_model = AnnotatedConvTransposeModel(
+            torch.backends.quantized.engine).eval()
+        conv_model = ConvTransposeModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
+        model_script = torch.jit.script(conv_model)
+        result_eager = model_eager(self.img_data_2d[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_jit(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.img_data_2d],
+                inplace=False)
+            self.assertEqual(model_quantized(self.img_data_2d[0][0]),
+                             result_eager)
 
     @override_qengines
     def test_conv_bn(self):

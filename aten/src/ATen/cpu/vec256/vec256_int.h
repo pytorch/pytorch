@@ -1039,6 +1039,10 @@ template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>:
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_xor_si256(a, b);
 }
+template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator~(const Vec256<T>& a) {
+  return _mm256_xor_si256(a, _mm256_set1_epi32(-1));
+}
 
 Vec256<int64_t> Vec256<int64_t>::eq(const Vec256<int64_t>& other) const {
   return (*this == other) & Vec256<int64_t>(1);
