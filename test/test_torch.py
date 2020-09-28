@@ -41,9 +41,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, \
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off, \
     _get_torch_cuda_version, TEST_MAGMA
-
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -59,7 +58,7 @@ if TEST_SCIPY:
 
 SIZE = 100
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32() 
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
@@ -230,10 +229,6 @@ class AbstractTestCases:
             s = torch.tensor(7)
             self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
             self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
-            self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
-            self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
-            self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
-            self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
         @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
         def test_mvlgamma(self):
@@ -6342,11 +6337,6 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor(a_, dtype=dtypes[0], device=device)
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
-        if dtypes[0].is_complex or dtypes[1].is_complex:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op)(b)
-            return
-
         # new tensor
         self.assertEqual(expected_res.bool(), getattr(a, op)(b))
         # out
@@ -6357,12 +6347,6 @@ class TestTorchDeviceType(TestCase):
         # in-place
         # TODO: remove when different dtypes as operands are supported
         if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
-        # TODO: remove when complex ops are supported
-        if dtypes[0].is_complex:
             with self.assertRaises(RuntimeError):
                 getattr(a, op + '_')(b)
             return
@@ -7014,6 +6998,9 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
+    # Although tf32 is always disabled on matrix_exp, this test uses matmul,
+    # which has tf32 on by default
+    @with_tf32_off
     def test_matrix_exp_analytic(self, device, dtype):
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
@@ -7155,6 +7142,9 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
+    # Although tf32 is always disabled on matrix_exp, this test uses matmul,
+    # which has tf32 on by default
+    @with_tf32_off
     def test_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
@@ -13833,15 +13823,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,)))
         self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,), test_out=True))
 
-        # ger, addr
-        self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
-        self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
-        self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
-
-        self.assertEqual((0, 0), fn(torch.addr, (0, 0), (0,), (0,)).shape)
-        self.assertEqual((5, 0), fn(torch.addr, (5, 0), (5,), (0,)).shape)
-        self.assertEqual((0, 4), fn(torch.addr, (0, 4), (0,), (4,)).shape)
-
         # bmm, baddbmm
         self.assertEqual((0, 0, 0), fn(torch.bmm, (0, 0, 0), (0, 0, 0)).shape)
         self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
@@ -16340,52 +16321,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
-    @slowTest
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float, torch.double)
-    def test_ger(self, device, dtype):
-        def run_test(v0, v1):
-            res0 = torch.ger(v0, v1)
-            res1 = torch.zeros(100, 100, dtype=dtype, device=device)
-            for i in range(100):
-                for j in range(100):
-                    res1[i, j] = v0[i] * v1[j]
-            self.assertEqual(res0, res1)
-
-        v0 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        run_test(v0, v1)
-
-        # Tests 0-strided
-        v0 = torch.randn(1, dtype=torch.float, device=device).expand(100).to(dtype=dtype)
-        v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
-        run_test(v0, v1)
-
-    @slowTest
-    @onlyCPU
-    @dtypes(torch.bfloat16, torch.float, torch.double)
-    def test_addr(self, device, dtype):
-        def run_test(m, v1, v2, m_transform=lambda x: x):
-            m = m_transform(m.clone())
-            ref = m.clone()
-            torch.addr(m, v1, v2, out=m)
-            for i in range(m.size(0)):
-                for j in range(m.size(1)):
-                    ref[i, j] += v1[i] * v2[j]
-            self.assertEqual(m, ref)
-
-        for h, w in [(100, 110), (1, 20), (200, 2)]:
-            m = torch.randn(h, w, dtype=torch.float, device=device).to(dtype=dtype)
-            v1 = torch.randn(h, dtype=torch.float, device=device).to(dtype=dtype)
-            v2 = torch.randn(w, dtype=torch.float, device=device).to(dtype=dtype)
-            run_test(m, v1, v2)
-            # test transpose
-            run_test(m, v2, v1, lambda x: x.transpose(0, 1))
-            # test 0 strided
-            v1 = torch.randn(1, dtype=torch.float, device=device).expand(h).to(dtype=dtype)
-            run_test(m, v1, v2)
-            run_test(m, v2, v1, lambda x: x.transpose(0, 1))
-
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -16482,6 +16417,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -19672,9 +19608,19 @@ _signed_types_no_half = [
     torch.int8, torch.short, torch.int, torch.long
 ]
 
+_integer_types = [
+    torch.uint8, torch.int8, torch.int16,
+    torch.int32, torch.int64
+]
+
 _cpu_types: List[torch.dtype] = []
 
 _unsigned_types = [torch.uint8]
+
+# Binary Float Ops
+# Operators which use TensorIterator::binary_float_op
+# These Ops promote integer inputs to Float.
+binary_float_ops_inplace = ['atan2_', 'div_']
 
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
@@ -19833,13 +19779,13 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
-        _cpu_types, True, [tf32_on_and_off(0.005)]),
+        _cpu_types, True, [tf32_on_and_off(0.01)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
@@ -19866,37 +19812,27 @@ tensor_op_tests = [
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM),
-        _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
+        _cpu_types, True, [tf32_on_and_off(0.01)], 0, True),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
-        True, [tf32_on_and_off(0.005)], 0, True),
+        True, [], 0, True),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4, 
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmv_? is deprecated")]),
-    ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
-    ('addr', 'scalar', _medium_2d,
-        lambda t, d: [_number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
-    ('addr', 'two_scalars', _medium_2d,
-        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
-    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
+        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
     ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
@@ -20187,6 +20123,15 @@ def generate_test_function(cls,
             device_args = [arg.to(dtype=dtype) if
                            (isinstance(arg, torch.Tensor) and arg.dtype == torch.float) else arg
                            for arg in device_args]
+
+        # Special case for binary float ops (binary ops that promote int to float)
+        if op_str in binary_float_ops_inplace and \
+                'inplace' in subtest_str and dtype in _integer_types:
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                device_result = getattr(device_tensor, op_str)(*device_args)
+            return  # Nothing more to check
 
         # Runs the tensor op on CPU and device
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
