@@ -53,6 +53,7 @@ using ::c10::FunctionSchema;
 
 using ResolutionCallback = std::function<py::function(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
+using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
 namespace {
 
@@ -1014,7 +1015,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             return pp.str();
@@ -1023,7 +1024,7 @@ void initJitScriptBindings(PyObject* module) {
           "code_with_constants",
           [](Module& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
@@ -1067,7 +1068,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method(method_name, stack);
+            return m.get_method(method_name)(stack);
           },
           py::arg("method_name"),
           py::arg("input_tuple"))
@@ -1078,7 +1079,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
-            return m.run_method("forward", stack);
+            return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));
 
@@ -1177,7 +1178,7 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](const StrongFunctionPtr& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
 
             PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
@@ -1222,14 +1223,14 @@ void initJitScriptBindings(PyObject* module) {
           "code",
           [](Method& self) {
             std::vector<at::IValue> constants;
-            std::vector<c10::NamedTypePtr> deps;
+            PrintDepsTable deps;
             PythonPrint pp(constants, deps);
             pp.printMethod(self.function());
             return pp.str();
           })
       .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::IValue> constants;
-        std::vector<c10::NamedTypePtr> deps;
+        PrintDepsTable deps;
         PythonPrint pp(constants, deps);
         pp.printMethod(self.function());
         std::map<std::string, at::IValue> consts;
@@ -1301,6 +1302,7 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
+         const ClassMethodDefaults& defaults,
          ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
@@ -1339,6 +1341,30 @@ void initJitScriptBindings(PyObject* module) {
 
         const auto self = SimpleSelf(classType);
         cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
+
+        // Stitch in default arguments for methods. Properties don't need to be
+        // considered since there is no way to invoke setters without passing in
+        // a value.
+        auto defs_it = methodDefs.begin();
+        while (defs_it != methodDefs.end()) {
+          auto def_name = (*defs_it).name().name();
+          // If the method is not in the defaults map, assume there are
+          // no default arguments for it.
+          auto default_it = defaults.find(def_name);
+          if (default_it == defaults.end()) {
+            continue;
+          }
+
+          const auto method_name =
+              QualifiedName(classname, (*defs_it).name().name());
+          auto& method = cu->get_function(method_name);
+          method.setSchema(getSchemaWithNameAndDefaults(
+              defs_it->range(),
+              method.getSchema(),
+              at::nullopt,
+              default_it->second));
+          ++defs_it;
+        }
       });
   m.def(
       "_jit_script_interface_compile",
@@ -1590,17 +1616,27 @@ void initJitScriptBindings(PyObject* module) {
             return self.equals(other);
           })
       .def(
-          "_create_methods",
+          "_create_methods_and_properties",
           [](std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
+             const std::vector<Property>& properties,
+             const std::vector<ResolutionCallback>& propertyRcbs,
+             const std::vector<Def>& methodDefs,
+             const std::vector<ResolutionCallback>& methodRcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
+            TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
+            TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
+
+            std::vector<ResolverPtr> methodResolvers, propertyResolvers;
+            methodResolvers.reserve(methodRcbs.size());
+            for (auto& callback : methodRcbs) {
+              methodResolvers.push_back(pythonResolver(callback));
             }
+
+            propertyResolvers.reserve(propertyRcbs.size());
+            for (auto& callback : propertyRcbs) {
+              propertyResolvers.push_back(pythonResolver(callback));
+            }
+
             const auto& selfType =
                 concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
@@ -1608,15 +1644,15 @@ void initJitScriptBindings(PyObject* module) {
             auto cu = selfType->compilation_unit();
             cu->define(
                 prefix,
-                /*properties=*/{},
-                /*propResolvers=*/{},
-                defs,
-                resolvers,
+                properties,
+                propertyResolvers,
+                methodDefs,
+                methodResolvers,
                 &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
+            auto defs_it = methodDefs.begin();
+            while (defs_it != methodDefs.end()) {
               const auto method_name =
                   QualifiedName(prefix, (*defs_it).name().name());
               auto& method = cu->get_function(method_name);

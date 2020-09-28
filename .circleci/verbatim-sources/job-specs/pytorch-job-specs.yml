@@ -45,6 +45,9 @@ jobs:
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+          # Copy dist folder back
+          docker cp $id:/var/lib/jenkins/workspace/dist /home/circleci/project/. || echo "Dist folder not found"
+
           # Push intermediate Docker image for next phase to use
           if [ -z "${BUILD_ONLY}" ]; then
             # Note [Special build images]
@@ -78,6 +81,8 @@ jobs:
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             time docker push ${COMMIT_DOCKER_IMAGE}
           fi
+    - store_artifacts:
+        path: /home/circleci/project/dist
 
   pytorch_linux_test:
     <<: *pytorch_params
@@ -176,7 +181,8 @@ jobs:
           EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
-          elif [[ ${BUILD_ENVIRONMENT} == *caffe2* ]]; then
+          elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+            echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
             echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else

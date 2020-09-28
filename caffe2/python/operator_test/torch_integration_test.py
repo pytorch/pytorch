@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -875,6 +875,47 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
+    def test_gather_ranges_to_dense_op(self):
+        data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
+        ranges = np.array([[[2, 4]], [[0, 0]]])
+        key = np.array([0, 1, 3, 2, 1, 0, 1, 0])
+        lengths = np.array([4])
+        min_observation = 2
+        max_mismatched_ratio = 0.5
+        max_empty_ratio = 1.0
+
+        outputs_name = ["X_{}".format(i) for i in range(len(lengths))]
+        ref_op = core.CreateOperator(
+            "GatherRangesToDense",
+            ["data", "ranges", "key"],
+            outputs_name,
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+        workspace.FeedBlob("data", data)
+        workspace.FeedBlob("ranges", ranges)
+        workspace.FeedBlob("key", key)
+        workspace.RunOperatorOnce(ref_op)
+        ref_outputs = []
+        for output_name in outputs_name:
+            ref_outputs.append(workspace.FetchBlob(output_name))
+
+        outputs = torch.ops._caffe2.GatherRangesToDense(
+            torch.from_numpy(data),
+            torch.from_numpy(ranges),
+            torch.from_numpy(key),
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+
+        self.assertEqual(len(ref_outputs), len(outputs))
+        for i in range(0, len(ref_outputs)):
+            np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
+
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
     @settings(deadline=1000)
     def test_merge_id_lists(self, lengths_0, lengths_1):
@@ -958,6 +999,21 @@ class TorchIntegration(hu.HypothesisTestCase):
                 gamma=gamma,
             ),
         )
+
+    def test_pack_segments(self):
+        s = torch.rand(3, 3, 3)
+        lengths = torch.tensor([2, 1])
+        packed_tensor, _ = torch.ops._caffe2.PackSegments(
+            lengths,
+            s,
+        )
+        self.assertEqual(packed_tensor.numpy().shape, (2, 2, 3, 3))
+        unpacked_tensor = torch.ops._caffe2.UnpackSegments(
+            lengths,
+            packed_tensor,
+        )
+        torch.testing.assert_allclose(s, unpacked_tensor)
+
 
 
 if __name__ == '__main__':

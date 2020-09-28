@@ -7,12 +7,12 @@ import numpy as np
 from torch._six import inf, istuple
 from torch.autograd import Variable
 
+from typing import List, Tuple, Dict, Any
+
 from torch.testing import \
-    (make_non_contiguous,
-     _dispatch_dtypes,
-     floating_types, floating_types_and, floating_types_and_half,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and)
+    (make_non_contiguous, _dispatch_dtypes,
+     floating_types, floating_types_and, floating_and_complex_types,
+     floating_and_complex_types_and, all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -67,7 +67,7 @@ class OpInfo(object):
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
-            assert isinstance(dtype_list, _dispatch_dtypes)
+            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
 
@@ -154,7 +154,6 @@ class UnaryUfuncInfo(OpInfo):
       - they typically have method and inplace variants
       - they typically support the out kwarg
       - they typically have NumPy or SciPy references
-
     See NumPy's universal function documentation
     (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
     about the concept of ufuncs.
@@ -230,7 +229,8 @@ op_db = [
                    ref=np.arccosh,
                    domain=(1, float('inf')),
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
@@ -247,7 +247,8 @@ op_db = [
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
@@ -263,7 +264,8 @@ op_db = [
                    ref=np.arctanh,
                    domain=(-1, 1),
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -290,6 +292,8 @@ op_db = [
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
@@ -302,7 +306,8 @@ op_db = [
     UnaryUfuncInfo('log10',
                    ref=np.log10,
                    domain=(0, float('inf')),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -314,25 +319,24 @@ op_db = [
                    ref=np.log1p,
                    domain=(-1, float('inf')),
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),)),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, float('inf')),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
-                                active_if=IS_WINDOWS),
+                                dtypes=[torch.cfloat, torch.cdouble]),
                    )),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
@@ -370,6 +374,7 @@ op_db = [
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -377,6 +382,11 @@ op_db = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
+    UnaryUfuncInfo('exp2',
+                   ref=np.exp2,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None)
 ]
 
 # Common operator groupings
@@ -520,6 +530,9 @@ def method_tests():
         ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('mul', (S, S, S), (3.14,), 'constant', (True,)),
         ('mul', (), (3.14,), 'scalar_constant', (True,)),
+        # TODO(@anjali411): enable these tests
+        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
+        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -530,9 +543,18 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),
+        ('true_divide', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs', (True,)),
+        ('true_divide', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
+        ('true_divide', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar', (True,)),
+        ('true_divide', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
+        ('true_divide', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
+        ('true_divide', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
+        ('true_divide', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
-        ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
@@ -597,6 +619,8 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
+        ('exp2', (S, S, S), NO_ARGS, '', (False,)),
+        ('exp2', (), NO_ARGS, 'scalar', (False,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
         ('expm1', (), NO_ARGS, 'scalar', (True,)),
         ('erf', torch.rand(S, S, S), NO_ARGS, '', (True,)),
@@ -613,12 +637,13 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
+        # ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        # ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        # ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
@@ -631,6 +656,12 @@ def method_tests():
         ('sinh', (), NO_ARGS, 'scalar', (True,)),
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
+        ('conj', (S, S, S), NO_ARGS),
+        ('real', (S, S, S), NO_ARGS, 'complex'),
+        ('imag', (S, S, S), NO_ARGS, 'complex'),
+        ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
+        ('view_as_complex', (S, S, 2), NO_ARGS),
+        ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
@@ -647,7 +678,8 @@ def method_tests():
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
+        # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
+        # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
@@ -659,12 +691,15 @@ def method_tests():
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
-        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
+        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
+        # ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
+        # ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
         ('sign', (), NO_ARGS, 'scalar'),
+        ('sgn', (S, S, S), NO_ARGS),
+        ('sgn', (), NO_ARGS, 'scalar'),
         ('trunc', (S, S, S), NO_ARGS, '', (True,)),
         ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('floor', (S, S, S), NO_ARGS, '', (True,)),
@@ -758,6 +793,16 @@ def method_tests():
         ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
         # END TODO
+        ('quantile', (S, S, S), (0.5,)),
+        ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('quantile', (), (0.5,), 'scalar'),
+        ('nanquantile', (S, S, S), (0.5,)),
+        ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -834,6 +879,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S,), (0, ), 'zero_dim'),
+        ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
@@ -1497,7 +1544,7 @@ tri_tests_args = [
     (2028, 1, -1)
 ]
 
-tri_large_tests_args = [
+tri_large_tests_args: List[Tuple[int, ...]] = [
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
@@ -1559,9 +1606,9 @@ EXCLUDE_FUNCTIONAL = {
     'reshape',
     'where'  # argument order
 }
-EXCLUDE_GRADCHECK = {
+EXCLUDE_GRADCHECK: Dict[str, Any] = {
 }
-EXCLUDE_GRADGRADCHECK = {
+EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,
@@ -1620,6 +1667,11 @@ def exclude_tensor_method(name, test_name):
         'test_std_mean_dim_1d',
         'test_std_mean_dim',
         'test_std_mean',
+        'test_view_as_complex',
+        'test_view_as_real_complex',
+        'test_real_complex',
+        'test_imag_complex',
+        'test_complex'
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
@@ -1637,5 +1689,7 @@ def exclude_tensor_method(name, test_name):
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
+        return True
+    if 'fft.' in name:
         return True
     return False

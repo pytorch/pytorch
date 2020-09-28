@@ -21,7 +21,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -40,15 +40,13 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
-    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
                                 torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
-    TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
@@ -280,6 +278,18 @@ class TestCuda(TestCase):
         # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
+
+    @skipIfRocm
+    def test_cudart_register(self):
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        cudart = torch.cuda.cudart()
+        r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
+        self.assertEquals(r, 0)
+        self.assertTrue(t.is_pinned())
+        r = cudart.cudaHostUnregister(t.data_ptr())
+        self.assertEquals(r, 0)
+        self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
         gc.collect()
@@ -1722,6 +1732,7 @@ class TestCuda(TestCase):
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
