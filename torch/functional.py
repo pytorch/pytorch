@@ -9,7 +9,6 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-import warnings
 
 Tensor = torch.Tensor
 from torch import _VF
