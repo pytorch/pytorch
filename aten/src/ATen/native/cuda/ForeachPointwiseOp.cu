@@ -59,7 +59,7 @@ void foreach_tensor_##NAME##_cuda_(TensorList input, TensorList tensors1, Tensor
     if (!can_use_fast_route(input, scalar) ||                                                                                  \
         !can_use_fast_route(tensors1, tensors2) ||                                                                             \
         !can_use_fast_route(input, tensors1)) {                                                                                \
-        at::native::foreach_tensor_##NAME##_slow_(input, tensors1, tensors2, scalar);                                          \
+        return at::native::foreach_tensor_##NAME##_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                          \
                                                                                                                                \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);                                                              \
