@@ -228,6 +228,8 @@ class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
   mobile::Module deserialize(c10::optional<at::Device> device);
+  std::unordered_map<std::string, std::string> deserializeMetadata(
+      c10::optional<at::Device> device);
 
  private:
   c10::IValue readArchive(
@@ -245,6 +247,13 @@ BytecodeDeserializer::BytecodeDeserializer(
     std::unique_ptr<PyTorchStreamReader> reader)
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
+
+std::unordered_map<std::string, std::string> BytecodeDeserializer::
+    deserializeMetadata(c10::optional<at::Device> device) {
+  device_ = device;
+  auto mcu = std::make_shared<mobile::CompilationUnit>();
+  return readMobileMetadata(mcu);
+}
 
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
@@ -397,17 +406,23 @@ mobile::Module _load_for_mobile(
   if (observer) {
     observer->onEnterLoadModel();
   }
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
   try {
-    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-    BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata["model_name"] = result.name();
+    }
     if (observer) {
-      observer->onExitLoadModel(result.metadata());
+      observer->onExitLoadModel(copied_metadata);
     }
     return result;
   } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailLoadModel(error.what());
+      observer->onFailLoadModel(
+          error.what(), deserializer.deserializeMetadata(std::move(device)));
     }
     TORCH_RETHROW(error);
   } catch (...) {
@@ -424,7 +439,8 @@ mobile::Module _load_for_mobile(
       }
     } catch (c10::Error& error) {
       if (observer) {
-        observer->onFailLoadModel(error.what());
+        observer->onFailLoadModel(
+            error.what(), deserializer.deserializeMetadata(std::move(device)));
       }
       TORCH_RETHROW(error);
     }

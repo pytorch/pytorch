@@ -10,7 +10,7 @@ namespace {
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},     {aten::absolute_, aten::abs_},
     {aten::clip, aten::clamp},       {aten::clip_, aten::clamp_},
-    {aten::linalg_det, aten::det},   {aten::outer, aten::ger},
+    {aten::linalg_det, aten::det},   {aten::ger, aten::outer},
     {aten::arccos, aten::acos},      {aten::arccos_, aten::acos_},
     {aten::arcsin, aten::asin},      {aten::arcsin_, aten::asin_},
     {aten::arctan, aten::atan},      {aten::arctan_, aten::atan_},
@@ -25,6 +25,9 @@ static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::less_equal, aten::le},    {aten::less_equal_, aten::le_},
     {aten::less, aten::lt},          {aten::less_, aten::lt_},
     {aten::not_equal, aten::ne},     {aten::not_equal_, aten::ne_},
+    {aten::divide, aten::div},       {aten::divide_, aten::div_},
+    {aten::multiply, aten::mul},     {aten::multiply_, aten::mul_},
+    {aten::true_divide, aten::div},  {aten::true_divide_, aten::div_},
 };
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {

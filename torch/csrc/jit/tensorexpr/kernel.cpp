@@ -673,11 +673,20 @@ Tensor* TensorExprKernel::computeFourOperand(
       });
 }
 
+namespace {
+
+// Convert boolean to integer, if needed.
+ExprHandle boolToInteger(const ExprHandle& x) {
+  return x.dtype().scalar_type() == ScalarType::Bool ? cast<int>(x) : x;
+}
+
+} // namespace
+
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return lhs + rhs;
+        return boolToInteger(lhs) + boolToInteger(rhs);
       };
       TORCH_INTERNAL_ASSERT(
           v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
@@ -694,6 +703,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::sub: {
       auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        // NB: sub isn't supported on boolean, no need to promote to integer.
         return lhs - rhs;
       };
       TORCH_INTERNAL_ASSERT(
@@ -706,35 +716,35 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::mul: {
       return computeTwoOperand(
           "aten_mul", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs;
+            return boolToInteger(lhs) * boolToInteger(rhs);
           });
     } break;
 
     case aten::div: {
       return computeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs / rhs;
+            return boolToInteger(lhs) / boolToInteger(rhs);
           });
     } break;
 
     case aten::__and__: {
       return computeTwoOperand(
           "aten_and", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs & rhs;
+            return boolToInteger(lhs) & boolToInteger(rhs);
           });
     } break;
 
     case aten::__or__: {
       return computeTwoOperand(
           "aten_or", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs | rhs;
+            return boolToInteger(lhs) | boolToInteger(rhs);
           });
     } break;
 
     case aten::__xor__: {
       return computeTwoOperand(
           "aten_xor", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs ^ rhs;
+            return boolToInteger(lhs) ^ boolToInteger(rhs);
           });
     } break;
 
@@ -806,14 +816,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::min: {
       return computeTwoOperand(
           "aten_min", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Min::make(lhs, rhs, false);
+            return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
     case aten::max: {
       return computeTwoOperand(
           "aten_max", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Max::make(lhs, rhs, false);
+            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
 
@@ -1287,12 +1297,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     if (!l.hasLoopBodyFor(p.second) || hasReduction) {
       continue;
     }
-    Stmt* loop = l.getLoopBodyFor(p.second);
-    if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
-      l.computeInlineWithRandom(loop);
-    } else {
-      l.computeInline(loop);
-    }
+    l.computeInline(p.second->buf());
   }
   if (backendType == kCudaCodeGen) {
     for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
@@ -1300,7 +1305,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       // For every output tensor we've created a flattened 1D tensor - let's
       // mark the original output tensor with computeInline
-      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+      l.computeInline(tensorOutputs_[i]->buf());
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
@@ -1371,68 +1376,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   l.prepareForCodegen();
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
-    std::vector<For*> innerLoops;
-    std::vector<For*> worklist;
-
-    // Find outer-most For loops
-    if (For* rootF = dynamic_cast<For*>(l.root_stmt())) {
-      worklist.push_back(rootF);
-    } else if (Block* body = dynamic_cast<Block*>(l.root_stmt())) {
-      std::vector<Block*> blocks = {body};
-      while (blocks.size()) {
-        Block* b = blocks.back();
-        blocks.pop_back();
-
-        for (Stmt* s : *b) {
-          if (For* f = dynamic_cast<For*>(s)) {
-            worklist.push_back(f);
-          } else if (Block* b2 = dynamic_cast<Block*>(s)) {
-            blocks.push_back(b2);
-          }
-        }
-      }
-    }
-
-    // Traverse the For loop nest find inner-most loops, which are
-    // vectorization candidates.
-    while (worklist.size()) {
-      For* f = worklist.back();
-      worklist.pop_back();
-
-      bool containsSubLoops = false;
-      if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : *body) {
-          if (For* f2 = dynamic_cast<For*>(s2)) {
-            containsSubLoops = true;
-            worklist.push_back(f2);
-          }
-        }
-      }
-
-      if (!containsSubLoops) {
-        innerLoops.push_back(f);
-      }
-    }
-
-    // vectorize inner loops.
-    for (For* loop : innerLoops) {
-      For* outer1;
-      For* split1;
-      For* tail1;
-
-      static const int kBodyVectorWidth = 8;
-      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
-      l.vectorize(split1);
-
-      if (tail1) {
-        For* outer2;
-        For* split2;
-        For* tail2;
-        static const int kTailVectorWidth = 4;
-        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
-        l.vectorize(split2);
-      }
-    }
+    l.vectorizeInnerLoops();
   }
 
   Stmt* stmt = l.root_stmt();
