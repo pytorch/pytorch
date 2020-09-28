@@ -382,8 +382,8 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   if (!maybe_kernel) {
     const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);
     spec.cacheKernel(arg_spec, kernel);
+    maybe_kernel = spec.findKernel(arg_spec);
   }
-  maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
 
   if (code_out) {
