@@ -193,7 +193,7 @@ class TestLinalg(TestCase):
             actual = torch.kron(a, b)
             self.assertEqual(actual, expected)
 
-        shapes = [(4,), (2, 2,), (1,2,3,), (1,2,3,3,)]
+        shapes = [(4,), (2, 2), (1, 2, 3), (1, 2, 3, 3)]
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
 
