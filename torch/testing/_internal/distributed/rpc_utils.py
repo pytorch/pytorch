@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,7 +54,28 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
 # the agent, which then gets mixed-in with each test suite and each mp method.
 
 
+# libSegFault.so is a library that, when (pre-)loaded into an executable,
+# installs a signal handler (for SIGSEGV and possibly others) that prints the
+# back trace, the content of registers and possibly other useful info.
+def find_libsegfault_path():
+    try:
+        output = subprocess.check_output(["/sbin/ldconfig", "-p"],
+                                         env={"LC_ALL": "C", "LANG": "C"})
+    except subprocess.SubprocessError:
+        return None
+    regex = r"^\s*libSegFault.so\s+\([^)]+\) => (.*)$"
+    try:
+        match = re.search(os.fsencode(regex), output, re.MULTILINE)
+        if not match:
+            return None
+        return os.fsdecode(match.group(1))
+    except OSError:
+        return None
+
+
 class RpcMultiProcessTestCase(MultiProcessTestCase, RpcAgentTestFixture):
+    LIBSEGFAULT_PATH = find_libsegfault_path()
+
     def setUp(self):
         super().setUp()
         self.output_dir = tempfile.mkdtemp()
@@ -67,7 +90,11 @@ class RpcMultiProcessTestCase(MultiProcessTestCase, RpcAgentTestFixture):
         sys.stderr = os.fdopen(2, "wt")
 
     def subprocess_env_vars(self):
-        env_vars = self.get_env_vars()
+        env_vars = dict()
+        if self.LIBSEGFAULT_PATH is not None:
+            env_vars["LD_PRELOAD"] = self.LIBSEGFAULT_PATH
+            env_vars["SEGFAULT_SIGNALS"] = "segv abrt bus"
+        env_vars.update(self.get_env_vars())
         return env_vars
 
     def on_test_failure(self):
