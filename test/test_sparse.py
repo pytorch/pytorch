@@ -11,7 +11,7 @@ import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 
@@ -36,6 +36,10 @@ def cuda_only(inner):
             raise unittest.SkipTest("Test is GPU-only")
         inner(self, *args, **kwargs)
     return outer
+
+def _get_torch_cuda_version():
+    return [int(x) for x in torch.version.cuda.split(".")] if torch.version.cuda else [0, 0]
+
 
 class TestSparse(TestCase):
 

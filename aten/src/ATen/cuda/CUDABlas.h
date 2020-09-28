@@ -141,36 +141,6 @@ void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 template <>
 void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 
-// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
-#ifdef CUDART_VERSION
-
-#define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
-  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
-
-template<class Dtype>
-void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
-}
-template<>
-void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
-template<>
-void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
-
-
-#define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
-  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
-
-template<class Dtype>
-void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
-}
-template<>
-void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
-template<>
-void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
-
-#endif // CUDART_VERSION
-
 } // namespace blas
 } // namespace cuda
 } // namespace at
