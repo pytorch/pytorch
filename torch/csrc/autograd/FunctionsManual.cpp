@@ -649,11 +649,11 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
 }
 
 Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward(grad / (result * 2), self, unbiased);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
 }
 
 Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
