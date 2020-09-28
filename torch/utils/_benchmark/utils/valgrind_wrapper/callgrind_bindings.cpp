@@ -1,4 +1,7 @@
+#include <pybind11/pybind11.h>
 #include <valgrind/callgrind.h>
+
+namespace py = pybind11;
 
 bool supported_platform(){
     #if defined(NVALGRIND)
@@ -14,4 +17,10 @@ void toggle() {
     #else
     CALLGRIND_TOGGLE_COLLECT;
     #endif
+}
+
+PYBIND11_MODULE(callgrind_bindings, m) {
+    m.doc() = "Wraps NVALGRIND and CALLGRIND_TOGGLE_COLLECT symbols in Valgrind/Callgrind.";
+    m.def("supported_platform", &supported_platform);
+    m.def("toggle", &toggle);
 }
