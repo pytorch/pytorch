@@ -647,10 +647,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complexOpt && !return_complex) {
-    TORCH_WARN("stft will require the return_complex parameter be explicitly "
-               " specified in a future PyTorch release. Use return_complex=False "
-               " to preserve the current behavior or return_complex=True to return "
-               " a complex output.");
+    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
+                    " specified in a future PyTorch release. Use return_complex=False "
+                    " to preserve the current behavior or return_complex=True to return "
+                    " a complex output.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
