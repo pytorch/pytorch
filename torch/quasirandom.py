@@ -1,5 +1,5 @@
 import torch
-from typing import Optional, Any
+from typing import Optional
 
 
 class SobolEngine(object):
@@ -58,7 +58,7 @@ class SobolEngine(object):
         torch._sobol_engine_initialize_state_(self.sobolstate, self.dimension)
 
         if self.scramble:
-            g: Optional[Any] = None
+            g: Optional[torch.Generator] = None
             if self.seed is not None:
                 g = torch.Generator()
                 g.manual_seed(self.seed)
