@@ -163,7 +163,8 @@ def preprocess_file_and_save_result(
         is_pytorch_extension=False,
         clean_ctx=None,
         show_progress=True):
-    result = preprocessor(output_directory, filepath, all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
+    result = preprocessor(output_directory, filepath, all_files, includes, stats,
+                          hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
     fin_path = os.path.join(output_directory, filepath)
     # Show what happened
@@ -173,7 +174,7 @@ def preprocess_file_and_save_result(
             result["hipified_path"], result["status"])
 
     if result["hipified_path"] is not None:
-        HIPIFY_FINAL_RESULT[fin_path]=result
+        HIPIFY_FINAL_RESULT[fin_path] = result
 
 
 def preprocess(
@@ -199,7 +200,8 @@ def preprocess(
     stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocess_file_and_save_result(output_directory, filepath, all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
+        preprocess_file_and_save_result(output_directory, filepath, all_files, includes, stats,
+                                        hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -690,7 +692,16 @@ Returns a dict with the following keys:
                       "skipped" if an identical hipified file already existed
                       "ignored" if the source file was a hipified file itself
 """
-def preprocessor(output_directory, filepath, all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress):
+def preprocessor(
+        output_directory,
+        filepath,
+        all_files,
+        includes,
+        stats,
+        hip_clang_launch,
+        is_pytorch_extension,
+        clean_ctx,
+        show_progress):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
 
@@ -759,7 +770,10 @@ def preprocessor(output_directory, filepath, all_files, includes, stats, hip_cla
                     return m.group(0)
                 # Hipify header file first if needed
                 if header_filepath not in HIPIFY_FINAL_RESULT:
-                    preprocess_file_and_save_result(output_directory, os.path.relpath(header_filepath, output_directory), all_files, includes, stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
+                    preprocess_file_and_save_result(output_directory,
+                                                    os.path.relpath(header_filepath, output_directory),
+                                                    all_files, includes, stats, hip_clang_launch, is_pytorch_extension,
+                                                    clean_ctx, show_progress)
                 return templ.format(os.path.relpath(HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"], header_dir))
 
             return m.group(0)
