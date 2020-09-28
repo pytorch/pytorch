@@ -1,7 +1,6 @@
 import torch
 import unittest
 import itertools
-import warnings
 from math import inf, nan, isnan
 
 from torch.testing._internal.common_utils import \
