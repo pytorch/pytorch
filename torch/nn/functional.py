@@ -2583,16 +2583,10 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _smooth_l1_loss(input, target):
-    # type: (Tensor, Tensor) -> Tensor
-    t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
-
-
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', beta=1.0):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
-    element-wise error falls below 1 and an L1 term otherwise.
+    element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
@@ -2601,7 +2595,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 smooth_l1_loss, tens_ops, input, target, size_average=size_average,
-                reduce=reduce, reduction=reduction)
+                reduce=reduce, reduction=reduction, beta=beta)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
@@ -2611,7 +2605,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
@@ -3331,6 +3325,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
+            Note: When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
+            used internally will actually be trilinear. However, when the input is 4-D,
+            the interpolation mode will legitimately be bilinear.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -3726,6 +3723,42 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
                                      swap, reduction_enum)
+
+
+def triplet_margin_with_distance_loss(anchor, positive, negative, *, distance_function=None,
+                                      margin=1.0, swap=False, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], float, bool, str) -> Tensor
+    r"""
+    See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
+    """
+    if torch.jit.is_scripting():
+        raise NotImplementedError("F.triplet_margin_with_distance_loss does not support JIT scripting: "
+                                  "functions requiring Callables cannot be scripted.")
+
+    tens_ops = (anchor, positive, negative)
+    if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+        return handle_torch_function(
+            triplet_margin_with_distance_loss, tens_ops, anchor, positive, negative,
+            distance_function=distance_function, margin=margin, swap=swap, reduction=reduction)
+
+    distance_function = distance_function if distance_function is not None else pairwise_distance
+
+    positive_dist = distance_function(anchor, positive)
+    negative_dist = distance_function(anchor, negative)
+
+    if swap:
+        swap_dist = distance_function(positive, negative)
+        negative_dist = torch.min(negative_dist, swap_dist)
+
+    output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
+
+    reduction_enum = _Reduction.get_enum(reduction)
+    if reduction_enum == 1:
+        return output.mean()
+    elif reduction_enum == 2:
+        return output.sum()
+    else:
+        return output
 
 
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):

@@ -43,6 +43,9 @@ at::Tensor pow_backward(at::Tensor grad, const at::Tensor & self, const at::Scal
 at::Tensor pow_backward_self(at::Tensor grad, const at::Tensor & self, const at::Tensor & exponent);
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Tensor& self, const at::Tensor& exponent, at::Tensor result);
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Scalar & base, const at::Tensor& exponent, at::Tensor result);
+at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st);
+at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
 at::Tensor mvlgamma_backward(at::Tensor grad, const at::Tensor & self, int64_t p);
 at::Tensor permute_backwards(const at::Tensor & grad, at::IntArrayRef fwd_dims);
 at::Tensor rad2deg_backward(const at::Tensor& grad);
@@ -70,9 +73,10 @@ at::Tensor mm_mat2_backward(const at::Tensor & grad, const at::Tensor & mat1, at
 at::Tensor _sparse_addmm_sparse_backward(const at::Tensor& grad, const at::Tensor& sparse_, const at::Tensor& dense, const at::Scalar& alpha);
 at::Tensor renorm_backward(const at::Tensor & grad, const at::Tensor & self, at::Scalar p, int64_t dim, at::Scalar maxnorm);
 at::Tensor sum_tensorlist(at::TensorList tl);
-at::Tensor repeat_backward(at::Tensor grad, int64_t input_dims, at::IntArrayRef repeats);
+at::Tensor repeat_backward(at::Tensor grad, at::IntArrayRef repeats, at::IntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
+at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(const at::Tensor & grad, const at::Tensor & self, bool unbiased);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 at::Tensor std_backward(const at::Tensor & result, const at::Tensor & grad, const at::Tensor & self, bool unbiased);
@@ -100,8 +104,8 @@ at::Tensor log_softmax_double_backward(const at::Tensor & grad, const at::Tensor
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor binary_cross_entropy_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
-at::Tensor smooth_l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
-at::Tensor smooth_l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
+at::Tensor smooth_l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction, double beta);
+at::Tensor smooth_l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction, double beta);
 at::Tensor mse_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, int64_t reduction);
 at::Tensor mse_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
 at::Tensor soft_margin_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction);

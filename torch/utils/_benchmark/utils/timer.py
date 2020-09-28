@@ -21,6 +21,8 @@ else:
 
 
 class Timer(object):
+    _timer_cls = timeit.Timer
+
     def __init__(
         self,
         stmt="pass",
@@ -50,7 +52,7 @@ class Timer(object):
         self._env = env
         self._num_threads = num_threads
         self._globals = globals
-        self._timer = timeit.Timer(stmt=stmt, setup=setup, timer=timer, globals=globals)
+        self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
 
     def _construct_measurement(self, number_per_run: int, times: List[float]):
         return common.Measurement(
