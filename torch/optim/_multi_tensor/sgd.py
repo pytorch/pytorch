@@ -117,7 +117,7 @@ class SGD(Optimizer):
             if momentum != 0:
                 bufs = []
                 for i in range(len(states)):
-                    if 'momentum_buffer' not in state:
+                    if 'momentum_buffer' not in states:
                         buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
                     else:
                         buf = states[i]['momentum_buffer']
