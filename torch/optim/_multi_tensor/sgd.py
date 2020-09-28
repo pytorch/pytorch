@@ -97,8 +97,6 @@ class SGD(Optimizer):
             grads_no_mb = []
             params_with_grad_mb = []
             params_with_grad_no_mb = []
-            states_mb = []
-            states_no_mb = []
             has_sparse_grad = False
             bufs_mb = []
             bufs_no_mb = []
@@ -108,13 +106,12 @@ class SGD(Optimizer):
                     if 'momentum_buffer' in self.state[p]: 
                         grads_mb.append(p.grad)
                         params_with_grad_mb.append(p)
-                        states_mb.append(self.state[p])
                         bufs_mb.append(self.state[p]['momentum_buffer'])
                     else: 
                         grads_no_mb.append(p.grad)
                         params_with_grad_no_mb.append(p)
-                        states_no_mb.append(self.state[p])
-                        bufs_no_mb.append(torch.clone(p.grad).detach())
+                        self.state[p]['momentum_buffer'] = torch.clone(p.grad).detach()
+                        bufs_no_mb.append(self.state[p]['momentum_buffer'])
 
                     if p.grad.is_sparse:
                         has_sparse_grad = True
@@ -126,32 +123,34 @@ class SGD(Optimizer):
                 return loss
 
             if weight_decay != 0:
-                grads_mb = torch._foreach_add(grads_mb, params_with_grad_mb, alpha=weight_decay)
-                grads_no_mb = torch._foreach_add(grads_no_mb, params_with_grad_no_mb, alpha=weight_decay)
+                if grads_mb != []:
+                    grads_mb = torch._foreach_add(grads_mb, params_with_grad_mb, alpha=weight_decay)
 
-            if momentum != 0:
+                if grads_no_mb != []:
+                    grads_no_mb = torch._foreach_add(grads_no_mb, params_with_grad_no_mb, alpha=weight_decay)
+
+            if momentum != 0 and grads_mb != []:
                 torch._foreach_mul_(bufs_mb, momentum)
                 torch._foreach_add_(bufs_mb, grads_mb, alpha=1 - dampening)
 
-                torch._foreach_mul_(bufs_no_mb, momentum)
-                torch._foreach_add_(bufs_no_mb, grads_no_mb, alpha=1 - dampening)
+            def perform_step(grads, params_with_grad, bufs):
+                if momentum != 0:
+                    if nesterov:
+                        grads = torch._foreach_add(grads, bufs, alpha=momentum)
+                    else:
+                        grads = bufs
 
-                if nesterov:
-                    torch._foreach_add_(grads_mb, bufs_mb, alpha=momentum)
-                    torch._foreach_add_(grads_no_mb, bufs_no_mb, alpha=momentum)
+                if not has_sparse_grad:
+                    torch._foreach_add_(params_with_grad, grads, alpha=-group['lr'])
                 else:
-                    grads_mb = bufs_mb
-                    grads_no_mb = bufs_no_mb
+                    # foreach APIs dont support sparse
+                    for i in range(len(params_with_grad)): 
+                        params_with_grad[i].add_(grads[i], alpha=-group['lr'])
 
-            if not has_sparse_grad:
-                torch._foreach_add_(params_with_grad_mb, grads_mb, alpha=-group['lr'])
-                torch._foreach_add_(params_with_grad_no_mb, grads_no_mb, alpha=-group['lr'])
-            else:
-                # foreach APIs dont support sparse
-                for i in range(len(params_with_grad_mb)): 
-                    params_with_grad_mb[i].add_(grads_mb[i], alpha=-group['lr'])
+            if grads_mb != []:
+                perform_step(grads_mb, params_with_grad_mb, bufs_mb)
 
-                for i in range(len(params_with_grad_no_mb)): 
-                    params_with_grad_no_mb[i].add_(grads_no_mb[i], alpha=-group['lr'])
+            if grads_no_mb != []:
+                perform_step(grads_no_mb, params_with_grad_no_mb, bufs_no_mb)
 
         return loss
