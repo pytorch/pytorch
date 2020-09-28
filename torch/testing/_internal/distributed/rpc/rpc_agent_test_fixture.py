@@ -51,3 +51,11 @@ class RpcAgentTestFixture(ABC):
         have the right errors during timeout.
         """
         pass
+
+    def get_env_vars(self):
+        """
+        Returns the dictionary of environment variables that the agent would
+        like to have set in the subprocesses that are running the workers of the
+        test.
+        """
+        return dict()

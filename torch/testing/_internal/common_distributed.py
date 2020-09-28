@@ -1,5 +1,6 @@
 
 from multiprocessing import Manager
+import contextlib
 import os
 import sys
 import tempfile
@@ -227,6 +228,19 @@ def cleanup_temp_dir():
     if tmp_dir is not None:
         tmp_dir.cleanup()
 
+
+@contextlib.contextmanager
+def set_env_vars(env_vars):
+    old_env_vars = {k: os.environ.get(k, None) for k in env_vars.keys()}
+    os.environ.update(env_vars)
+    yield
+    for k, v in old_env_vars.items():
+        if v is None:
+            del os.environ[k]
+        else:
+            os.environ[k] = v
+
+
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
 # default `world_size()` returns 4. Let's take `test_rpc_spawn.py` as an
@@ -296,6 +310,9 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
+    def subprocess_env_vars(self):
+        return dict()
+
     def _start_processes(self, proc):
         test_skips_manager = Manager()
         test_skips = test_skips_manager.dict()
@@ -309,7 +326,8 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name='process ' + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, self.subprocess_init_data))
-            process.start()
+            with set_env_vars(self.subprocess_env_vars()):
+                process.start()
             self.processes.append(process)
 
     def _fork_processes(self):

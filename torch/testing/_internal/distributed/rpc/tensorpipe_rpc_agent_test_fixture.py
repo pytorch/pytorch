@@ -26,3 +26,13 @@ class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
 
     def get_timeout_error_regex(self):
         return "RPC ran for more than"
+
+    def get_env_vars(self):
+        # Set this to the lowest level, to avoid flooding the output. This will
+        # print information about the "boundary" between TensorPipe and PyTorch,
+        # by logging all the calls that the agent makes into TensorPipe and all
+        # the callbacks that are invoked. This will hopefully be enough to
+        # figure out whether the issue lies in TensorPipe or in the agent.
+        env_vars = super().get_env_vars()
+        env_vars["TP_VERBOSE_LOGGING"] = "1"
+        return env_vars
