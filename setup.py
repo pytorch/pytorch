@@ -673,7 +673,7 @@ def configure_extension_build():
             name=str('torch.utils._benchmark.utils.valgrind_wrapper.callgrind_bindings'),
             sources=['torch/utils/_benchmark/utils/valgrind_wrapper/callgrind_bindings.cpp'],
             include_dirs=[
-                'third_party/pybind11',  # Just hard code since this isn't permanent
+                'third_party/pybind11/include',  # Just hard code since this isn't permanent
                 'third_party/valgrind',
             ]),
     )
