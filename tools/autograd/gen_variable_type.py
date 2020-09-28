@@ -142,6 +142,19 @@ DONT_REQUIRE_DERIVATIVE = {
     'bucketize'
 }
 
+# All the C -> R functions at the time of adding this were audited and tested
+# C -> C, R -> C functions for which backward is correctly implemented and tested
+GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
+    'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
+    'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
+    'eq_', 'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'cosh', '__rmul__', 'sgn', 'view_as_real', 'real', 'imag', 'asin', 'acos', 'sub',
+    'div', 'cat', 'view_as_complex', 'neg', 'complex', 'select', '_s_where', 'as_strided',
+    '_fft_with_size'
+}
+
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
     'set', 'resize'
@@ -926,6 +939,16 @@ def emit_body(declaration):
         body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
         return body
 
+    def emit_check_if_in_complex_autograd_whitelist():
+        body = []
+        if base_name in GRADIENT_IMPLEMENTED_FOR_COMPLEX:
+            return body
+        for arg in differentiable_outputs:
+            if arg['type'] == 'Tensor':
+                name = arg['name']
+                body.append('throw_error_for_complex_fns_backward_not_implemented({}, "{}");'.format(name, base_name))
+        return body
+
     def emit_check_no_requires_grad(tensor_args, args_with_derivatives):
         """Checks that arguments without derivatives don't require grad"""
         body = []
@@ -1183,6 +1206,7 @@ def emit_body(declaration):
         body.append(emit_history())
     if requires_derivative:
         body.append(emit_save_outputs())
+        body.extend(emit_check_if_in_complex_autograd_whitelist())
     if base_name in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to

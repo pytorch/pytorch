@@ -67,6 +67,14 @@ inline void throw_error_out_requires_grad(const char* name) {
       "but one of the arguments requires grad.");
 }
 
+inline void throw_error_for_complex_fns_backward_not_implemented(const Tensor& tensor, const char* name) {
+  if (tensor.requires_grad() && tensor.is_complex()) {
+    std::string msg = name;
+    msg += " does not support automatic differentiation for outputs with complex dtype.";
+    throw std::runtime_error(msg);
+  }
+}
+
 // TODO: Blegh, bare references
 
 inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
