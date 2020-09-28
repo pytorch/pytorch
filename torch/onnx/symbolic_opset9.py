@@ -374,7 +374,7 @@ def expand(g, self, size, implicit):
         # Expand with -1 dim value means dim is unchanged.
         # Since onnx::expand supports two-way broadcasting,
         # -1 dim value can be exported to onnx as 1
-        size = view(g, stack(g, size, 0), [-1])
+        size = view(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1])))
     dtype = 4  # dim type is int64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
@@ -461,12 +461,9 @@ def view(g, self, size):
     if sym_help._is_value(size):
         shape = size
     else:
-        if self.isCompleteTensor():
-            self_sizes = self.type().sizes()
-            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-                return g.op("Flatten", self, axis_i=1)
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
+
 
 def view_as(g, self, other):
     shape = g.op("Shape", other)
@@ -1783,12 +1780,12 @@ def pixel_shuffle(g, self, upscale_factor):
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = view(g, self, [-1, output_channel, upscale_factor, upscale_factor,
-                                dims[2], dims[3]])
+    after_view = view(g, self, g.op("Constant", value_t=torch.tensor([-1, output_channel, upscale_factor,
+                                                                      upscale_factor, dims[2], dims[3]])))
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
-                [-1, output_channel, dims[2] * upscale_factor, dims[3] *
-                 upscale_factor])
+                g.op("Constant", value_t=torch.tensor([-1, output_channel, dims[2] * upscale_factor,
+                                                       dims[3] * upscale_factor])))
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -2136,7 +2133,7 @@ def narrow(g, input, dim, start, length):
 
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, 'i')
@@ -2146,7 +2143,7 @@ def argmax(g, input, dim, keepdim):
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, 'i')
@@ -2453,7 +2450,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 def meshgrid(g, tensor_list):
-    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors = [view(g, t, g.op("Constant", value_t=torch.LongTensor([-1]))) for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
     out = []
