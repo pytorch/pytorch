@@ -105,7 +105,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     class_annotations = getattr(nn_module, '__annotations__', {})
     # Get user-annotated ignored attributes.
-    user_annotated_ignored_attributes = getattr(nn_module, "__ignored_attributes__", set())
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", set())
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):

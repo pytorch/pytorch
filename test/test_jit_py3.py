@@ -621,7 +621,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_module_properties(self):
         class ModuleWithProperties(torch.nn.Module):
-            __ignored_properties__ = ["ignored_attr"]
+            __jit_unused_properties__ = ["ignored_attr"]
 
             def __init__(self, a: int):
                 super().__init__()
@@ -690,7 +690,7 @@ class TestScriptPy3(JitTestCase):
                 return sum([a])
 
         class ModuleWithIgnoredAttr(torch.nn.Module):
-            __ignored_attributes__ = ["a", "sub"]
+            __jit_ignored_attributes__ = ["a", "sub"]
 
             def __init__(self, a: int, b: int):
                 super().__init__()
@@ -712,7 +712,7 @@ class TestScriptPy3(JitTestCase):
 
         # Test the error message for ignored attributes.
         class ModuleUsesIgnoredAttr(torch.nn.Module):
-            __ignored_attributes__ = ["a", "sub"]
+            __jit_ignored_attributes__ = ["a", "sub"]
 
             def __init__(self, a: int):
                 super().__init__()
