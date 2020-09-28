@@ -109,7 +109,7 @@ class Adam(Optimizer):
             bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
             bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
             if group['weight_decay'] != 0:
-                grads = torch._foreach_add(grads, group['params'], group['weight_decay'])
+                grads = torch._foreach_add(grads, group['params'], alpha=group['weight_decay'])
 
             #
             # Decay the first and second moment running average coefficient
