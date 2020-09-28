@@ -167,10 +167,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
-  # apparently needed for test libraries to be available see comments
-  # in #45426. setup.py will transform the environment var into a
-  # cmake argument.
-  export INSTALL_TEST=ON
   python tools/amd_build/build_amd.py
   python setup.py install --user
 
