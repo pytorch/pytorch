@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/runtime/static/impl.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
