@@ -28,9 +28,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {
-        'torch': torch
-    }
+    gbls: Dict[str, Any] = {}
     exec_with_source(src, gbls)
     return gbls['forward']
 
@@ -173,9 +171,11 @@ class GraphModule(torch.nn.Module):
     @graph.setter
     def graph(self, val) -> None:
         self._graph = val
-        body, result, free_variables = self._graph.python_code(root_module='self')
+        body, result, free_variables, imports = self._graph.python_code(root_module='self')
+        import_block = '\n'.join(f'import {name}' for name in imports)
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.code = f"""\
+{import_block}
 def forward(self, {', '.join(free_variables)}):
 {body}
     return {result}
