@@ -234,7 +234,7 @@ class Graph:
                 try:
                     int(maybe_idx)
                     sanitized_name = base
-                except:
+                except ValueError:
                     pass
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name)
