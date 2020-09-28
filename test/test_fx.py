@@ -27,6 +27,9 @@ class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
 
+def a_non_torch_leaf(a, b):
+    return a + b
+
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -641,5 +644,15 @@ class TestFX(JitTestCase):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)
             assert user_indexes == expected_uses[i]
 
+    def test_custom_import(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(a_non_torch_leaf, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+        x, y = torch.rand(1), torch.rand(1)
+        self.assertEqual(torch.sin(x + y), gm(x, y))
 if __name__ == '__main__':
     run_tests()
