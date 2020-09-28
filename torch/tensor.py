@@ -518,7 +518,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
-            return (self.double().reciprocal() * other).type_as(self)
+            return self.to(torch.get_default_dtype()).reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
