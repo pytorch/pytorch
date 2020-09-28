@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -6,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
+#include <memory>
 #include <ostream>
 
 namespace torch {
@@ -22,26 +24,21 @@ class TORCH_CUDA_API GpuLower {
     lower();
   }
 
-  // print generated code to ostream
-  std::ostream& printKernel(
-      std::ostream& _os,
-      const std::string& kernel_name = "CUDAGeneratedKernel");
-
-  std::string getKernel(const std::string& kernel_name = "CUDAGeneratedKernel");
-
-  std::vector<kir::Allocate*> global_allocations() {
-    return global_allocations_;
-  }
-
-  std::vector<kir::Allocate*> sync_allocations() {
-    return sync_allocations_;
-  }
+  Kernel* kernel() const;
 
   // Converts a Fusion IR value into the Kernel IR equivalent
   //
   // TODO(kir): revisit this interface
   //
   static Val* lowerValue(const Val* val);
+
+  // TODO(kir): we have two methods which do almost the same thing
+  //
+  Val* getLowerValue(const Val* val);
+
+  //! Returns the currently active lowering object
+  //! (or nullptr if no lowering is in progress)
+  static GpuLower* current();
 
  private:
   void lower();
@@ -52,21 +49,11 @@ class TORCH_CUDA_API GpuLower {
   // not have this information. Since we need to have the correct information in
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
-  void buildSizesMap();
-
-  // Adjust memory types to make sure they are valid
-  void adjustMemoryTypes();
+  void replaceSymbolicSizes();
 
  private:
-  // List of global buffers (not including buffers for grid syncronization)
-  std::vector<kir::Allocate*> global_allocations_;
-
-  // List of syncronization buffers that must be initialized to 0 when running
-  // the fusion
-  std::vector<kir::Allocate*> sync_allocations_;
-
-  // Lowered IR
-  std::vector<Expr*> lowered_exprs_;
+  // Lowered Kernel IR
+  std::unique_ptr<Kernel> kernel_;
 
   // Fusion IR node to Kernel IR node mapping
   std::unordered_map<const Val*, Val*> kir_map_;
