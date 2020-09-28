@@ -280,6 +280,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
+        self.subprocess_init_data = dict()
 
     def tearDown(self):
         super().tearDown()
@@ -307,7 +308,7 @@ class MultiProcessTestCase(TestCase):
             process = proc(
                 target=self.__class__._run,
                 name='process ' + str(rank),
-                args=(rank, self._current_test_name(), self.file_name))
+                args=(rank, self._current_test_name(), self.file_name, self.subprocess_init_data))
             process.start()
             self.processes.append(process)
 
@@ -319,17 +320,25 @@ class MultiProcessTestCase(TestCase):
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
+    def subprocess_init(self, data):
+        pass
+
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, subprocess_init_data):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+
+        self.subprocess_init(subprocess_init_data)
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         getattr(self, test_name)()
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
+
+    def on_test_failure(self):
+        pass
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
@@ -367,10 +376,14 @@ class MultiProcessTestCase(TestCase):
                 # Sleep to avoid excessive busy polling.
                 time.sleep(0.1)
             elapsed_time = time.time() - start_time
-            if fn in self.skip_return_code_checks:
-                self._check_no_test_errors(elapsed_time)
-            else:
-                self._check_return_codes(elapsed_time)
+            try:
+                if fn in self.skip_return_code_checks:
+                    self._check_no_test_errors(elapsed_time)
+                else:
+                    self._check_return_codes(elapsed_time)
+            except Exception:
+                self.on_test_failure()
+                raise
         finally:
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
