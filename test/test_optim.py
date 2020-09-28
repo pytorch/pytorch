@@ -307,6 +307,10 @@ class TestOptim(TestCase):
                                             amsgrad=True)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
+                                            weight_decay=0.1)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3, amsgrad=True)
