@@ -3,7 +3,7 @@
 import collections
 import contextlib
 import dataclasses
-from typing import DefaultDict, List, Optional
+from typing import ClassVar, DefaultDict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -47,14 +47,14 @@ class Measurement:
     task_spec: TaskSpec
     metadata: Optional[dict] = None
 
-    # NB: dataclass will not include these in __init__ because they are not
-    #     type annotated, however they are serialized.
-    _sorted_times = ()
-    _median = -1.0
-    _mean = -1.0
-    _p25 = -1.0
-    _p75 = -1.0
-    _warnings = ()
+    # Wrapping type with ClassVar excludes them from dataclass fields.
+    _sorted_times: ClassVar[Tuple[float, ...]] = ()
+    _warnings: ClassVar[Tuple[str, ...]] = ()
+    _median: ClassVar[float] = -1.0
+    _mean: ClassVar[float] = -1.0
+    _p25: ClassVar[float] = -1.0
+    _p75: ClassVar[float] = -1.0
+
 
     def __getattr__(self, name):
         # Forward TaskSpec fields for convenience.
@@ -109,7 +109,7 @@ class Measurement:
         n_total = len(self._sorted_times)
         lower_bound = int(n_total // 4)
         upper_bound = int(np.ceil(3 * n_total / 4))
-        interquartile_points: List[float] = self._sorted_times[lower_bound:upper_bound]
+        interquartile_points: Tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
         std = np.std(interquartile_points)
         sqrt_n = np.sqrt(len(interquartile_points))
 
@@ -191,7 +191,7 @@ class Measurement:
   {self.description or skip_line}
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
-  {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{s if self.num_threads > 1 else ''}
+  {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
 {newline.join(self._warnings)}""".strip() # noqa
 
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
