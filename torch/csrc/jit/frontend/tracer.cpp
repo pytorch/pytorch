@@ -696,15 +696,6 @@ void addInputs(
   }
 }
 
-void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
-  // [TensorOptions in script] - update this when you change how we schematize
-  // TensorOptions
-  addInputs(n, name, options.dtype_opt());
-  addInputs(n, name, options.layout());
-  addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
-}
-
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)

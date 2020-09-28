@@ -63,12 +63,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("stack", &Event::stack)
       .def("scope", &Event::scope);
 
+  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
+    .def(py::init<bool, bool>());
+
   m.def("_enable_profiler", enableProfiler);
   m.def(
       "_disable_profiler",
       disableProfiler,
-      py::arg("cleanup_tls_states") = true,
-      py::arg("consolidate") = true);
+      py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);

@@ -88,6 +88,21 @@ inline int64_t getTime() {
 #endif
 }
 
+// A struct to control settings of disableProfiler options.
+struct TORCH_API ProfilerDisableOptions {
+  ProfilerDisableOptions() = default;
+  ProfilerDisableOptions(bool shouldCleanupTLSState, bool shouldConsolidate)
+      : cleanupTLSState(shouldCleanupTLSState),
+        consolidate(shouldConsolidate) {}
+  // Whether we should clean up profiler states that are thread local, such as
+  // ThreadLocalDebugInfo and thread local RecordFunction callbacks.
+  bool cleanupTLSState = true;
+  // Whether we should consolidate all currently recorded profiled events. If
+  // false, will not consolidate and other threads can continue to write to the
+  // event lists.
+  bool consolidate = true;
+};
+
 enum class C10_API_ENUM ProfilerState {
     Disabled,
     CPU, // CPU-only profiling
@@ -377,7 +392,7 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfiler(const ProfilerConfig&);
-TORCH_API thread_event_lists disableProfiler(bool cleanupTLSState = true, bool consolidate = true);
+TORCH_API thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<Event>&& profiledEvents);
@@ -419,19 +434,27 @@ struct TORCH_API TLSProfilerGuard {
   explicit TLSProfilerGuard(
       const ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
-          resultCallback = c10::nullopt)
-      : cb_(std::move(resultCallback)) {
+          resultCallback = c10::nullopt,
+      c10::optional<ProfilerDisableOptions> profilerDisableOptions =
+          c10::nullopt)
+      : cb_(std::move(resultCallback)),
+        profilerDisableOptions_(std::move(profilerDisableOptions)) {
     enableProfiler(cfg);
   }
   ~TLSProfilerGuard() {
-    thread_event_lists event_lists = disableProfiler();
+    thread_event_lists event_lists = disableProfiler(profilerDisableOptions_);
     if (cb_) {
-      (*cb_)(event_lists);
+      try {
+        (*cb_)(event_lists);
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Got error processing profiler events: " << e.what();
+      }
     }
   }
 
  private:
   c10::optional<std::function<void(const thread_event_lists&)>> cb_;
+  const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
 } // namespace profiler
