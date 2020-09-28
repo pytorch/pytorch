@@ -583,29 +583,28 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
-    "nonzero(Tensor input, *, bool as_tuple)",
+    "nonzero(Tensor input, *, bool as_tuple=False, Tensor out=None)",
   });
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
-  if(r.has_torch_function()){
+  if (r.has_torch_function()){
     return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
   }
 
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
-    }
-  } else {
-    if (r.toBool(1)) {
-      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    }
+  const auto as_tuple = r.toBool(1);
+  const auto has_out = !r.isNone(2);
+
+  if (as_tuple) {
+    TORCH_CHECK(!has_out, "nonzero does not support the out kwarg when as_tuple is True");
+    return wrap(dispatch_nonzero_numpy(r.tensor(0)));
   }
+
+  if (has_out) {
+    return wrap(dispatch_nonzero(r.tensor(0), r.tensor(2)));
+  }
+
+  return wrap(dispatch_nonzero(r.tensor(0)));
   END_HANDLE_TH_ERRORS
 }
 
