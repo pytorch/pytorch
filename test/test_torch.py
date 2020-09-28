@@ -6052,11 +6052,11 @@ class TestTorchDeviceType(TestCase):
                 for mat in matrix.contiguous().view(-1, n, n):
                     expected_inv_list.append(torch.inverse(mat))
                 expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                if 'cuda' in device:
+                if 'cuda' in device and dtype is torch.float32:
                     # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
-                    # individual values can be significantly different, hence rather high atol is used
+                    # individual values can be significantly different for fp32, hence rather high rtol is used
                     # the important thing is that torch.inverse passes above checks with identity
-                    self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=0)
+                    self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=1e-2)
                 else:
                     self.assertEqual(matrix_inverse, expected_inv)
 
