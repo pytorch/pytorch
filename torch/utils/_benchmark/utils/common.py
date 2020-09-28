@@ -3,7 +3,7 @@
 import collections
 import contextlib
 import dataclasses
-from typing import ClassVar, DefaultDict, List, Optional, Tuple
+from typing import DefaultDict, List, Optional, Tuple
 
 import numpy as np
 import torch
