@@ -417,7 +417,9 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3)
             )
-
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
@@ -531,6 +533,11 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-3),
                     lr=1e-2, momentum=0.1)
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, momentum=0.1, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
@@ -543,6 +550,11 @@ class TestOptim(TestCase):
                 lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, t0=100)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
