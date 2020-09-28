@@ -187,6 +187,10 @@ def stack(g, tensor_list, dim):
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
+def _list(g, self):
+    return self
+
+
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
@@ -1177,7 +1181,7 @@ def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, gr
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
-    sym_help.assert_training_mode(training, "dropout")
+    sym_help.assert_training_mode(training, "batch_norm")
     input_sizes = input.type().sizes()
 
     if weight is None or sym_help._is_none(weight):
@@ -1559,7 +1563,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            dtype = sym_help._maybe_get_const(data, 't').type().scalarType()
+            dtype = data.type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 

@@ -27,7 +27,6 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -50,6 +49,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
@@ -479,15 +483,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               optional<std::vector<std::string>>,
               optional<std::vector<std::string>>,
               float,
-              std::string,
-              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
+              std::string>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod,
-          py::arg("device_maps") =
-              std::unordered_map<std::string, tensorpipe::DeviceMap>())
+          py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -495,12 +496,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               The number of threads in the thread-pool used by
               :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
               requests.
-          )")
-      .def_readwrite(
-          "device_maps",
-          &TensorPipeRpcBackendOptions::deviceMaps,
-          R"(The device map locations.)")
-      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
+          )");
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
