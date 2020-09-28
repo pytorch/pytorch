@@ -150,7 +150,7 @@ def skip_if_win32():
         "This unit test case is not supportted on Windows platform",
     )
 
-TIMEOUT_DEFAULT = 100
+TIMEOUT_DEFAULT = 30
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 

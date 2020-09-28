@@ -2120,7 +2120,7 @@ class RpcTest(RpcAgentTestFixture):
         # This call is effectively A asking B to share its 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
 
-        self.assertEqual(len(rrefs), 2)
+        self.assertEqual(len(rrefs), 3)
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
