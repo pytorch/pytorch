@@ -367,49 +367,16 @@ Python enums can be used in TorchScript without any extra annotation or code:
         GREEN = 2
 
     @torch.jit.script
-    def enum_comp(x: Color, y: Color) -> bool:
+    def enum_fn(x: Color, y: Color) -> bool:
+        if x == Color.RED:
+            return True
+
         return x == y
 
 After an enum is defined, it can be used in both TorchScript and Python interchangeably
-like any other TorchScript type:
-
-::
-
-    from enum import Enum
-
-    class Color(Enum):
-        RED = 1
-        GREEN = 2
-
-    @torch.jit.script
-    def return_enum(cond: bool):
-        if cond:
-            return Color.RED
-        else:
-            return Color.GREEN
-
-    self.assertEqual(return_enum(True), Color.RED)
-    self.assertEqual(return_enum(False), Color.GREEN)
-
-The type of the values of an enum must be ``int``, ``float``, or ``str``:
-
-::
-
-    from enum import Enum
-
-    class IntEnum(Enum):
-        FOO = 1
-        BAR = 2
-
-    class FloatEnum(Enum):
-        FOO = 1.2
-        BAR = 2.3
-
-    class StringEnum(Enum):
-        FOO = "foo as in foo bar"
-        BAR = "bar as in foo bar"
-
-All values must be of the same type; heterogenous types for enum values are not supported.
+like any other TorchScript type. The type of the values of an enum must be ``int``,
+``float``, or ``str``. All values must be of the same type; heterogenous types for enum
+values are not supported.
 
 
 Named Tuples

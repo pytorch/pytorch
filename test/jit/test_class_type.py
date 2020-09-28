@@ -1167,7 +1167,7 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         class Properties(object):
-            __ignored_properties__ = ["unsupported"]
+            __jit_unused_properties__ = ["unsupported"]
 
             def __init__(self, a: int):
                 self.a = a

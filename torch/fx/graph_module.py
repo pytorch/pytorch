@@ -164,8 +164,8 @@ class GraphModule(torch.nn.Module):
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
-    __ignored_properties__ = ['graph']
-    __ignored_attributes__ = ['_graph']
+    __jit_unused_properties__ = ['graph']
+    __jit_ignored_attributes__ = ['_graph']
 
     @property
     def graph(self):
