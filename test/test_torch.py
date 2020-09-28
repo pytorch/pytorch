@@ -13021,10 +13021,6 @@ class TestTorchDeviceType(TestCase):
             dst2 = tensor.nonzero(as_tuple=False)
             dst3 = torch.empty([], dtype=torch.long, device=device)
             torch.nonzero(tensor, out=dst3)
-            self.assertRaisesRegex(
-                TypeError,
-                "received an invalid combination of arguments",
-                lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
             if self.device_type != 'xla':
                 # xla does not raise runtime error
                 self.assertRaisesRegex(
