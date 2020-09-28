@@ -712,6 +712,12 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     return g.op("Reshape", output, output_shape)
 
 
+def narrow(g, input, dim, start, length):
+    from torch.onnx.symbolic_helper import _slice_helper
+    end = g.op("Add", start, length)
+    return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
+
+
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
