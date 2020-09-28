@@ -186,7 +186,8 @@ conda install pkg-config libuv
 
 On Windows
 ```bash
-# Add these packages and set libuv_ROOT environment variable if torch.distributed is needed
+# Add these packages and set libuv_ROOT environment variable if torch.distributed is needed.
+# Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -y -q -c rdonnelly libuv
 set libuv_ROOT={conda active env location}\Library
 ```

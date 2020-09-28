@@ -52,19 +52,20 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux and Windows. By default for Linux, the Gloo and NCCL backends
-are built and included in PyTorch distributed (NCCL only when building with CUDA).
-MPI is an
-optional backend that can only be included if you build PyTorch from source. (e.g.
-building PyTorch on a host that has MPI installed.)
+PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
+distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
+included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+installed.)
 
-.. note ::
-    On Windows, Pytorch distributed currently only supports Gloo backend, and FileStore as
-    Key/value store accessible to all workers.
-    If you set init_method parameter in torch.distributed.init_process_group method, must use "file:///".
-    For example, create a FilsStore on local file system, init_method="file:///d:/tmp/ddp_filestore",
-    create a FileStore on shared folder, init_method="file://////{machine_name}/{share_folder_name}/ddp_filestore".
-    If you set store parameter in torch.distributed.init_process_group method, must set it as a FileStore.
+.. warning ::
+    As of PyTorch v1.7, Windows support for the distributed package only covers collective
+    communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
+    the `init_method` argument in :func:`init_process_group` must point to a file. This works
+    for both local and shared file systems: local file system example
+    ``init_method="file:///d:/tmp/some_file"``, shared file system example
+    ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``.
+    Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^
