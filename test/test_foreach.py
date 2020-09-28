@@ -373,7 +373,7 @@ class TestForeach(TestCase):
         for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
-                                                                     self.torch_bin_ops,):
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = True
 
