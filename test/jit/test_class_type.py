@@ -13,7 +13,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, Optional, Dict
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -1019,6 +1019,106 @@ class TestClassType(JitTestCase):
             new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
             y.my_list = new_list
             return y
+
+    def test_default_args(self):
+        """
+        Test that methods on class types can have default arguments.
+        """
+        @torch.jit.script
+        class ClassWithDefaultArgs:
+            def __init__(
+                self,
+                a: int = 1,
+                b: Optional[List[int]] = None,
+                c: Tuple[int, int, int] = (1, 2, 3),
+                d: Optional[Dict[int, int]] = None,
+                e: Optional[str] = None,
+            ):
+                self.int = a
+                self.tup = c
+                self.str = e
+
+                self.list = [1, 2, 3]
+                if b is not None:
+                    self.list = b
+
+                self.dict = {1: 2, 3: 4}
+                if d is not None:
+                    self.dict = d
+
+            def add(self, b: int, scale: float = 1.0) -> float:
+                return self.int * scale + b
+
+        def all_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.int + obj.list[2] + obj.tup[1]
+
+        def some_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(b=[5, 6, 7])
+            return obj.int + obj.list[2] + obj.dict[1]
+
+        def override_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14), {3: 4}, "str")
+            s: int = obj.int
+
+            for x in obj.list:
+                s += x
+
+            for y in obj.tup:
+                s += y
+
+            s += obj.dict[3]
+
+            st = obj.str
+            if st is not None:
+                s += len(st)
+
+            return s
+
+        def method_defaults() -> float:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.add(3) + obj.add(3, 0.25)
+
+        self.checkScript(all_defaults, ())
+        self.checkScript(some_defaults, ())
+        self.checkScript(override_defaults, ())
+        self.checkScript(method_defaults, ())
+
+        # The constructor of this class below has some arguments without default values.
+        class ClassWithSomeDefaultArgs:  # noqa: B903
+            def __init__(
+                self,
+                a: int,
+                b: int = 1,
+            ):
+                self.a = a
+                self.b = b
+
+        def default_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1)
+            return obj.a + obj.b
+
+        def set_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1, 4)
+            return obj.a + obj.b
+
+        self.checkScript(default_b, ())
+        self.checkScript(set_b, ())
+
+        # The constructor of this class below has mutable arguments. This should throw
+        # an error.
+        class ClassWithMutableArgs:   # noqa: B903
+            def __init__(
+                self,
+                a: List[int] = [1, 2, 3],  # noqa: B006
+            ):
+                self.a = a
+
+        def should_fail():
+            obj: ClassWithMutableArgs = ClassWithMutableArgs()
+
+        with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
+            torch.jit.script(should_fail)
 
     def test_staticmethod(self):
         """

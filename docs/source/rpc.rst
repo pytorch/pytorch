@@ -142,9 +142,6 @@ to configure the backend's behavior.
 TensorPipe Backend
 """"""""""""""""""
 
-.. warning::
-    The TensorPipe backend is a **beta feature**.
-
 The TensorPipe agent, which is the default, leverages `the TensorPipe library
 <https://github.com/pytorch/tensorpipe>`_, which provides a natively
 point-to-point communication primitive specifically suited for machine learning
@@ -191,6 +188,10 @@ Example::
 
 Process Group Backend
 """""""""""""""""""""
+
+.. warning ::
+     The Process Group Backend will be deprecated soon, we recommend using the
+     TensorPipe Backend instead.
 
 The Process Group agent instantiates a process group from
 the :mod:`~torch.distributed` module and utilizes its point-to-point
@@ -293,8 +294,11 @@ The RRef design note covers the design of the :ref:`rref` (Remote REFerence) pro
 
 Tutorials
 ---------
-The RPC tutorial introduces users to the RPC framework and provides two example applications using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs.
+The RPC tutorials introduce users to the RPC framework, provide several example applications
+using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
+to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__ to profile RPC-based workloads.
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
 -  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
