@@ -1,6 +1,6 @@
 import torch
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 
 class TestForeach(TestCase):
@@ -55,7 +55,7 @@ class TestForeach(TestCase):
             tensors2 = self._get_test_data(device, dtype, N)
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype),
                                  tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
@@ -68,7 +68,7 @@ class TestForeach(TestCase):
         for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1)
@@ -84,7 +84,7 @@ class TestForeach(TestCase):
             value = 2
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors[i].to(dtype=control_dtype),
                                  tensors1[i].to(dtype=control_dtype),
@@ -102,7 +102,7 @@ class TestForeach(TestCase):
             alpha = 2
 
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
             expected = [torch_op(tensors1[i].to(dtype=control_dtype),
                                  torch.mul(tensors2[i].to(dtype=control_dtype),
@@ -256,7 +256,7 @@ class TestForeach(TestCase):
                 scalar = 3.3
 
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
                 expected = [torch_bin_op(t.to(dtype=control_dtype),
                                          scalar) for t in tensors]
@@ -293,7 +293,7 @@ class TestForeach(TestCase):
                 scalars = [1.1 for _ in range(N)]
 
                 # If incoming dtype is float16 or bfloat16, runs in float32 and casts output back to dtype.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and not TEST_WITH_ROCM and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
                 expected = [torch_bin_op(t.to(dtype=control_dtype),
                                          s) for t, s in zip(tensors, scalars)]
