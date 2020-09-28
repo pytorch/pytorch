@@ -78,7 +78,7 @@ class WithInsertPoint:
 
 class Graph:
     def __init__(self):
-        self._nodes : List[Node] = [Node(self, 'return', 'return', 'return', (), {})]
+        self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert_point : Node = self._nodes[-1]
 
@@ -92,10 +92,9 @@ class Graph:
         """
         val_map : Dict[Node, Node] = {}
         for node in g._nodes:
-            if node.op == 'return':
+            if node.op == 'output':
                 continue
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
-
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -107,13 +106,13 @@ class Graph:
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None) -> Node:
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder')
+        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
         n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
-        self.insert_node_before(n=n, before=self._insert_point)
+        self._nodes.append(n)
         return n
 
     def insert_node_before(self, n : Node, before : Node) -> Node:
@@ -239,17 +238,8 @@ class Graph:
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name)
 
-    def output(self, result: Argument):
-        assert len(self._nodes) != 0
-        assert self._nodes[-1].op == 'return'
-        # Indiscriminately dumping everything into a tuple here. The user-provided
-        # `result` value will always be result.args[0]
-        self._nodes[-1].args = (result,)
-
-    @property
-    def result(self):
-        assert self._nodes[-1].op == 'return'
-        return self.nodes[-1].args[0]
+    def output(self, result: Argument) -> Node:
+        return self.create_node('output', 'output', (result,))
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -280,7 +270,15 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
+        output : Optional[str] = None
         for node in self._nodes:
+            if output:
+                # If we get here, we've recorded a output node, but there
+                # are additional nodes in the graph afterward! Since we don't
+                # support control flow, this early return behavior must be an
+                # error
+                raise RuntimeError('Nodes found after output node! Early '
+                                   'returns are not supported')
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
@@ -319,14 +317,13 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
-            elif node.op == 'return':
+            elif node.op == 'output':
+                output = str(node.args[0])
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         src = ''.join(body)
-        return_node = self._nodes[-1]
-        assert return_node.op == 'return'
-        return src, str(self._nodes[-1].args[0]), free_vars
+        return src, output, free_vars
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
@@ -355,8 +352,6 @@ class Graph:
                 return None
             elif n.op == 'get_attr':
                 return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
-            elif n.op == 'return':
-                return f'return {n.args}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
@@ -377,7 +372,6 @@ class Graph:
             - Checks Nodes have correct ownership (owned by this graph)
             - Checks Nodes appear in topological order
             - If `root` is provided, checks that `target`s exist in `root`
-            - Check for exactly one `return` node at the end of the Graph
         """
 
         # Check topo order
@@ -393,9 +387,8 @@ class Graph:
 
         seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
-        return_node_idx : Optional[int] = None
-        for i, node in enumerate(self._nodes):
-            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'return']:
+        for node in self._nodes:
+            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
@@ -406,19 +399,6 @@ class Graph:
             if node.name in seen_names:
                 raise RuntimeError(f'Node redefined name {node.name}!')
             seen_names.add(node.name)
-
-            if node.op == 'return':
-                if return_node_idx:
-                    raise RuntimeError('Multiple return nodes in this graph!')
-                return_node_idx = i
-
-        if return_node_idx is None:
-            raise RuntimeError('This graph had no return node!')
-        elif return_node_idx != len(self._nodes) - 1:
-            raise RuntimeError('Return node was not the last node in the graph!')
-
-        if hasattr(self, 'result'):
-            map_arg(self.result, check_arg)
 
         # Check targets are legit
         if root:
