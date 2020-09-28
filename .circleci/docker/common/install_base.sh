@@ -31,6 +31,7 @@ install_ubuntu() {
     build-essential \
     ca-certificates \
     curl \
+    gdb \
     git \
     libatlas-base-dev \
     libc6-dbg \
@@ -41,6 +42,7 @@ install_ubuntu() {
     libasound2-dev \
     libsndfile-dev \
     python \
+    python-dbg \
     python-dev \
     python-setuptools \
     python-wheel \
@@ -131,4 +133,3 @@ sudo make install
 cd ../../
 rm -rf valgrind_build
 alias valgrind="/usr/local/bin/valgrind"
-

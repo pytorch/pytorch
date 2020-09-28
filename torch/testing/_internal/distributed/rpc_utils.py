@@ -112,6 +112,32 @@ class RpcMultiProcessTestCase(MultiProcessTestCase, RpcAgentTestFixture):
             except Exception as err:
                 print(f"Process {rank} didn't produce stderr ({err})")
 
+    def on_test_timeout(self):
+        for rank in range(self.world_size):
+            process = self.processes[rank]
+            if process.exitcode is not None:
+                continue
+            try:
+                # There's no guarantee that GDB will be available on the machine
+                # but this is a best-effort diagnostic and we'll ignore errors.
+                subprocess.check_call([
+                    "gdb",
+                    sys.executable,
+                    "--pid",
+                    f"{process.pid}",
+                    "--batch",
+                    # Print the C/C++ stack trace of all threads.
+                    "--eval-command",
+                    "thread apply all backtrace",
+                    # Print the Python stack trace of all threads.
+                    # This requires GDB's Python extensions to be installed and
+                    # may fail if they aren't. We'll ignore those failures.
+                    "--eval-command",
+                    "thread apply all py-bt",
+                ])
+            except subprocess.SubprocessError as err:
+                print(f"Issues while retrieving stack traces for process {rank}: {err}")
+
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN and fork() is broken")
 class ForkHelper(RpcMultiProcessTestCase):

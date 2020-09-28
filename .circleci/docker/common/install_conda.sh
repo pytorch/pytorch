@@ -92,6 +92,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
+  conda_install gdb -c conda-forge
 
   # Install some other packages
   # TODO: Why is scipy pinned
