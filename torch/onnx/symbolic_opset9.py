@@ -186,8 +186,10 @@ def stack(g, tensor_list, dim):
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in sym_help._unpack_list(tensor_list)]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
+
 def _list(g, self):
     return self
+
 
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
@@ -1558,7 +1560,7 @@ def tensor(g, data, dtype=None, device=None, requires_grad=False):
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            dtype = sym_help._maybe_get_const(data, 't').type().scalarType()
+            dtype = data.type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 
