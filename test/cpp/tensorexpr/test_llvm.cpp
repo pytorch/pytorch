@@ -326,8 +326,8 @@ void testLLVMVecLoadStoreTest() {
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
   void testLLVMVecFloat_##Name##Lane##Lanes##Test() {            \
     KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kFloat));               \
-    Placeholder b(BufHandle("B", {1}, kFloat));               \
+    Placeholder a(BufHandle("A", {1}, kFloat));                  \
+    Placeholder b(BufHandle("B", {1}, kFloat));                  \
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
@@ -371,8 +371,8 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
   void testLLVMVecDouble_##Name##Lane##Lanes##Test() {           \
     KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kDouble));              \
-    Placeholder b(BufHandle("B", {1}, kDouble));              \
+    Placeholder a(BufHandle("A", {1}, kDouble));                 \
+    Placeholder b(BufHandle("B", {1}, kDouble));                 \
     float val = 0.5f;                                            \
     std::vector<double> a_buffer(Lanes, val);                    \
     std::vector<double> b_buffer(Lanes, val);                    \
