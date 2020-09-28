@@ -2,6 +2,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
 
@@ -30,6 +31,32 @@ namespace api {
 //
 
 struct Pipeline final {
+  //
+  // Barrier
+  //
+
+  struct Barrier final {
+    enum class Type {
+      Execution,
+      Buffer,
+      Image,
+    } type;
+
+    struct Stage final {
+      VkPipelineStageFlags src;
+      VkPipelineStageFlags dst;
+    } stage;
+
+    union {
+      Resource::Buffer::Barrier buffer;
+      Resource::Image::Barrier image;
+    } as;
+
+    Barrier(Stage stage);
+    Barrier(Stage stage, Resource::Buffer::Barrier buffer);
+    Barrier(Stage stage, Resource::Image::Barrier image);
+  };
+
   //
   // Layout
   //
@@ -111,6 +138,17 @@ struct Pipeline final {
   };
 
   /*
+    Object
+  */
+
+  struct Object final {
+    VkPipeline handle;
+    VkPipelineLayout layout;
+
+    operator bool() const;
+  };
+
+  /*
     Cache
   */
 
@@ -126,6 +164,29 @@ struct Pipeline final {
 //
 // Impl
 //
+
+inline Pipeline::Barrier::Barrier(const Stage stage)
+  : type(Type::Execution),
+    as{} {
+}
+
+inline Pipeline::Barrier::Barrier(
+    const Stage stage,
+    const Resource::Buffer::Barrier barrier)
+  : type(Type::Buffer),
+    as{
+      .buffer = barrier,
+    } {
+}
+
+inline Pipeline::Barrier::Barrier(
+    const Stage stage,
+    const Resource::Image::Barrier barrier)
+  : type(Type::Image),
+    as{
+      .image = barrier,
+    } {
+}
 
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
@@ -154,6 +215,11 @@ inline size_t Pipeline::Factory::Hasher::operator()(
       descriptor.work_group.x,
       descriptor.work_group.y,
       descriptor.work_group.z);
+}
+
+inline Pipeline::Object::operator bool() const {
+  return (VK_NULL_HANDLE != handle) &&
+         (VK_NULL_HANDLE != layout);
 }
 
 } // namespace api

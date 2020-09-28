@@ -18,6 +18,15 @@ struct Resource final {
   //
 
   struct Memory final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
     VmaAllocator allocator;
     VmaAllocation allocation;
 
@@ -71,6 +80,14 @@ struct Resource final {
   //
 
   struct Buffer final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      Memory::Barrier memory;
+    };
+
     /*
       Descriptor
     */
@@ -150,6 +167,20 @@ struct Resource final {
       explicit Sampler(const GPU& gpu)
         : cache(Factory(gpu)) {
       }
+    };
+
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkImage handle;
+      Memory::Barrier memory;
+
+      struct {
+        VkImageLayout src;
+        VkImageLayout dst;
+      } layout;
     };
 
     /*
@@ -335,6 +366,10 @@ inline Resource::Fence::operator bool() const {
 }
 
 inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
+  }
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       id < pool->fence_.pool.size(),
       "Invalid Vulkan fence!");
