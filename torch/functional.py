@@ -1214,7 +1214,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
-        Use :func:`torch.linalg.norm` instead.
+        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
+        has a different signature and slightly different behavior that is
+        more consistent with NumPy's numpy.linalg.norm.
 
     Args:
         input (Tensor): the input tensor
@@ -1273,9 +1275,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-    warnings.warn((
-        "torch.norm is deprecated and may be removed in a future PyTorch release. "
-        "Use torch.linalg.norm instead."))
 
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):

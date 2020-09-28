@@ -654,18 +654,6 @@ class TestLinalg(TestCase):
                 for ord in ord_matrix:
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
 
-    def test_norm_deprecated(self, device):
-        expected_message = (
-            r'torch.norm is deprecated and may be removed in a future PyTorch release. '
-            r'Use torch.linalg.norm instead.')
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            for func in [torch.norm, torch.functional.norm]:
-                func(torch.rand(10, device=device))
-        self.assertEqual(len(w), 2)
-        for wi in w:
-            self.assertEqual(str(wi.message), expected_message)
-
     def test_norm_fastpaths(self, device):
         x = torch.randn(3, 5, device=device)
 
