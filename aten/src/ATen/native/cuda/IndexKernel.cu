@@ -38,28 +38,28 @@ __device__ __forceinline__ IndexType indexToOffset(
   if (linearIndex < 0) {
     linearIndex += size;
   }
-  return IndexToOffset<T, IndexType, Dims>::get(linearIndex, info);
+  return cuda::detail::IndexToOffset<T, IndexType, Dims>::get(linearIndex, info);
 }
 
 template<typename IndexType, typename T>
 void dispatchTakePutImpl(const Tensor& input, Tensor& output, const Tensor& index) {
   auto inputInfo = cuda::detail::getTensorInfo<T, IndexType>(input);
-  inputInfo.collapseDims(); // TODO: figure out what collapseDims() does differently from contiguous()
+  inputInfo.collapseDims();
   auto numel = input.numel();
   if (inputInfo.isContiguous()) {
-    at::cuda::CUDA_tensor_apply2<T, int64_t>(
+    cuda::CUDA_tensor_apply2<T, int64_t>(
         output,
         index,
-        [&inputInfo, numel] __device__ __force_inline__(
+        [inputInfo, numel] __device__ (
             T & out, const int64_t& idx) {
             auto offset = indexToOffset<-2, T, IndexType>(inputInfo, idx, numel);
             out = inputInfo.data[offset];
         });
   } else {
-    at::cuda::CUDA_tensor_apply2<T, int64_t>(
+    cuda::CUDA_tensor_apply2<T, int64_t>(
         output,
         index,
-        [&inputInfo, numel] __device__ __force_inline__(
+        [inputInfo, numel] __device__ (
             T & out, const int64_t& idx) {
             auto offset = indexToOffset<-1, T, IndexType>(inputInfo, idx, numel);
             out = inputInfo.data[offset];
@@ -69,7 +69,7 @@ void dispatchTakePutImpl(const Tensor& input, Tensor& output, const Tensor& inde
 
 template<typename T>
 void dispatchTakePut(const Tensor& input, Tensor& output, const Tensor& index) {
-  if (at::cuda::detail::canUse32BitIndexMath(input)) {
+  if (cuda::detail::canUse32BitIndexMath(input)) {
     dispatchTakePutImpl<int32_t, T>(input, output, index);
   } else {
     dispatchTakePutImpl<int64_t, T>(input, output, index);
@@ -256,7 +256,7 @@ void take_out_cuda_template(
 Tensor take_cuda(const Tensor& self, const Tensor& index) {
     auto out = at::empty(index.sizes(), self.options());
     take_out_cuda_template(out, self, index);
-    return output;
+    return out;
 }
 
 Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
