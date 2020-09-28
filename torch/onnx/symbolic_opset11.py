@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 from sys import maxsize
 
@@ -273,7 +272,7 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
     return g.op("Size", self)
 
@@ -711,6 +710,12 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     output = g.op("Gather", output, blocks_col_indices, axis_i=4)
     output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
     return g.op("Reshape", output, output_shape)
+
+
+def narrow(g, input, dim, start, length):
+    from torch.onnx.symbolic_helper import _slice_helper
+    end = g.op("Add", start, length)
+    return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
 
 @parse_args('v', 'i', 'i')

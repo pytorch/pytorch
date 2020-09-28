@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 from multiprocessing import Manager
 import os
@@ -17,7 +16,7 @@ import torch
 import torch.distributed as c10d
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -144,8 +143,21 @@ def skip_if_rocm(func):
 
     return wrapper
 
+def skip_if_win32():
+    return unittest.skipIf(
+        sys.platform == 'win32',
+        "This unit test case is not supportted on Windows platform",
+    )
+
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
+
+def create_device(interface=None):
+    if sys.platform == 'win32' or interface is None:
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
+    else:
+        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
 def get_timeout(test_id):
@@ -162,10 +174,10 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
-        indices = [range(rank + 1)]
+        indices = torch.reshape(torch.arange(rank + 1), (1, rank + 1))
         shape = [world_size] + [2 for _ in range(dense_dims)]
         for _ in range(sparse_dims - 1):
-            indices.append([0] * (rank + 1))
+            indices = torch.cat((indices, torch.zeros(1, rank + 1)))
             shape.append(world_size)
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
@@ -207,7 +219,7 @@ def initialize_temp_directories(init_method=None):
     if init_method is not None:
         os.environ["INIT_METHOD"] = init_method
     else:
-        os.environ["INIT_METHOD"] = "file://" + os.path.join(
+        os.environ["INIT_METHOD"] = FILE_SCHEMA + os.path.join(
             init_dir_path, "shared_init_file"
         )
 

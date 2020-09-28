@@ -1,6 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
-import fcntl
 import itertools
 import random
 import math
@@ -23,6 +21,7 @@ from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
+from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -44,6 +43,10 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
 
 class Foo:
     def __init__(self, x):
@@ -192,10 +195,17 @@ def _lock():
     lockfile = os.path.join(TEMP_DIR, "lockfile")
     with open(lockfile, "w") as lf:
         try:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            yield
+            if sys.platform == 'win32':
+                msvcrt.locking(lf.fileno(), msvcrt.LK_RLCK, 1)
+                yield
+            else:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                yield
         finally:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            if sys.platform == 'win32':
+                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             lf.close()
 
 
@@ -271,10 +281,12 @@ class TestDistBackend(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return "file://{file_name}".format(file_name=self.file_name)
+        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
+        if BACKEND == 'nccl' and not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -690,7 +702,7 @@ class DistributedTest:
 
         # BROADCAST
         def _test_broadcast_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, with_options=False
         ):
             for dtype, value, requires_cuda in [
                 (torch.float, -1e-10, False),
@@ -708,12 +720,24 @@ class DistributedTest:
                     if cuda:
                         expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     if rank == src:
-                        dist.broadcast(expected_tensor, src, group_id)
+                        if with_options:
+                            opts = dist.BroadcastOptions()
+                            opts.rootTensor = 0
+                            opts.rootRank = src
+                            group_id.broadcast([expected_tensor], opts).wait()
+                        else:
+                            dist.broadcast(expected_tensor, src, group_id)
                     else:
                         tensor = _build_tensor(src + 1, -1, dtype)
                         if cuda:
                             tensor = tensor.cuda(rank_to_GPU[rank][0])
-                        dist.broadcast(tensor, src, group_id)
+                        if with_options:
+                            opts = dist.BroadcastOptions()
+                            opts.rootTensor = 0
+                            opts.rootRank = src
+                            group_id.broadcast([tensor], opts).wait()
+                        else:
+                            dist.broadcast(tensor, src, group_id)
                         self.assertEqual(tensor.size(), expected_tensor.size())
                         self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
@@ -729,6 +753,7 @@ class DistributedTest:
             "Only Gloo and Nccl backend supports CUDA allReduce",
         )
         @skip_if_no_gpu
+        @skip_if_rocm
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -744,6 +769,28 @@ class DistributedTest:
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_broadcast_helper(group, group_id, rank)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports high priority stream",
+        )
+        @skip_if_no_gpu
+        @skip_if_rocm
+        def test_nccl_high_priority_stream(self):
+            group, _, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+
+            new_port = str(MASTER_PORT + 1)
+            os.environ['MASTER_PORT'] = new_port
+            gen_iterator = dist.rendezvous('env://', rank, dist.get_world_size())
+            store, rank, size = next(gen_iterator)
+            store = dist.PrefixStore(new_port, store)
+
+            opts = dist.ProcessGroupNCCL.Options()
+            opts.is_high_priority = False
+            group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
+
+            self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
 
         # REDUCE
         def _test_reduce_helper(
@@ -905,6 +952,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @require_backend({"gloo", "nccl"})
+        @skip_if_rocm
         def test_all_reduce_result_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -1871,6 +1919,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @skip_if_rocm
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2063,6 +2112,14 @@ class DistributedTest:
                         param += param.grad
                     param.grad = None
 
+        def _model_step_with_zero_grad(self, model):
+            for param in model.parameters():
+                if param.grad is not None:
+                    with torch.no_grad():
+                        param += param.grad
+                    param.grad.requires_grad_(False)
+                    param.grad.zero_()
+
         def _prepare_dummy_data(self, local_bs):
             # global_bs for DDP should be divisible by WORLD_SIZE
             world_size = int(os.environ["WORLD_SIZE"])
@@ -2085,7 +2142,8 @@ class DistributedTest:
                 self.assertEqual(p_gpu, p_DDP)
 
         def _test_DDP_5iter(
-            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save, offset=None, world_size=0
+            self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
+            offset=None, world_size=0, zero_grad=False
         ):
             for idx in range(5):
                 # single cpu/gpu training
@@ -2104,8 +2162,12 @@ class DistributedTest:
                 )
 
                 # Update weights and run a second iteration to shake out errors
-                self._model_step(model_base)
-                self._model_step(model_DDP)
+                if zero_grad:
+                    self._model_step_with_zero_grad(model_base)
+                    self._model_step_with_zero_grad(model_DDP)
+                else:
+                    self._model_step(model_base)
+                    self._model_step(model_DDP)
                 self._assert_equal_param(
                     list(model_base.parameters()), list(model_DDP.module.parameters())
                 )
@@ -2116,8 +2178,13 @@ class DistributedTest:
                 # save the model in the middle and reload
                 if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
                     with tempfile.NamedTemporaryFile() as tmp:
-                        torch.save(model_DDP, tmp.name)
-                        model_DDP = torch.load(tmp.name)
+                        if sys.platform == 'win32':
+                            torch.save(model_DDP, tmp)
+                            tmp.seek(0)
+                            model_DDP = torch.load(tmp)
+                        else:
+                            torch.save(model_DDP, tmp.name)
+                            model_DDP = torch.load(tmp.name)
 
             with tempfile.TemporaryFile() as tmp_file:
                 torch.save(model_DDP, tmp_file)
@@ -2126,7 +2193,7 @@ class DistributedTest:
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
-        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
+        def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None, gradient_as_bucket_view=False):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
@@ -2141,13 +2208,18 @@ class DistributedTest:
             model_DDP = copy.deepcopy(model)
             model_DDP.cuda(gpu_subset[0])
             model_DDP = nn.parallel.DistributedDataParallel(
-                model_DDP, device_ids=gpu_subset
+                model_DDP, device_ids=gpu_subset, gradient_as_bucket_view=gradient_as_bucket_view
             )
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
-                torch.save(model_DDP, tmp.name)
-                model_DDP = torch.load(tmp.name)
+                if sys.platform == 'win32':
+                    torch.save(model_DDP, tmp)
+                    tmp.seek(0)
+                    model_DDP = torch.load(tmp)
+                else:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
             # dummy data initialization
             local_bs = len(gpu_subset)
@@ -2163,14 +2235,11 @@ class DistributedTest:
                 local_bs,
                 rank,
                 global_bs,
-                True
+                True,
             )
             self._barrier()
 
-        @unittest.skipIf(
-            BACKEND == "nccl", "nccl does not support DDP on CPU models"
-        )
-        def test_DistributedDataParallelCPU(self):
+        def _test_DistributedDataParallelCPU(self, gradient_as_bucket_view=False):
             # Run a simple end to end DDP-CPU model, use result of single node
             # model as baseline
             group, group_id, rank = self._init_global_test()
@@ -2180,7 +2249,8 @@ class DistributedTest:
 
             # DDP-CPU training setup
             model_DDP = copy.deepcopy(model_base)
-            model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_DDP, gradient_as_bucket_view=gradient_as_bucket_view)
 
             # dummy data initialization
             local_bs = 2
@@ -2188,9 +2258,21 @@ class DistributedTest:
 
             # check two model parameters over 5 iterations
             self._test_DDP_5iter(
-                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
+                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False, zero_grad=True
             )
             self._barrier()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU(self):
+            self._test_DistributedDataParallelCPU()
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_DistributedDataParallelCPU_grad_is_view(self):
+            self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -2206,7 +2288,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_non_default_stream(self):
-            stream = torch.cuda.Stream()
+            stream = torch.cuda.Stream(self.rank)
             rank = self.rank
             with torch.cuda.stream(stream):
                 net = torch.nn.parallel.DistributedDataParallel(
@@ -2255,6 +2337,25 @@ class DistributedTest:
             gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        @skip_if_rocm
+        def test_DistributedDataParallel_with_grad_is_view(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = list(rank_to_GPU[rank])
+            self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, gradient_as_bucket_view=True)
+
+            # test output_device
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+
+            # test device_ids
+            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            self._test_DistributedDataParallel(
+                gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
+
         def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
@@ -2275,8 +2376,13 @@ class DistributedTest:
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
-                torch.save(model_DDP, tmp.name)
-                model_DDP = torch.load(tmp.name)
+                if sys.platform == 'win32':
+                    torch.save(model_DDP, tmp)
+                    tmp.seek(0)
+                    model_DDP = torch.load(tmp)
+                else:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
             # data initialization
             input_cpu = torch.randn(global_bs, 2)
@@ -2919,7 +3025,7 @@ class DistributedTest:
             rank = self.rank
             sync_interval = test_case.sync_interval
             # Ensure all outsanding GPU work is comlete so this test runs independently.
-            torch.cuda.synchronize()
+            dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
             # there are many buckets.
             net = torch.nn.parallel.DistributedDataParallel(
