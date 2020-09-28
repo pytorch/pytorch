@@ -1711,6 +1711,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_test(NarrowModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_narrow_dynamic(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, input.shape[0] - 1)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_test(NarrowModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_fill(self):
         class IndexFillModel(torch.nn.Module):

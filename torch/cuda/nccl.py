@@ -3,6 +3,7 @@ import warnings
 
 import torch._six
 import torch.cuda
+from typing import Optional, Sequence, Union
 
 
 __all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
@@ -43,7 +44,7 @@ def init_rank(num_ranks, uid, rank):
     return torch._C._nccl_init_rank(num_ranks, uid, rank)
 
 
-def _check_sequence_type(inputs):
+def _check_sequence_type(inputs: Union[torch.Tensor, Sequence[torch.Tensor]]) -> None:
     if not isinstance(inputs, collections.Container) or isinstance(inputs, torch.Tensor):
         raise TypeError("Inputs should be a collection of tensors")
 
@@ -58,8 +59,15 @@ def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
 
 # `output` used to be `outputs`, taking in a list of tensors. So we have two
 # arguments for BC reasons.
-def reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None, *, outputs=None):
+def reduce(inputs: Sequence[torch.Tensor],
+           output: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+           root: int = 0,
+           op: int = SUM,
+           streams: Optional[Sequence[torch.cuda.Stream]] = None,
+           comms=None, *,
+           outputs: Optional[Sequence[torch.Tensor]] = None) -> None:
     _check_sequence_type(inputs)
+    _output: torch.Tensor
     if outputs is not None:
         if output is not None:
             raise ValueError(
@@ -70,30 +78,33 @@ def reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None, *, out
             warnings.warn(
                 "nccl.reduce with an output tensor list is deprecated. "
                 "Please specify a single output tensor with argument 'output' instead instead.")
-            output = outputs[root]
+            _output = outputs[root]
     elif not isinstance(output, torch.Tensor) and isinstance(output, torch._six.container_abcs.Sequence):
         # User called old API with positional arguments of list of output tensors.
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "
             "Please specify a single output tensor.")
-        output = output[root]
-    elif output is None:
-        output = inputs[root]
-    torch._C._nccl_reduce(inputs, output, root, op, streams, comms)
+        _output = output[root]
+    else:
+        _output = inputs[root] if output is None else output
+    torch._C._nccl_reduce(inputs, _output, root, op, streams, comms)
 
 
-def broadcast(inputs, root=0, streams=None, comms=None):
+def broadcast(inputs: Sequence[torch.Tensor], root: int = 0, streams=None, comms=None) -> None:
     _check_sequence_type(inputs)
     torch._C._nccl_broadcast(inputs, root, streams, comms)
 
 
-def all_gather(inputs, outputs, streams=None, comms=None):
+def all_gather(inputs: Sequence[torch.Tensor], outputs: Sequence[torch.Tensor], streams=None, comms=None) -> None:
     _check_sequence_type(inputs)
     _check_sequence_type(outputs)
     torch._C._nccl_all_gather(inputs, outputs, streams, comms)
 
 
-def reduce_scatter(inputs, outputs, op=SUM, streams=None, comms=None):
+def reduce_scatter(inputs: Sequence[torch.Tensor],
+                   outputs: Sequence[torch.Tensor],
+                   op: int = SUM,
+                   streams=None, comms=None) -> None:
     _check_sequence_type(inputs)
     _check_sequence_type(outputs)
     torch._C._nccl_reduce_scatter(inputs, outputs, op, streams, comms)

@@ -21,7 +21,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -1734,6 +1734,7 @@ class TestCuda(TestCase):
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
