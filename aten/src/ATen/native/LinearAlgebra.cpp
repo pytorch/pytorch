@@ -1708,51 +1708,36 @@ Tensor kron(const Tensor& a, const Tensor& b) {
   int64_t min_ndim = std::min(a_ndim, b_ndim);
   int64_t ndim_diff = std::abs(a_ndim - b_ndim);
 
-  std::vector<int64_t> kron_permutation(a_ndim + b_ndim);
-
   std::vector<int64_t> a_axes(a_ndim);
   std::vector<int64_t> b_axes(b_ndim);
   std::iota(a_axes.begin(), a_axes.end(), 0);
   std::iota(b_axes.begin(), b_axes.end(), 0 + a_ndim);
 
-  if (b_ndim <= a_ndim) {
-    for (int64_t i = 0; i <= ndim_diff; i++) {
-      kron_permutation[i] = a_axes[i];
-    }
-  } else {
-    for (int64_t i = 0; i < ndim_diff; i++) {
-      kron_permutation[i] = b_axes[i];
-    }
+  bool is_a_larger = a_ndim >= b_ndim;
+  std::vector<int64_t> kron_permutation(a_ndim + b_ndim);
+  for (int64_t i = 0; i < ndim_diff; i++) {
+    kron_permutation[i] = is_a_larger ? a_axes[i] : b_axes[i];
   }
-
-  for (int64_t i = 0, j = 0; i < std::min(a_ndim, b_ndim); i++, j += 2) {
+  for (int64_t i = 0, j = 0; i < min_ndim; i++, j += 2) {
     kron_permutation[a_ndim + b_ndim - 1 - j] = b_axes[b_ndim - 1 - i];
     kron_permutation[a_ndim + b_ndim - 1 - j - 1] = a_axes[a_ndim - 1 - i];
   }
 
-  int64_t res_ndim = std::max(a_ndim, b_ndim);
-  std::vector<int64_t> res_shape(res_ndim);
-  if (a_ndim > b_ndim) {
-    for (int64_t i = 0; i < ndim_diff; i++) {
-      res_shape[i] = a_sizes[i];
-    }
-    for (int64_t i = 0; i < b_ndim; i++) {
-      res_shape[ndim_diff + i] = a_sizes[ndim_diff + i] * b_sizes[i];
-    }
-  } else {
-    for (int64_t i = 0; i < ndim_diff; i++) {
-      res_shape[i] = b_sizes[i];
-    }
-    for (int64_t i = 0; i < a_ndim; i++) {
-      res_shape[ndim_diff + i] = b_sizes[ndim_diff + i] * a_sizes[i];
-    }
+  std::vector<int64_t> result_shape(std::max(a_ndim, b_ndim));
+  for (int64_t i = 0; i < ndim_diff; i++) {
+    result_shape[i] = is_a_larger ? a_sizes[i] : b_sizes[i];
+  }
+  for (int64_t i = 0; i < min_ndim; i++) {
+    result_shape[ndim_diff + i] = is_a_larger
+        ? a_sizes[ndim_diff + i] * b_sizes[i]
+        : b_sizes[ndim_diff + i] * a_sizes[i];
   }
 
   Tensor result = at::tensordot(a, b, {}, {});
   // Step 2: now permute result
   result = result.permute(kron_permutation);
   // Step 3: reshape
-  result = result.reshape(res_shape);
+  result = result.reshape(result_shape);
 
   return result;
 }
