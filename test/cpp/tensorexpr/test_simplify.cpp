@@ -3964,5 +3964,31 @@ void testSimplifyRampSubBroadcast() {
   ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
+void testSimplifyBroadcastTermExpander() {
+  KernelScope kernel_scope;
+  int num_lanes = 8;
+  ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);
+  ExprHandle bc1 = Broadcast::make(ExprHandle(1), num_lanes);
+  ExprHandle bc2 = Broadcast::make(ExprHandle(2), num_lanes);
+  // NB: We need a term in the middle which isn't simplified to trigger the
+  // relevant path in TermExpander::mutate. The two bc1 terms are brought
+  // together and simplified to 2 * bc1, which then needs to make 2 multi-lane.
+  ExprHandle simplified = IRSimplifier::simplify(bc1 + (bc0 / bc2) + bc1);
+  Buffer buf(BufHandle("buf", {num_lanes}, kInt));
+  // The result isn't fully simplified currently and thus would be brittle to
+  // match. Observe its value instead.
+  auto store = Store::make(
+      buf,
+      {Ramp::make(0, 1, num_lanes)},
+      simplified,
+      Broadcast::make(ExprHandle(1), num_lanes));
+  SimpleIREvaluator eval(store, buf);
+  std::vector<int> output(num_lanes);
+  eval(output);
+  for (int i = 0; i < num_lanes; ++i) {
+    ASSERT_EQ(output[i], 2);
+  }
+}
+
 } // namespace jit
 } // namespace torch

@@ -1,4 +1,5 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -7,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-void testSubgraphUtils() {
+TEST(SubgraphUtilsTest, Basic) {
   auto graph = build_lstm();
   EliminateCommonSubexpression(graph);
 
@@ -37,7 +38,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-void testSubgraphUtilsVmap() {
+TEST(SubgraphUtilsTest, Vmap) {
   auto graph = std::make_shared<Graph>();
 
   std::unordered_map<std::string, Value*> parse_map;
