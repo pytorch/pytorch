@@ -309,15 +309,9 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             return
 
-        orig_optimizers = [optim.Adam, optim.AdamW,
-                           optim.SGD, optim.RMSprop,
-                           optim.Rprop, optim.ASGD,
-                           optim.Adamax, optim.Adadelta]
+        orig_optimizers = [optim.SGD]
 
-        mt_optimizers = [optim._multi_tensor.Adam, optim._multi_tensor.AdamW,
-                         optim._multi_tensor.SGD, optim._multi_tensor.RMSprop,
-                         optim._multi_tensor.Rprop, optim._multi_tensor.ASGD,
-                         optim._multi_tensor.Adamax, optim._multi_tensor.Adadelta]
+        mt_optimizers = [optim._multi_tensor.SGD]
 
         kIterations = 1001
         device = 'cuda'
@@ -347,13 +341,16 @@ class TestOptim(TestCase):
                 pretrained_dict['2.bias'] = bias2
                 model.load_state_dict(pretrained_dict)
 
-                optimizer = opt(model.parameters(), lr=1.0)
+                optimizer = opt(model.parameters(), lr=1.0, momentum=1, nesterov=True, weight_decay=1)
 
-                for _ in range(kIterations): 
+                for i in range(5): 
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
+
+                    if i == 0:
+                        bias.grad = None
 
                     def closure():
                         return torch.Tensor([10])

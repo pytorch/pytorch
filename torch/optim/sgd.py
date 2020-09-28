@@ -93,6 +93,7 @@ class SGD(Optimizer):
 
             for p in group['params']:
                 if p.grad is None:
+                    print("grad is none!")
                     continue
                 d_p = p.grad
                 if weight_decay != 0:

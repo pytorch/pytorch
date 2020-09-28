@@ -113,7 +113,9 @@ class SGD(Optimizer):
 
             if weight_decay != 0:
                 grads = torch._foreach_add(grads, params_with_grad, alpha=weight_decay)
-
+                
+            print("len -> ", len(grads))
+            
             if momentum != 0:
                 bufs = []
 
