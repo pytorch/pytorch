@@ -30,8 +30,8 @@ void testCudaTestVectorAdd01_impl() {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<ctype>();
-  ExternalTensor a_buf("a", dtype, {num_iter, block_count, block_size});
-  ExternalTensor b_buf("b", dtype, {num_iter, block_count, block_size});
+  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
+  Placeholder b_buf("b", dtype, {num_iter, block_count, block_size});
   Tensor* c = Compute(
       "c",
       {
@@ -96,7 +96,7 @@ void testCudaSigmoid() {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<float>();
-  ExternalTensor a_buf("a", dtype, {num_iter, block_count, block_size});
+  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
   Tensor* c = Compute(
       "c",
       {
@@ -161,8 +161,8 @@ void testCudaTestVectorAdd01() {
 
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   KernelScope kernel_scope;
-  ExternalTensor a_buf("a", kFloat, {N});
-  ExternalTensor b_buf("b", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {N});
+  Placeholder b_buf("b", kFloat, {N});
   Tensor* c = Compute(
       "c",
       {
@@ -223,7 +223,7 @@ void testCudaTestVectorAdd02() {
 void testCudaHalfCast() {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
-  ExternalTensor a("a", half, {4});
+  Placeholder a("a", half, {4});
   Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(kFloat, a(i));
   });
@@ -264,8 +264,8 @@ void testCudaDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    ExternalTensor a(BufHandle("a", {m, n}, kFloat));
-    ExternalTensor b(BufHandle("b", {m, n}, kFloat));
+    Placeholder a(BufHandle("a", {m, n}, kFloat));
+    Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -385,7 +385,7 @@ void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  ExternalTensor a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   LoopNest l({b});
@@ -435,8 +435,8 @@ void testCudaDynamicShapeSplit() {
 void testCudaOneBlockOneThreadGlobalReduce1() {
   const static int N = 1024;
   KernelScope kernel_scope;
-  ExternalTensor data_buf("data", kFloat, {N});
-  ExternalTensor output_buf("output", kFloat, {1});
+  Placeholder data_buf("data", kFloat, {N});
+  Placeholder output_buf("output", kFloat, {1});
 
   // The test adds the following code for trivial reduction:
   // for (int bidx = 0; bidx < 1; bidx++) { // blockIdx.x
@@ -514,8 +514,8 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   //      b[0] = b[0] + a[t] // implied atomic
   // clang-format on
 
-  ExternalTensor a_buf("a", kFloat, {N});
-  ExternalTensor b_buf("b", kFloat, {1});
+  Placeholder a_buf("a", kFloat, {N});
+  Placeholder b_buf("b", kFloat, {1});
 
   Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
   VarHandle t("t", kInt);
@@ -596,8 +596,8 @@ void testCudaNoThreadIdxWrite_1() {
   //  covered by its own thread-idx
 
   const static int N = 1024;
-  ExternalTensor a_buf("a", kFloat, {2});
-  ExternalTensor b_buf("b", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {2});
+  Placeholder b_buf("b", kFloat, {N});
 
   VarHandle k("k", kInt);
   VarHandle l("l", kInt);
@@ -698,8 +698,8 @@ void testCudaSharedMemReduce_1() {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  ExternalTensor a("a", kFloat, {1, M, N});
-  ExternalTensor b("b", kFloat, {1});
+  Placeholder a("a", kFloat, {1, M, N});
+  Placeholder b("b", kFloat, {1});
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -834,8 +834,8 @@ void testCudaLocalMemReduce_1() {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  ExternalTensor a("a", kFloat, {1, M, N});
-  ExternalTensor b("b", kFloat, {1});
+  Placeholder a("a", kFloat, {1, M, N});
+  Placeholder b("b", kFloat, {1});
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -929,7 +929,7 @@ void testCudaLocalMemReduce_1() {
 void testCudaHalfSupport() {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
-  ExternalTensor a("a", half, {4});
+  Placeholder a("a", half, {4});
   Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
     return Cast::make(half, ExprHandle(2.0f) * a(i));
   });
@@ -987,7 +987,7 @@ void testCudaHalfSupport() {
 void testCudaHalfPropagation() {
   KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
-  ExternalTensor a("a", half, {4});
+  Placeholder a("a", half, {4});
   Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
     return Max::make(a(i), ExprHandle(new HalfImm(0)), true);
   });
@@ -1035,9 +1035,9 @@ void testCudaHalfPropagation() {
 
 void testCudaPrioritizeDependents() {
   KernelScope kernel_scope;
-  ExternalTensor a("a", kFloat, {10});
-  ExternalTensor b("b", kFloat, {12});
-  ExternalTensor c("c", kFloat, {12});
+  Placeholder a("a", kFloat, {10});
+  Placeholder b("b", kFloat, {12});
+  Placeholder c("c", kFloat, {12});
 
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
@@ -1111,8 +1111,8 @@ void testCudaMaskBlockDim() {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {B_SIZE});
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
   Tensor* c = Compute(
       "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
@@ -1203,8 +1203,8 @@ void testCudaMaskThreadDim() {
   KernelScope kernel_scope;
   int A_SIZE = 50;
   int B_SIZE = 100;
-  ExternalTensor a_buf("a", kFloat, {A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {B_SIZE});
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
   Tensor* c = Compute(
       "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
@@ -1297,8 +1297,8 @@ void testCudaMaskMultiBlockDim() {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {B_SIZE});
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
   Tensor* c = Compute(
       "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
@@ -1390,8 +1390,8 @@ void testCudaMaskBlockAndThreadDim() {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {B_SIZE});
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
   Tensor* c = Compute(
       "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
@@ -1482,8 +1482,8 @@ void testCudaMaskMultiDim() {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
   Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -1612,8 +1612,8 @@ void testCudaMaskMultiDimSymbolic() {
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
   VarHandle B_SIZE("B_SIZE", kInt);
-  ExternalTensor a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
   Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -1748,10 +1748,10 @@ void testCudaMaskCompoundInnerLoop() {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  ExternalTensor c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
 
   // Can't build this using Compute and transforms yet.
   LoopOptions blockBound;
@@ -1887,10 +1887,10 @@ void testCudaMaskInnerLoopOneBlock() {
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
   int B_SIZE = 50;
-  ExternalTensor a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
-  ExternalTensor c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
 
   // Can't build this using Compute and transforms yet.
   LoopOptions blockBound;
@@ -2026,8 +2026,8 @@ void testCudaMaskMultiDimMultiAxis() {
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
   int B_SIZE = 15;
-  ExternalTensor a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
   Tensor* c = Compute(
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
@@ -2157,8 +2157,8 @@ void testCudaMaskMultiDimMultiLevel() {
   int OUTER_B_SIZE = 5;
   int A_SIZE = 30;
   int B_SIZE = 15;
-  ExternalTensor a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
-  ExternalTensor b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
+  Placeholder a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
   Tensor* c = Compute(
       "C",
       {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},

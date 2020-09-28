@@ -157,11 +157,11 @@ class Tensor : KernelScopedObject {
   const Expr* initializer_{nullptr};
 };
 
-class ExternalTensor {
+class Placeholder {
  public:
-  ExternalTensor(const BufHandle& data) : data_(data.node()) {
+  Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
-      throw malformed_input("ExternalTensor dtype must be Handle");
+      throw malformed_input("Placeholder dtype must be Handle");
     }
 
     std::vector<ExprHandle> stride_handles(ndim());
@@ -174,11 +174,11 @@ class ExternalTensor {
     }
     strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
-  ExternalTensor(
+  Placeholder(
       const std::string& name,
       const Dtype& dtype,
       const std::vector<ExprHandle>& dims)
-      : ExternalTensor(BufHandle(name, dims, dtype)) {}
+      : Placeholder(BufHandle(name, dims, dtype)) {}
 
   const Buf* data() const {
     return data_;
@@ -228,7 +228,7 @@ class ExternalTensor {
   std::vector<const Expr*> strides_;
 };
 
-inline ExprHandle ExternalTensor::LoadValue(
+inline ExprHandle Placeholder::LoadValue(
     const std::vector<ExprHandle>& indices) const {
   return Load::make(*this, indices, ExprHandle(1));
 }
@@ -318,12 +318,12 @@ Tensor* Reduce(
   return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
 }
 
-// Overload for the common case of all dimensions of a ExternalTensor.
+// Overload for the common case of all dimensions of a Placeholder.
 TORCH_API Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    const ExternalTensor& buffer,
+    const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args);
 
 // Overload for the common case of all dimensions of a prevously Computed
