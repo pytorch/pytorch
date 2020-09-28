@@ -108,14 +108,16 @@ class SGD(Optimizer):
                         if momentum != 0: 
                             raise RuntimeError('SGD does not support momentum for sparse gradients')
 
+            print("len -> ", len(grads))
+            print("len2 -> ", len(params_with_grad), "\n")
             if grads == []:
                 return loss
 
             if weight_decay != 0:
                 grads = torch._foreach_add(grads, params_with_grad, alpha=weight_decay)
                 
-            print("len -> ", len(grads))
             
+
             if momentum != 0:
                 bufs = []
 
