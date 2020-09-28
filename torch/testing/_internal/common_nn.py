@@ -871,6 +871,36 @@ def smoothl1loss_no_reduce_scalar_test():
         pickle=False)
 
 
+def smoothl1loss_beta_test():
+    t = torch.randn(2, 3, 4)
+    return dict(
+        fullname='SmoothL1Loss_beta',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none', beta=0.5)),
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone), 0.5)''',
+        input_fn=lambda: torch.randn(2, 3, 4),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0.5),
+        pickle=False)
+
+
+def smoothl1loss_zero_beta_test():
+    t = torch.randn(2, 3, 4)
+    return dict(
+        fullname='SmoothL1Loss_zero_beta',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none', beta=0)),
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone), 0)''',
+        input_fn=lambda: torch.randn(2, 3, 4),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
+        pickle=False)
+
+
 def multilabelmarginloss_0d_no_reduce_test():
     t = torch.zeros(()).long()
     return dict(
@@ -1244,6 +1274,8 @@ new_module_tests = [
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
     smoothl1loss_no_reduce_scalar_test(),
+    smoothl1loss_beta_test(),
+    smoothl1loss_zero_beta_test(),
     multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
@@ -1601,6 +1633,7 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1620,6 +1653,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1629,6 +1663,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1638,6 +1673,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1647,6 +1683,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1657,6 +1694,7 @@ new_module_tests = [
         desc='zero_batch',
         test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_dilated',
@@ -1664,6 +1702,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
         input_size=(2, 4, 10),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_groups',
@@ -1672,6 +1711,7 @@ new_module_tests = [
         input_size=(2, 4, 6),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1702,6 +1742,7 @@ new_module_tests = [
         cudnn=True,
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d_groups',
@@ -2117,7 +2158,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2140,7 +2181,7 @@ new_module_tests = [
         desc='stride',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2151,7 +2192,7 @@ new_module_tests = [
         desc='stride_padding',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2180,6 +2221,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_dilated_strided',
@@ -2187,6 +2229,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2195,6 +2238,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2205,6 +2249,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='MaxPool3d',
@@ -3599,11 +3644,15 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
-def smoothl1loss_reference(input, target, reduction='mean'):
+def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
     abs_diff = (input - target).abs()
-    ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
-    lt_one_mask = (abs_diff < 1).type_as(abs_diff)
-    output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
+    ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
+    lt_beta_mask = (abs_diff < beta).type_as(abs_diff)
+    # when beta <= 0 we should just use l1_loss
+    if beta == 0:
+        output = abs_diff
+    else:
+        output = ge_beta_mask * (abs_diff - 0.5 * beta) + lt_beta_mask * 0.5 * (abs_diff ** 2) / beta
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -3890,7 +3939,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3900,7 +3949,7 @@ criterion_tests = [
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3911,7 +3960,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3922,7 +3971,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -3933,7 +3982,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='KLDivLoss',
@@ -3966,7 +4015,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -3977,7 +4026,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -4020,7 +4069,7 @@ criterion_tests = [
         desc="1d",
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -4030,7 +4079,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
@@ -4101,8 +4150,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -4179,7 +4228,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4189,7 +4238,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d_alert_nondeterministic',
-        # check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=(not TEST_WITH_ROCM),
         test_cpu=False,
         decorator=expectedAlertNondeterministic('SpatialClassNLLCriterion_updateOutput', fn_has_device_arg=False)
     ),
@@ -4202,7 +4251,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4213,7 +4262,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4223,7 +4272,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='higher_dim',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4233,7 +4282,7 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
@@ -4305,7 +4354,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
         desc='scalar',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='MSELoss',
@@ -4315,7 +4364,7 @@ criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_forward_only=True,
         desc='prec',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='BCELoss',
@@ -4326,7 +4375,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
-        check_bfloat16=TEST_WITH_ROCM,
+        check_bfloat16=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -4342,8 +4391,8 @@ criterion_tests = [
         input_size=(),
         target_fn=lambda: torch.randn((), requires_grad=True),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
         desc='scalar',
     ),
     dict(
@@ -4433,7 +4482,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
         check_jit=False,
@@ -4452,7 +4500,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
     dict(
         module_name='CTCLoss',
@@ -4468,7 +4515,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
 ]
 
@@ -5003,8 +5049,9 @@ class CriterionTest(InputVariableMixin, TestBase):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
-        self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
+        self.with_tf32 = kwargs.get('with_tf32', True)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5046,8 +5093,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
-            elif isinstance(obj, torch.Tensor):
-                return obj.to(dtype)
             elif isinstance(obj, tuple):
                 return tuple(convert_dtype(o, dtype, requires_grad) for o in obj)
             else:
@@ -5064,8 +5109,7 @@ class CriterionTest(InputVariableMixin, TestBase):
         # Convert input, target and module parameters to dtype
         if dtype is not None:
             cpu_input = convert_dtype(cpu_input, dtype, True)
-            # NLLLoss requires target to be LongTensor
-            if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
+            if cpu_target.is_floating_point() or cpu_target.is_complex():
                 cpu_target = convert_dtype(cpu_target, dtype)
             cpu_module.type(dtype)
             gpu_module.type(dtype)

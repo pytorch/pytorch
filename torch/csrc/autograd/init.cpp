@@ -60,8 +60,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_remote", &Event::isRemote)
       .def("sequence_nr", &Event::sequence_nr);
 
+  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
+    .def(py::init<bool, bool>());
+
   m.def("_enable_profiler", enableProfiler);
-  m.def("_disable_profiler", disableProfiler);
+  m.def(
+      "_disable_profiler",
+      disableProfiler,
+      py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
