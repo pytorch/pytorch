@@ -32,10 +32,9 @@ std::vector<StackEntry> pythonCallstack() {
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    auto source =
-      std::make_shared<Source>(funcname, filename, line);
-    entries.emplace_back(StackEntry{
-        funcname, SourceRange(source, 0, funcname.size())});
+    auto source = std::make_shared<Source>(funcname, filename, line);
+    entries.emplace_back(
+        StackEntry{funcname, SourceRange(source, 0, funcname.size())});
     frame = frame->f_back;
   }
   return entries;
@@ -51,9 +50,10 @@ SourceRange getPythonInterpreterSourceRange() {
     if (range.source()) {
       auto& src = range.source();
       if (src && src->filename()) {
-        auto line = src->starting_line_no() +
-            src->lineno_for_offset(range.start());
-        stack_trace << *(src->filename()) << "(" << line << "): " << entry.filename << "\n";
+        auto line =
+            src->starting_line_no() + src->lineno_for_offset(range.start());
+        stack_trace << *(src->filename()) << "(" << line
+                    << "): " << entry.filename << "\n";
         if (!source_filename) {
           source_filename = *(src->filename());
           source_line = line;

@@ -5,8 +5,8 @@
 
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 namespace at {
 class Tensor;

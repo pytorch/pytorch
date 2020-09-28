@@ -1264,7 +1264,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 peek(stack, 0, inst.N)
                     .toObject()
                     ->type()
-                    ->getMethod(frame.function->constant_table_[inst.X].toStringRef());
+                    ->getMethod(
+                        frame.function->constant_table_[inst.X].toStringRef());
             if (!function.isGraphFunction()) {
               runBuiltinFunction(stack, &function);
             } else {
@@ -1441,7 +1442,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case NAMED_TUPLE_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<TupleType>();
+            auto type =
+                frame.function->type_table_[inst.X]->expect<TupleType>();
             namedTupleConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1456,7 +1458,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case CREATE_OBJECT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ClassType>();
+            auto type =
+                frame.function->type_table_[inst.X]->expect<ClassType>();
             createObject(stack, type);
             ++frame.pc;
           } break;
@@ -1548,14 +1551,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    if (!frame.record_function &&
-        at::hasCallbacks() &&
+    if (!frame.record_function && at::hasCallbacks() &&
         at::isRecordFunctionEnabled()) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->active) {
         if (rec_fn->needs_inputs) {
-          rec_fn->before(frame.function->function_name_, last(stack, frame.function->n_inputs));
+          rec_fn->before(
+              frame.function->function_name_,
+              last(stack, frame.function->n_inputs));
         } else {
           rec_fn->before(frame.function->function_name_);
         }

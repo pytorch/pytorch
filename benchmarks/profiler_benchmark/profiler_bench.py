@@ -1,6 +1,4 @@
 import argparse
-from functools import partial
-import itertools
 import statistics
 import sys
 import timeit
