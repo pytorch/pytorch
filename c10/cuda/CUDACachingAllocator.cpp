@@ -900,7 +900,8 @@ THCCachingAllocator caching_allocator;
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
-  static bool force_uncached = getenv("PYTORCH_CUDA_DEBUG_MEMORY") != nullptr;
+  static bool force_uncached =
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
   return force_uncached;
 }
 

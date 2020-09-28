@@ -119,6 +119,121 @@ struct BinaryOpScalarFunctor {
 };
 
 template<typename T, template<class> class Op>
+struct BinaryOpScalarListFunctor_ {
+    __device__ void operator() (
+        int chunk_size,
+        TensorListScalarListMetadata<1>& tl) {
+            int tensor_loc = tl.block_to_tensor[blockIdx.x];
+            int chunk_idx = tl.block_to_chunk[blockIdx.x];
+            int n = tl.sizes[tensor_loc];
+
+            T* x = (T*)tl.addresses[0][tensor_loc];
+            x += chunk_idx * chunk_size;
+
+            double y = tl.scalar_vals[tensor_loc];
+
+            n -= chunk_idx * chunk_size;
+
+            T r_x[kILP];
+
+            // to make things simple, we put aligned case in a different code path
+            if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x)) {
+                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+                    // load
+                    load_store(r_x, x, 0 , i_start);
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                    }
+                    // store
+                    load_store(x, r_x, i_start, 0);
+                }
+            }
+            else {
+                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = 0;
+                        int i = i_start + threadIdx.x + ii * blockDim.x;
+                        if(i < n && i < chunk_size) {
+                            r_x[ii] = x[i];
+                        }
+                    }
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                    }
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        int i = i_start + threadIdx.x + ii * blockDim.x;
+                        if(i < n && i < chunk_size)
+                            x[i] = r_x[ii];
+                    }
+                }
+            }
+        }
+};
+
+template<typename T, template<class> class Op>
+struct BinaryOpScalarListFunctor {
+    __device__ void operator() (
+        int chunk_size,
+        TensorListScalarListMetadata<2>& tl) {
+            int tensor_loc = tl.block_to_tensor[blockIdx.x];
+            int chunk_idx = tl.block_to_chunk[blockIdx.x];
+            int n = tl.sizes[tensor_loc];
+
+            T* x = (T*)tl.addresses[0][tensor_loc];
+            x += chunk_idx * chunk_size;
+
+            T* out = (T*)tl.addresses[1][tensor_loc];
+            out += chunk_idx * chunk_size;
+
+            double y = tl.scalar_vals[tensor_loc];
+
+            n -= chunk_idx * chunk_size;
+
+            T r_x[kILP];
+
+            // to make things simple, we put aligned case in a different code path
+            if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
+                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+                    // load
+                    load_store(r_x, x, 0 , i_start);
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                    }
+                    // store
+                    load_store(out, r_x, i_start, 0);
+                }
+            }
+            else {
+                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = 0;
+                        int i = i_start + threadIdx.x + ii * blockDim.x;
+                        if(i < n && i < chunk_size) {
+                            r_x[ii] = x[i];
+                        }
+                    }
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), y);
+                    }
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        int i = i_start + threadIdx.x + ii * blockDim.x;
+                        if(i < n && i < chunk_size)
+                            out[i] = r_x[ii];
+                    }
+                }
+            }
+        }
+};
+
+template<typename T, template<class> class Op>
 struct BinaryOpListAlphaFunctor_ {
     __device__ void operator() (
         int chunk_size,
