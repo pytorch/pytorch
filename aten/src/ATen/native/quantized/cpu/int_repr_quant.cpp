@@ -12,13 +12,13 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
   Tensor dst;
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self.scalar_type(), "int_repr", [&]() {
     if (bit_width == 4) {
-      auto out_size = std::ceil(self.numel() * 0.5);
+      int64_t out_size = std::ceil(self.numel() * 0.5);
       dst = at::empty(
           {out_size},
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
-      auto qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
-      for (int i = 0; i < dst.numel(); ++i) {
+      const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
+      for (int64_t i = 0; i < dst.numel(); ++i) {
         dst[i] = static_cast<underlying_t>(qdata[i]);
       }
     } else {
