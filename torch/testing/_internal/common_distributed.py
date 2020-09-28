@@ -328,7 +328,6 @@ class MultiProcessTestCase(TestCase):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
-
         self.subprocess_init(subprocess_init_data)
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
