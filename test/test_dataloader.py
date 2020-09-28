@@ -11,6 +11,7 @@ import unittest
 import itertools
 import warnings
 import tempfile
+import random
 from torch import multiprocessing as mp
 from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset,
                               ChainDataset, ShuffleDataset)
@@ -711,6 +712,10 @@ def init_fn(worker_id):
     torch.manual_seed(12345)
 
 
+def shuffle_ds_init_fn(worker_id):
+    random.seed(123)
+
+
 # used with test_error_in_init
 class ErrorIterableDataset(IterableDataset):
     def __iter__(self):
@@ -1217,24 +1222,33 @@ except RuntimeError as e:
     def test_shuffle_dataset(self):
         dataset = CountingIterableDataset(20)
         expected = list(range(20))
-        buffer_sizes = [1, 5, 20, 25]
-        shuffled_enables = [False, True, True, True]
+        buffer_sizes = [5, 20, 25]
         for num_workers in [0, 1]:
-            for buffer_size, shuffled in zip(buffer_sizes, shuffled_enables):
-                fetched = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers))
+            # Buffer Size <= 1: Not shuffled dataset
+            fetched_nos = list(self._get_data_loader(ShuffleDataset(dataset, 1), num_workers=num_workers))
+            self.assertEqual(len(fetched_nos), len(expected))
+            for e, d in zip(expected, fetched_nos):
+                self.assertIsInstance(d, torch.Tensor)
+                self.assertEqual(e, d)
+            # Buffer Size > 1: Shuffled dataset
+            for buffer_size in buffer_sizes:
+                fetched = sorted(list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers)))
                 self.assertEqual(len(fetched), len(expected))
-                if shuffled:
-                    fetched = sorted(fetched)
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
                     self.assertEqual(e, d)
-            fetched_seed1 = list(self._get_data_loader(ShuffleDataset(dataset, 5, seed=123), num_workers=num_workers))
-            fetched_seed2 = list(self._get_data_loader(ShuffleDataset(dataset, 5, seed=123), num_workers=num_workers))
-            self.assertEqual(len(fetched_seed1), len(fetched_seed2))
-            for d1, d2 in zip(fetched_seed1, fetched_seed2):
-                self.assertIsInstance(d1, torch.Tensor)
-                self.assertIsInstance(d2, torch.Tensor)
-                self.assertEqual(d1, d2)
+                # Random Seed for single process
+                random.seed(123)
+                fetched_seed1 = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                                     worker_init_fn=shuffle_ds_init_fn))
+                random.seed(123)
+                fetched_seed2 = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                                     worker_init_fn=shuffle_ds_init_fn))
+                self.assertEqual(len(fetched_seed1), len(fetched_seed2))
+                for d1, d2 in zip(fetched_seed1, fetched_seed2):
+                    self.assertIsInstance(d1, torch.Tensor)
+                    self.assertIsInstance(d2, torch.Tensor)
+                    self.assertEqual(d1, d2)
 
     def test_multiprocessing_contexts(self):
         reference = [
