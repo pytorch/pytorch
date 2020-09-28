@@ -3329,9 +3329,10 @@ class DistributedTest:
 
             device_id = self.rank
             # Ensure the test works for both find_unused_parameter and broadcast_buffer settings.
-            for (find_unused, broadcast_buffers) in
-                itertools.product([True, False], [True, False]):
+            for (find_unused, broadcast_buffers) in itertools.product([True, False], [True, False]):
                 model = TestModel(self.rank).float().to(device_id)
+                # Note that the model can have different shape buffers if we pass
+                # them in to be ignored as well.
                 model.fc2.register_buffer(
                     "ignore_buffer", torch.zeros(5 + self.rank, device=self.rank)
                 )
