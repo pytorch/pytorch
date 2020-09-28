@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_utils.h>
+#include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/code_template.h"
 
 namespace torch {

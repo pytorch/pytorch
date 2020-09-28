@@ -213,11 +213,14 @@ static void bitwise_not_kernel(TensorIterator& iter) {
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
           iter,
           [](scalar_t a) -> scalar_t {
             return ~a;
-      });
+          },
+          [](Vec256<scalar_t> a) -> Vec256<scalar_t> {
+            return ~a;
+          });
     });
   }
 }

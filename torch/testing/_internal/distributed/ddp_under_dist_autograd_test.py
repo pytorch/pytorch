@@ -18,8 +18,9 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
+    skip_if_rocm,
 )
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import dist_init, INIT_METHOD_TEMPLATE
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -324,14 +325,19 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
-    def _remote_worker_process(self):
+    def _remote_worker_process(self, ddp_mode):
         gLogger.info("The remote worker is running.")
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
+
+        if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
+            # new_group needs to be called on ranks.
+            dist.new_group(TRAINER_RANKS)
+
         global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
@@ -345,7 +351,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         )
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -362,10 +368,11 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         gLogger.info("Running the master process...")
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
+
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
@@ -399,6 +406,10 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     args=(remote_em_rref, remote_net_rref, ddp_mode, rank),
                 )
             )
+
+        if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
+            # new_group needs to be called on ranks.
+            dist.new_group(TRAINER_RANKS)
 
         training_examples = get_training_examples()
         for _ in range(3):
@@ -454,7 +465,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         if self.rank == MASTER_RANK:
             self._master_process(ddp_mode, simulate_uneven_inputs)
         elif self.rank == REMOTE_WORKER_RANK:
-            self._remote_worker_process()
+            self._remote_worker_process(ddp_mode)
         elif self.rank in TRAINER_RANKS:
             self._trainer_process(self.rank)
         else:
@@ -499,7 +510,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -566,7 +577,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -603,7 +614,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -641,6 +652,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
+    @skip_if_rocm
     def test_ddp_dist_autograd_local_vs_remote_gpu(self):
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
@@ -649,7 +661,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
