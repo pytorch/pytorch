@@ -286,6 +286,12 @@ class TestOptim(TestCase):
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1)
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
@@ -417,6 +423,9 @@ class TestOptim(TestCase):
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
@@ -449,6 +458,9 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, rho=0.95)),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
@@ -501,6 +513,9 @@ class TestOptim(TestCase):
                 lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
