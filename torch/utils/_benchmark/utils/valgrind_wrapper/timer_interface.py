@@ -254,7 +254,21 @@ class _ValgrindWrapper(object):
         error_log = os.path.join(working_dir, "error.txt")
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
-        f_stdout_stderr = open(stdout_stderr_log, "wb")
+
+        def run(args, **kwargs):
+            # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
+            f_stdout_stderr = open(stdout_stderr_log, "wb")
+            try:
+                invocation = subprocess.run(
+                    args,
+                    stdout=f_stdout_stderr,
+                    stderr=subprocess.STDOUT,
+                    **kwargs,
+                )
+                with open(stdout_stderr_log, "rt") as f:
+                    return invocation, f.read()
+            finally:
+                f_stdout_stderr.close()
 
         try:
             with open(script_file, "wt") as f:
@@ -263,48 +277,39 @@ class _ValgrindWrapper(object):
                     num_threads=num_threads, error_log=error_log,
                     stat_log=stat_log))
 
-            valgrind_invocation = subprocess.run(
-                [
-                    "valgrind",
-                    "--tool=callgrind",
-                    f"--callgrind-out-file={callgrind_out}",
-                    "--dump-line=yes",
-                    "--dump-instr=yes",
-                    "--collect-jumps=yes",
-                    "--instr-atstart=yes",
-                    "--collect-atstart=no",
-                    "python",
-                    script_file,
-                ],
-                stdout=f_stdout_stderr,
-                stderr=subprocess.STDOUT,
-            )
+            valgrind_invocation, valgrind_invocation_output = run([
+                "valgrind",
+                "--tool=callgrind",
+                f"--callgrind-out-file={callgrind_out}",
+                "--dump-line=yes",
+                "--dump-instr=yes",
+                "--collect-jumps=yes",
+                "--instr-atstart=yes",
+                "--collect-atstart=no",
+                "python",
+                script_file,
+            ])
+
             if valgrind_invocation.returncode:
                 error_report = ""
                 if os.path.exists(error_log):
                     with open(error_log, "rt") as f:
                         error_report = f.read()
                 if not error_report:
-                    with open(stdout_stderr_log, "rt") as f:
-                        error_report = "Unknown error.\n" + f.read()
+                    error_report = "Unknown error.\n" + valgrind_invocation_output
 
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(inclusive: bool):
-                annotate_invocation = subprocess.run(
-                    [
-                        "callgrind_annotate",
-                        f"--inclusive={'yes' if inclusive else 'no'}",
-                        callgrind_out
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    check=True,
-                )
+                annotate_invocation, annotate_invocation_output = run([
+                    "callgrind_annotate",
+                    f"--inclusive={'yes' if inclusive else 'no'}",
+                    callgrind_out
+                ], check=True)
 
                 begin_collecting = False
                 fn_counts = []
-                for l in annotate_invocation.stdout.decode("utf-8").splitlines(keepends=False):
+                for l in annotate_invocation_output.splitlines(keepends=False):
                     if not begin_collecting and re.match(r"Ir\s+file:function", l):
                         begin_collecting = True
                         continue
@@ -324,7 +329,6 @@ class _ValgrindWrapper(object):
                 return fn_counts
             return parse_output(inclusive=True), parse_output(inclusive=False)
         finally:
-            f_stdout_stderr.close()
             shutil.rmtree(working_dir)
 
     @staticmethod
