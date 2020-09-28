@@ -44,8 +44,10 @@ else()
   set(TORCH_LIBRARIES torch)
 endif()
 
-find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
-list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
+if(@BUILD_SHARED_LIBS@)
+  find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
+endif()
 
 # We need manually add dependent libraries when they are not linked into the
 # shared library.
@@ -53,6 +55,9 @@ list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
 if(NOT @BUILD_SHARED_LIBS@)
   find_library(TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_INSTALL_PREFIX}/lib")
   list(APPEND TORCH_LIBRARIES ${TORCH_CPU_LIBRARY})
+
+  find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
 
   if(@USE_NNPACK@)
     find_library(NNPACK_LIBRARY nnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
