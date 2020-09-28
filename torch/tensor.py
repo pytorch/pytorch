@@ -552,10 +552,7 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        result = other / self
-        if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+        return torch.floor_divide(other, self)
 
     __neg__ = _C._TensorBase.neg
 
