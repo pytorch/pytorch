@@ -857,7 +857,8 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   try {
     const static std::unordered_set<std::string>
         types_with_independent_output_shape = {"Int8GenQuantParams",
-                                               "Int8QuantSchemeBlobFill"};
+                                               "Int8QuantSchemeBlobFill",
+                                               "ComputeEqualizationScale"};
     std::vector<TensorShape> input_shapes;
     for (const auto& input : op.input()) {
       const auto it = shape_info_.find(input);
@@ -883,6 +884,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
     bool is_quantized = !(op.type().compare(0, 4, "Int8")) &&
         (op.type() != "Int8Dequantize") &&
         (op.type() != "Int8QuantSchemeBlobFill") &&
+        (op.type() != "ComputeEqualizationScale") &&
         (op.type() != "Int8GenQuantParams");
     float scale = 1;
     int offset = 0;
