@@ -872,6 +872,36 @@ def smoothl1loss_no_reduce_scalar_test():
         pickle=False)
 
 
+def smoothl1loss_beta_test():
+    t = torch.randn(2, 3, 4)
+    return dict(
+        fullname='SmoothL1Loss_beta',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none', beta=0.5)),
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone), 0.5)''',
+        input_fn=lambda: torch.randn(2, 3, 4),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0.5),
+        pickle=False)
+
+
+def smoothl1loss_zero_beta_test():
+    t = torch.randn(2, 3, 4)
+    return dict(
+        fullname='SmoothL1Loss_zero_beta',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduction='none', beta=0)),
+        cpp_function_call='''F::smooth_l1_loss(
+            i, t.to(i.options()), F::SmoothL1LossFuncOptions().reduction(torch::kNone), 0)''',
+        input_fn=lambda: torch.randn(2, 3, 4),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
+        pickle=False)
+
+
 def multilabelmarginloss_0d_no_reduce_test():
     t = torch.zeros(()).long()
     return dict(
@@ -1245,6 +1275,8 @@ new_module_tests = [
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
     smoothl1loss_no_reduce_scalar_test(),
+    smoothl1loss_beta_test(),
+    smoothl1loss_zero_beta_test(),
     multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
@@ -1602,6 +1634,7 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1621,6 +1654,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1630,6 +1664,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1639,6 +1674,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1648,6 +1684,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad2size1',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -1658,6 +1695,7 @@ new_module_tests = [
         desc='zero_batch',
         test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_dilated',
@@ -1665,6 +1703,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
         input_size=(2, 4, 10),
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv1d_groups',
@@ -1673,6 +1712,7 @@ new_module_tests = [
         input_size=(2, 4, 6),
         cudnn=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1703,6 +1743,7 @@ new_module_tests = [
         cudnn=True,
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='ConvTranspose1d_groups',
@@ -2118,7 +2159,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2141,7 +2182,7 @@ new_module_tests = [
         desc='stride',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2152,7 +2193,7 @@ new_module_tests = [
         desc='stride_padding',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2181,6 +2222,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_dilated_strided',
@@ -2188,6 +2230,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2196,6 +2239,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2206,6 +2250,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='MaxPool3d',
@@ -3656,11 +3701,15 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
-def smoothl1loss_reference(input, target, reduction='mean'):
+def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
     abs_diff = (input - target).abs()
-    ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
-    lt_one_mask = (abs_diff < 1).type_as(abs_diff)
-    output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
+    ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
+    lt_beta_mask = (abs_diff < beta).type_as(abs_diff)
+    # when beta <= 0 we should just use l1_loss
+    if beta == 0:
+        output = abs_diff
+    else:
+        output = ge_beta_mask * (abs_diff - 0.5 * beta) + lt_beta_mask * 0.5 * (abs_diff ** 2) / beta
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -4158,8 +4207,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.randn((5, 10), requires_grad=True),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -4399,8 +4448,8 @@ criterion_tests = [
         input_size=(),
         target_fn=lambda: torch.randn((), requires_grad=True),
         check_sum_reduction=True,
-        reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        reference_fn=lambda i, t, m, b=1.0:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
         desc='scalar',
     ),
     dict(
@@ -5059,6 +5108,8 @@ class CriterionTest(InputVariableMixin, TestBase):
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
+        self.with_tf32 = kwargs.get('with_tf32', True)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)

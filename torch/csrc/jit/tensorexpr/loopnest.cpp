@@ -23,17 +23,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-namespace {
-
-// Evaluates a constant expression and returns its value.
-template <typename T>
-static T EvalConstExpr(const ExprHandle& expr) {
-  ExprEval<SimpleIREvaluator> eval(expr);
-  return eval.value<T>();
-}
-
-} // namespace
-
 class IndexFlattener : public IRMutator {
  public:
   Stmt* flatten(Stmt* s) {
@@ -848,6 +837,71 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+void LoopNest::vectorizeInnerLoops() {
+  std::vector<For*> innerLoops;
+  std::vector<For*> worklist;
+
+  // Find outer-most For loops
+  if (For* rootF = dynamic_cast<For*>(root_stmt_)) {
+    worklist.push_back(rootF);
+  } else if (Block* body = dynamic_cast<Block*>(root_stmt_)) {
+    std::vector<Block*> blocks = {body};
+    while (blocks.size()) {
+      Block* b = blocks.back();
+      blocks.pop_back();
+
+      for (Stmt* s : *b) {
+        if (For* f = dynamic_cast<For*>(s)) {
+          worklist.push_back(f);
+        } else if (Block* b2 = dynamic_cast<Block*>(s)) {
+          blocks.push_back(b2);
+        }
+      }
+    }
+  }
+
+  // Traverse the For loop nest find inner-most loops, which are
+  // vectorization candidates.
+  while (worklist.size()) {
+    For* f = worklist.back();
+    worklist.pop_back();
+
+    bool containsSubLoops = false;
+    if (Block* body = dynamic_cast<Block*>(f->body())) {
+      for (Stmt* s2 : *body) {
+        if (For* f2 = dynamic_cast<For*>(s2)) {
+          containsSubLoops = true;
+          worklist.push_back(f2);
+        }
+      }
+    }
+
+    if (!containsSubLoops) {
+      innerLoops.push_back(f);
+    }
+  }
+
+  // vectorize inner loops.
+  for (For* loop : innerLoops) {
+    For* outer1;
+    For* split1;
+    For* tail1;
+
+    static const int kBodyVectorWidth = 8;
+    splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
+    vectorize(split1);
+
+    if (tail1) {
+      For* outer2;
+      For* split2;
+      For* tail2;
+      static const int kTailVectorWidth = 4;
+      splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
+      vectorize(split2);
+    }
+  }
+}
+
 void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   if (dynamic_cast<const IntImm*>(f->start()) &&
       dynamic_cast<const IntImm*>(f->stop())) {
@@ -1007,10 +1061,11 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   }
 
   bool tail_is_needed = true;
-  if (dynamic_cast<const IntImm*>(f->start()) &&
-      dynamic_cast<const IntImm*>(f->stop())) {
-    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
-    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+  const Expr* start = IRSimplifier::simplify(f->start());
+  const Expr* stop = IRSimplifier::simplify(f->stop());
+  if (start->isConstant() && stop->isConstant()) {
+    int start_val = immediateAs<int>(start);
+    int stop_val = immediateAs<int>(stop);
     int size_val = stop_val - start_val;
     int tail_size = size_val % factor;
     if (tail_size == 0) {
