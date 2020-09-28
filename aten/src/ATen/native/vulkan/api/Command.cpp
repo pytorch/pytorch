@@ -9,7 +9,7 @@ namespace {
 
 VkCommandPool create_command_pool(
     const VkDevice device,
-    uint32_t queue_family_index) {
+    const uint32_t queue_family_index) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device,
       "Invalid Vulkan device!");
@@ -95,49 +95,113 @@ void Command::Buffer::Buffer::end() {
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
 }
 
-void Command::Buffer::barrier() {
+void Command::Buffer::barrier(
+    const Pipeline::Barrier& barrier) {
+  c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
+  c10::SmallVector<VkImageMemoryBarrier, 1u> image_memory_barriers;
+
+  switch(barrier.type) {
+    case Pipeline::Barrier::Type::Execution:
+      break;
+
+    case Pipeline::Barrier::Type::Buffer:
+      // Using global memory barriers for buffers.  The consensus seems to be
+      // that there is no advantage in using the latter.
+      global_memory_barriers.push_back({
+          VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+          nullptr,
+          barrier.as.buffer.memory.src,
+          barrier.as.buffer.memory.dst,
+        });
+      break;
+
+    case Pipeline::Barrier::Type::Image:
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          barrier.as.image.handle,
+          "Invalid Vulkan image!");
+
+
+      image_memory_barriers.push_back({
+          VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+          nullptr,
+          barrier.as.image.memory.src,
+          barrier.as.image.memory.dst,
+          barrier.as.image.layout.src,
+          barrier.as.image.layout.dst,
+          VK_QUEUE_FAMILY_IGNORED,
+          VK_QUEUE_FAMILY_IGNORED,
+          barrier.as.image.handle,
+          VkImageSubresourceRange{
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0u,
+            VK_REMAINING_MIP_LEVELS,
+            0u,
+            VK_REMAINING_ARRAY_LAYERS,
+          },
+        });
+      break;
+
+    default:
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          false,
+          "Invalid Vulkan barrier type!");
+  };
+
   vkCmdPipelineBarrier(
       command_buffer_,
-    );
+      barrier.stage.src,
+      barrier.stage.dst,
+      0u,
+      global_memory_barriers.size(),
+      global_memory_barriers.data(),
+      0u,
+      nullptr,
+      image_memory_barriers.size(),
+      image_memory_barriers.data());
 }
 
-void Command::Buffer::bind(const VkPipeline pipeline) {
+void Command::Buffer::bind(
+    const Pipeline::Object pipeline) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       pipeline,
       "Invalid Vulkan pipeline!");
 
-  vkCmdBindPipeline(
-      command_buffer_,
-      VK_PIPELINE_BIND_POINT_COMPUTE,
-      pipeline);
+  if (pipeline.handle != bound_.pipeline.handle) {
+    vkCmdBindPipeline(
+        command_buffer_,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        pipeline.handle);
+
+    bound_.pipeline = pipeline;
+  }
 }
 
 void Command::Buffer::bind(
-    const VkPipelineLayout pipeline_layout,
-    const VkDescriptorSet descriptor_set) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pipeline_layout,
-      "Invalid Vulkan pipeline layout!");
+    const Descriptor::Set& set) {
+  const VkDescriptorSet descriptor_set = set.handle();
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor_set,
       "Invalid Vulkan descriptor set!");
 
-  vkCmdBindDescriptorSets(
-      command_buffer_,
-      VK_PIPELINE_BIND_POINT_COMPUTE,
-      pipeline_layout,
-      0u,
-      1u,
-      &descriptor_set,
-      0u,
-      nullptr);
+  if (descriptor_set != bound_.descriptor_set) {
+    vkCmdBindDescriptorSets(
+        command_buffer_,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        bound_.pipeline.layout,
+        0u,
+        1u,
+        &descriptor_set,
+        0u,
+        nullptr);
+
+    bound_.descriptor_set = descriptor_set;
+  }
 }
 
 void Command::Buffer::copy(
-    const VkBuffer source,
-    const VkBuffer destination,
-    const size_t size) {
+    const Resource::Buffer::Object source,
+    const Resource::Buffer::Object destination) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       source,
       "Invalid Vulkan source buffer!");
@@ -149,13 +213,13 @@ void Command::Buffer::copy(
   const VkBufferCopy buffer_copy{
     0u,
     0u,
-    size,
+    std::min(source.range, destination.range),
   };
 
   vkCmdCopyBuffer(
       command_buffer_,
-      source,
-      destination,
+      source.handle,
+      destination.handle,
       1u,
       &buffer_copy);
 }
@@ -171,7 +235,7 @@ void Command::Buffer::dispatch(
 
 void Command::Buffer::submit(
     const VkQueue queue,
-    const VkFence fence) {
+    const Resource::Fence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       queue,
       "Invalid Vulkan queue!");
@@ -188,7 +252,7 @@ void Command::Buffer::submit(
     nullptr,
   };
 
-  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence));
+  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
 }
 
 Command::Pool::Pool(const GPU& gpu)
@@ -205,7 +269,7 @@ Command::Pool::Pool(const GPU& gpu)
       "Invalid Vulkan command pool!");
 }
 
-Command::Buffer Command::Pool::buffer() {
+Command::Buffer Command::Pool::allocate() {
   return Buffer(device_, command_pool_.get());
 }
 

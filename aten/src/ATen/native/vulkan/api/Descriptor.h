@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
 namespace at {

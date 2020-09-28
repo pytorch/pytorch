@@ -44,26 +44,6 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
   };
 }
 
-Shader::Descriptor::Descriptor(const char* const glsl)
- : type(Type::Source) {
-  TORCH_CHECK(glsl, "Invalid shader source code!");
-
-  shader.source = {
-    glsl,
-    0u,
-  };
-}
-
-Shader::Descriptor::Descriptor(const uint32_t* const code, const uint32_t size)
- : type(Type::Binary) {
-  TORCH_CHECK(code && (0u != size), "Invalid shader binary!");
-
-  shader.binary = {
-    code,
-    size,
-  };
-}
-
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 
 struct Shader::Factory::Compiler final {
