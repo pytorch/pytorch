@@ -23,7 +23,8 @@ Tensor min_quantized_cpu(const Tensor& self) {
 std::tuple<Tensor, Tensor> sort_quantized_cpu(
     const Tensor& self,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   Tensor sort_int;
   Tensor sort_indicies;
   std::tie(sort_int, sort_indicies) =

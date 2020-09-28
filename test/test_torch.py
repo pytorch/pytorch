@@ -1048,6 +1048,24 @@ class AbstractTestCases:
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
 
+        def test_stable_sort(self):
+            for dtype in (
+                torch.float, torch.double,
+                torch.int8, torch.int16, torch.int32,
+                torch.bool):
+                for device in ["cpu"]:
+                    for ncopies in (100, 1000, 10000):
+                        x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=torch.device(device))
+                        _, idx = x.sort(stable=True)
+                        self.assertEqual(
+                            idx[:ncopies],
+                            torch.arange(start=0, end=2 * ncopies, step=2, device=torch.device(device))
+                        )
+                        self.assertEqual(
+                            idx[ncopies:],
+                            torch.arange(start=1, end=2 * ncopies, step=2, device=torch.device(device))
+                        )
+
         def test_topk(self):
             def topKViaSort(t, k, dim, dir):
                 sorted, indices = t.sort(dim, dir)
@@ -19996,10 +20014,15 @@ tensor_op_tests = [
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sort', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'stable', _small_3d_unique, lambda t, d: [0, False, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sort', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'dim_stable', _small_3d_unique, lambda t, d: [1, False, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'neg_dim_stable', _small_3d_unique, lambda t, d: [-1, False, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True, False], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'dim_descending_stable', _small_3d_unique, lambda t, d: [1, True, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True, False], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'neg_dim_descending_stable', _small_3d_unique, lambda t, d: [-1, True, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),

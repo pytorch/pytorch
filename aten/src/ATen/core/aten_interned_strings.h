@@ -993,6 +993,7 @@ _(attr, spatialScale) \
 _(attr, split_size) \
 _(attr, split_sizes) \
 _(attr, src) \
+_(attr, stable) \
 _(attr, start) \
 _(attr, start_dim) \
 _(attr, std) \

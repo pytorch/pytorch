@@ -948,7 +948,7 @@
   self: solve_backward_self(grad, self, A)
   A: solve_backward_A(grad, self, A, solution)
 
-- name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- name: sort(Tensor self, int dim=-1, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
