@@ -4,35 +4,35 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 
 class TestForeach(TestCase):
-    foreach_ops = [
+    foreach_bin_ops = [
         torch._foreach_add,
         torch._foreach_sub,
         torch._foreach_mul,
         torch._foreach_div,
     ]
 
-    foreach_ops_ = [
+    foreach_bin_ops_ = [
         torch._foreach_add_,
         torch._foreach_sub_,
         torch._foreach_mul_,
         torch._foreach_div_,
     ]
 
-    foreach_ops_sl = [
+    foreach_bin_ops_sl = [
         torch._foreach_add_scalar_list,
         torch._foreach_sub_scalar_list,
         torch._foreach_mul_scalar_list,
         torch._foreach_div_scalar_list,
     ]
 
-    foreach_ops_sl_ = [
+    foreach_bin_ops_sl_ = [
         torch._foreach_add_scalar_list_,
         torch._foreach_sub_scalar_list_,
         torch._foreach_mul_scalar_list_,
         torch._foreach_div_scalar_list_,
     ]
 
-    torch_ops = [
+    torch_bin_ops = [
         torch.add,
         torch.sub,
         torch.mul,
@@ -145,36 +145,38 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalar(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops, self.foreach_ops_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3
                 expected = [torch_bin_op(t, scalar) for t in tensors]
 
-                res = foreach_op(tensors, scalar)
+                res = foreach_bin_op(tensors, scalar)
 
                 if dtype == torch.bool:
                     self.assertEqual(res, expected)
 
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
                     return
 
 
-                if foreach_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types() and self.device_type == "cpu":
+                if foreach_bin_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types() and self.device_type == "cpu":
                     with self.assertRaisesRegex(RuntimeError,
                                                 "can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
                     return
 
                 # TODO[type promotion]: Fix once type promotion is enabled.
                 if dtype in torch.testing.integral_types() and self.device_type == 'cuda':
                     self.assertEqual(res, [e.to(dtype) for e in expected])
 
-                    foreach_op_(tensors, scalar)
+                    foreach_bin_op_(tensors, scalar)
                     self.assertEqual(tensors, [e.to(dtype) for e in expected])
                 else:
                     self.assertEqual(res, expected)
-                    foreach_op_(tensors, scalar)
+                    foreach_bin_op_(tensors, scalar)
                     self.assertEqual(tensors, expected)
 
     # TODO[Fix scalar list]: 
@@ -184,7 +186,9 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops_sl, self.foreach_ops_sl_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
+                                                                     self.foreach_bin_ops_sl_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1 for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -192,19 +196,19 @@ class TestForeach(TestCase):
                 # we dont support bool and complex types on CUDA for now
                 if (dtype in torch.testing.get_all_complex_dtypes() or dtype == torch.bool) and self.device_type == 'cuda':
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
 
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                        foreach_op(tensors, scalars)
+                        foreach_bin_op(tensors, scalars)
                     return
 
-                res = foreach_op(tensors, scalars)
+                res = foreach_bin_op(tensors, scalars)
 
                 if dtype == torch.bool:
                     self.assertEqual(res, [torch_bin_op(t.to(torch.float32), s) for t, s in zip(tensors, scalars)])
 
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
                     return
 
                 if dtype in torch.testing.integral_types():
@@ -218,44 +222,48 @@ class TestForeach(TestCase):
 
                 if dtype in torch.testing.integral_types() and self.device_type == 'cpu':
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
                     return
                 else:
-                    foreach_op_(tensors, scalars)
+                    foreach_bin_op_(tensors, scalars)
                     self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalar(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops, self.foreach_ops_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3.3
                 expected = [torch_bin_op(t, scalar) for t in tensors]
 
                 if dtype == torch.bool:
-                    if foreach_op == torch._foreach_sub:
+                    if foreach_bin_op == torch._foreach_sub:
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op_(tensors, scalar)
+                            foreach_bin_op_(tensors, scalar)
 
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op(tensors, scalar)
+                            foreach_bin_op(tensors, scalar)
                     return
 
-                res = foreach_op(tensors, scalar)
+                res = foreach_bin_op(tensors, scalar)
                 self.assertEqual(res, expected)
 
                 if dtype in torch.testing.integral_types():
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
                     return
 
-                foreach_op_(tensors, scalar)
+                foreach_bin_op_(tensors, scalar)
                 self.assertEqual(tensors, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops_sl, self.foreach_ops_sl_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
+                                                                     self.foreach_bin_ops_sl_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1.1 for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -263,27 +271,27 @@ class TestForeach(TestCase):
                 # we dont support bool and complex types on CUDA for now
                 if (dtype in torch.testing.get_all_complex_dtypes() or dtype == torch.bool) and self.device_type == 'cuda':
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
 
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                        foreach_op(tensors, scalars)
+                        foreach_bin_op(tensors, scalars)
                     return
 
-                res = foreach_op(tensors, scalars)
+                res = foreach_bin_op(tensors, scalars)
 
                 if dtype == torch.bool:
                     # see TODO[Fix scalar list]
                     self.assertEqual(res, [torch_bin_op(t.to(torch.float32), s) for t, s in zip(tensors, scalars)])
 
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
                     return
 
                 if dtype in torch.testing.integral_types() and self.device_type == 'cuda':
                     # see TODO[Fix scalar list]
                     self.assertEqual(res, [e.to(dtype) for e in expected])
 
-                    foreach_op_(tensors, scalars)
+                    foreach_bin_op_(tensors, scalars)
                     self.assertEqual(tensors, res)
                     return
                 else:
@@ -291,101 +299,107 @@ class TestForeach(TestCase):
 
                 if dtype in torch.testing.integral_types() and self.device_type == "cpu":
                     with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalars)
+                        foreach_bin_op_(tensors, scalars)
                     return
 
-                foreach_op_(tensors, scalars)
+                foreach_bin_op_(tensors, scalars)
                 self.assertEqual(tensors, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops, self.foreach_ops_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3 + 5j
                 expected = [torch_bin_op(t, scalar) for t in tensors]
 
                 if dtype == torch.bool:
-                    if foreach_op == torch._foreach_sub:
+                    if foreach_bin_op == torch._foreach_sub:
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op_(tensors, scalar)
+                            foreach_bin_op_(tensors, scalar)
 
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op(tensors, scalar)
+                            foreach_bin_op(tensors, scalar)
                     return
 
                 if dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=True) and \
                    self.device_type == 'cuda':
                     with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
 
                     with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
-                        foreach_op(tensors, scalar)
+                        foreach_bin_op(tensors, scalar)
                     return
 
-                res = foreach_op(tensors, scalar)
+                res = foreach_bin_op(tensors, scalar)
                 self.assertEqual(res, expected)
 
                 if dtype not in [torch.complex64, torch.complex128]:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
                 else:
-                    foreach_op_(tensors, scalar)
+                    foreach_bin_op_(tensors, scalar)
                     self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalarlist(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops_sl, self.foreach_ops_sl_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
+                                                                     self.foreach_bin_ops_sl_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [3 + 5j for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
                 if dtype == torch.bool:
-                    if foreach_op == torch._foreach_sub:
+                    if foreach_bin_op == torch._foreach_sub:
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op_(tensors, scalar)
+                            foreach_bin_op_(tensors, scalar)
 
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
-                            foreach_op(tensors, scalar)
+                            foreach_bin_op(tensors, scalar)
                     return
 
                 with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
-                    res = foreach_op(tensors, scalars)
+                    res = foreach_bin_op(tensors, scalars)
 
                 with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
-                    foreach_op_(tensors, scalars)
+                    foreach_bin_op_(tensors, scalars)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalar(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops, self.foreach_ops_, self.torch_ops): 
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops, \
+                                                                     self.foreach_bin_ops_, \
+                                                                     self.torch_bin_ops): \
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = True
 
                 if dtype == torch.bool:
                     expected = [torch_bin_op(t, scalar) for t in tensors]
-                    res = foreach_op(tensors, scalar)
+                    res = foreach_bin_op(tensors, scalar)
 
-                    foreach_op_(tensors, scalar)
+                    foreach_bin_op_(tensors, scalar)
                     self.assertEqual(tensors, res)
                     return
 
-                if foreach_op == torch._foreach_sub and self.device_type == "cpu":
+                if foreach_bin_op == torch._foreach_sub and self.device_type == "cpu":
                     with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
-                        res = foreach_op(tensors, scalar)
+                        res = foreach_bin_op(tensors, scalar)
 
                     with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator"):
-                        foreach_op_(tensors, scalar)
-                elif foreach_op == torch._foreach_sub and self.device_type == 'cuda':
-                    res = foreach_op(tensors, scalar)
-                    self.assertEqual(res, foreach_op(tensors, 1))
+                        foreach_bin_op_(tensors, scalar)
+                elif foreach_bin_op == torch._foreach_sub and self.device_type == 'cuda':
+                    res = foreach_bin_op(tensors, scalar)
+                    self.assertEqual(res, foreach_bin_op(tensors, 1))
 
-                    foreach_op_(tensors, scalar)
+                    foreach_bin_op_(tensors, scalar)
                     self.assertEqual(tensors, res)
                 else:
                     expected = [torch_bin_op(t, scalar) for t in tensors]
-                    res = foreach_op(tensors, scalar)
+                    res = foreach_bin_op(tensors, scalar)
 
                     # TODO[type promotion]: Fix once type promotion is enabled.
                     if dtype in torch.testing.integral_types() and self.device_type == 'cuda':
@@ -394,82 +408,84 @@ class TestForeach(TestCase):
                         self.assertEqual(res, expected)
 
                     if dtype in torch.testing.integral_types():
-                        if foreach_op == torch._foreach_div and self.device_type == "cpu":
+                        if foreach_bin_op == torch._foreach_div and self.device_type == "cpu":
                             with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired "):
-                                foreach_op_(tensors, scalar)
+                                foreach_bin_op_(tensors, scalar)
                         else:
-                            foreach_op_(tensors, scalar)
+                            foreach_bin_op_(tensors, scalar)
                             self.assertEqual(tensors, res)
                     else:
-                        foreach_op_(tensors, scalar)
+                        foreach_bin_op_(tensors, scalar)
                         self.assertEqual(tensors, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalarlist(self, device, dtype):
         for N in [30, 300]:
-            for foreach_op, foreach_op_, torch_bin_op in zip(self.foreach_ops_sl, self.foreach_ops_sl_, self.torch_ops):
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
+                                                                     self.foreach_bin_ops_sl_,
+                                                                     self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [True for _ in range(N)]
 
                 if dtype == torch.bool:
                     if self.device_type == 'cuda':
                         with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                            foreach_op(tensors, scalars)
+                            foreach_bin_op(tensors, scalars)
 
                         with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                            foreach_op_(tensors, scalars)
+                            foreach_bin_op_(tensors, scalars)
                         return
                     else:
-                        if foreach_op == torch._foreach_sub_scalar_list:
+                        if foreach_bin_op == torch._foreach_sub_scalar_list:
                             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
-                                foreach_op_(tensors, scalars)
+                                foreach_bin_op_(tensors, scalars)
 
                             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
-                                foreach_op(tensors, scalars)
+                                foreach_bin_op(tensors, scalars)
                         else:
                             with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired"):
-                                foreach_op_(tensors, scalars)
+                                foreach_bin_op_(tensors, scalars)
 
-                            res = foreach_op(tensors, scalars)
+                            res = foreach_bin_op(tensors, scalars)
                             for r in res:
                                 self.assertTrue(r.dtype == torch.float32)
                 else:
                     # we dont support bool and complex types on CUDA for now
                     if (dtype in torch.testing.get_all_complex_dtypes()) and self.device_type == 'cuda':
                         with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                            foreach_op_(tensors, scalars)
+                            foreach_bin_op_(tensors, scalars)
 
                         with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                            foreach_op(tensors, scalars)
+                            foreach_bin_op(tensors, scalars)
                         return
 
-                    if foreach_op == torch._foreach_sub_scalar_list:
+                    if foreach_bin_op == torch._foreach_sub_scalar_list:
                         if self.device_type == "cpu":
                             # see TODO[Fix scalar list]
-                            res = foreach_op(tensors, scalars)
+                            res = foreach_bin_op(tensors, scalars)
                             if dtype in torch.testing.integral_types():
                                 self.assertEqual(res, [r.to(torch.float32) for r in [torch_bin_op(t, 1) for t in tensors]])
 
                                 with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the "):
-                                    foreach_op_(tensors, scalars)
+                                    foreach_bin_op_(tensors, scalars)
                             else:
                                 self.assertEqual(res, [torch_bin_op(t, 1) for t in tensors])
-                                foreach_op_(tensors, scalars)
+                                foreach_bin_op_(tensors, scalars)
                                 self.assertEqual(res, tensors)
                         else:
                             # see TODO[Fix scalar list]
-                            res = foreach_op(tensors, scalars)
+                            res = foreach_bin_op(tensors, scalars)
                             if dtype in torch.testing.integral_types():
                                 self.assertEqual(res, [r.to(dtype) for r in [torch_bin_op(t, 1) for t in tensors]])
                             else:
                                 self.assertEqual(res, [torch_bin_op(t, 1) for t in tensors])
 
-                            foreach_op_(tensors, scalars)
+                            foreach_bin_op_(tensors, scalars)
                             self.assertEqual(res, tensors)
                     else:
                         if self.device_type == "cpu":
                             expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
-                            res = foreach_op(tensors, scalars)
+                            res = foreach_bin_op(tensors, scalars)
 
                             # see TODO[Fix scalar list]
                             if dtype in torch.testing.integral_types():
@@ -479,20 +495,20 @@ class TestForeach(TestCase):
 
                             if dtype in torch.testing.integral_types():
                                 with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired "):
-                                    foreach_op_(tensors, scalars)
+                                    foreach_bin_op_(tensors, scalars)
                             else:
-                                foreach_op_(tensors, scalars)
+                                foreach_bin_op_(tensors, scalars)
                                 self.assertEqual(tensors, expected)
                         else:
                             expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
-                            res = foreach_op(tensors, scalars)
+                            res = foreach_bin_op(tensors, scalars)
 
                             if dtype in torch.testing.integral_types():
                                 self.assertEqual(res, [e.to(dtype) for e in expected])
                             else:
                                 self.assertEqual(res, expected)
 
-                            foreach_op_(tensors, scalars)
+                            foreach_bin_op_(tensors, scalars)
                             self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
@@ -635,7 +651,7 @@ class TestForeach(TestCase):
         tensors1 = []
         tensors2 = []
 
-        for bin_op in self.foreach_ops + self.foreach_ops_:
+        for bin_op in self.foreach_bin_ops + self.foreach_bin_ops_:
             # Empty lists
             with self.assertRaises(RuntimeError):
                 bin_op(tensors1, tensors2)
