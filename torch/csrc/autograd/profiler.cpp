@@ -36,6 +36,7 @@ namespace {
     CUDA_MEM_USAGE,
     CUDA_DEVICE,
     CUDA_US,
+    SHAPES,
     NUM_EVENT_IVALUE_IDX // must be last in list
   };
 
@@ -214,14 +215,15 @@ struct ProfilerThreadLocalState
       cuda_stubs->nvtxRangePushA(getNvtxStr(
           name, msg, sequence_nr, shapes).c_str());
     } else {
-      getEventList().record(
-          EventKind::PushRange,
+      Event evt(EventKind::PushRange,
           name,
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
           handle,
           std::move(shapes),
           at::RecordFunction::getDefaultNodeId());
+      evt.setSequenceNr(sequence_nr);
+      getEventList().record(std::move(evt));
     }
   }
 
@@ -387,9 +389,6 @@ void pushProfilingCallbacks() {
 
 const int kCUDAWarmupStart = 5;
 
-// temp. workaround for dispatcher ::Profiler key
-thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -444,12 +443,10 @@ void enableProfiler(const ProfilerConfig& new_config) {
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
-  g_.emplace_back(std::make_shared<at::RecordFunctionGuard>());
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -471,22 +468,31 @@ void enableProfiler(const ProfilerConfig& new_config) {
   state->mark("__start_profile", false);
 }
 
-thread_event_lists disableProfiler() {
+thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
+  auto cleanupTLSState = profilerDisableOptions ? profilerDisableOptions->cleanupTLSState : true;
+  auto consolidate = profilerDisableOptions ? profilerDisableOptions->consolidate : true;
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  std::shared_ptr<c10::DebugInfoBase> state;
+  if (cleanupTLSState) {
+    state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+  } else {
+    state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
+  }
+
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 
-  g_.pop_back();
-  at::removeCallback(state_ptr->callbackHandle());
+  if (cleanupTLSState) {
+    at::removeCallback(state_ptr->callbackHandle());
+  }
 
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (!consolidate || state_ptr->config().state == ProfilerState::NVTX) {
     return thread_event_lists();
   }
 
   state_ptr->mark("__stop_profile");
-
+  // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
 
@@ -515,6 +521,30 @@ void Event::record(bool record_cuda) {
       NUM_EVENT_IVALUE_IDX,
       " elements to reconstruct Event.");
 
+  // Reconstruct input shapes from ivalues.
+  auto shapeListIValue = ivalues.get(EventIValueIdx::SHAPES);
+  TORCH_INTERNAL_ASSERT(
+    shapeListIValue.isList(),
+    "Expected profiler shapes IValue to contain type c10::impl::GenericList."
+  );
+
+  auto shapeList = shapeListIValue.toList();
+  std::vector<std::vector<int64_t>> shapes;
+  shapes.reserve(shapeList.size());
+  for (size_t i = 0 ; i < shapeList.size(); ++i) {
+    std::vector<int64_t> s;
+    auto shapeIValue = shapeList.get(i);
+    TORCH_INTERNAL_ASSERT(
+        shapeIValue.isList(),
+        "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
+    auto curShapesList = shapeIValue.toList();
+    s.reserve(curShapesList.size());
+    for (size_t j = 0; j < curShapesList.size(); ++j) {
+      s.emplace_back(curShapesList.get(j).toInt());
+    }
+    shapes.emplace_back(s);
+  }
+
   Event evt(
       static_cast<EventKind>(
           ivalues.get(EventIValueIdx::KIND).toInt()), // EventKind
@@ -522,7 +552,7 @@ void Event::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::THREAD_ID).toInt(), // thread_id
       static_cast<at::RecordFunctionHandle>(
           ivalues.get(EventIValueIdx::HANDLE).toDouble()), // handle
-      {}, // TODO: record shapes
+      std::move(shapes), // input shapes
       ivalues.get(EventIValueIdx::NODE_ID).toInt(), // node id
       true, // is remote
       ivalues.get(EventIValueIdx::CPU_MEM_USAGE).toInt(), // cpu_mem_usage
@@ -551,6 +581,19 @@ at::IValue Event::toIValue() const {
   eventIValueList.emplace_back(static_cast<int64_t>(cuda_memory_usage_));
   eventIValueList.emplace_back(device_);
   eventIValueList.emplace_back(cuda_us_);
+  // Shapes
+  c10::impl::GenericList shapesList =
+      c10::impl::GenericList(at::ListType::create(at::IntType::get()));
+  shapesList.reserve(shapes_.size());
+  for (const auto& shape : shapes_) {
+    c10::impl::GenericList s = c10::impl::GenericList(at::IntType::get());
+    s.reserve(shape.size());
+    for (const auto& k : shape) {
+      s.emplace_back(k);
+    }
+    shapesList.emplace_back(s);
+  }
+  eventIValueList.emplace_back(shapesList);
   return at::IValue(eventIValueList);
 }
 
@@ -663,12 +706,3 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
 }
 
 }}}
-
-void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  op.callBoxed(stack);
-}
-
-TORCH_LIBRARY_IMPL(_, Profiler, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&profile_wrapper>());
-}

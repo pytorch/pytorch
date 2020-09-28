@@ -3,8 +3,10 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from torch import jit
+from textwrap import dedent
 from typing import NamedTuple, List, Optional, Dict, Tuple, Any
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
+import inspect
 import unittest
 import sys
 import torch
@@ -406,6 +408,67 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_optional_no_element_type_annotation(self):
+        """
+        Test that using an optional with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Optional
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_no_element_type_annotation(self):
+        """
+        Test that using a tuple with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Tuple
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Tuple:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
     def test_subexpression_List_Future(self):
 
         @torch.jit.script
@@ -429,6 +492,15 @@ class TestScriptPy3(JitTestCase):
             return x
 
         FileCheck().check("Future[int]").run(fn.graph)
+
+    def test_str_refine_any(self):
+        def forward(x: Any) -> str:
+            if isinstance(x, str):
+                return x
+            return "foo"
+        forward = torch.jit.script(forward)
+        self.assertEqual(forward(1), "foo")
+        self.assertEqual(forward("bar"), "bar")
 
     def test_subexpression_Tuple_int_int_Future(self):
 
@@ -532,6 +604,70 @@ class TestScriptPy3(JitTestCase):
 
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
+
+    def test_if_returning_any(self):
+        """
+        Check that an if statement can return different
+        types early from each branch when the return
+        type of the function is Any.
+        """
+        def if_function(inp: torch.Tensor) -> Any:
+            if inp.shape[0] == 1:
+                return inp * inp
+            else:
+                return "str"
+
+        self.checkScript(if_function, (torch.randn(5),))
+
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            __ignored_properties__ = ["ignored_attr"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+
+        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
 
     def test_export_opnames_interface(self):
         global OneTwoModule

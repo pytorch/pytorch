@@ -1,8 +1,9 @@
-import torch.distributed.rpc as rpc
+from abc import ABC, abstractmethod
+
 import torch.testing._internal.dist_utils
 
 
-class RpcAgentTestFixture(object):
+class RpcAgentTestFixture(ABC):
     @property
     def world_size(self):
         return 4
@@ -14,13 +15,39 @@ class RpcAgentTestFixture(object):
         )
 
     @property
+    @abstractmethod
     def rpc_backend(self):
-        return rpc.backend_registry.BackendType[
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        ]
+        pass
 
     @property
+    @abstractmethod
     def rpc_backend_options(self):
-        return torch.testing._internal.dist_utils.TEST_CONFIG.build_rpc_backend_options(
-            self
-        )
+        pass
+
+    def setup_fault_injection(self, faulty_messages, messages_to_delay):
+        """Method used by dist_init to prepare the faulty agent.
+
+        Does nothing for other agents.
+        """
+        pass
+
+    # Shutdown sequence is not well defined, so we may see any of the following
+    # errors when running tests that simulate errors via a shutdown on the
+    # remote end.
+    @abstractmethod
+    def get_shutdown_error_regex(self):
+        """
+        Return various error message we may see from RPC agents while running
+        tests that check for failures. This function is used to match against
+        possible errors to ensure failures were raised properly.
+        """
+        pass
+
+    @abstractmethod
+    def get_timeout_error_regex(self):
+        """
+        Returns a partial string indicating the error we should receive when an
+        RPC has timed out. Useful for use with assertRaisesRegex() to ensure we
+        have the right errors during timeout.
+        """
+        pass

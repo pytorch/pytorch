@@ -20,36 +20,73 @@ namespace jit {
 namespace fuser {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
-  ir_cloner->registerClone(src, this);
   name_ = src->name_;
   fusion_ = ir_cloner->fusion();
+  ir_cloner->registerClone(src, this);
 }
 
 Val* Statement::asVal() {
   TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
-  return static_cast<Val*>(this);
+  return this->as<Val>();
 }
 
 Expr* Statement::asExpr() {
   TORCH_INTERNAL_ASSERT(isExpr(), "Cannot cast to Expr as this is not a Expr.");
-  return static_cast<Expr*>(this);
+  return this->as<Expr>();
 }
 
 void Statement::print() const {
-  IRPrinter ir_printer(std::cout);
+  IrPrinter ir_printer(std::cout);
   ir_printer.handle(this);
   std::cout << std::endl;
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype, bool register_val)
-    : vtype_{_vtype}, dtype_{_dtype} {
+Val::Val(ValType _vtype, DataType _dtype, bool register_val, bool lowered)
+    : vtype_(_vtype), dtype_(_dtype) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_CHECK(
       fusion != nullptr, "No active fusion group found when creating a Val.");
-  this->fusion_ = fusion;
-  if (register_val)
-    this->name_ = this->fusion_->registerVal(this);
+  fusion_ = fusion;
+  if (register_val) {
+    if (lowered) {
+      name_ = fusion_->registerLoweredVal(this);
+    } else {
+      name_ = fusion_->registerVal(this);
+    }
+  }
+}
+
+namespace {
+
+// TODO(kir): remove this
+ValType lowerValType(ValType vtype) {
+  switch (vtype) {
+    case ValType::Scalar:
+      return ValType::KirScalar;
+    case ValType::NamedScalar:
+      return ValType::KirNamedScalar;
+    case ValType::TensorDomain:
+      return ValType::KirTensorDomain;
+    case ValType::IterDomain:
+      return ValType::KirIterDomain;
+    case ValType::TensorView:
+      return ValType::KirTensorView;
+    default:
+      TORCH_CHECK(false, "Unexpected");
+  }
+}
+
+} // namespace
+
+// TODO(kir): remove this
+Val::Val(const Val* fusion_ir_node)
+    : vtype_(lowerValType(fusion_ir_node->vtype_)),
+      dtype_(fusion_ir_node->dtype_) {
+  // The lowered nodes preserve the names from the fusion IR counterparts
+  name_ = fusion_ir_node->name_;
+  fusion_ = fusion_ir_node->fusion_;
+  fusion_->registerLoweredVal(this);
 }
 
 Val::Val(const Val* src, IrCloner* ir_cloner)
@@ -84,9 +121,29 @@ class ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && false;
   }
 
+  void handle(const kir::Bool* b) override {
+    is_const_ = is_const_ && b->isConst();
+  }
+
+  void handle(const kir::Float* f) override {
+    is_const_ = is_const_ && f->isConst();
+  }
+
+  void handle(const kir::Half* h) override {
+    is_const_ = is_const_ && h->isConst();
+  }
+
+  void handle(const kir::Int* i) override {
+    is_const_ = is_const_ && i->isConst();
+  }
+
+  void handle(const kir::NamedScalar* ns) override {
+    is_const_ = is_const_ && false;
+  }
+
   void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
-      OptOutConstDispatch::handle(inp);
+      handle(inp);
     }
   }
 
@@ -107,26 +164,32 @@ class ConstCheck : OptOutConstDispatch {
 };
 
 } // namespace
+
 bool Val::isConstScalar() const {
   if (!isScalar())
     return false;
   return ConstCheck::isConst(this);
 }
 
+c10::optional<int64_t> Val::getInt() const {
+  if (isConstScalar() && isAnInt()) {
+    if (this->getValType() == ValType::Scalar) {
+      return this->as<Int>()->value();
+    } else if (this->getValType() == ValType::KirScalar) {
+      return this->as<kir::Int>()->value();
+    }
+  }
+  return c10::optional<int64_t>();
+}
+
 bool Val::isZeroInt() const {
-  if (isConstScalar() && getValType().value() == ValType::Scalar &&
-      getDataType().value() == DataType::Int &&
-      static_cast<const Int*>(this)->value().value() == 0)
-    return true;
-  return false;
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 0;
 }
 
 bool Val::isOneInt() const {
-  if (isConstScalar() && getValType().value() == ValType::Scalar &&
-      getDataType().value() == DataType::Int &&
-      static_cast<const Int*>(this)->value().value() == 1)
-    return true;
-  return false;
+  auto int_val = getInt();
+  return int_val.has_value() && int_val.value() == 1;
 }
 
 c10::optional<DataType> Val::getDataType() const {
@@ -136,63 +199,11 @@ c10::optional<DataType> Val::getDataType() const {
 }
 
 Expr* Val::getOrigin() {
-  return (fusion_->origin(this));
+  return fusion_->origin(this);
 }
 
-Scope::Scope(const Scope* src, IrCloner* ir_cloner)
-    : exprs_(ir_cloner->clone(src->exprs_)) {}
-
-void Scope::insert_before(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if ((*it)->sameAs(ref))
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(it, expr);
-}
-
-void Scope::insert_after(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.insert(++it, expr);
-}
-
-void Scope::erase(Expr* ref) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
-    exprs_.erase(it);
-}
-
-bool Scope::contains(Expr* expr) const {
-  for (auto e : exprs_)
-    if (e == expr)
-      return true;
-  return false;
-}
-
-bool Scope::sameAs(const Scope& other) const {
-  if (other.exprs().size() != this->exprs().size())
-    return false;
-  for (decltype(exprs().size()) i{0}; i < exprs().size(); i++)
-    if (other.exprs()[i] != exprs()[i])
-      return false;
-  return true;
-}
-
-void Scope::clear() {
-  this->exprs_ = std::vector<Expr*>();
+const Expr* Val::getOrigin() const {
+  return fusion_->origin(this);
 }
 
 // We don't register with the active fusion in Expr as this needs to be done
@@ -201,7 +212,7 @@ Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
-  this->fusion_ = fusion;
+  fusion_ = fusion;
 }
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)

@@ -19,6 +19,25 @@ namespace at {
 namespace cuda {
 namespace blas {
 
+// RAII guard that sets the CuBLAS pointer mode and restores it to
+// its previous value when the guard is destroyed
+class PointerModeGuard {
+public:
+  PointerModeGuard(cublasHandle_t handle, cublasPointerMode_t mode) :
+      handle(handle) {
+    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
+    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, mode));
+  }
+
+  ~PointerModeGuard() {
+    cublasSetPointerMode(handle, previous_mode);
+  }
+
+private:
+  cublasHandle_t handle;
+  cublasPointerMode_t previous_mode;
+};
+
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMM_ARGTYPES(Dtype)                                       \
@@ -45,7 +64,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 #endif
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
@@ -73,7 +92,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
 #endif
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
 #endif
@@ -107,6 +126,50 @@ template <>
 void dot<float>(CUDABLAS_DOT_ARGTYPES(float));
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half));
+template <>
+void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
+template <>
+void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
+
+template <typename Dtype>
+inline void vdot(CUDABLAS_DOT_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::vdot: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
+template <>
+void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
+
+// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+#ifdef CUDART_VERSION
+
+#define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
+
+template<class Dtype>
+void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
+template<>
+void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
+
+
+#define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
+
+template<class Dtype>
+void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
+template<>
+void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
+
+#endif // CUDART_VERSION
 
 } // namespace blas
 } // namespace cuda

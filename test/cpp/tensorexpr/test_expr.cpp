@@ -69,10 +69,11 @@ void testExprLetStmtTest01() {
 
   ExprHandle load_a = Load::make(a_buf, {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
+  Stmt* let_store = Let::make(var, load_a);
   Stmt* store_b = Store::make(b_buf, {0}, var, 1);
-  Stmt* let_store = Block::make({{var.node(), load_a.node()}}, {store_b});
+  Block* block = Block::make({let_store, store_b});
 
-  SimpleIREvaluator eval(let_store, a_buf, b_buf);
+  SimpleIREvaluator eval(block, a_buf, b_buf);
 
   PaddedBuffer<float> a_v(1);
   PaddedBuffer<float> b_v(1);
@@ -161,6 +162,24 @@ void testExprDoubleTest() {
   SimpleIRExprEval eval(body);
   eval.bindVar(x, ExprHandle((double)3));
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
+}
+
+void testExprDisallowBoolArithmetic() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kBool);
+  VarHandle y("y", kBool);
+  std::string error{"arithmetic binary operations on Bool not supported"};
+  ASSERT_THROWS_WITH((x + y), error);
+  ASSERT_THROWS_WITH((x - y), error);
+  ASSERT_THROWS_WITH((x * y), error);
+  ASSERT_THROWS_WITH((x / y), error);
+  ASSERT_THROWS_WITH((x & y), error);
+  ASSERT_THROWS_WITH((x | y), error);
+  ASSERT_THROWS_WITH((x ^ y), error);
+  ASSERT_THROWS_WITH((x << y), error);
+  ASSERT_THROWS_WITH((x >> y), error);
+  ASSERT_THROWS_WITH(Max::make(x, y, /*propagate_nans=*/true), error);
+  ASSERT_THROWS_WITH(Min::make(x, y, /*propagate_nans=*/true), error);
 }
 
 void testExprVectorAdd01() {
@@ -252,6 +271,78 @@ void testExprCompareSelectEQ() {
   assertAllEqual(a_buffer, 1);
   assertAllEqual(b_buffer, 1);
   assertAllEqual(c_buffer, 1);
+}
+
+void testExprCompareSelectDtypes() {
+  // LHS and RHS expressions should have the same dtype, but this dtype could
+  // differ from the dtype of the return values (but dtypes of true and false
+  // return values should be the same).
+  // This test constructs a CompareSelect expression where the input dtype is
+  // different from the output dtype and verifies that it works correctly:
+  //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kFloat));
+  std::vector<int> a_buffer(N, 1);
+  std::vector<int> b_buffer(N, 1);
+  std::vector<float> c_buffer(N, 0.0f);
+  std::vector<float> c_ref(N, 3.14f);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  // C[i] = (A[i] == B[i]) ? 3.14f : 2.78f
+  // A and B are int, C is float.
+  auto select_expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              FloatImm::make(3.14f),
+              FloatImm::make(2.78f),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  SimpleIREvaluator ir_eval(select_expr, a, b, c);
+  ir_eval(a_buffer, b_buffer, c_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(a_buffer, 1);
+  assertAllEqual(b_buffer, 1);
+  ExpectAllNear(c_buffer, c_ref, 1e-7);
+}
+
+void testExprIntrinsicsDtypes() {
+  KernelScope kernel_scope;
+  constexpr int N = 256;
+  Buffer a(BufHandle("A", {N}, kDouble));
+  Buffer b(BufHandle("B", {N}, kDouble));
+  std::vector<double> a_buffer(N, -10.0);
+  std::vector<double> b_buffer(N, 0.0);
+  std::vector<double> b_ref(N, 10.0);
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto fabs_expr = For::make(
+      i, 0, N, Store::make(b, {i}, fabs(Load::make(a, {i}, mask)), mask));
+
+  SimpleIREvaluator ir_eval(fabs_expr, a, b);
+  ir_eval(a_buffer, b_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+
+  assertAllEqual(a_buffer, -10.0);
+  ExpectAllNear(b_buffer, b_ref, 1e-7);
 }
 
 void testExprSubstitute01() {
@@ -346,7 +437,7 @@ void testExprUnaryMath01() {
     ExprHandle v = test_config.func(ExprHandle(input_v));
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
-    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v);
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
 }
 
@@ -370,7 +461,7 @@ void testExprBinaryMath01() {
     ExprHandle v_expr = test_config.func(ExprHandle(v1), ExprHandle(v2));
     float v_ref = test_config.ref_func(v1, v2);
     SimpleIRExprEval eval(v_expr);
-    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v_expr);
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
 }
 
@@ -447,6 +538,19 @@ void testIfThenElse01() {
 void testIfThenElse02() {
   KernelScope kernel_scope;
   ExprHandle v = ifThenElse(ExprHandle(0), ExprHandle(1.0f), ExprHandle(2.0f));
+
+  std::ostringstream oss;
+  oss << v;
+  ASSERT_EQ(oss.str(), "IfThenElse(0, 1.f, 2.f)");
+
+  SimpleIRExprEval eval(v);
+  ASSERT_EQ(eval.value<float>(), 2.0f);
+}
+
+void testIfThenElse03() {
+  KernelScope kernel_scope;
+  ExprHandle v =
+      ifThenElse(BoolImm::make(false), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
   oss << v;

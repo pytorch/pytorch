@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
 from datetime import timedelta
@@ -21,8 +20,8 @@ def _backend_type_repr(self):
 _backend_type_doc = """
     An enum class of available backends.
 
-    PyTorch ships with two builtin backends: ``BackendType.PROCESS_GROUP`` and
-    ``BackendType.TENSORPIPE``. Additional ones can be registered using the
+    PyTorch ships with two builtin backends: ``BackendType.TENSORPIPE`` and
+    ``BackendType.PROCESS_GROUP``. Additional ones can be registered using the
     :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
 """
 
@@ -133,7 +132,20 @@ def _init_process_group(store, rank, world_size):
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
+    from . import ProcessGroupRpcBackendOptions
     from . import ProcessGroupAgent
+
+    if not isinstance(store, dist.Store):
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, ProcessGroupRpcBackendOptions
+    ):
+        raise TypeError(
+            "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
 
     group = _init_process_group(store, rank, world_size)
 

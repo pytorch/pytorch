@@ -50,8 +50,6 @@ if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
-      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
-      ${JIT_TEST_SRCS}
       )
 endif()
 
@@ -70,7 +68,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -87,6 +84,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
+
+set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
@@ -147,6 +146,12 @@ if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       )
+    if(USE_STATIC_CUDNN)
+        set_source_files_properties(
+          ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+          PROPERTIES COMPILE_DEFINITIONS "USE_STATIC_CUDNN"
+        )
+    endif()
 endif()
 
 if(USE_NUMPY)
@@ -155,25 +160,31 @@ endif()
 
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(NOT MSVC)
+    if(WIN32)
+      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+    else()
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-      # Disable certain warnings for GCC-9.X
-      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      endif()
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
     endif()
+    # Disable certain warnings for GCC-9.X
+    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+    endif()
+    if(USE_TENSORPIPE)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    endif()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 
-if(USE_NCCL)
+if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${NCCL_INCLUDE_DIRS})
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
@@ -262,6 +273,8 @@ target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
+target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
+
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
@@ -272,3 +285,25 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Generate torch/version.py from the appropriate CMake cache variables.
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+  set(TORCH_VERSION_DEBUG 1)
+else()
+  set(TORCH_VERSION_DEBUG 0)
+endif()
+
+add_custom_command(
+  OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND
+    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
+      --is_debug=${TORCH_VERSION_DEBUG}
+      --cuda_version=${CUDA_VERSION}
+      --hip_version=${HIP_VERSION}
+  WORKING_DIRECTORY ${TORCH_ROOT}
+)
+add_custom_target(
+  gen_torch_version ALL
+  DEPENDS ${TORCH_SRC_DIR}/version.py
+)
+add_dependencies(torch_python gen_torch_version)

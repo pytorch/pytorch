@@ -17,7 +17,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
-  AT_ERROR("mkldnn_batch_norm: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -49,7 +49,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 
   if (train) {
     // TODO: support training
-    AT_ERROR("mkldnn_batch_norm: mkldnn training is not supported in yet.");
+    TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn training is not supported in yet.");
 
     // ideep::tensor saved_mean;
     // ideep::tensor saved_var;
@@ -60,7 +60,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     //     new_with_itensor_mkldnn(std::move(saved_mean), input.options()),
     //     new_with_itensor_mkldnn(std::move(saved_var), input.options()));
   } else {
-    AT_ASSERTM(input.dim() == 4 || input.dim() == 5,
+    TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
                "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
     ideep::batch_normalization_forward_inference::compute(
         x, m, v, w, b, y, eps);

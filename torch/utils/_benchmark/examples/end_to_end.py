@@ -28,6 +28,7 @@ import numpy as np
 import torch
 from torch.utils._benchmark.op_fuzzers import unary
 from torch.utils._benchmark import Timer, Measurement
+from typing import Dict, Tuple, List
 
 
 _MAIN, _SUBPROCESS = "main", "subprocess"
@@ -64,7 +65,7 @@ _DEVICES_TO_TEST = {
     "39744": {_CPU: True, _GPU: True},
 }
 
-_AVAILABLE_GPUS = queue.Queue()
+_AVAILABLE_GPUS = queue.Queue[int]()
 _DTYPES_TO_TEST = {
     "39850": ("int8", "float32", "float64"),
     "39967": ("float32", "float64"),
@@ -226,7 +227,7 @@ def merge(measurements):
 
 
 def process_results(results, test_variance):
-    paired_results = {}
+    paired_results: Dict[Tuple[str, str, int, bool, int], List] = {}
     for (seed, use_gpu), result_batch in results:
         for r in result_batch:
             key = (r.label, r.description, r.num_threads, use_gpu, seed)
@@ -235,7 +236,7 @@ def process_results(results, test_variance):
             paired_results[key][index].append(r)
 
     paired_results = {
-        key: (merge(r_ref_list), merge(r_pr_list))
+        key: [merge(r_ref_list), merge(r_pr_list)]
         for key, (r_ref_list, r_pr_list) in paired_results.items()
     }
 
@@ -366,7 +367,7 @@ def run(cmd, cuda_visible_devices=""):
         cmd,
         env={
             "CUDA_VISIBLE_DEVICES": str(cuda_visible_devices),
-            "PATH": os.getenv("PATH"),
+            "PATH": os.getenv("PATH", ""),
         },
         stdout=subprocess.PIPE,
         shell=True

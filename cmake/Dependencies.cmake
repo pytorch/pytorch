@@ -46,7 +46,7 @@ endif()
 # 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
 #    for Debug and RelWithDebInfo builds
 if(MSVC)
-  foreach(flag_var 
+  foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
     if(${flag_var} MATCHES "/Z[iI7]")
@@ -919,13 +919,17 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6 3.5)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+  endif()
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.6)
+    message(FATAL_ERROR
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.5 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1249,10 +1253,7 @@ if(USE_CUDA)
 endif()
 
 if(USE_GLOO)
-  if(MSVC)
-    message(WARNING "Gloo can not be used on Windows.")
-    caffe2_update_option(USE_GLOO OFF)
-  elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
@@ -1307,17 +1308,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
-    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
-    set(PYTORCH_BUILD ON)
-    set(__BUILD_TESTING ${BUILD_TESTING})
-    set(BUILD_TESTING OFF)
-    set(TP_BUILD_PYTHON OFF)
-    set(TP_BUILD_LIBUV ON)
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
+    set(TP_ENABLE_CMA OFF CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
-    set(BUILD_TESING ${__BUILD_TESTING})
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()
@@ -1483,7 +1479,7 @@ if(NOT INTERN_BUILD_MOBILE)
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     # skip unwanted includes from windows.h
     add_definitions(-DWIN32_LEAN_AND_MEAN)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1502,7 +1498,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   list(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
-  list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
   if(CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
   endif()

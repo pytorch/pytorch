@@ -277,6 +277,18 @@ them the same thing!)
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
+Available backend options can be found at
+https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py#L970.
+In addition to backends above, we also support keyword `Math` which is an alias
+that maps to all backend and autograd backend keys. In other words, function registered to `Math` key
+should be a plain mathematical composition of other `at::` functions and works for any backend.
+
+If you add `dispatch` section to any API that didn't have it before, you **have to** move
+the old implementation to `Math` field so that it's still available for other backends to use.
+
+This work is currently WIP and you can find the design proposal in
+https://github.com/pytorch/pytorch/issues/44680.
+
 ### `device_guard`
 
 ```
@@ -335,9 +347,13 @@ or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the d
 manual_kernel_registration: True
 ```
 
-With this flag set, we will not generate code to automatically register the C++ operator
-implementation with the dispatcher. This is a workaround for ops that need manual
-Variable code (see VariableTypeManual.cpp) and should only be used rarely.
+With this flag set, we will not generate code to automatically register the C++ operator implementation
+to TypeDefault (catchAll dispatch key) with the dispatcher.
+It doesn't make sense to have both `dispatch` section and `manual_kernel_registration: True` for the same op.
+You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.cpp.
+Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
+(It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
+This field should only be used rarely.
 
 ## Writing an implementation in C++
 
@@ -375,7 +391,9 @@ name that we skip in python binding generation, e.g. `*_backward`. Check
 `tools/autograd/gen_python_functions.py` for the latest rules.
 
 The generated bindings are either exposed as methods on python_variable or functions on
-torch._C._nn object(marked with `python_module: nn`).
+the torch._C._nn (marked with `python_module: nn`),
+torch._C._fft (marked with `python_module: fft`),
+or torch._C._linalg (marked with `python_module: linalg`) objects.
 
 ### Can it handle being passed Variables?
 

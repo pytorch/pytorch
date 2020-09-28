@@ -33,6 +33,10 @@ class TORCH_API CodeGen {
     return stmt_;
   }
 
+  void set_stmt(Stmt* s) {
+    stmt_ = s;
+  }
+
   void apply_mutator(IRMutator* mutator) {
     stmt_ = stmt_->accept_mutator(mutator);
   }
@@ -47,6 +51,14 @@ class TORCH_API CodeGen {
 
   at::Device device() {
     return device_;
+  }
+
+  // This function returns the generated code as
+  // a string. Currently only implemented for Block.
+  // TODO. Rename this, as we can return other than string
+  // and implement for other backends.
+  virtual std::string getCodeText() {
+    return ("");
   }
 
   virtual void call(const std::vector<CallArg>& args) = 0;
@@ -188,7 +200,7 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  const Expr* mutate(const Intrinsics* v);
+  const Expr* mutate(const Intrinsics* v) override;
 };
 
 } // namespace tensorexpr

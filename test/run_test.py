@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
-
 import argparse
 from datetime import datetime
 import modulefinder
@@ -15,8 +13,9 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
 import torch.distributed as dist
+from typing import Dict, Optional
 
 TESTS = [
     'test_autograd',
@@ -35,11 +34,14 @@ TESTS = [
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
-    'distributed/test_distributed',
+    'distributed/test_distributed_fork',
+    'distributed/test_distributed_spawn',
     'test_distributions',
     'test_expecttest',
+    'test_foreach',
     'test_indexing',
     'test_jit',
+    'test_linalg',
     'test_logging',
     'test_mkldnn',
     'test_multiprocessing',
@@ -48,6 +50,7 @@ TESTS = [
     'test_native_functions',
     'test_nn',
     'test_numba_integration',
+    'test_ops',
     'test_optim',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
@@ -57,10 +60,13 @@ TESTS = [
     'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
+    'test_tensor_creation_ops',
     'test_torch',
     'test_type_info',
     'test_type_hints',
+    'test_unary_ufuncs',
     'test_utils',
+    'test_vmap',
     'test_namedtuple_return_api',
     'test_jit_profiling',
     'test_jit_legacy',
@@ -70,64 +76,37 @@ TESTS = [
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
+    'test_op_aliases.py',
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
     'test_openmp',
     'test_profiler',
     'distributed/nn/jit/test_instantiator',
-    'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
-    'distributed/rpc/tensorpipe/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/test_faulty_agent',
+    'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/test_tensorpipe_agent',
     'test_jit_py3',
     'test_determination',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
     'test_futures',
-    'distributed/test_ddp_under_dist_autograd',
+    'test_fx',
+    'test_functional_autograd_benchmark',
+    'test_package',
 ]
 
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
-    'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
-    'distributed/rpc/tensorpipe/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/test_rpc_spawn',
-    'distributed/test_distributed',
-    'distributed/test_ddp_under_dist_autograd',
+    'distributed/rpc/test_faulty_agent',
+    'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/test_tensorpipe_agent',
+    'distributed/test_distributed_fork',
 ]
 
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
-    'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
-    'distributed/rpc/tensorpipe/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/test_faulty_agent',
+    'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/test_tensorpipe_agent',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
@@ -163,15 +142,11 @@ SLOW_TESTS = [
     'test_jit_profiling',
     'test_torch',
     'distributed/nn/jit/test_instantiator',
-    'distributed/nn/api/test_remote_module_spawn',
-    'distributed/test_distributed',
-    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
-    'distributed/rpc/tensorpipe/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/rpc/test_rpc_spawn',
-    'distributed/test_ddp_under_dist_autograd',
+    'distributed/test_distributed_fork',
+    'distributed/rpc/test_process_group_agent',
+    'distributed/rpc/test_tensorpipe_agent',
+    'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
+    'distributed/test_distributed_spawn',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',
@@ -188,7 +163,7 @@ SLOW_TESTS = [
     'test_determination',
     'test_futures',
 ]
-_DEP_MODULES_CACHE = {}
+_DEP_MODULES_CACHE: Dict[str, set] = {}
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
@@ -224,6 +199,7 @@ or `conda install ninja`. Alternatively, disable said tests with
 `run_test.py --exclude test_cpp_extensions_aot_ninja test_cpp_extensions_jit`.
 """
 
+PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -231,7 +207,7 @@ def print_to_stderr(message):
 
 def get_executable_command(options, allow_pytest):
     if options.coverage:
-        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
+        executable = ['coverage', 'run', '--parallel-mode', '--source=torch']
     else:
         executable = [sys.executable]
     if options.pytest:
@@ -243,7 +219,7 @@ def get_executable_command(options, allow_pytest):
 
 
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
-    unittest_args = options.additional_unittest_args
+    unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append('--verbose')
     if test_module in RUN_PARALLEL_BLOCKLIST:
@@ -330,12 +306,17 @@ def test_distributed(test_module, test_directory, options):
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if sys.platform == 'win32' and backend != 'gloo':
+            continue
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
+            if sys.platform == 'win32' and not with_init_file:
+                continue
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:
-                with_init = ' with file init_method' if with_init_file else ''
+                init_str = "with {} init_method"
+                with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
                     'Running distributed tests for the {} backend{}'.format(
                         backend, with_init))
@@ -344,10 +325,10 @@ def test_distributed(test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module == "test_distributed":
-                    init_method = 'file://{}/'.format(tmp_dir)
+                if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
-                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
@@ -376,7 +357,8 @@ CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
-    'distributed/test_distributed': test_distributed,
+    'distributed/test_distributed_fork': test_distributed,
+    'distributed/test_distributed_spawn': test_distributed,
 }
 
 
@@ -412,7 +394,8 @@ def parse_args():
              'TestTorch with pytest in verbose and coverage mode: '
              'python run_test.py -vci torch -pt')
     parser.add_argument(
-        '-c', '--coverage', action='store_true', help='enable coverage')
+        '-c', '--coverage', action='store_true', help='enable coverage',
+        default=PYTORCH_COLLECT_COVERAGE)
     parser.add_argument(
         '-i',
         '--include',
@@ -595,7 +578,7 @@ def log_test_reason(file_type, filename, test, options):
 
 
 def get_dep_modules(test):
-    # Cache results in case of repitition
+    # Cache results in case of repetition
     if test in _DEP_MODULES_CACHE:
         return _DEP_MODULES_CACHE[test]
 
@@ -642,7 +625,7 @@ def determine_target(test, touched_files, options):
     # Some tests are faster to execute than to determine.
     if test not in SLOW_TESTS:
         if options.verbose:
-            print_to_stderr('Running {} without determination'.format(test))
+            print_to_stderr(f'Running {test} without determination')
         return True
     # HACK: "no_ninja" is not a real module
     if test.endswith('_no_ninja'):
@@ -680,10 +663,30 @@ def determine_target(test, touched_files, options):
 
     # If nothing has determined the test has run, don't run the test.
     if options.verbose:
-        print_to_stderr('Determination is skipping {}'.format(test))
+        print_to_stderr(f'Determination is skipping {test}')
 
     return False
 
+
+def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
+    test_module = parse_test_module(test)
+
+    # Printing the date here can help diagnose which tests are slow
+    print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
+    handler = CUSTOM_HANDLERS.get(test, run_test)
+    return_code = handler(test_module, test_directory, options)
+    assert isinstance(return_code, int) and not isinstance(
+        return_code, bool), 'Return code should be an integer'
+    if return_code == 0:
+        return None
+
+    message = f'{test} failed!'
+    if return_code < 0:
+        # subprocess.Popen returns the child process' exit signal as
+        # return code -N, where N is the signal number.
+        signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
+        message += f' Received signal: {signal_name}'
+    return message
 
 def main():
     options = parse_args()
@@ -693,7 +696,7 @@ def main():
     if options.verbose:
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
-    if options.coverage:
+    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(['coverage', 'erase'])
 
     if options.jit:
@@ -715,33 +718,24 @@ def main():
 
     has_failed = False
     failure_messages = []
-    for test in selected_tests:
-
-        test_module = parse_test_module(test)
-
-        # Printing the date here can help diagnose which tests are slow
-        print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
-        handler = CUSTOM_HANDLERS.get(test, run_test)
-        return_code = handler(test_module, test_directory, options)
-        assert isinstance(return_code, int) and not isinstance(
-            return_code, bool), 'Return code should be an integer'
-        if return_code != 0:
+    try:
+        for test in selected_tests:
+            err_message = run_test_module(test, test_directory, options)
+            if err_message is None:
+                continue
             has_failed = True
-            message = '{} failed!'.format(test)
-            if return_code < 0:
-                # subprocess.Popen returns the child process' exit signal as
-                # return code -N, where N is the signal number.
-                signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
-                message += ' Received signal: {}'.format(signal_name)
-            err = RuntimeError(message)
-            failure_messages.append(err)
-            if options.continue_through_error:
-                print_to_stderr(err)
+            failure_messages.append(err_message)
+            if not options.continue_through_error:
+                raise RuntimeError(err_message)
+            print_to_stderr(err_message)
+    finally:
+        if options.coverage:
+            test_dir = os.path.dirname(os.path.abspath(__file__))
+            if not PYTORCH_COLLECT_COVERAGE:
+                shell(['coverage', 'combine'], cwd=test_dir)
+                shell(['coverage', 'html'], cwd=test_dir)
             else:
-                raise RuntimeError(err)
-    if options.coverage:
-        shell(['coverage', 'combine'])
-        shell(['coverage', 'html'])
+                shell(['coverage', 'combine', '--append'], cwd=test_dir)
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:

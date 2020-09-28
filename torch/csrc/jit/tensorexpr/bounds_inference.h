@@ -14,7 +14,7 @@ class Expr;
 class Buf;
 class Stmt;
 
-enum TORCH_API TensorAccessKind { kLoad, kStore };
+enum C10_API_ENUM TensorAccessKind { kLoad, kStore };
 
 struct TORCH_API TensorAccessBoundsInfo {
   TensorAccessKind kind;
