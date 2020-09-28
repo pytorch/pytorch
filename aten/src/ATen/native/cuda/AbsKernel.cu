@@ -6,11 +6,16 @@
 
 namespace at { namespace native {
 
+template<typename scalar_t>
+struct AbsFunctor {
+  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
+    return std::abs(a);
+  }
+};
+
 void abs_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return std::abs(a);
-    });
+    gpu_kernel(iter, AbsFunctor<scalar_t>());
   });
 }
 
