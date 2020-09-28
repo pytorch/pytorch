@@ -4566,7 +4566,7 @@ add_docstr(torch.median,
            r"""
 median(input) -> Tensor
 
-Computes the median of the values in :attr:`input`.
+Returns the median of the values in :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
@@ -4589,9 +4589,8 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
-Returns a namedtuple ``(values, indices)`` where ``values`` is the median
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each median value found.
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, and ``indices`` contains the index of the median values found in the dimension :attr:`dim`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -4619,8 +4618,9 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second tensor,
-                                       which must have dtype long, with their indices in the dimension :attr:`dim` of :attr:`input`.
+    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second
+                                       tensor, which must have dtype long, with their indices in the dimension
+                                       :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -4638,7 +4638,7 @@ add_docstr(torch.nanmedian,
            r"""
 nanmedian(input) -> Tensor
 
-Computes the median of the values in :attr:`input`, ignoring ``NaN``s.
+Returns the median of the values in :attr:`input`, ignoring ``NaN``s.
 
 This function is identical to :func:`torch.median` when there are no ``NaN`` values in :attr:`input`.
 When :attr:`input` has one or more ``NaN`` values, :func:`torch.median` will always return ``NaN``,
@@ -4660,6 +4660,10 @@ Example::
 
 Computes the median of the values, and its index, along dimension :attr:`dim` of :attr:`input`, ignoring ``NaN``s.
 
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, ignoring ``NaN``s, and ``indices`` contains the index of the median values found
+in the dimension :attr:`dim`.
+
 This function is identical to :func:`torch.median` when there are no ``NaN`` values in a reduced row. When a reduced row has
 one or more ``NaN`` values, :func:`torch.median` will always reduce it to ``NaN``, while this function will reduce it to the
 median of the non-``NaN`` elements. If all the elements in a reduced row are ``NaN`` then it will be reduced to ``NaN``, too.
@@ -4670,8 +4674,9 @@ Args:
     {keepdim}
 
 Keyword args:
-    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second tensor,
-                                       which must have dtype long, with their indices in the dimension :attr:`dim` of :attr:`input`.
+    out ((Tensor, Tensor)), optional): The first tensor will be populated with the median values and the second
+                                       tensor, which must have dtype long, with their indices in the dimension
+                                       :attr:`dim` of :attr:`input`.
 
 Example::
 

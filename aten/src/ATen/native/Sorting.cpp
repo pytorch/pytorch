@@ -276,7 +276,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     int64_t dim,
     bool keepdim,
     bool ignore_nan) {
-  NoNamesGuard guard;
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
@@ -359,10 +358,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       *tl[2].data_ptr<int64_t>() = *nth;
     });
   });
-
-  guard.reset();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
 
   return std::forward_as_tuple(values, indices);
 }
@@ -541,7 +536,8 @@ std::tuple<Tensor, Tensor> kthvalue(
     bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::make_tuple(values, indices);
 }
 
 std::tuple<Tensor, Tensor> kthvalue(
@@ -595,8 +591,14 @@ std::tuple<Tensor&, Tensor&> median_out_cpu(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_with_indices_impl(
-      values, indices, self, dim, keepdim, /*ignore_nan=*/false);
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return median_with_indices_impl(
+        values, indices, self, dim, keepdim, /*ignore_nan=*/false);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
 }
 
 std::tuple<Tensor&, Tensor&> median_out(
@@ -636,8 +638,14 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  return median_with_indices_impl(
-      values, indices, self, dim, keepdim, /*ignore_nan=*/true);
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return median_with_indices_impl(
+        values, indices, self, dim, keepdim, /*ignore_nan=*/true);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
 }
 
 std::tuple<Tensor&, Tensor&> nanmedian_out(
