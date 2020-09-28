@@ -65,20 +65,27 @@ void InsertPrepackUnpack(Module& module) {
 void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
-        (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::linear_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
-        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
+        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::conv_transpose1d_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::conv_transpose2d_prepack"));
   };
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module, QuantType quant_type) {
+Module Finalize(
+    Module& module,
+    QuantType quant_type,
+    const std::vector<std::string>& preserved_attrs) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);
-  auto frozen = freeze_module(module);
+  auto frozen = freeze_module(module, preserved_attrs);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;
 }
