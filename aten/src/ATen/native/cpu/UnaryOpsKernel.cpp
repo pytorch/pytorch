@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
@@ -212,11 +213,14 @@ static void bitwise_not_kernel(TensorIterator& iter) {
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
           iter,
           [](scalar_t a) -> scalar_t {
             return ~a;
-      });
+          },
+          [](Vec256<scalar_t> a) -> Vec256<scalar_t> {
+            return ~a;
+          });
     });
   }
 }
@@ -269,16 +273,16 @@ static void sign_kernel(TensorIterator& iter){
         auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
-            [=](Vec256<scalar_t> self_vec){
+          iter,
+          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+          [=](Vec256<scalar_t> self_vec){
 
-                // Comparision operators returns bitmask.
-                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+              // Comparision operators returns bitmask.
+              auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+              auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
-                return left - right;
-            });
+              return left - right;
+          });
     });
   }
 }
@@ -286,6 +290,15 @@ static void sign_kernel(TensorIterator& iter){
 static void signbit_kernel(TensorIterator& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
+  });
+}
+
+static void sgn_kernel(TensorIterator& iter){
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), 'sgn_cpu', [&]() {
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
+      [=](Vec256<scalar_t> a) { return a.sgn(); });
   });
 }
 
@@ -347,6 +360,16 @@ static void trigamma_kernel(TensorIterator& iter) {
   });
 }
 
+static void exp2_kernel(TensorIterator& iter) {
+  // Supports only floating types as std::exp2 doesn't have
+  // complex overloads.
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "exp2", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::exp2(a); });
+  });
+}
+
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel(iter);
@@ -392,6 +415,15 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
+  });
+}
+
+static void kaiser_window_kernel(TensorIterator& iter, int64_t window_length, double beta){
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
+    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+    cpu_kernel(iter, [=](scalar_t a){
+        return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+    });
   });
 }
 
@@ -611,6 +643,7 @@ REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
 REGISTER_DISPATCH(imag_stub, &imag_kernel);
 REGISTER_DISPATCH(conj_stub, &conj_kernel);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
@@ -618,6 +651,7 @@ REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
@@ -629,6 +663,7 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
 
 
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)

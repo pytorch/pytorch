@@ -587,14 +587,8 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
-  else if (reduce == "subtract") {
-    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
-  }
   else if (reduce == "multiply") {
     return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-  }
-  else if (reduce == "divide") {
-    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
   }
   else {
     TORCH_CHECK(false,
@@ -602,7 +596,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   }
 }
 
-Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
@@ -613,7 +607,7 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
   return self;
 }
 
-Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index");
@@ -808,6 +802,21 @@ Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tenso
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   Tensor result = at::empty({0}, self.options());
   return masked_select_out_cpu(result, self, mask);
+}
+
+Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
+  // The following could just be written as `zeros_like(input).masked_scatter(mask, grad)`.
+  // However, as an optimization, we call the in-place variant of masked_scatter.
+  // Unfortunately, that doesn't allow for the broadcasting of the LHS, so we need
+  // to explicitly broadcast here (the out-of-place variant of masked_scatter
+  // implicitly handles broadcasting).
+  auto result = at::zeros_like(
+      input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
+  return result.masked_scatter_(mask, grad);
+}
+
+Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
+  return at::zeros_like(input).put_(index, grad, true);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

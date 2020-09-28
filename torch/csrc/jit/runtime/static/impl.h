@@ -15,15 +15,16 @@
 namespace torch {
 namespace jit {
 
+TORCH_API std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g);
+TORCH_API std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    const torch::jit::Module& m);
+
 class ProcessedNode;
 class TORCH_API StaticRuntime {
  public:
-  explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g)
-      : graph_(std::move(g)) {}
-
-  explicit StaticRuntime(const torch::jit::Module& m);
-
-  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps);
+  explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g);
+  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps) const;
 
 #ifdef FBCODE_CAFFE2
   using ConstantMap = folly::F14FastMap<Value*, IValue>;
@@ -32,12 +33,11 @@ class TORCH_API StaticRuntime {
 #endif
 
  private:
-  torch::jit::Module module_;
   std::shared_ptr<torch::jit::Graph> graph_;
 
   // Static runtime states
   // Value table (including weights)
-  ConstantMap workspace_;
+  mutable ConstantMap workspace_;
 
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;

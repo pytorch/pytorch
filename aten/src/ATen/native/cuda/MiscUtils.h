@@ -89,6 +89,14 @@ struct MagmaStreamSyncGuard {
 };
 #endif
 
+static inline int cuda_int_cast(int64_t value, const char* varname) {
+  auto result = static_cast<int>(value);
+  TORCH_CHECK(static_cast<int64_t>(result) == value, 
+              "cuda_int_cast: The value of ", varname, "(", (long long)value,
+              ") is too large to fit into a int (", sizeof(int), " bytes)");
+  return result;
+}
+
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
 template<class T>
@@ -100,6 +108,16 @@ static inline Storage pin_memory(int64_t size) {
       adjusted_size,
       allocator,
       /*resizable=*/false);
+}
+
+// heuristic:
+//   cublas_x_batched doesn't work very well for small batchsize
+//   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
+// with use_loop_launch = True, we will loop through all batches, and launch single matrix cusolver/cublas kernels
+// (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
+inline static bool use_loop_launch(int batch_size, int matrix_size) {
+  return (batch_size <= 8) || \
+         (/* batch_size > 8 && */ matrix_size >= 512);
 }
 
 } // namespace native

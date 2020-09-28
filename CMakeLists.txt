@@ -103,7 +103,7 @@ endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
-if(NOT LINUX)
+if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
   # On macOS, if USE_DISTRIBUTED is enabled (specified by the user),
   # then make Gloo build with the libuv transport.
@@ -144,7 +144,7 @@ option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in develo
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
+option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -201,6 +201,7 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
+option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -224,6 +225,12 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
+
+# Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
+if(WIN32)
+  set(USE_TENSORPIPE OFF)
+  message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
@@ -360,7 +367,7 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
 endif(MSVC)
 
 list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
@@ -513,6 +520,10 @@ if(USE_VULKAN_SHADERC_RUNTIME)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
 endif()
 
+if(USE_VULKAN_RELAXED_PRECISION)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+endif()
+
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 
@@ -615,6 +626,23 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
   float a[] = {1.0, 1.0};
+  float32x4x2_t v;
+  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  vst1q_f32_x2(a, v);
+  return 0;
+}" HAS_VST1)
+
+  if(NOT HAS_VST1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
+  float a[] = {1.0, 1.0};
   vld1q_f32_x2(a);
   return 0;
 }" HAS_VLD1)
@@ -626,7 +654,7 @@ endif()
 
 
 # Add code coverage flags to supported compilers
-if(CODE_COVERAGE)
+if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     string(APPEND CMAKE_C_FLAGS  " --coverage -fprofile-abs-path")
     string(APPEND CMAKE_CXX_FLAGS  " --coverage -fprofile-abs-path")

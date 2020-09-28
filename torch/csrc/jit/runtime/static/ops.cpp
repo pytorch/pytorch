@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/runtime/static/ops.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {

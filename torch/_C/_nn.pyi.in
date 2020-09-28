@@ -1,5 +1,13 @@
-from typing import Callable
+from torch import Tensor
+from typing import Callable, Optional, List
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp
 
 ${dispatched_hints}
+
+# Defined in aten/src/ATen/native/mkldnn/Linear.cpp
+def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
+
+# Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
+def mkldnn_reorder_conv2d_weight(self: Tensor, padding: List, stride: List, dilatation: List, groups: int) -> Tensor: ...
+def mkldnn_reorder_conv3d_weight(self: Tensor, padding: List, stride: List, dilatation: List, groups: int) -> Tensor: ...
