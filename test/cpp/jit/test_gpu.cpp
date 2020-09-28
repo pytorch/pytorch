@@ -5275,6 +5275,10 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<int> output_dims = {320, 640};
   std::vector<int> red_dims;
 
+  // Making sure we get deterministic results
+  // (see https://github.com/csarofeen/pytorch/issues/399)
+  at::manual_seed(0);
+
   // Tried to cut down the number iterations with just
   // doing every other power of 2.
   for (int i = 1; i <= 1024 * 1024; i <<= 2) {
