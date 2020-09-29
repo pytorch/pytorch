@@ -65,40 +65,44 @@ graph {
     }
   }
   node {
-    output: "7"
-    name: "Constant_6"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 7
-        raw_data: "\030\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "7"
     input: "6"
-    output: "8"
-    name: "Div_7"
-    op_type: "Div"
-  }
-  node {
-    input: "8"
     output: "9"
-    name: "Cast_8"
+    name: "Cast_6"
     op_type: "Cast"
     attribute {
       name: "to"
-      i: 7
+      i: 1
       type: INT
     }
   }
   node {
     input: "9"
-    output: "10"
-    name: "Cast_9"
+    output: "11"
+    name: "Cast_7"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "20"
+    input: "11"
+    output: "12"
+    name: "Div_8"
+    op_type: "Div"
+  }
+  node {
+    input: "12"
+    output: "13"
+    name: "Floor_9"
+    op_type: "Floor"
+  }
+  node {
+    input: "13"
+    output: "14"
+    name: "Cast_10"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -108,18 +112,7 @@ graph {
   }
   node {
     input: "3"
-    output: "11"
-    name: "Unsqueeze_10"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "10"
-    output: "12"
+    output: "15"
     name: "Unsqueeze_11"
     op_type: "Unsqueeze"
     attribute {
@@ -129,10 +122,21 @@ graph {
     }
   }
   node {
-    input: "11"
-    input: "12"
-    output: "13"
-    name: "Concat_12"
+    input: "14"
+    output: "16"
+    name: "Unsqueeze_12"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "15"
+    input: "16"
+    output: "17"
+    name: "Concat_13"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -142,12 +146,17 @@ graph {
   }
   node {
     input: "0"
-    input: "13"
-    output: "14"
-    name: "Reshape_13"
+    input: "17"
+    output: "18"
+    name: "Reshape_14"
     op_type: "Reshape"
   }
   name: "torch-jit-export"
+  initializer {
+    data_type: 1
+    name: "20"
+    raw_data: "\000\000\300A"
+  }
   input {
     name: "0"
     type {
@@ -171,7 +180,7 @@ graph {
     }
   }
   output {
-    name: "14"
+    name: "18"
     type {
       tensor_type {
         elem_type: 1
