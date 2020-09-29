@@ -254,31 +254,31 @@ class ChainDataset(IterableDataset):
         return total
 
 
-class ShuffleDataset(IterableDataset[T_co]):
+class BufferedShuffleDataset(IterableDataset[T_co]):
     r"""Dataset shuffled from the original dataset.
 
     This class is useful to shuffle an existing instance of an IterableDataset.
     The buffer with buffer_size is filled with the items from the dataset first. Then,
     each item will be yielded from the buffer by reservoir sampling via iterator.
 
-    For buffer size smaller than 1, the buffer size is set to 1 representing
-    non-shuffled dataset. For perfect shuffling, the buffer size is required to be
-    greater than or equal to the size of dataset.
+    For `buffer_size` smaller than 1, the `buffer_size` is set to 1 representing
+    non-shuffled dataset. For fully shuffling the whole dataset, the buffer size is
+    required to be greater than or equal to the size of dataset.
 
-    When it is used with :class:`~torch.utils.data.DataLoader`,each item in the
+    When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
     dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
 
     When it is used with :class:`~torch.utils.data.DataLoader` with :attr:`num_workers == 0`,
     manually setting up a random seed for the single-process mode:
 
-        >>> ds = ShuffleDataset(dataset)
+        >>> ds = BufferedShuffleDataset(dataset)
         >>> random.seed(...)
         >>> print(list(torch.utils.data.DataLoaderDataLoader(ds, num_workers=0)))
 
     When it is used with :class:`~torch.utils.data.DataLoader` with :attr:`num_workers > 0`,
     using :attr:`worker_init_fn` to set up a random seed for all workers:
 
-        >>> ds = ShuffleDataset(dataset)
+        >>> ds = BufferedShuffleDataset(dataset)
         >>> def init_fn(worker_id):
         ...     random.seed(...)
         >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
@@ -291,7 +291,7 @@ class ShuffleDataset(IterableDataset[T_co]):
     buffer_size: int
 
     def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
-        super(ShuffleDataset, self).__init__()
+        super(BufferedShuffleDataset, self).__init__()
         self.dataset = dataset
         self.buffer_size = buffer_size if buffer_size > 1 else 1
 
@@ -299,10 +299,14 @@ class ShuffleDataset(IterableDataset[T_co]):
         buf: List[T_co] = []
         for x in self.dataset:
             if len(buf) == self.buffer_size:
-                yield buf.pop(random.randint(0, self.buffer_size - 1))
-            buf.append(x)
+                idx = random.randint(0, self.buffer_size - 1)
+                yield buf[idx]
+                buf[idx] = x
+            else:
+                buf.append(x)
+        random.shuffle(buf)
         while buf:
-            yield buf.pop(random.randint(0, len(buf) - 1))
+            yield buf.pop()
 
 
 class Subset(Dataset[T_co]):

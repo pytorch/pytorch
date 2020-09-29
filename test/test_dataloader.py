@@ -14,7 +14,7 @@ import tempfile
 import random
 from torch import multiprocessing as mp
 from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset,
-                              ChainDataset, ShuffleDataset)
+                              ChainDataset, BufferedShuffleDataset)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
@@ -1219,30 +1219,30 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
-    def test_shuffle_dataset(self):
+    def test_buffer_shuffle_dataset(self):
         dataset = CountingIterableDataset(20)
         expected = list(range(20))
         buffer_sizes = [5, 20, 25]
         for num_workers in [0, 1]:
             # Buffer Size <= 1: Not shuffled dataset
-            fetched_nos = list(self._get_data_loader(ShuffleDataset(dataset, 1), num_workers=num_workers))
+            fetched_nos = list(self._get_data_loader(BufferedShuffleDataset(dataset, 1), num_workers=num_workers))
             self.assertEqual(len(fetched_nos), len(expected))
             for e, d in zip(expected, fetched_nos):
                 self.assertIsInstance(d, torch.Tensor)
                 self.assertEqual(e, d)
             # Buffer Size > 1: Shuffled dataset
             for buffer_size in buffer_sizes:
-                fetched = sorted(list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers)))
+                fetched = sorted(list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers)))
                 self.assertEqual(len(fetched), len(expected))
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
                     self.assertEqual(e, d)
                 # Random Seed for single process
                 random.seed(123)
-                fetched_seed1 = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                fetched_seed1 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
                                      worker_init_fn=shuffle_ds_init_fn))
                 random.seed(123)
-                fetched_seed2 = list(self._get_data_loader(ShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                fetched_seed2 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
                                      worker_init_fn=shuffle_ds_init_fn))
                 self.assertEqual(len(fetched_seed1), len(fetched_seed2))
                 for d1, d2 in zip(fetched_seed1, fetched_seed2):
