@@ -398,9 +398,14 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
+    .. warning::
+        Setting :attr:`return_complex` explicitly will be required in a future
+        PyTorch release. Set it to False to preserve the current behavior or
+        True to return a complex output.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after librosa_.
+    time. The interface of this function is modeled after the librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -455,10 +460,6 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       return is a ``input.dim() + 1`` dimensional complex tensor. If ``False``,
       the output is a ``input.dim() + 2`` dimensional real tensor where the last
       dimension represents the real and imaginary components.
-
-      .. warning::
-         From pytorch 1.8.0, :attr:`return_complex` will default to ``True``
-         for all input types.
 
     Returns either a complex tensor of size :math:`(* \times N \times T)` if
     :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
