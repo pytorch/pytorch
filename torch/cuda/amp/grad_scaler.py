@@ -196,7 +196,8 @@ class GradScaler(object):
         # However, we don't know their devices or dtypes in advance.
 
         # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        # Google says mypy struggles with defaultdicts type annotations.
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list)) # type: ignore[var-annotated]
         with torch.no_grad():
             for group in optimizer.param_groups:
                 for param in group["params"]:
@@ -218,11 +219,11 @@ class GradScaler(object):
                     # TODO: is there a way to split by device and dtype without appending in the inner loop?
                     per_device_and_dtype_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
 
-                for device, per_dtype_grads in per_device_and_dtype_grads.items():
-                    for grads in per_dtype_grads.values():
-                        torch._amp_foreach_non_finite_check_and_unscale_(grads,
-                                                                         per_device_found_inf.get(device),
-                                                                         per_device_inv_scale.get(device))
+            for device, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._amp_foreach_non_finite_check_and_unscale_(grads,
+                                                                     per_device_found_inf.get(device),
+                                                                     per_device_inv_scale.get(device))
 
         return per_device_found_inf._per_device_tensors
 
