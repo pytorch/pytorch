@@ -8,9 +8,12 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import DefaultDict, Dict, Optional, Tuple
+from typing import DefaultDict, Dict, NamedTuple, Optional, Tuple
 
 import torch
+
+
+FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -20,10 +23,10 @@ class CallgrindStats(object):
     number: int
     num_threads: int
     built_with_debug_symbols: bool
-    baseline_inclusive_stats: Tuple[Tuple[int, str], ...]
-    baseline_exclusive_stats: Tuple[Tuple[int, str], ...]
-    stmt_inclusive_stats: Tuple[Tuple[int, str], ...]
-    stmt_exclusive_stats: Tuple[Tuple[int, str], ...]
+    baseline_inclusive_stats: Tuple[FunctionCount, ...]
+    baseline_exclusive_stats: Tuple[FunctionCount, ...]
+    stmt_inclusive_stats: Tuple[FunctionCount, ...]
+    stmt_exclusive_stats: Tuple[FunctionCount, ...]
 
     def __repr__(self) -> str:
         newline = "\n"  # `\` cannot appear in fstring code section.
@@ -45,7 +48,7 @@ class CallgrindStats(object):
                      REL_WITH_DEB_INFO=1 for more detailed results.""")
         return output
 
-    def stats(self, inclusive: bool = False) -> Tuple[Tuple[int, str], ...]:
+    def stats(self, inclusive: bool = False) -> Tuple[FunctionCount, ...]:
         """Returns stats as a tuple of (count, function)
 
         `inclusive` matches the semantics of callgrind. If True, the counts
@@ -60,7 +63,7 @@ class CallgrindStats(object):
             first, second = self.stmt_exclusive_stats, self.baseline_exclusive_stats
         return self._diff(first, second)
 
-    def counts(self, include_lookdict_unicode: bool = True) -> int:
+    def counts(self, *, include_lookdict_unicode: bool = True) -> int:
         """Returns the total number of instructions executed.
 
         Several instructions in the CPython interpreter are rather noisy. These
@@ -72,7 +75,12 @@ class CallgrindStats(object):
         return self._counts(self.stmt_exclusive_stats, include_lookdict_unicode)
 
     # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
-    def delta(self, other, inclusive: bool = False, subtract_baselines: bool = True):
+    def delta(
+        self,
+        other,  # type: CallgrindStats
+        inclusive: bool = False,
+        subtract_baselines: bool = True
+    ) -> Tuple[FunctionCount, ...]:
         """Diff two sets of counts.
 
         One common reason to collect instruction counts is to determine the
@@ -95,9 +103,8 @@ class CallgrindStats(object):
                 first, second = self.stmt_exclusive_stats, other.stmt_exclusive_stats
         return self._diff(first, second)
 
-    # FIXME: Once 3.7 is the minimum version, type annotate output
-    def as_standardized(self):
-        """Strip some prefixes from function strings.
+    def as_standardized(self) -> "CallgrindStats":
+        """Strip library names and some prefixes from function strings.
 
         When comparing two different sets of instruction counts, on stumbling
         block can be path prefixes. Callgrind includes the full filepath
@@ -117,7 +124,7 @@ class CallgrindStats(object):
         strings and causing better cancelation of equivilent call sites
         when diffing.
         """
-        def strip_prefix(stats: Tuple[Tuple[int, str], ...]) -> Tuple[Tuple[int, str], ...]:
+        def strip(stats: Tuple[FunctionCount, ...]) -> Tuple[FunctionCount, ...]:
             counts: DefaultDict[str, int] = collections.defaultdict(int)
 
             # "Python" and "Objects" come from CPython.
@@ -126,9 +133,13 @@ class CallgrindStats(object):
                 fn = re.sub(r"^.+build/\.\./", "build/../", fn)
                 for new_prefix in prefix_truncations:
                     fn = re.sub(r"^.+" + new_prefix, new_prefix, fn)
+
+                # Strip library name. e.g. `libtorch.so`
                 fn = re.sub(r"\s\[.+\]$", "", fn)
                 counts[fn] += c
-            return tuple(sorted([(c, fn) for fn, c in counts.items() if c], reverse=True))
+            return tuple(sorted([
+                FunctionCount(c, fn) for fn, c in counts.items() if c
+            ], reverse=True))
 
         return CallgrindStats(
             stmt=self.stmt,
@@ -136,10 +147,10 @@ class CallgrindStats(object):
             number=self.number,
             num_threads=self.num_threads,
             built_with_debug_symbols=self.built_with_debug_symbols,
-            baseline_inclusive_stats=strip_prefix(self.baseline_inclusive_stats),
-            baseline_exclusive_stats=strip_prefix(self.baseline_exclusive_stats),
-            stmt_inclusive_stats=strip_prefix(self.stmt_inclusive_stats),
-            stmt_exclusive_stats=strip_prefix(self.stmt_exclusive_stats),
+            baseline_inclusive_stats=strip(self.baseline_inclusive_stats),
+            baseline_exclusive_stats=strip(self.baseline_exclusive_stats),
+            stmt_inclusive_stats=strip(self.stmt_inclusive_stats),
+            stmt_exclusive_stats=strip(self.stmt_exclusive_stats),
         )
 
     @staticmethod
@@ -151,17 +162,19 @@ class CallgrindStats(object):
         )
 
     @staticmethod
-    def _diff(first: Tuple[Tuple[int, str], ...], second: Tuple[Tuple[int, str], ...]) -> Tuple[Tuple[int, str], ...]:
+    def _diff(first: Tuple[FunctionCount, ...], second: Tuple[FunctionCount, ...]) -> Tuple[FunctionCount, ...]:
         counts = collections.defaultdict(int, {fn: c for c, fn in first})
         assert len(counts) == len(first)
         for c, fn in second:
             counts[fn] -= c
 
-        return tuple(sorted([(c, fn) for fn, c in counts.items() if c], reverse=True))
+        return tuple(sorted([
+            FunctionCount(c, fn) for fn, c in counts.items() if c
+        ], reverse=True))
 
 
 class _ValgrindWrapper(object):
-    def __init__(self):
+    def __init__(self) -> None:
         self._commands_available: Dict[str, bool] = {}
         if torch._C.valgrind_supported_platform():
             # Only bother checking on supported platforms.
@@ -177,7 +190,7 @@ class _ValgrindWrapper(object):
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
-        self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[Tuple[int, str], ...], Tuple[Tuple[int, str], ...]]] = {}
+        self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[FunctionCount, ...], Tuple[FunctionCount, ...]]] = {}
 
     def _validate(self):
         if not torch._C.valgrind_supported_platform():
@@ -197,8 +210,8 @@ class _ValgrindWrapper(object):
     ):
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
-        baseline_inclusive_stats: Tuple[Tuple[int, str], ...] = ()
-        baseline_exclusive_stats: Tuple[Tuple[int, str], ...] = ()
+        baseline_inclusive_stats: Tuple[FunctionCount, ...] = ()
+        baseline_exclusive_stats: Tuple[FunctionCount, ...] = ()
         if collect_baseline:
             cache_key = (number, num_threads)
             if cache_key not in self._baseline_cache:
@@ -226,7 +239,13 @@ class _ValgrindWrapper(object):
             stmt_exclusive_stats=stmt_exclusive_stats,
         )
 
-    def _invoke(self, stmt: str, setup: str, number: int, num_threads: int):
+    def _invoke(
+            self,
+            stmt: str,
+            setup: str,
+            number: int,
+            num_threads: int
+        ) -> Tuple[Tuple[FunctionCount, ...], Tuple[FunctionCount, ...]]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -254,7 +273,7 @@ class _ValgrindWrapper(object):
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args, **kwargs):
+        def run(args, **kwargs) -> Tuple[subprocess.CompletedProcess, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:
@@ -282,7 +301,6 @@ class _ValgrindWrapper(object):
                 f"--callgrind-out-file={callgrind_out}",
                 "--dump-line=yes",
                 "--dump-instr=yes",
-                "--collect-jumps=yes",
                 "--instr-atstart=yes",
                 "--collect-atstart=no",
                 "python",
@@ -299,7 +317,7 @@ class _ValgrindWrapper(object):
 
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
-            def parse_output(inclusive: bool):
+            def parse_output(inclusive: bool) -> Tuple[FunctionCount, ...]:
                 annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
@@ -317,7 +335,7 @@ class _ValgrindWrapper(object):
                     if count_match:
                         ir_str, file_function = count_match.groups()
                         ir = int(ir_str.replace(",", ""))
-                        fn_counts.append((ir, file_function))
+                        fn_counts.append(FunctionCount(ir, file_function))
                         continue
 
                     if begin_collecting and re.match(r"-+", l):
@@ -325,7 +343,7 @@ class _ValgrindWrapper(object):
 
                     begin_collecting = False
 
-                return fn_counts
+                return tuple(fn_counts)
             return parse_output(inclusive=True), parse_output(inclusive=False)
         finally:
             shutil.rmtree(working_dir)

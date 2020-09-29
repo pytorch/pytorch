@@ -15,7 +15,7 @@ import torch.utils._benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, slowTest
 from urllib.error import URLError
 import numpy as np
 
@@ -768,6 +768,7 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(len(measurement.times), repeats)
             self.assertEqual(measurement.number_per_run, number_per_run)
 
+    @slowTest
     @unittest.skipIf(not torch._C.valgrind_supported_platform(), "Unsupported platform.")
     def test_collect_callgrind(self):
         timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
