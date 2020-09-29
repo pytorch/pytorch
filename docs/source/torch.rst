@@ -537,3 +537,4 @@ Utilities
     set_deterministic
     is_deterministic
     vmap
+    Assert

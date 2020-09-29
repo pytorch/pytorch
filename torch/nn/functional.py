@@ -2583,16 +2583,10 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _smooth_l1_loss(input, target):
-    # type: (Tensor, Tensor) -> Tensor
-    t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
-
-
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', beta=1.0):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
-    element-wise error falls below 1 and an L1 term otherwise.
+    element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
@@ -2601,7 +2595,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 smooth_l1_loss, tens_ops, input, target, size_average=size_average,
-                reduce=reduce, reduction=reduction)
+                reduce=reduce, reduction=reduction, beta=beta)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
@@ -2611,7 +2605,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+    return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):

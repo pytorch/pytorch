@@ -2740,20 +2740,27 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
-add_docstr(torch.floor_divide,
-           r"""
+add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
-for type promotion and broadcasting rules.
+.. warning::
+    This function's name is a misnomer. It actually rounds the
+    quotient towards zero instead of taking its floor. This behavior
+    will be deprecated in a future PyTorch release.
+
+Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
+quotient towards zero. Equivalently, it truncates the quotient(s):
 
 .. math::
-    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+    \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
+
+Supports broadcasting to a common shape, type promotion, and integer and float inputs.
+
 Args:
-    input (Tensor): the numerator tensor
-    other (Tensor or Scalar): the denominator
+    input (Tensor or Number): the dividend
+    other (Tensor or Number): the divisor
 
 Keyword args:
     {out}
@@ -8533,7 +8540,13 @@ Example::
 add_docstr(torch.fft, r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
-Complex-to-complex Discrete Fourier Transform
+Complex-to-complex Discrete Fourier Transform.
+
+.. warning::
+    The function :func:`torch.fft` is deprecated and will be removed in
+    PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
+    functions, instead, by importing :ref:`torch.fft <torch-fft-module>` and
+    calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
 
 This method computes the complex-to-complex discrete Fourier transform.
 Ignoring the batch dimensions, it computes the following expression:
@@ -8558,12 +8571,6 @@ Returns the real and the imaginary parts together as one tensor of the same
 shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
-
-.. deprecated:: 1.7.0
-    The function :func:`torch.fft` is deprecated and will be removed in
-    PyTorch 1.8. Use the new :ref:`torch.fft <torch-fft-module>` module
-    functions, instead, by importing :ref:`torch.fft <torch-fft-module>` and
-    calling :func:`torch.fft.fft` or :func:`torch.fft.fftn`.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8639,11 +8646,16 @@ Example::
 
 """)
 
-add_docstr(torch.ifft,
-           r"""
+add_docstr(torch.ifft, r"""
 ifft(input, signal_ndim, normalized=False) -> Tensor
 
-Complex-to-complex Inverse Discrete Fourier Transform
+Complex-to-complex Inverse Discrete Fourier Transform.
+
+.. warning::
+    The function :func:`torch.ifft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
 
 This method computes the complex-to-complex inverse discrete Fourier
 transform. Ignoring the batch dimensions, it computes the following
@@ -8667,12 +8679,6 @@ Returns the real and the imaginary parts together as one tensor of the same
 shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
-
-.. deprecated:: 1.7.0
-    The function :func:`torch.ifft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
-    and calling :func:`torch.fft.ifft` or :func:`torch.fft.ifftn`.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8730,11 +8736,17 @@ Example::
 
 """)
 
-add_docstr(torch.rfft,
-           r"""
+add_docstr(torch.rfft, r"""
 rfft(input, signal_ndim, normalized=False, onesided=True) -> Tensor
 
-Real-to-complex Discrete Fourier Transform
+Real-to-complex Discrete Fourier Transform.
+
+.. warning::
+    The function :func:`torch.rfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.rfft` for one-sided output, or
+    :func:`torch.fft.fft` for two-sided output.
 
 This method computes the real-to-complex discrete Fourier transform. It is
 mathematically equivalent with :func:`~torch.fft` with differences only in
@@ -8761,13 +8773,6 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 :math:`\lfloor \frac{N_d}{2} \rfloor + 1`.
 
 The inverse of this function is :func:`~torch.irfft`.
-
-.. deprecated:: 1.7.0
-    The function :func:`torch.rfft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
-    and calling :func:`torch.fft.rfft` for one-sided output, or
-    :func:`torch.fft.fft` for two-sided output.
 
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
@@ -8806,11 +8811,17 @@ Example::
 """)
 
 
-add_docstr(torch.irfft,
-           r"""
+add_docstr(torch.irfft, r"""
 irfft(input, signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
 
-Complex-to-real Inverse Discrete Fourier Transform
+Complex-to-real Inverse Discrete Fourier Transform.
+
+.. warning::
+    The function :func:`torch.irfft` is deprecated and will be removed in a
+    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
+    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
+    and calling :func:`torch.fft.irfft` for one-sided input, or
+    :func:`torch.fft.ifft` for two-sided input.
 
 This method computes the complex-to-real inverse discrete Fourier transform.
 It is mathematically equivalent with :func:`ifft` with differences only in
@@ -8840,13 +8851,6 @@ this normalizes the result by multiplying it with
     See :func:`~torch.rfft` for details on conjugate symmetry.
 
 The inverse of this function is :func:`~torch.rfft`.
-
-.. deprecated:: 1.7.0
-    The function :func:`torch.irfft` is deprecated and will be removed in a
-    future PyTorch release. Use the new :ref:`torch.fft <torch-fft-module>`
-    module functions, instead, by importing :ref:`torch.fft <torch-fft-module>`
-    and calling :func:`torch.fft.irfft` for one-sided input, or
-    :func:`torch.fft.ifft` for two-sided input.
 
 .. warning::
     Generally speaking, input to this function should contain values
@@ -9097,7 +9101,7 @@ where ``L`` is the :attr:`window_length`. This function computes:
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 
 Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
 The :attr:`periodic` argument is intended as a helpful shorthand
 to produce a periodic window as input to functions like :func:`torch.stft`.
 

@@ -615,7 +615,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
-        torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
+        torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean', beta=1.: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.softmin: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
@@ -665,6 +665,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
 
         torch.quantized_lstm_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                     col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
+        torch.quantized_max_pool1d: (lambda input, kernel_size, stride=tuple(), padding=(0,),
+                                     dilation=(1,), ceil_mode=False: -1),
         torch.quantized_max_pool2d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0),
                                      dilation=(1, 1), ceil_mode=False: -1),
         torch.quantized_rnn_relu_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,

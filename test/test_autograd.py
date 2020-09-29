@@ -2592,6 +2592,67 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
+    @slowTest
+    @skipIfNoLapack
+    def test_lobpcg(self):
+
+        def func(k, A, largest=True, B=None):
+            X_shape = list(A.shape)
+            X_shape[-1] = k
+            X = torch.eye(A.size(-2), k, dtype=A.dtype, device=A.device)
+            if A.dim() > 2:
+                X = X.expand(X_shape)
+
+            D, U = torch.lobpcg(A=A, k=k, B=B, X=X)
+
+            # LOBPCG uses a random initial eigenspace approximation
+            # if parameter `X` is not provided.
+            # This may cause a non-deterministic behavior
+            # when it comes to the sign of an eigenvector
+            # (note if v is an eigenvector, so is -v),
+            # hence we eliminate this non-determinism
+            # by making sure that each column of U
+            # gets multiplied by the sign of its max (in absolute value) element.
+            # Also, gradcheck changes the content of the input by +/- eps (default to 1e-06)
+            # to compute the numerical gradient which can also cause the signs to flip.
+            _, idx = U.abs().max(-2, keepdim=True)
+            sign = U.gather(-2, idx).sign()
+            U = U * sign
+            return D, U
+
+        def run_symeig_test(k, sizes, largest=True):
+            A = torch.rand(*sizes).double()
+            A = A.matmul(A.transpose(-1, -2)) / 10
+            A.requires_grad_(True)
+
+            gradcheck(lambda A: func(k, A, largest), A)
+
+            # Custom gradient vectors for better stability due to some
+            # non-determinism in the lobpcg's forward.
+            # Note it is not required if symeig is in forward instead (tested).
+            D_grad = torch.rand(*A.shape[:-2], k) / 100
+            U_grad = torch.rand(*A.shape[:-1], k) / 100
+            gradgradcheck(lambda A: func(k, A, largest), A, [D_grad, U_grad], atol=1e-4)
+
+            # check whether A.grad is symmetric
+            A = A.detach().requires_grad_(True)
+            D, U = func(k, A, largest)
+            (D.sum() + U.sum()).backward()
+            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
+
+        # the tests below take about 1-2 minutes to finish,
+        # but we want to be extra sure that the backward is correct.
+        for largest in [True, False]:
+            run_symeig_test(1, (6, 6), largest=largest)
+            run_symeig_test(1, (2, 6, 6), largest=largest)
+            run_symeig_test(1, (2, 2, 6, 6), largest=largest)
+            run_symeig_test(2, (6, 6), largest=largest)
+            run_symeig_test(2, (2, 6, 6), largest=largest)
+            run_symeig_test(2, (2, 2, 6, 6), largest=largest)
+            run_symeig_test(3, (9, 9), largest=largest)
+            run_symeig_test(3, (2, 9, 9), largest=largest)
+            run_symeig_test(3, (2, 2, 9, 9), largest=largest)
+
     @skipIfNoLapack
     def test_cholesky_inverse(self):
         def _test_with_size(upper, dims):
@@ -4764,9 +4825,9 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['l
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
+                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs'] + separate_complex_tests
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']
@@ -4891,7 +4952,9 @@ def add_test(
                                         'broadcast_all' in test_name or
                                         'atanh' in test_name or
                                         'acosh' in test_name or
-                                        'asinh' in test_name)
+                                        'asinh' in test_name or
+                                        'abs_complex' in test_name or
+                                        'abs_scalar_complex' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -4938,7 +5001,10 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+                # skip C -> R inplace tests
+                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
+                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
+                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
@@ -6010,11 +6076,13 @@ class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
         for f in [torch.min, torch.max, torch.median]:
-            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
-            y = f(x)
-            y.backward()
-            self.assertEqual(x.grad.sum(), 1.)
-            self.assertEqual((x.grad == 1 / 3).sum(), 3)
+            x1 = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            x2 = torch.tensor([float('nan'), float('nan'), float('nan')], requires_grad=True)
+            for x in [x1, x2]:
+                y = f(x)
+                y.backward()
+                self.assertEqual(x.grad.sum(), 1.)
+                self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
