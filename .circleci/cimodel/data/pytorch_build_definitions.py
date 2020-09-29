@@ -110,6 +110,8 @@ class Conf:
             parameters["resource_class"] = resource_class
         if phase == "build" and self.rocm_version is not None:
             parameters["resource_class"] = "xlarge"
+        if hasattr(self, 'filters'):
+            parameters['filters'] = self.filters
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -139,14 +141,16 @@ class Conf:
 
 # TODO This is a hack to special case some configs just for the workflow list
 class HiddenConf(object):
-    def __init__(self, name, parent_build=None):
+    def __init__(self, name, parent_build=None, filters=None):
         self.name = name
         self.parent_build = parent_build
+        self.filters = filters
 
     def gen_workflow_job(self, phase):
         return {
             self.gen_build_name(phase): {
-                "requires": [self.parent_build.gen_build_name("build")]
+                "requires": [self.parent_build.gen_build_name("build")],
+                "filters": self.filters,
             }
         }
 
@@ -206,7 +210,9 @@ def gen_docs_configs(xenial_parent_config):
     configs.append(
         HiddenConf(
             "pytorch_python_doc_build",
-            parent_build=xenial_parent_config
+            parent_build=xenial_parent_config,
+            filters=gen_filter_dict(branches_list=r"/.*/",
+                                    tags_list=RC_PATTERN),
         )
     )
     configs.append(
@@ -220,7 +226,9 @@ def gen_docs_configs(xenial_parent_config):
     configs.append(
         HiddenConf(
             "pytorch_cpp_doc_build",
-            parent_build=xenial_parent_config
+            parent_build=xenial_parent_config,
+            filters=gen_filter_dict(branches_list=r"/.*/",
+                                    tags_list=RC_PATTERN),
         )
     )
     configs.append(
@@ -361,6 +369,8 @@ def instantiate_configs():
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
+            c.filters = gen_filter_dict(branches_list=r"/.*/",
+                                        tags_list=RC_PATTERN)
             c.dependent_tests = gen_docs_configs(c)
 
         if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
