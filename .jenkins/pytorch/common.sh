@@ -15,7 +15,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   PYTHON=$(which "python${BASH_REMATCH[1]}")
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
-  export PYTORCH_TEST_WITH_ROCM=1
   alias python="$PYTHON"
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
