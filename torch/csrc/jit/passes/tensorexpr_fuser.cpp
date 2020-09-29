@@ -29,6 +29,23 @@ bool isSupportedForBlock(Node* node) {
   }
 }
 
+bool usedOnlyInSize(Value* v) {
+  const auto& uses = v->uses();
+  return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+    return u.user->matches("aten::size(Tensor self) -> int[]");
+  });
+}
+
+Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
+  AT_ASSERT(!sizes.empty());
+  Graph* graph = sizes[0]->owningGraph();
+  Node* broadcast_n =
+      graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
+  broadcast_n->output()->setType(ListType::ofInts());
+  db->createValue(broadcast_n->output());
+  return broadcast_n->output();
+}
+
 namespace tensorexpr {
 bool isSupported(Node* node) {
   // For Block codegen we allow limited ops.
@@ -287,6 +304,132 @@ class TensorExprFuser {
         min_group_size_(min_group_size),
         disable_shape_checks_(disable_shape_checks) {}
 
+  // Builds up expressions that compute shapes of all intermediates (and
+  // outputs) of the fusion group, based on the sizes of inputs. You should run
+  // DCE to remove those that you end up not using.
+  std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
+    GRAPH_DUMP("buildShapeExpressions for ", fusion_group->g(attr::Subgraph));
+    WithInsertPoint insert_guard{fusion_group->next()};
+    std::unordered_map<Value*, Value*> shape_of;
+
+    Graph* graph = fusion_group->owningGraph();
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto inputs = fusion_group->inputs();
+    auto sinputs = subgraph->inputs();
+    AT_ASSERT(inputs.size() == sinputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+        Value* soutput = graph->insert(aten::size, {inputs[i]});
+        aliasDb_->createValue(soutput);
+        GRAPH_DEBUG(
+            "Adding a mapping for %",
+            sinputs[i]->debugName(),
+            " ",
+            getHeader(soutput->node()));
+        shape_of[sinputs[i]] = soutput;
+      }
+    }
+
+    // When we have a guarantee that an output won't be removed, because it's
+    // used in expressions that don't involve size checks, we can use its size
+    // instead of computing a long chain of broadcasts, starting from the
+    // beginning of the kernel.
+    auto outputs = fusion_group->outputs();
+    auto soutputs = subgraph->outputs();
+    AT_ASSERT(outputs.size() == soutputs.size());
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      if (usedOnlyInSize(outputs[i]))
+        continue;
+      Value* soutput = graph->insert(aten::size, {outputs[i]});
+      aliasDb_->createValue(soutput);
+      shape_of[soutputs[i]] = soutput;
+    }
+
+    for (Node* n : subgraph->nodes()) {
+      // XXX: Use of shape_of.emplace is crucial to the output shape
+      // optimization!
+      if (n->kind() == aten::cat) {
+        // This is a bit more involved, because we have to account for the case
+        // when inputs have different shapes, but fortunately those tensors are
+        // always outputs, and so we can simply avoid replacing their queries,
+        // because it won't help us.
+        continue;
+      }
+      if (n->kind() == prim::Constant) {
+        continue;
+      }
+      if (n->kind() == prim::ConstantChunk) {
+        Node* sizes_node = graph->insertNode(
+            graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
+        sizes_node->i_(attr::dim, n->i(attr::dim));
+        sizes_node->i_(attr::chunks, n->i(attr::chunks));
+        for (Value* output : sizes_node->outputs()) {
+          aliasDb_->createValue(output);
+        }
+        Value* regular_size = sizes_node->outputs().at(0);
+        Value* last_size = sizes_node->outputs().at(1);
+        regular_size->setType(ListType::ofInts());
+        last_size->setType(ListType::ofInts());
+        auto outputs = n->outputs();
+        for (Value* o : outputs.slice(0, outputs.size() - 1)) {
+          shape_of.emplace(o, regular_size);
+        }
+        shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
+        continue;
+      }
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+      shape_of.emplace(
+          n->output(),
+          shapes.size() == 1 ? shapes[0]
+                             : broadcastSizes(shapes, aliasDb_.get()));
+    }
+    return shape_of;
+  }
+
+  void removeOutputsUsedOnlyInSize(Node* fusion_group) {
+    if (fusion_group->kind() != prim::TensorExprGroup)
+      return;
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto shape_of = buildShapeExpressions(fusion_group);
+    auto outputs = fusion_group->outputs().vec();
+    auto soutputs = subgraph->outputs().vec();
+    // XXX: Iterating in this order is not only good for performance reasons!
+    // It is also crucial for correctness (i has to reflect the current true
+    // index of outputs[i])!
+    for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
+      auto output = outputs[i];
+      auto soutput = soutputs[i];
+      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
+        auto uses = output->uses();
+        for (Use u : uses) {
+          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
+          u.user->destroy();
+        }
+        fusion_group->eraseOutput(i);
+        subgraph->eraseOutput(i);
+      }
+    }
+  }
+
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
@@ -298,7 +441,7 @@ class TensorExprFuser {
     // fusion is done.
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
-    guardFusionGroups(graph_->block());
+    guardFusionGroupsAndRemoveOutputs(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
     GRAPH_DUMP("After removing tensor type specializations: ", graph_);
@@ -772,17 +915,18 @@ class TensorExprFuser {
     }
   }
 
-  void guardFusionGroups(Block* block) {
+  void guardFusionGroupsAndRemoveOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
       for (Block* b : n->blocks()) {
-        guardFusionGroups(b);
+        guardFusionGroupsAndRemoveOutputs(b);
       }
       if (n->kind() == prim::TensorExprGroup) {
         fusion_groups.push_back(n);
       }
     }
     for (Node* fusion_group : fusion_groups) {
+      removeOutputsUsedOnlyInSize(fusion_group);
       guardFusionGroup(fusion_group);
     }
   }
