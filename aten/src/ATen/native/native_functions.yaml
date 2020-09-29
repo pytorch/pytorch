@@ -397,12 +397,18 @@
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: addmv_
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: addmv_out
 
 - func: _addmv_impl_(Tensor(a!) self, Tensor self2, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1068,6 +1074,8 @@
 - func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: count_nonzero
 
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   use_c10_dispatcher: full
@@ -2430,6 +2438,8 @@
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: mode
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
@@ -6313,6 +6323,7 @@
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
 - func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6320,6 +6331,7 @@
     CUDA: foreach_tensor_add_scalar_kernel_cuda_
 
 - func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6327,6 +6339,7 @@
     CUDA: foreach_tensor_sub_scalar_kernel_cuda
 
 - func: _foreach_sub_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6334,6 +6347,7 @@
     CUDA: foreach_tensor_sub_scalar_kernel_cuda_
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6341,6 +6355,7 @@
     CUDA: foreach_tensor_mul_scalar_kernel_cuda
 
 - func: _foreach_mul_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6348,6 +6363,7 @@
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6355,34 +6371,39 @@
     CUDA: foreach_tensor_div_scalar_kernel_cuda
 
 - func: _foreach_div_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
     CUDA: foreach_tensor_div_scalar_kernel_cuda_
 
-- func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, Scalar alpha=1) -> Tensor[]
+- func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow
     CUDA: foreach_tensor_add_list_kernel_cuda
 
-- func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, Scalar alpha=1) -> ()
+- func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow_
     CUDA: foreach_tensor_add_list_kernel_cuda_
 
-- func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2, Scalar alpha=1) -> Tensor[]
+- func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow
     CUDA: foreach_tensor_sub_list_kernel_cuda
 
-- func: _foreach_sub_.List(Tensor(a!)[] self, Tensor[] other, Scalar alpha=1) -> ()
+- func: _foreach_sub_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6390,6 +6411,7 @@
     CUDA: foreach_tensor_sub_list_kernel_cuda_
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6397,13 +6419,15 @@
     CUDA: foreach_tensor_mul_list_kernel_cuda
 
 - func: _foreach_mul_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow_
     CUDA: foreach_tensor_mul_list_kernel_cuda_
 
-- func: _foreach_div.List(Tensor(a!)[] self, Tensor[] other) -> Tensor[]
+- func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6411,13 +6435,79 @@
     CUDA: foreach_tensor_div_list_kernel_cuda
 
 - func: _foreach_div_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow_
     CUDA: foreach_tensor_div_list_kernel_cuda_
 
+- func: _foreach_add_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist_kernel_slow
+    CUDA: foreach_tensor_add_scalarlist_kernel_cuda
+
+- func: _foreach_add_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
+
+- func: _foreach_sub_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sub_scalarlist_kernel_slow
+    CUDA: foreach_tensor_sub_scalarlist_kernel_cuda
+
+- func: _foreach_sub_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sub_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
+
+- func: _foreach_div_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_scalarlist_kernel_slow
+    CUDA: foreach_tensor_div_scalarlist_kernel_cuda
+
+- func: _foreach_div_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
+
+- func: _foreach_mul_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_scalarlist_kernel_slow
+    CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
+
+- func: _foreach_mul_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_mul_scalarlist_kernel_cuda_
+
 - func: _foreach_exp(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6425,6 +6515,7 @@
     CUDA: foreach_tensor_exp_cuda
 
 - func: _foreach_exp_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6432,6 +6523,7 @@
     CUDA: foreach_tensor_exp_cuda_
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6439,6 +6531,7 @@
     CUDA: foreach_tensor_sqrt_cuda
 
 - func: _foreach_sqrt_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6446,6 +6539,7 @@
     CUDA: foreach_tensor_sqrt_cuda_
 
 - func: _foreach_addcdiv_(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6453,6 +6547,7 @@
     CUDA: foreach_tensor_addcdiv_cuda_
 
 - func: _foreach_addcmul_(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6460,6 +6555,7 @@
     CUDA: foreach_tensor_addcmul_cuda_
 
 - func: _foreach_addcdiv(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6467,6 +6563,7 @@
     CUDA: foreach_tensor_addcdiv_cuda
 
 - func: _foreach_addcmul(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
@@ -6683,25 +6780,25 @@
     CPU: nll_loss2d_backward_cpu
     CUDA: legacy::cuda::_thnn_nll_loss2d_backward
 
-- func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+- func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, float beta=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_out
     CUDA: smooth_l1_loss_out
 
-- func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: smooth_l1_loss
 
-- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_backward_out
     CUDA: smooth_l1_loss_backward_out
 
-- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
+- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
