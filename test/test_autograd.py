@@ -4800,7 +4800,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs'] + separate_complex_tests
 
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']
@@ -4925,7 +4925,9 @@ def add_test(
                                         'broadcast_all' in test_name or
                                         'atanh' in test_name or
                                         'acosh' in test_name or
-                                        'asinh' in test_name)
+                                        'asinh' in test_name or
+                                        'abs_complex' in test_name or
+                                        'abs_scalar_complex' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -4972,7 +4974,10 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+                # skip C -> R inplace tests
+                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
+                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
+                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
