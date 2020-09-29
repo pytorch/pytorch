@@ -1,9 +1,4 @@
 r""" Functional interface (quantized)."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from typing import List, Optional
 
 import torch
@@ -364,6 +359,22 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
         zero_point = input.q_zero_point()
     _packed_params = torch.ops.quantized.linear_prepack(weight, bias)
     return torch.ops.quantized.linear(input, _packed_params, scale, zero_point)
+
+def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
+               ceil_mode=False, return_indices=False):
+    r"""Applies a 1D max pooling over a quantized input signal composed of
+    several quantized input planes.
+
+    .. note:: The input quantization parameters are propagated to the output.
+
+    See :class:`~torch.nn.quantized.MaxPool1d` for details.
+    """
+    if return_indices:
+        raise NotImplementedError("return_indices is not yet implemented!")
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.nn.functional.max_pool1d(input, kernel_size, stride, padding,
+                                          dilation, ceil_mode, return_indices)
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):

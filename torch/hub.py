@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import errno
 import hashlib
 import os
@@ -312,45 +311,94 @@ def help(github, model, force_reload=False):
 # but Python2 complains syntax error for it. We have to skip force_reload in function
 # signature here but detect it in kwargs instead.
 # TODO: fix it after Python2 EOL
-def load(github, model, *args, **kwargs):
+def load(repo_or_dir, model, *args, **kwargs):
     r"""
-    Load a model from a github repo, with pretrained weights.
+    Load a model from a github repo or a local directory.
+
+    Note: Loading a model is the typical use case, but this can also be used to
+    for loading other objects such as tokenizers, loss functions, etc.
+
+    If :attr:`source` is ``'github'``, :attr:`repo_or_dir` is expected to be
+    of the form ``repo_owner/repo_name[:tag_name]`` with an optional
+    tag/branch.
+
+    If :attr:`source` is ``'local'``, :attr:`repo_or_dir` is expected to be a
+    path to a local directory.
 
     Args:
-        github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
-        model (string): a string of entrypoint name defined in repo's hubconf.py
-        *args (optional): the corresponding args for callable `model`.
-        force_reload (bool, optional): whether to force a fresh download of github repo unconditionally.
-            Default is `False`.
-        verbose (bool, optional): If False, mute messages about hitting local caches. Note that the message
-            about first download is cannot be muted.
-            Default is `True`.
-        **kwargs (optional): the corresponding kwargs for callable `model`.
+        repo_or_dir (string): repo name (``repo_owner/repo_name[:tag_name]``),
+            if ``source = 'github'``; or a path to a local directory, if
+            ``source = 'local'``.
+        model (string): the name of a callable (entrypoint) defined in the
+            repo/dir's ``hubconf.py``.
+        *args (optional): the corresponding args for callable :attr:`model`.
+        source (string, optional): ``'github'`` | ``'local'``. Specifies how
+            ``repo_or_dir`` is to be interpreted. Default is ``'github'``.
+        force_reload (bool, optional): whether to force a fresh download of
+            the github repo unconditionally. Does not have any effect if
+            ``source = 'local'``. Default is ``False``.
+        verbose (bool, optional): If ``False``, mute messages about hitting
+            local caches. Note that the message about first download cannot be
+            muted. Does not have any effect if ``source = 'local'``.
+            Default is ``True``.
+        **kwargs (optional): the corresponding kwargs for callable
+            :attr:`model`.
+
+    Returns:
+        The output of the :attr:`model` callable when called with the given
+        ``*args`` and ``**kwargs``.
+
+    Example:
+        >>> # from a github repo
+        >>> repo = 'pytorch/vision'
+        >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
+        >>> # from a local directory
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
+    """
+    source = kwargs.pop('source', 'github').lower()
+    force_reload = kwargs.pop('force_reload', False)
+    verbose = kwargs.pop('verbose', True)
+
+    if source not in ('github', 'local'):
+        raise ValueError(
+            f'Unknown source: "{source}". Allowed values: "github" | "local".')
+
+    if source == 'github':
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
+
+    model = _load_local(repo_or_dir, model, *args, **kwargs)
+    return model
+
+
+def _load_local(hubconf_dir, model, *args, **kwargs):
+    r"""
+    Load a model from a local directory with a ``hubconf.py``.
+
+    Args:
+        hubconf_dir (string): path to a local directory that contains a
+            ``hubconf.py``.
+        model (string): name of an entrypoint defined in the directory's
+            `hubconf.py`.
+        *args (optional): the corresponding args for callable ``model``.
+        **kwargs (optional): the corresponding kwargs for callable ``model``.
 
     Returns:
         a single model with corresponding pretrained weights.
 
     Example:
-        >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = _load_local(path, 'resnet50', pretrained=True)
     """
-    force_reload = kwargs.get('force_reload', False)
-    kwargs.pop('force_reload', None)
-    verbose = kwargs.get('verbose', True)
-    kwargs.pop('verbose', None)
+    sys.path.insert(0, hubconf_dir)
 
-    repo_dir = _get_cache_or_reload(github, force_reload, verbose)
-
-    sys.path.insert(0, repo_dir)
-
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
+    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
 
     entry = _load_entry_from_hubconf(hub_module, model)
-
     model = entry(*args, **kwargs)
 
-    sys.path.remove(repo_dir)
+    sys.path.remove(hubconf_dir)
 
     return model
 
@@ -422,6 +470,31 @@ def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
             _download_url_to_file will be removed in after 1.3 release')
     download_url_to_file(url, dst, hash_prefix, progress)
 
+# Hub used to support automatically extracts from zipfile manually compressed by users.
+# The legacy zip format expects only one file from torch.save() < 1.6 in the zip.
+# We should remove this support since zipfile is now default zipfile format for torch.save().
+def _is_legacy_zip_format(filename):
+    if zipfile.is_zipfile(filename):
+        infolist = zipfile.ZipFile(filename).infolist()
+        return len(infolist) == 1 and not infolist[0].is_dir()
+    return False
+
+def _legacy_zip_load(filename, model_dir, map_location):
+    warnings.warn('Falling back to the old format < 1.6. This support will be '
+                  'deprecated in favor of default zipfile format introduced in 1.6. '
+                  'Please redo torch.save() to save it in the new zipfile format.')
+    # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
+    #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
+    #       E.g. resnet18-5c106cde.pth which is widely used.
+    with zipfile.ZipFile(filename) as f:
+        members = f.infolist()
+        if len(members) != 1:
+            raise RuntimeError('Only one file(not dir) is allowed in the zipfile')
+        f.extractall(model_dir)
+        extraced_name = members[0].filename
+        extracted_file = os.path.join(model_dir, extraced_name)
+    return torch.load(extracted_file, map_location=map_location)
+
 def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, file_name=None):
     r"""Loads the Torch serialized object at the given URL.
 
@@ -481,16 +554,6 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
             hash_prefix = r.group(1) if r else None
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
-    # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
-    #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
-    #       E.g. resnet18-5c106cde.pth which is widely used.
-    if zipfile.is_zipfile(cached_file):
-        with zipfile.ZipFile(cached_file) as cached_zipfile:
-            members = cached_zipfile.infolist()
-            if len(members) != 1:
-                raise RuntimeError('Only one file(not dir) is allowed in the zipfile')
-            cached_zipfile.extractall(model_dir)
-            extraced_name = members[0].filename
-            cached_file = os.path.join(model_dir, extraced_name)
-
+    if _is_legacy_zip_format(cached_file):
+        return _legacy_zip_load(cached_file, model_dir, map_location)
     return torch.load(cached_file, map_location=map_location)

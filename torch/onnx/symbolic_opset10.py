@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -139,6 +138,8 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = g.op("Unsqueeze", starts, axes_i=[0])
         ends = g.op("Unsqueeze", ends, axes_i=[0])
+        if isinstance(axes, int):
+            axes = g.op("Constant", value_t=torch.tensor(axes))
         axes = g.op("Unsqueeze", axes, axes_i=[0])
     else:
         assert len(starts) == len(ends)
@@ -156,10 +157,21 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
+    else:
+        raise NotImplementedError("Unknown aten::slice signature")
+
+    step = sym_help._parse_arg(step, 'i')
     if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
+       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
     else:
         start = [sym_help._parse_arg(start, 'i')]
@@ -194,7 +206,7 @@ def embedding_bag(g,
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
 
-    from torch.onnx.symbolic_opset9 import size, div, select
+    from torch.onnx.symbolic_opset9 import size, select
 
     # Check if initial indices was 2D. In functional.py:
     # offsets is set to torch.arange(0, indices.numel(), indices.size(1))
@@ -205,7 +217,7 @@ def embedding_bag(g,
         assert not include_last_offset
         embeddings = g.op("Gather", embedding_matrix, indices)
         dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
-        dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
+        dim_1 = g.op('Div', size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
         dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
 
         shape = [dim_0, dim_1, dim_2]
@@ -223,7 +235,7 @@ def embedding_bag(g,
         else:
             embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
         # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
-        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.          
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
         return embeddings, None, None, None
     elif offsets.type().sizes() is not None:
         if include_last_offset:

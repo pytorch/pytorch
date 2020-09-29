@@ -236,8 +236,9 @@ void initPythonIRBindings(PyObject* module_) {
              bool use_external_data_format,
              const std::string& onnx_file_path) {
             std::string graph;
+            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
-            std::tie(graph, export_map) = export_onnx(
+            std::tie(model_proto, export_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
@@ -261,6 +262,7 @@ void initPythonIRBindings(PyObject* module_) {
               python_serialized_export_map[kv.first] =
                   py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
             }
+            graph = serialize_model_proto_to_string(model_proto);
             return std::make_tuple(
                 py::bytes(graph), python_serialized_export_map);
           },
@@ -522,6 +524,8 @@ void initPythonIRBindings(PyObject* module_) {
       .NS(replaceAllUsesWith)
       .NS(insertBefore)
       .NS(insertAfter)
+      .NS(isBefore)
+      .NS(isAfter)
       .NS(moveAfter)
       .NS(moveBefore)
       .NS(removeInput)
@@ -791,10 +795,20 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
-      .def(py::init([](const std::string& qualified_name, TypePtr value) {
+      .def(py::init([](const std::string& qualified_name,
+                       TypePtr value_type,
+                       const std::vector<py::object>& enum_names_values) {
+        std::vector<std::pair<std::string, IValue>> names_values;
+        names_values.reserve(enum_names_values.size());
+        for (const auto& enum_name_value : enum_names_values) {
+          auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
+          auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
+          names_values.emplace_back(std::make_pair(enum_name, enum_value));
+        }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
-            std::move(value),
+            std::move(value_type),
+            std::move(names_values),
             get_python_cu());
       }));
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(

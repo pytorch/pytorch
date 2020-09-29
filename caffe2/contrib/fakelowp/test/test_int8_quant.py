@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -46,7 +46,7 @@ class QuantTest(serial.SerializedTestCase):
             {"X": [5, 2]},
             debug=True,
             adjust_batch=True,
-            black_list=[0],
+            block_list=[0],
             use_onnx=False,
         )
         num_onnxified_ops = sum(

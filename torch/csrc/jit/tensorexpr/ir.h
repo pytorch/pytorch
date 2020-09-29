@@ -55,7 +55,7 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Buffer;
+class Placeholder;
 
 class Cast : public ExprNode<Cast> {
  public:
@@ -391,7 +391,7 @@ class TORCH_API Load : public ExprNode<Load> {
     return buf_;
   }
   static ExprHandle make(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
   static ExprHandle make(
@@ -401,7 +401,7 @@ class TORCH_API Load : public ExprNode<Load> {
       const ExprHandle& mask);
 
   Load(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
   Load(
@@ -577,13 +577,6 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
   }
 
- private:
-  const Expr* lhs_;
-  const Expr* rhs_;
-  const Expr* ret_val1_;
-  const Expr* ret_val2_;
-  CompareSelectOperation compare_op_;
-
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
@@ -600,6 +593,21 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       throw malformed_input("bad dtype in CompareSelect");
     }
   }
+
+  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+      : ExprNodeBase(kInt),
+        lhs_(lhs),
+        rhs_(rhs),
+        ret_val1_(new IntImm(1)),
+        ret_val2_(new IntImm(0)),
+        compare_op_(cmp_op) {}
+
+ private:
+  const Expr* lhs_;
+  const Expr* rhs_;
+  const Expr* ret_val1_;
+  const Expr* ret_val2_;
+  CompareSelectOperation compare_op_;
 };
 
 enum IntrinsicsOp {
@@ -802,6 +810,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 

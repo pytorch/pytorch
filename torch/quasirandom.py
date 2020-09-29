@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 
 class SobolEngine(object):
@@ -45,7 +46,7 @@ class SobolEngine(object):
     def __init__(self, dimension, scramble=False, seed=None):
         if dimension > self.MAXDIM or dimension < 1:
             raise ValueError("Supported range of dimensionality "
-                             "for SobolEngine is [1, {}]".format(self.MAXDIM))
+                             f"for SobolEngine is [1, {self.MAXDIM}]")
 
         self.seed = seed
         self.scramble = scramble
@@ -57,11 +58,10 @@ class SobolEngine(object):
         torch._sobol_engine_initialize_state_(self.sobolstate, self.dimension)
 
         if self.scramble:
+            g: Optional[torch.Generator] = None
             if self.seed is not None:
                 g = torch.Generator()
                 g.manual_seed(self.seed)
-            else:
-                g = None
 
             shift_ints = torch.randint(2, (self.dimension, self.MAXBIT), device=cpu, generator=g)
             self.shift = torch.mv(shift_ints, torch.pow(2, torch.arange(0, self.MAXBIT, device=cpu)))
@@ -120,9 +120,9 @@ class SobolEngine(object):
         return self
 
     def __repr__(self):
-        fmt_string = ['dimension={}'.format(self.dimension)]
+        fmt_string = [f'dimension={self.dimension}']
         if self.scramble:
             fmt_string += ['scramble=True']
         if self.seed is not None:
-            fmt_string += ['seed={}'.format(self.seed)]
+            fmt_string += [f'seed={self.seed}']
         return self.__class__.__name__ + '(' + ', '.join(fmt_string) + ')'

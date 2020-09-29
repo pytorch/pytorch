@@ -78,6 +78,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
+}
+
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
+}
+
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 
@@ -220,6 +228,29 @@ bool Context::setFlushDenormal(bool on) {
 
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
+}
+
+// override_allow_tf32_flag = true
+//    means the allow_tf32 flags are overrided and tf32 is force disabled
+// override_allow_tf32_flag = false
+//    means the original allow_tf32 flags are followed
+thread_local bool override_allow_tf32_flag = false;
+
+NoTF32Guard::NoTF32Guard() {
+  if (!override_allow_tf32_flag) {
+    changed = true;
+    override_allow_tf32_flag = true;
+  }
+}
+
+NoTF32Guard::~NoTF32Guard() {
+  if (changed) {
+    override_allow_tf32_flag = false;
+  }
+}
+
+bool NoTF32Guard::should_disable_tf32() {
+  return override_allow_tf32_flag;
 }
 
 } // namespace at

@@ -2,7 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Nightly Checkout](#nightly-checkout)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -59,6 +59,9 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
+
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
@@ -88,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -124,36 +125,36 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 
 ## Nightly Checkout & Pull
 
-The `tools/nightly_checkout.py` script is provided to ease pure Python development of
-PyTorch. This uses conda and git to check out the nightly development version of PyTorch
-and installs pre-built binaries into the current repository. This is like a development
-or editable install, but without needing the ability to compile any C++ code.
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `conda` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
 
-You can use this script to check out a new nightly branch with the following::
+You can use this script to check out a new nightly branch with the following:
 
-```sh
-$ ./tools/nightly.py checkout -b my-nightly-branch
-$ conda activate pytorch-deps
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+conda activate pytorch-deps
 ```
 
 Or if you would like to re-use an existing conda environment, you can pass in
-the regular environment parameters (--name or --prefix)::
+the regular environment parameters (`--name` or `--prefix`):
 
-```sh
-$ ./tools/nightly.py checkout -b my-nightly-branch -n my-env
-$ conda activate my-env
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -n my-env
+conda activate my-env
 ```
 
-You can also use this tool to pull the nightly commits into the current branch as
-well. This can be done with
+You can also use this tool to pull the nightly commits into the current branch:
 
-```sh
-$ ./tools/nightly.py pull -n my-env
-$ conda activate my-env
+```bash
+./tools/nightly.py pull -n my-env
+conda activate my-env
 ```
 
-Pulling will reinstalle the conda dependencies as well as the nightly binaries into
-the repo directory.
+Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
+into the repo directory.
 
 ## Codebase structure
 
@@ -824,8 +825,9 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See our
-[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+in our CI to make sure that new C++ code is safe, sane and efficient. See the
+[`clang-tidy` job in our GitHub Workflow's
+lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:

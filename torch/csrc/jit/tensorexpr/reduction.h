@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -81,16 +81,17 @@ class ReduceOp : public ExprNode<ReduceOp> {
   std::vector<const Var*> reduce_args_;
 };
 
-// A Reducer is a user interface describing a particular reduction operation. It
-// has three components: An initializtion value, a way of interacting each value
-// with the accumulation, and a method for obtaining the current value to be
-// reduced. It is materialized into a ReduceOp when loop variables are known.
+// A Reducer is a user interface describing a particular reduction
+// operation. It has three components: An initialization value, a way of
+// interacting each value with the accumulation, and a method for obtaining the
+// current value to be reduced. It is materialized into a ReduceOp when loop
+// variables are known.
 class Reducer {
  public:
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Buffer& buf)
+  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
@@ -173,8 +174,7 @@ class Sum : public Reducer {
         }) {}
 };
 
-namespace {
-ExprHandle maximumVal(ScalarType type) {
+inline ExprHandle maximumVal(ScalarType type) {
   switch (type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
@@ -187,7 +187,7 @@ ExprHandle maximumVal(ScalarType type) {
   return ExprHandle();
 }
 
-static ExprHandle minimumVal(ScalarType type) {
+inline ExprHandle minimumVal(ScalarType type) {
   switch (type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
@@ -198,7 +198,6 @@ static ExprHandle minimumVal(ScalarType type) {
       throw unsupported_dtype();
   }
 }
-} // namespace
 
 class Maximum : public Reducer {
  public:

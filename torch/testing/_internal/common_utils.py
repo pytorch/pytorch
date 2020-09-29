@@ -11,9 +11,11 @@ import platform
 import re
 import gc
 import types
+import math
 from functools import partial
 import inspect
 import io
+import operator
 import argparse
 import unittest
 import warnings
@@ -31,12 +33,14 @@ from numbers import Number
 import tempfile
 import json
 from urllib.request import urlopen
-import __main__
+import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Iterable, Optional
+from typing import cast, Any, Dict, Iterable, Optional
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
+from torch.testing import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
+     floating_types_and, integral_types, complex_types)
 
 import torch
 import torch.cuda
@@ -49,6 +53,10 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
+
+FILE_SCHEMA = "file://"
+if sys.platform == 'win32':
+    FILE_SCHEMA = "file:///"
 
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
@@ -120,8 +128,9 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-torch._C.ScriptFunction.__call__ = prof_func_call
-torch._C.ScriptMethod.__call__ = prof_meth_call
+# TODO fix when https://github.com/python/mypy/issues/2427 is address
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -269,7 +278,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner
+        import xmlrunner  # type: ignore[import]
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
@@ -389,7 +398,7 @@ def skipIfRocm(fn):
 
 # This decorator can be used for API tests that call torch.set_deterministic().
 # When the test is finished, it will restore the previous deterministic flag
-# setting. Also, if CUDA >= 10.2, this will set the environment variable 
+# setting. Also, if CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
 # is not thrown during the test unless the test changes that variable on purpose.
 # The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
@@ -674,7 +683,7 @@ try:
             derandomize=True,
             suppress_health_check=[hypothesis.HealthCheck.too_slow],
             database=None,
-            max_examples=100,
+            max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
@@ -698,11 +707,11 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-disabled_test_from_issues = None
+disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
     if disabled_test_from_issues is None:
-        disabled_test_from_issues = {}
+        _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
             url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
@@ -713,18 +722,21 @@ def check_disabled(test_name):
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    disabled_test_from_issues[test_name] = item['html_url']
+                    _disabled_test_from_issues[test_name] = item['html_url']
 
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             try:
                 read_and_process()
+                disabled_test_from_issues = _disabled_test_from_issues
             except Exception:
                 print("Couldn't download test skip set, leaving all tests enabled...")
+                disabled_test_from_issues = {}
 
-    if test_name in disabled_test_from_issues:
-        raise unittest.SkipTest(
-            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if disabled_test_from_issues is not None:
+        if test_name in disabled_test_from_issues:
+            raise unittest.SkipTest(
+                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -873,7 +885,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(t._values(), tc._values())
             return tc
 
-        value_map = {}
+        value_map: Dict[Any, Any] = {}
         for idx, val in zip(t._indices().t(), t._values()):
             idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
@@ -882,11 +894,11 @@ class TestCase(expecttest.TestCase):
                 value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
         new_indices = sorted(list(value_map.keys()))
-        new_values = [value_map[idx] for idx in new_indices]
+        _new_values = [value_map[idx] for idx in new_indices]
         if t._values().ndimension() < 2:
-            new_values = t._values().new(new_values)
+            new_values = t._values().new(_new_values)
         else:
-            new_values = torch.stack(new_values)
+            new_values = torch.stack(_new_values)
 
         new_indices = t._indices().new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
@@ -1162,8 +1174,8 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override] 
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1222,7 +1234,7 @@ class TestCase(expecttest.TestCase):
                     msg = 'Caught unexpected warnings:\n'
                     for w in ws:
                         msg += warnings.formatwarning(
-                            w.message, w.category, w.filename, w.lineno, w.line)
+                            str(w.message), w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
 
@@ -1283,7 +1295,7 @@ class TestCase(expecttest.TestCase):
                 raise RuntimeError(
                     ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -1350,10 +1362,10 @@ def download_file(url, binary=True):
         with open(path, 'wb' if binary else 'w') as f:
             f.write(data)
         return path
-    except error.URLError:
+    except error.URLError as e:
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
-        raise unittest.SkipTest(msg)
+        raise unittest.SkipTest(msg) from e
 
 
 def find_free_port():
@@ -1414,8 +1426,57 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix generation
+# Methods for matrix and tensor generation
+
 # Used in test_autograd.py and test_torch.py
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
+                low, high, requires_grad: bool = False) -> torch.Tensor:
+    """Returns a tensor of the specified size on the given device and dtype.
+       The tensors values are between -9 and 9, inclusive, for most dtypes,
+       unless low (high) is not None in which case the values are between
+       max(-9, low) and min(9, high).
+       For unsigned types the values are between 0 and 9, and for complex
+       dtypes the real and imaginary parts are each between -9 and 9,
+       independently."""
+
+    assert low is None or low < 9, "low value too high!"
+    assert high is None or high > -9, "high value too low!"
+
+    if dtype is torch.bool:
+        return torch.randint(0, 2, size, device=device, dtype=dtype)
+
+    if dtype is torch.uint8:
+        low = math.floor(0 if low is None else max(low, 0))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in integral_types():
+        low = math.floor(-9 if low is None else max(low, -9))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in floating_types_and(torch.half, torch.bfloat16):
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        # Windows doesn't support torch.rand(bfloat16) on CUDA
+        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+        else:
+            t = torch.rand(size, device=device, dtype=dtype) * span + low
+        t.requires_grad = requires_grad
+        return t
+    else:
+        assert dtype in complex_types()
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        c = torch.complex(real, imag)
+        c.requires_grad = requires_grad
+        return c
+
+
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
     result[0, 1] = 0
@@ -1552,7 +1613,8 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     values = torch.randn(nonzero_elements, dtype=dtype, device=device)
     # ensure that the diagonal dominates
     values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    indices_tensor = torch.tensor(indices)
+    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
     return A.coalesce()
 
 
@@ -1609,8 +1671,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
         icoords.append(i)
         jcoords.append(j)
         values.append(v)
-    indices = [icoords, jcoords]
-    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
+    indices_tensor = torch.tensor([icoords, jcoords])
+    return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):

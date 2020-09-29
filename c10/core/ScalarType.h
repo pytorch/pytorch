@@ -3,9 +3,11 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/complex.h>
 #include <c10/util/Half.h>
+#include <c10/util/qint32.h>
+#include <c10/util/qint8.h>
+#include <c10/util/quint8.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
-#include <c10/util/typeid.h>
 
 #include <complex>
 #include <cstdint>
@@ -67,6 +69,8 @@ enum class ScalarType : int8_t {
   NumOptions
 };
 
+constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
+
 namespace impl {
 
 // These are used to map ScalarTypes to C++ types.
@@ -93,7 +97,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 #undef SPECIALIZE_ScalarTypeToCPPType
 
-}
+} // namespace impl
 
 template <typename T>
 struct CppTypeToScalarType;
@@ -159,64 +163,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 #define AT_FORALL_COMPLEX_TYPES(_)             \
   _(c10::complex<float>, ComplexFloat)         \
   _(c10::complex<double>, ComplexDouble)
-
-static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype, name) \
-  case ScalarType::name:         \
-    return caffe2::TypeMeta::Make<ctype>();
-
-  switch (scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    case ScalarType::Undefined:
-      return caffe2::TypeMeta();
-    default:
-      AT_ERROR(
-          "Unrecognized Scalartype ",
-          scalar_type,
-          " (please report this error)");
-  }
-#undef DEFINE_CASE
-}
-
-static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
-    caffe2::TypeMeta dtype) {
-#define DEFINE_IF(ctype, name)                    \
-  if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
-    return {ScalarType::name};                    \
-  }
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_IF)
-#undef DEFINE_IF
-  if (dtype == caffe2::TypeMeta()) {
-    return {ScalarType::Undefined};
-  }
-  return c10::nullopt;
-}
-
-static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
-  if (auto scalar_type = tryTypeMetaToScalarType(dtype)) {
-    return *scalar_type;
-  }
-  AT_ERROR(
-      "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
-}
-
-inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::TypeMeta> type_meta) {
-  if (!type_meta.has_value()) {
-    return c10::nullopt;
-  }
-  return typeMetaToScalarType(*type_meta);
-}
-
-static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
-  if (auto mt = tryTypeMetaToScalarType(m)) {
-    return (*mt) == t;
-  }
-  return false;
-}
-
-static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
-  return t == m;
-}
 
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
@@ -315,12 +261,13 @@ static inline bool isSignedType(ScalarType t) {
       return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::ComplexFloat: \
-    case ScalarType::ComplexDouble: \
-      return true; \
+    case ScalarType::ComplexHalf:
+    case ScalarType::ComplexFloat:
+    case ScalarType::ComplexDouble:
+      return true;
     AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
-      AT_ERROR("Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
   #undef CASE_SIGNED
 }
@@ -331,6 +278,8 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
 
 static inline ScalarType toValueType(ScalarType t) {
   switch (t) {
+    case ScalarType::ComplexHalf:
+      return ScalarType::Half;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -342,6 +291,8 @@ static inline ScalarType toValueType(ScalarType t) {
 
 static inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
+    case ScalarType::Half:
+      return ScalarType::ComplexHalf;
     case ScalarType::Float:
       return ScalarType::ComplexFloat;
     case ScalarType::Double:
@@ -422,17 +373,17 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, bf},
         /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, bf},
         /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, bf},
-        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
+        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, f4},
         /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, f4},
         /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, f8},
         /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
-        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, ud},
-        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud},
+        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, c4},
+        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, c8},
         /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, b1, ud, ud, ud, bf},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* bf */ {bf, bf, bf, bf, bf, ud, f4, f8, ud, ud, ud, bf, ud, ud, ud, bf},
+        /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, ud, c4, c8, bf, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

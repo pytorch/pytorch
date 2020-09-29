@@ -28,7 +28,11 @@ class HashStore : public Store {
 
   int64_t add(const std::string& key, int64_t value) override;
 
+  int64_t getNumKeys() override;
+
   bool check(const std::vector<std::string>& keys) override;
+
+  bool deleteKey(const std::string& key) override;
 
  protected:
   std::unordered_map<std::string, std::vector<uint8_t>> map_;

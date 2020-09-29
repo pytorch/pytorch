@@ -469,6 +469,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Vulkan);
   }
 
+  // TODO: remove this once we don't automatically enabled Autograd dispatch keys
+  //       in TensorImpl constructor.
+  // DON'T USE THIS API!! It's only created for testing purpose in
+  // file aten/src/ATen/core/boxing/impl/test_helpers.h
+  void remove_autograd_key() {
+    key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),
@@ -1769,13 +1777,13 @@ protected:
 //    strides SmallVector (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type pointer
+//    data type
 //    (optional) device
 //    tensor type id
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 31,
+              sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

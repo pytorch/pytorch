@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 import unittest
@@ -14,6 +14,7 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--glow_global_fp16=1",
                  "--glow_global_fused_scale_offset_fp16=1",
@@ -39,13 +40,13 @@ def reference_spatialbn_test16(X, scale, bias, mean, var, epsilon, order):
 
 
 # Test the lowered BN op
-class BatchnormTest(unittest.TestCase):
+class BatchnormTest(serial.SerializedTestCase):
     # TODO: using hypothesis seed, sweep dimensions
     @given(seed=st.integers(0, 65535),
            size=st.integers(2, 30),
            input_channels=st.integers(2, 40),
            batch_size=st.integers(2, 20))
-    @settings(max_examples=100, deadline=None)
+    @settings(deadline=None)
     def test_bn(self, seed, size, input_channels, batch_size):
         workspace.ResetWorkspace()
         np.random.seed(seed)

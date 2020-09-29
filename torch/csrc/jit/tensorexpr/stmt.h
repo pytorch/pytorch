@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -10,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Buffer;
+class Placeholder;
 
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
@@ -134,7 +135,7 @@ class TORCH_API Block : public StmtNode<Block> {
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt wiith existing parent", new_stmt);
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -271,7 +272,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   static Store* make(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
       const ExprHandle& mask);
@@ -289,7 +290,7 @@ class TORCH_API Store : public StmtNode<Store> {
 
   // TODO: merge this with Load.
   Store(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<const Expr*>& indices,
       const Expr* value,
       const Expr* mask);
@@ -433,6 +434,14 @@ class TORCH_API Cond : public StmtNode<Cond> {
     }
   }
 
+  Cond* cloneWithNewBodies(Stmt* true_stmt, Stmt* false_stmt) {
+    return new Cond(condition_, true_stmt, false_stmt);
+  }
+
+  Cond* cloneWithNewBody(Stmt* true_stmt) {
+    return new Cond(condition_, true_stmt, nullptr);
+  }
+
  private:
   const Expr* condition_;
   Block* true_stmt_ = nullptr;
@@ -530,22 +539,31 @@ class TORCH_API LoopOptions {
   }
 
   std::string ToString() const {
-    std::ostringstream oss;
     if (is_gpu_block_index()) {
-      oss << gpu_block_index_str();
+      return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
-      oss << gpu_thread_index_str();
+      return gpu_thread_index_str();
     }
-    return oss.str();
+    return "";
   }
 
   bool isDefault() const {
     return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
   }
 
+  void set_buffer_mapping(
+      const std::unordered_map<std::string, const Buf*>& map) {
+    map_input_to_tensor_bufs_ = map;
+  }
+
+  std::unordered_map<std::string, const Buf*> get_buffer_mapping() const {
+    return map_input_to_tensor_bufs_;
+  }
+
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
 class TORCH_API For : public StmtNode<For> {
@@ -639,6 +657,10 @@ class TORCH_API For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {
+    loop_options_.set_buffer_mapping(map);
+  }
+
   For* cloneWithNewBody(Stmt* body) const {
     return new For(var_, start_, stop_, body, loop_options_);
   }
@@ -655,7 +677,7 @@ class TORCH_API For : public StmtNode<For> {
 // This node could only shows up as an internal with GPU backends.
 // TODO: move to this an internal IR.
 // TODO: make IR nodes extensible.
-class AtomicAdd : public StmtNode<AtomicAdd> {
+class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   AtomicAdd(
       const Buf* buf,
@@ -688,6 +710,11 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
+};
+
+class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
+ public:
+  SyncThreads() {}
 };
 
 } // namespace tensorexpr

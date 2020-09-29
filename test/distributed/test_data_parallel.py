@@ -7,6 +7,7 @@ from itertools import product
 
 import torch
 from torch import nn
+from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
@@ -92,6 +93,26 @@ class TestDataParallel(TestCase):
         #                       or an object representing the single argument
         for inputs in [((i1,), (i2,)), (i1, i2)]:
             outputs = dp.parallel_apply(modules, inputs, None)
+            for out, expected in zip(outputs, expected_outputs):
+                self.assertEqual(out, expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parallel_apply_autocast(self):
+        l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
+        l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
+        i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
+        i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
+        with autocast():
+            expected1 = l1(i1)
+            expected2 = l2(i2)
+        modules = (l1, l2)
+        expected_outputs = (expected1, expected2)
+
+        # each input can be either a collection of positional arguments
+        #                       or an object representing the single argument
+        for inputs in [((i1,), (i2,)), (i1, i2)]:
+            with autocast():
+                outputs = dp.parallel_apply(modules, inputs, None)
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out, expected)
 
@@ -753,6 +774,36 @@ class TestDataParallel(TestCase):
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
                         print("Caught exception during iterations at " + named_msg, flush=True)
                         raise
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parameter_list_dict_replica(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self, data):
+                super(MyMod, self).__init__()
+                self.data = data
+
+            def forward(self, inp):
+                return inp
+
+        p1 = torch.nn.Parameter(torch.rand(10))
+        p2 = torch.nn.Parameter(torch.rand(10))
+        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterList is being used with DataParallel but this"):
+            model(input)
+
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterDict is being used with DataParallel but this"):
+            model(input)
 
 
 if __name__ == '__main__':
