@@ -19,7 +19,7 @@ def async_execution(fn):
     .. note:: To enable asynchronous execution, applications must pass the
         function object returned by this decorator to RPC APIs. If RPC detected
         attributes installed by this decorator, it knows that this function
-        returns a `Future` object and will handle that accordingly.
+        returns a ``Future`` object and will handle that accordingly.
         However, this does not mean this decorator has to be outmost one when
         defining a function. For example, when combined with ``@staticmethod``
         or ``@classmethod``, ``@rpc.functions.async_execution`` needs to be the
@@ -31,9 +31,11 @@ def async_execution(fn):
 
     Example::
         The returned :class:`~torch.futures.Future` object can come from
-        ``rpc.rpc_async``, ``Future.then(cb)``, or :class:`~torch.futures.Future`
+        :meth:`~torch.distributed.rpc.rpc_async`,
+        :meth:`~torch.futures.Future.then`, or :class:`~torch.futures.Future`
         constructor. The example below shows directly using the
-        :class:`~torch.futures.Future` returned by ``Future.then(cb)``.
+        :class:`~torch.futures.Future` returned by
+        :meth:`~torch.futures.Future.then`.
 
         >>> from torch.distributed import rpc
         >>>

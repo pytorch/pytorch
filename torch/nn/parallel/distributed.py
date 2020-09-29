@@ -114,15 +114,17 @@ class DistributedDataParallel(Module):
 
     To use ``DistributedDataParallel`` on a host with N GPUs, you should spawn
     up ``N`` processes, ensuring that each process exclusively works on a single
-    GPU from 0 to N-1. This can be done by either setting `CUDA_VISIBLE_DEVICES`
-    for every process or by calling:
+    GPU from 0 to N-1. This can be done by either setting
+    ``CUDA_VISIBLE_DEVICES`` for every process or by calling:
 
         >>> torch.cuda.set_device(i)
 
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
-        >>> torch.distributed.init_process_group(backend='nccl', world_size=N, init_method='...')
+        >>> torch.distributed.init_process_group(
+        >>>     backend='nccl', world_size=N, init_method='...'
+        >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
     In order to spawn up multiple processes per node, you can use either
@@ -261,16 +263,16 @@ class DistributedDataParallel(Module):
         The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
         Mixed Precision (AMP). AMP maintains stashed gradients that are used for
         unscaling gradients. With ``gradient_as_bucket_view=True``, these
-        stashed gradient will point to communication buckets in the first
+        stashed gradients will point to communication buckets in the first
         iteration. In the next iteration, the communication buckets are mutated
         and thus these stashed gradients will be unexpectedly mutated as well,
-        which might result in wrong results.
+        which might lead to wrong results.
 
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
                    only be provided when the input module resides on a single
-                   CUDA device. For single-device modules, the ``i``th
+                   CUDA device. For single-device modules, the i'th
                    :attr:`module` replica is placed on ``device_ids[i]``. For
                    multi-device modules and CPU modules, ``device_ids`` must be
                    ``None`` or an empty list, and input data for the forward
@@ -286,7 +288,7 @@ class DistributedDataParallel(Module):
                           function. (default: ``True``)
         process_group: The process group to be used for distributed data
                        all-reduction. If ``None``, the default process group, which
-                       is created by ```torch.distributed.init_process_group```,
+                       is created by :func:`torch.distributed.init_process_group`,
                        will be used. (default: ``None``)
         bucket_cap_mb: ``DistributedDataParallel`` will bucket parameters into
                        multiple buckets so that gradient reduction of each
@@ -310,15 +312,16 @@ class DistributedDataParallel(Module):
         check_reduction: This argument is deprecated.
         gradient_as_bucket_view (bool): This is a prototype feature and subject
                       to changes. When set to ``True``, gradients will be views
-                      pointing to different offsets of allreduce communication
+                      pointing to different offsets of ``allreduce`` communication
                       buckets. This can reduce peak memory usage, where the
                       saved memory size will be equal to the total gradients
                       size. Moreover, it avoids the overhead of copying between
-                      gradients and allreduce communication buckets. When
+                      gradients and ``allreduce`` communication buckets. When
                       gradients are views, ``detach_()`` cannot be called on the
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
-                      function in ``torch/optim/optimizer.py`` as the solution.
+                      function in [``torch/optim/optimizer.py``](https://github.com/pytorch/pytorch/blob/a0f0cb1608427a0d196ce635de04afe54f7ca0e1/torch/optim/optimizer.py#L184-L192)
+                      as a solution.
 
 
     Attributes:
@@ -793,7 +796,9 @@ class DistributedDataParallel(Module):
           >>>      dist.init_process_group("nccl", rank=rank, world_size=2)
           >>>      torch.cuda.set_device(rank)
           >>>      model = nn.Linear(1, 1, bias=False).to(rank)
-          >>>      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], output_device=rank)
+          >>>      model = torch.nn.parallel.DistributedDataParallel(
+          >>>          model, device_ids=[rank], output_device=rank
+          >>>      )
           >>>      # Rank 1 gets one more input than rank 0.
           >>>      inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
           >>>      with model.join():
