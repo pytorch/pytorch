@@ -690,6 +690,7 @@ class FormattedTimesMixin(object):
     cpu_time_total_str = attr_formatter('cpu_time_total')
     cuda_time_total_str = attr_formatter('cuda_time_total')
     self_cpu_time_total_str = attr_formatter('self_cpu_time_total')
+    self_cuda_time_total_str = attr_formatter('self_cuda_time_total')
 
     @property
     def cpu_time(self):
@@ -790,6 +791,11 @@ class FunctionEvent(FormattedTimesMixin):
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
 
     @property
+    def self_cuda_time_total(self):
+        return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) - \
+            sum([child.cuda_time_total for child in self.cpu_children])
+
+    @property
     def cpu_time_total(self):
         return self.cpu_interval.elapsed_us()
 
@@ -832,6 +838,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_time_total = 0
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
+        self.self_cuda_time_total = 0
         self.input_shapes = None
         self.stack = None
         self.scope = None
@@ -862,6 +869,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_time_total += other.cpu_time_total
         self.cuda_time_total += other.cuda_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
+        self.self_cuda_time_total += other.self_cuda_time_total
         self.cpu_memory_usage += other.cpu_memory_usage
         self.cuda_memory_usage += other.cuda_memory_usage
         self.self_cpu_memory_usage += other.self_cpu_memory_usage
@@ -875,11 +883,12 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            'cuda_time={} input_shapes={} '
+            ' self_cuda_time={} cuda_time={} input_shapes={} '
             'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
+                self.self_cuda_time_total_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
                 self.cpu_memory_usage,
@@ -1155,7 +1164,8 @@ def build_table(
         [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
 
     name_column_width = max([len(evt.key) for evt in events]) + 4
-    DEFAULT_COLUMN_WIDTH = 15
+
+    DEFAULT_COLUMN_WIDTH = 12
 
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
     shapes_column_width = min(shapes_column_width, 45)
@@ -1172,15 +1182,16 @@ def build_table(
 
     headers = [
         'Name',
-        'Self CPU total %',
-        'Self CPU total',
+        'Self CPU %',
+        'Self CPU',
         'CPU total %',
         'CPU total',
         'CPU time avg',
     ]
     if use_cuda:
         headers.extend([
-            'CUDA total %',
+            'Self CUDA',
+            'Self CUDA %',
             'CUDA total',
             'CUDA time avg',
         ])
@@ -1195,7 +1206,7 @@ def build_table(
                 'Self CUDA Mem',
             ])
     headers.append(
-        'Number of Calls'
+        '# of Calls'
     )
     # Only append Node ID if any event has a valid (>= 0) Node ID
     append_node_id = any([evt.node_id != -1 for evt in events])
@@ -1210,7 +1221,7 @@ def build_table(
     MAX_STACK_ENTRY = 5
 
     def add_column(padding):
-        row_format[0] += '{: <' + str(padding) + '}' + (' ' * SPACING_SIZE)
+        row_format[0] += '{: >' + str(padding) + '}' + (' ' * SPACING_SIZE)
         header_sep[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length[0] += padding + SPACING_SIZE
 
@@ -1239,7 +1250,7 @@ def build_table(
         result.append('\n')  # Yes, newline after the end as well
 
     self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
-    cuda_time_total = sum([evt.cuda_time_total for evt in events])
+    cuda_time_total = sum([evt.self_cuda_time_total for evt in events])
     # Actual printing
     if header is not None:
         append('=' * line_length)
@@ -1273,8 +1284,9 @@ def build_table(
         ]
         if use_cuda:
             row_values.extend([
+                evt.self_cuda_time_total_str,
                 # CUDA time total %
-                format_time_share(evt.cuda_time_total, cuda_time_total),
+                format_time_share(evt.self_cuda_time_total, cuda_time_total),
                 evt.cuda_time_total_str,
                 evt.cuda_time_str,  # Cuda time avg
             ])
