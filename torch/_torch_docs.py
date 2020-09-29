@@ -640,20 +640,22 @@ as_tensor(data, dtype=None, device=None) -> Tensor
 
 Converts :attr:`data` into a tensor.
 
-If :attr:`data` is  already a tensor and :attr:`dtype` and :attr:`device` are
+If :attr:`data` is already a tensor and :attr:`dtype` and :attr:`device` are
 None or match :attr:`data`'s dtype and device, then :attr:`data` is simply
 returned. Otherwise a new tensor is returned.
 
-If :attr:`data` is a NumPy array and :attr:`dtype` is None or matches
-:attr:`data`'s dtype and :attr:`device` is None or the cpu, then the
-returned tensor will share its storage with the array.
+If :attr:`data` is a NumPy array and the returned tensor has a matching dtype
+and cpu device, then the tensor will share storage with the array.
 
 Args:
     {data}
-    {dtype}
+    dtype (:class:`torch.dtype`, optional): the dtype of the returned tensor.
+        If None, returns a tensor with the same dtype as :attr:`data` if
+        :attr:`data` is a tensor, and an inferred dtype, otherwise.
     device (:class:`torch.device`, optional): the device of the returned tensor.
         If None, returns a tensor on the same device as :attr:`data` if
-        :attr:`data` is a tensor, and a tensor on the cpu otherwise.
+        :attr:`data` is a tensor, and a tensor on the device of the 
+        default tensor type, otherwise.
 
 Example::
 
