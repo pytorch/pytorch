@@ -1,7 +1,12 @@
 from torch.fx import GraphModule
 
 class ObservedStandaloneGraphModule(GraphModule):
-    _PRESERVED_ATTR_NAMES = ['_activation_post_process_map', '_patterns', '_qconfig_map', '_standalone_module_observed_input_idxs', '_output_is_observed']
+    _PRESERVED_ATTR_NAMES = [
+        '_activation_post_process_map',
+        '_patterns',
+        '_qconfig_map',
+        '_standalone_module_observed_input_idxs',
+        '_output_is_observed']
 
     def __init__(self, root, graph):
         preserved_attrs = dict()
