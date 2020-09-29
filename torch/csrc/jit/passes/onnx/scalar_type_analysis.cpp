@@ -134,17 +134,19 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
       // If output scalar type is available, use that.
       st = output_st;
     } else if (n->kind() == onnx::Mod && !typesFromTensors.empty()) {
-      // Most of the operators like Mul are switched to allow implicit type promotion.
-      // But fmod and remainder still only support implicit casting between scalars.
-      // i.e. for torch.remainder(a, b), if a is LongTensor and b is float, b will be cast to Long.
+      // Most of the operators like Mul are switched to allow implicit type
+      // promotion. But fmod and remainder still only support implicit casting
+      // between scalars. i.e. for torch.remainder(a, b), if a is LongTensor and
+      // b is float, b will be cast to Long.
       st = PromoteScalarTypes(typesFromTensors);
     } else {
-      // PyTorch now does implicit type promotion regardless whether the inputs are tensors or scalars.
-      // (Previously only scalars support implicit casting).
+      // PyTorch now does implicit type promotion regardless whether the inputs
+      // are tensors or scalars. (Previously only scalars support implicit
+      // casting).
       typesFromScalars.insert(
-        typesFromScalars.end(),
-        typesFromTensors.begin(),
-        typesFromTensors.end());
+          typesFromScalars.end(),
+          typesFromTensors.begin(),
+          typesFromTensors.end());
       st = PromoteScalarTypes(typesFromScalars);
     }
   }
