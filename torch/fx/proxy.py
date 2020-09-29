@@ -10,6 +10,12 @@ from .node import Target, Node, Argument, base_types
 class TracerBase:
     graph: Graph
 
+    def placeholder(self, name : str):
+        """
+        Inserts a placeholder, i.e. a function input with a specified name
+        """
+        return self.graph.placeholder(name)
+
     def create_node(self, kind : str, target : Union[str, Callable],
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
         """
