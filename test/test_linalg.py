@@ -188,7 +188,7 @@ class TestLinalg(TestCase):
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        shapes = (0, 3, 129)
+        shapes = (0, 3, 35)
         tensors = (random_hermitian_matrix(shape, dtype=dtype, device=device) for shape in shapes)
 
         for t in tensors:
