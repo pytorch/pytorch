@@ -336,16 +336,22 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        for node in model.graph.nodes:
+        for node in model.graph.inputs + model.graph.nodes:
             if node.name in observed_node_names_set:
                 continue
 
             prefix = node.name + '_activation_post_process_'
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
-                env[node.name] = observed_graph.node_copy(node, load_arg)
+                if node.op == 'placeholder':
+                    env[node.name] = observed_graph.placeholder(node.target)
+                else:
+                    env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
-                env[node.name] = observed_graph.node_copy(node, load_arg)
+                if node.op == 'placeholder':
+                    env[node.name] = observed_graph.placeholder(node.target)
+                else:
+                    env[node.name] = observed_graph.node_copy(node, load_arg)
                 if qconfig is None:
                     continue
 
@@ -561,7 +567,7 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
-        for node in model.graph.nodes:
+        for node in model.graph.inputs + model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
                 if qconfig is None:
@@ -617,7 +623,10 @@ class Quantizer:
                         load_non_quantized(node.args[0]), observer_module)
                     continue
             # dequantize inputs for the node that are not quantized
-            env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+            if node.op == 'placeholder':
+                env[node.name] = self.quantized_graph.placeholder(node.target)
+            else:
+                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
         self.quantized_graph.output(map_arg(model.graph.result, load_non_quantized))
 
         # remove activation post process
@@ -625,7 +634,9 @@ class Quantizer:
         env = {}
 
         def load_arg(a):
-            return map_arg(a, lambda node: env[node.name])
+            return map_arg(a, lambda n: env[n.name])
+        for inp in self.quantized_graph.inputs:
+            env[inp.name] = act_post_process_removed_graph.placeholder(inp.target)
         for node in self.quantized_graph.nodes:
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
@@ -675,6 +686,8 @@ class Quantizer:
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
         quantized_root = quantized
         quantized_graph = quantized.graph
+        for inp in quantized_graph.inputs:
+            env[inp.name] = folded_graph.placeholder(inp.target)
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
