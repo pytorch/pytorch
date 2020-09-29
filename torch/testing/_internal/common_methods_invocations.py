@@ -63,8 +63,10 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -85,6 +87,7 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.supports_tensor_out = supports_tensor_out
 
         self.skips = skips
         self.decorators = decorators
