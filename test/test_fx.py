@@ -183,6 +183,37 @@ class TestFX(JitTestCase):
         gm = GraphModule(m, new_g)
         self.assertEqual(gm(3, 4), 14)
 
+    def test_graph_unique_names(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = M()
+        g = symbolic_trace(m).graph
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
+        t = Proxy(new_g.nodes[-1])
+        # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
+        new_g.output((t + t).node)
+        gm = GraphModule(m, new_g)
+        seen_names : Set[str] = set()
+        for node in gm.graph.nodes:
+            assert node.name not in seen_names
+            seen_names.add(node.name)
+
+    def test_graph_unique_names_manual(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,), name='foo_1_1')
+        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr', name='foo_1')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+        graph2 = torch.fx.Graph()
+        graph2.graph_copy(graph)
+        seen_names : Set[str] = set()
+        for node in graph2.nodes:
+            assert node.name not in seen_names
+            seen_names.add(node.name)
+
     @skipIfNoTorchVision
     def test_resnet(self):
         resnet = resnet18()
