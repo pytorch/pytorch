@@ -6,7 +6,7 @@ from math import inf, nan, isnan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+    (instantiate_device_type_tests, dtypes, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -179,6 +179,31 @@ class TestLinalg(TestCase):
         t = torch.randn(1, device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             op(t)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float32: 1e-3})
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_eigh(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        shapes = (0, 3, 129)
+        tensors = (random_hermitian_matrix(shape, dtype=dtype, device=device) for shape in shapes)
+
+        for t in tensors:
+            expected_w, expected_v = np.linalg.eigh(t.cpu().numpy())
+            actual_w, actual_v = torch.linalg.eigh(t)
+            # The sign of eigenvectors is not unique,
+            # therefore absolute values are compared
+            self.assertEqual(actual_w, expected_w)
+            # TODO: remove abs as it discards imaginary part of complex numbers
+            self.assertEqual(abs(actual_v), abs(expected_v))
+
+        # NOTE: eigh requires a square matrix
+        t = torch.randn(1, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.eigh(t)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
