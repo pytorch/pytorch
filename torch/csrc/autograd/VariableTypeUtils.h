@@ -67,11 +67,14 @@ inline void throw_error_out_requires_grad(const char* name) {
       "but one of the arguments requires grad.");
 }
 
-inline void throw_error_for_complex_fns_backward_not_implemented(const Tensor& tensor, const char* name) {
-  if (tensor.requires_grad() && tensor.is_complex()) {
-    std::string msg = name;
-    msg += " does not support automatic differentiation for outputs with complex dtype.";
-    throw std::runtime_error(msg);
+inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
+  TORCH_CHECK(tensor.requires_grad() && tensor.is_complex(), name,
+              " does not support automatic differentiation for outputs with complex dtype.");
+}
+
+inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
+  for (auto tensor: tensorlist) {
+    throw_error_for_complex_autograd(tensor, name);
   }
 }
 
