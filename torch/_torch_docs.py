@@ -2745,7 +2745,8 @@ floor_divide(input, other, *, out=None) -> Tensor
 
 .. warning::
     This function's name is a misnomer. It actually rounds the
-    quotient towards zero instead of taking its floor.
+    quotient towards zero instead of taking its floor. This behavior
+    will be deprecated in a future PyTorch release.
 
 Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
 quotient towards zero. Equivalently, it truncates the quotient(s):
