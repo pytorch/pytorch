@@ -778,8 +778,10 @@ class SmoothL1Loss(_Loss):
     :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
     the sum operation still operates over all the elements, and divides by :math:`n`.
 
-    beta is an optional parameter that defaults to 1. When beta is set to 0, we call out directly
-    to l1_loss. Passing a negative value in for beta will result in an exception.
+    beta is an optional parameter that defaults to 1.
+
+    Note: When beta is set to 0, this is equivalent to we call out directly to :class:`L1Loss`.
+    Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
