@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import DefaultDict, Dict, NamedTuple, Optional, Tuple
+from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 
@@ -154,7 +154,7 @@ class CallgrindStats(object):
         )
 
     @staticmethod
-    def _counts(stats, include_lookdict_unicode: bool) -> int:
+    def _counts(stats: Tuple[FunctionCount, ...], include_lookdict_unicode: bool) -> int:
         return sum(
             c for c, fn in stats
             if include_lookdict_unicode
@@ -192,7 +192,7 @@ class _ValgrindWrapper(object):
 
         self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[FunctionCount, ...], Tuple[FunctionCount, ...]]] = {}
 
-    def _validate(self):
+    def _validate(self) -> None:
         if not torch._C.valgrind_supported_platform():
             raise OSError("Valgrind is not supported on this platform.")
 
@@ -207,7 +207,7 @@ class _ValgrindWrapper(object):
         number: int,
         num_threads: int,
         collect_baseline: bool
-    ):
+    ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
         baseline_inclusive_stats: Tuple[FunctionCount, ...] = ()
@@ -240,12 +240,12 @@ class _ValgrindWrapper(object):
         )
 
     def _invoke(
-            self,
-            stmt: str,
-            setup: str,
-            number: int,
-            num_threads: int
-        ) -> Tuple[Tuple[FunctionCount, ...], Tuple[FunctionCount, ...]]:
+        self,
+        stmt: str,
+        setup: str,
+        number: int,
+        num_threads: int
+    ) -> Tuple[Tuple[FunctionCount, ...], Tuple[FunctionCount, ...]]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -273,7 +273,7 @@ class _ValgrindWrapper(object):
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args, **kwargs) -> Tuple[subprocess.CompletedProcess, str]:
+        def run(args: List[str], **kwargs: Any) -> Tuple[subprocess.CompletedProcess, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:
@@ -349,7 +349,14 @@ class _ValgrindWrapper(object):
             shutil.rmtree(working_dir)
 
     @staticmethod
-    def _construct_script(stmt: str, setup: str, number: int, num_threads: int, error_log: str, stat_log: str):
+    def _construct_script(
+        stmt: str,
+        setup: str,
+        number: int,
+        num_threads: int,
+        error_log: str,
+        stat_log: str
+    ) -> str:
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"
         # However a loop in Python is surprisingly expensive, and significantly
@@ -380,7 +387,7 @@ class _ValgrindWrapper(object):
             PID = os.getpid()
 
             def log_failure(msg):
-                with open("{error_log}", "wt") as f:
+                with open({error_log_repr}, "wt") as f:
                     f.write(msg)
                 sys.exit(1)
 
@@ -451,15 +458,15 @@ class _ValgrindWrapper(object):
             setup=setup,
             warmup_number=min(number, 10),
             num_threads=num_threads,
-            error_log=error_log,
+            error_log_repr=repr(error_log),
             stat_log=stat_log,
             parent_interpreter=sys.executable,
             torch_file=torch.__file__,
         )
 
 
-CALLGRIND_SINGLETON = None
-def wrapper_singleton():
+CALLGRIND_SINGLETON: Optional[_ValgrindWrapper] = None
+def wrapper_singleton() -> _ValgrindWrapper:
     global CALLGRIND_SINGLETON
     if CALLGRIND_SINGLETON is None:
         CALLGRIND_SINGLETON = _ValgrindWrapper()
