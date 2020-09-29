@@ -23,7 +23,7 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::vector<StackEntry> pythonCallstack() {
+std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
   std::vector<StackEntry> entries;
@@ -142,8 +142,8 @@ void pythonWarn(const std::string& reason) {
 }
 
 void initPythonTracerBindings(PyObject* module) {
+  setPythonCallstack(_pythonCallstack);
   setRecordSourceLocation(pythonRecordSourceLocation);
-  setPythonCallstack(pythonCallstack);
 
   auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState, std::shared_ptr<TracingState>>(
