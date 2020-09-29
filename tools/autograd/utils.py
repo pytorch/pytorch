@@ -1,5 +1,7 @@
 import re
 import os
+# yaml is used below, and YamlLoader used outside of this module, which
+# is why it is needed and used.
 import yaml
 from .nested_dict import nested_dict
 
@@ -73,6 +75,12 @@ def is_tensor_method(declaration):
 
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
+
+def op_name_with_overload(decl):
+    name = decl['operator_name_with_overload'] \
+        if not is_out_variant(decl) else \
+        decl['operator_name_with_overload'][:-len('_out')]
+    return name
 
 def op_name_without_overload(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
