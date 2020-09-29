@@ -83,6 +83,10 @@ int64_t HashStore::getNumKeys() {
   TORCH_CHECK(false, "getNumKeys not implemented for HashStore");
 }
 
+bool HashStore::deleteKey(const std::string& /* unused */) {
+  TORCH_CHECK(false, "deleteKey not implemented for HashStore");
+}
+
 bool HashStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> lock(m_);
   for (const auto& key : keys) {

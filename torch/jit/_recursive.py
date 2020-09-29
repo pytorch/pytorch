@@ -104,8 +104,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
+
     # Get user-annotated ignored attributes.
-    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", set())
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
+    concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
@@ -126,7 +128,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     for name, item in nn_module._parameters.items():
         if name in user_annotated_ignored_attributes:
-            concrete_type_builder.add_ignored_attribute(name)
             continue
 
         assert item is None or isinstance(item, torch.Tensor)
@@ -141,7 +142,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     for name, item in nn_module._buffers.items():
         if name in user_annotated_ignored_attributes:
-            concrete_type_builder.add_ignored_attribute(name)
             continue
 
         assert item is None or isinstance(item, torch.Tensor)
@@ -151,7 +151,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     for name, item in nn_module._modules.items():
         if name in user_annotated_ignored_attributes:
-            concrete_type_builder.add_ignored_attribute(name)
             continue
 
         attr_type = infer_type(name, item)
@@ -220,7 +219,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             continue
 
         if name in user_annotated_ignored_attributes:
-            concrete_type_builder.add_ignored_attribute(name)
             continue
 
         if name in added_names:

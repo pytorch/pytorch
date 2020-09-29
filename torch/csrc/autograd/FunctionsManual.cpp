@@ -624,13 +624,12 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto mask = (input == value);
-  auto count = mask.sum();
-  auto grad_input = grad / count;
   if (input.is_cuda()) {
-    return mask * grad_input;
+    auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
+    return mask * (grad / mask.sum());
   } else {
-    return at::zeros_like(input).masked_fill_(mask, grad_input);
+    auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
+    return at::zeros_like(input).masked_fill_(mask, grad / mask.sum());
   }
 }
 
@@ -716,15 +715,15 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // leads to stable gradient updates, and retains symmetry of the updated matrix if it
   // were updated by a gradient based algorithm.
   if (upper) {
-    L = L.transpose(-1, -2);
-    grad = grad.transpose(-1, -2);
+    L = L.transpose(-1, -2).conj();
+    grad = grad.transpose(-1, -2).conj();
   }
   auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L, /*upper=*/false));
-  auto phi = at::matmul(L.transpose(-1, -2), grad);
+  auto phi = at::matmul(L.transpose(-1, -2).conj(), grad);
   phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
 
-  auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
-  return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
+  auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2).conj(), phi), L_inverse);
+  return grad_input.add(grad_input.transpose(-1, -2).conj()).mul_(0.5);  // Symmetrizing the gradient
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {

@@ -106,6 +106,7 @@ bool ConcreteModuleTypeBuilder::equals(
     bool equal =
       pyClass_.is(other.pyClass_) &&
       iterableModuleKind_ == other.iterableModuleKind_ &&
+      ignoredAttributes_ == other.ignoredAttributes_ &&
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
