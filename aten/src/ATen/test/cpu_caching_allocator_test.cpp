@@ -3,7 +3,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/ATen.h>
 
-#include <c10/core/CPUCachingAllocator.h>
+#include <c10/mobile/CPUCachingAllocator.h>
 
 TEST(CPUCachingAllocatorTest, check_alloc_free) {
   c10::CPUCachingAllocator caching_allocator;
