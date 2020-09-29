@@ -623,6 +623,9 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             stmt="torch.ones(())",
         )
+        sample = timer.timeit(5).median
+        self.assertIsInstance(sample, float)
+
         median = timer.blocked_autorange(min_run_time=0.01).median
         self.assertIsInstance(median, float)
 
@@ -766,13 +769,137 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(measurement.number_per_run, number_per_run)
 
     def test_compare(self):
-        compare = benchmark_utils.Compare([
-            benchmark_utils.Timer(
-                "torch.ones((n,))", globals={"n": n},
-                description="ones", label=str(n)).timeit(3)
-            for n in range(3)
-        ])
-        compare.print()
+        # Simulate several approaches.
+        costs = (
+            # overhead_optimized_fn()
+            (1e-6, 1e-9),
+
+            # compute_optimized_fn()
+            (3e-6, 5e-10),
+
+            # special_case_fn()  [square inputs only]
+            (1e-6, 4e-10),
+        )
+
+        sizes = (
+            (16, 16),
+            (16, 128),
+            (128, 128),
+            (4096, 1024),
+            (2048, 2048),
+        )
+
+        # overhead_optimized_fn()
+        class _MockTimer_0(self._MockTimer):
+            _function_costs = tuple(
+                (f"fn({i}, {j})", costs[0][0] + costs[0][1] * i * j)
+                for i, j in sizes
+            )
+
+        class MockTimer_0(benchmark_utils.Timer):
+            _timer_cls = _MockTimer_0
+
+        # compute_optimized_fn()
+        class _MockTimer_1(self._MockTimer):
+            _function_costs = tuple(
+                (f"fn({i}, {j})", costs[1][0] + costs[1][1] * i * j)
+                for i, j in sizes
+            )
+
+        class MockTimer_1(benchmark_utils.Timer):
+            _timer_cls = _MockTimer_1
+
+        # special_case_fn()
+        class _MockTimer_2(self._MockTimer):
+            _function_costs = tuple(
+                (f"fn({i}, {j})", costs[2][0] + costs[2][1] * i * j)
+                for i, j in sizes if i == j
+            )
+
+        class MockTimer_2(benchmark_utils.Timer):
+            _timer_cls = _MockTimer_2
+
+        results = []
+        for i, j in sizes:
+            results.append(
+                MockTimer_0(
+                    f"fn({i}, {j})",
+                    label="fn",
+                    description=f"({i}, {j})",
+                    sub_label="overhead_optimized",
+                ).blocked_autorange(min_run_time=10)
+            )
+
+            results.append(
+                MockTimer_1(
+                    f"fn({i}, {j})",
+                    label="fn",
+                    description=f"({i}, {j})",
+                    sub_label="compute_optimized",
+                ).blocked_autorange(min_run_time=10)
+            )
+
+            if i == j:
+                results.append(
+                    MockTimer_2(
+                        f"fn({i}, {j})",
+                        label="fn",
+                        description=f"({i}, {j})",
+                        sub_label="special_case (square)",
+                    ).blocked_autorange(min_run_time=10)
+                )
+
+        def check_output(output: str, expected: str):
+            # VSCode will strip trailing newlines from `expected`, so we have to match
+            # this behavior when comparing output.
+            output_str = "\n".join(
+                i.rstrip() for i in output.strip().splitlines(keepends=False))
+
+            self.assertEqual(output_str, textwrap.dedent(expected).strip())
+
+        compare = benchmark_utils.Compare(results)
+
+        check_output(
+            str(compare),
+            """
+            [------------------------------------------------- fn ------------------------------------------------]
+                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
+            1 threads: --------------------------------------------------------------------------------------------
+                  overhead_optimized     |    1.3     |     3.0     |     17.4     |     4174.4     |     4174.4
+                  compute_optimized      |    3.1     |     4.0     |     11.2     |     2099.3     |     2099.3
+                  special_case (square)  |    1.1     |             |      7.5     |                |     1674.7
+
+            Times are in microseconds (us)."""
+        )
+
+        compare.trim_significant_figures()
+        check_output(
+            str(compare),
+            """
+            [------------------------------------------------- fn ------------------------------------------------]
+                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
+            1 threads: --------------------------------------------------------------------------------------------
+                  overhead_optimized     |     1      |     3.0     |      17      |      4200      |      4200
+                  compute_optimized      |     3      |     4.0     |      11      |      2100      |      2100
+                  special_case (square)  |     1      |             |       8      |                |      1700
+
+            Times are in microseconds (us)."""
+        )
+
+        compare.colorize()
+        check_output(
+            str(compare),
+            """
+            [------------------------------------------------- fn ------------------------------------------------]
+                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
+            1 threads: --------------------------------------------------------------------------------------------
+                  overhead_optimized     |     1      |  \x1b[92m\x1b[1m   3.0   \x1b[0m\x1b[0m  |  \x1b[2m\x1b[91m    17    \x1b[0m\x1b[0m  |      4200      |  \x1b[2m\x1b[91m    4200    \x1b[0m\x1b[0m
+                  compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
+                  special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
+
+            Times are in microseconds (us)."""  # noqa
+        )
+
 
     @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
     def test_fuzzer(self):
@@ -793,6 +920,14 @@ class TestBenchmarkUtils(TestCase):
             x = tensors["x"]
             self.assertEqual(
                 x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+
+
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch.Assert(False, "bar")
 
 
 if __name__ == '__main__':

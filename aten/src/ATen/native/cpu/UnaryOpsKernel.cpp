@@ -213,11 +213,14 @@ static void bitwise_not_kernel(TensorIterator& iter) {
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
           iter,
           [](scalar_t a) -> scalar_t {
             return ~a;
-      });
+          },
+          [](Vec256<scalar_t> a) -> Vec256<scalar_t> {
+            return ~a;
+          });
     });
   }
 }
@@ -679,7 +682,7 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, i0)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)

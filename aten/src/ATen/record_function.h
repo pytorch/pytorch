@@ -471,4 +471,16 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
 TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
 TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
 
+struct TORCH_API RecordFunctionTLS {
+  // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
+  // must be sorted in increasing handles order
+  RecordFunctionCallbacks sorted_tls_callbacks_;
+
+  bool tls_record_function_enabled_ = true;
+};
+
+TORCH_API const RecordFunctionTLS& get_record_function_tls_();
+
+TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
+
 } // namespace at
