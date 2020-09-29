@@ -635,19 +635,25 @@ Example::
             [1.0795, 2.1939]])
 """.format(**common_args))
 
-add_docstr(torch.as_tensor,
-           r"""
+add_docstr(torch.as_tensor, r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
-no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
-`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
-the `device` is the cpu, no copy will be performed.
+Converts :attr:`data` into a tensor.
+
+If :attr:`data` is  already a tensor and :attr:`dtype` and :attr:`device` are
+None or match :attr:`data`'s dtype and device, then :attr:`data` is simply
+returned. Otherwise a new tensor is returned.
+
+If :attr:`data` is a NumPy array and :attr:`dtype` is None or matches
+:attr:`data`'s dtype and :attr:`device` is None or the cpu, then the
+returned tensor will share its storage with the array.
 
 Args:
     {data}
     {dtype}
-    {device}
+    device (:class:`torch.device`, optional): the device of the returned tensor.
+        If None, returns a tensor on the same device as :attr:`data` if
+        :attr:`data` is a tensor, and a tensor on the cpu otherwise.
 
 Example::
 
@@ -9062,7 +9068,7 @@ where ``L`` is the :attr:`window_length`. This function computes:
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 
 Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
 The :attr:`periodic` argument is intended as a helpful shorthand
 to produce a periodic window as input to functions like :func:`torch.stft`.
 
