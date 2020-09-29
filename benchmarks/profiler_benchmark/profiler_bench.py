@@ -4,6 +4,8 @@ import sys
 import timeit
 import torch
 
+from torch.utils._benchmark import Timer
+
 PARALLEL_TASKS_NUM = 4
 INTERNAL_ITER = None
 def loop_workload(x):
@@ -91,7 +93,7 @@ if __name__ == '__main__':
         if args.use_timer:
             t = Timer(
                 "payload()",
-                globals = {"payload": payload},
+                globals={"payload": payload},
                 timer=timeit.default_timer,
             ).blocked_autorange(min_run_time=args.timer_min_run_time)
             print(t)
