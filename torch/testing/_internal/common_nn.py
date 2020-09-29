@@ -4482,7 +4482,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
         # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
         test_cpp_api_parity=False,
         check_jit=False,
@@ -4501,7 +4500,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
     dict(
         module_name='CTCLoss',
@@ -4517,7 +4515,6 @@ criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        convert_target=False,
     ),
 ]
 
@@ -5052,7 +5049,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
-        self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
@@ -5093,12 +5089,10 @@ class CriterionTest(InputVariableMixin, TestBase):
         if self.check_gradgrad:
             gradgradcheck(apply_fn, inputs)
 
-    def test_cuda(self, test_case, dtype=None, extra_args=None):
+    def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
-            elif isinstance(obj, torch.Tensor):
-                return obj.to(dtype)
             elif isinstance(obj, tuple):
                 return tuple(convert_dtype(o, dtype, requires_grad) for o in obj)
             else:
@@ -5113,13 +5107,11 @@ class CriterionTest(InputVariableMixin, TestBase):
         gpu_module = self.constructor(*self.constructor_args)
 
         # Convert input, target and module parameters to dtype
-        if dtype is not None:
-            cpu_input = convert_dtype(cpu_input, dtype, True)
-            # NLLLoss requires target to be LongTensor
-            if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
-                cpu_target = convert_dtype(cpu_target, dtype)
-            cpu_module.type(dtype)
-            gpu_module.type(dtype)
+        cpu_input = convert_dtype(cpu_input, dtype, True)
+        if cpu_target.is_floating_point() or cpu_target.is_complex():
+            cpu_target = convert_dtype(cpu_target, dtype)
+        cpu_module.type(dtype)
+        gpu_module.type(dtype)
 
         # GPU setup
         gpu_input = to_gpu(cpu_input)
@@ -5135,13 +5127,14 @@ class CriterionTest(InputVariableMixin, TestBase):
 
         cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
-        # dtype can be None, so set precision in this way instead of a precision map
+        # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
         cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
         gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
+        # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
