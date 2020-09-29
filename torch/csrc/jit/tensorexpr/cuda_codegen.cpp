@@ -935,10 +935,15 @@ void CudaCodeGen::Initialize() {
   std::string func_name = GetUniqueFuncName("func");
   os() << "extern \"C\" __global__" << std::endl;
 #ifdef USE_ROCM
-  // TODO: If the work group can be larger than 256, we have to annotate
-  //       it. These values have a particular chance of not being correct.
-  os() << "__attribute__((amdgpu_flat_work_group_size(128, 1024)))"
-       << std::endl;
+  // CUDA has a default limit of threads per block (=flat work group size)
+  // of 1024, but ROCm uses 256 by default. At the time of writing
+  // (#45506), I am unaware of a stricter limit that TensorExpr imposes
+  // (maybe for perf),so I use 1024 as maximum flat work group size.
+  // We put a minimum value of 1, this is also used by hip (ROCm 3.8) in
+  // the __launch_bound__ implementation. The arguments for the attribute
+  // are (min, max), for details see the documentation at
+  // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
+  os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
 #endif
   os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
