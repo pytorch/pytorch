@@ -324,7 +324,7 @@ class TestOptim(TestCase):
             (optim.RMSprop, optim._multi_tensor.RMSprop),
             (optim.RMSprop, optim._multi_tensor.RMSprop),
             (optim.RMSprop, optim._multi_tensor.RMSprop),
-            (optim.Rprop,  optim._multi_tensor.Rprop),
+            (optim.Rprop, optim._multi_tensor.Rprop),
             (optim.ASGD, optim._multi_tensor.ASGD),
             (optim.ASGD, optim._multi_tensor.ASGD),
             (optim.Adamax, optim._multi_tensor.Adamax),
@@ -334,27 +334,27 @@ class TestOptim(TestCase):
         ]
 
         flag_params = [
-            dict(weight_decay=1, amsgrad=True), #Adam
-            dict(weight_decay=1, amsgrad=False), #Adam
-            dict(weight_decay=0, amsgrad=True), #Adam
-            dict(weight_decay=0, amsgrad=False), #Adam
-            dict(weight_decay=1, amsgrad=True), #AdamW
-            dict(weight_decay=1, amsgrad=False), #AdamW
-            dict(weight_decay=0, amsgrad=True), #AdamW
-            dict(weight_decay=0, amsgrad=False), #AdamW
-            dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True), # SGD
-            dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False), # SGD
-            dict(weight_decay=1, momentum=1, centered=True), # RMSprop
-            dict(weight_decay=1, momentum=0, centered=True), # RMSprop
-            dict(weight_decay=1, momentum=1, centered=False), # RMSprop
-            dict(weight_decay=0, momentum=1, centered=False), # RMSprop
-            dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)), # Rprop
-            dict(weight_decay=0), # ASGD
-            dict(weight_decay=1), # ASGD
-            dict(weight_decay=0), # Adamax
-            dict(weight_decay=1), # Adamax
-            dict(weight_decay=0), # Adadelta
-            dict(weight_decay=1), # Adadelta
+            dict(weight_decay=1., amsgrad=True),  #Adam
+            dict(weight_decay=1., amsgrad=False),  #Adam
+            dict(weight_decay=0., amsgrad=True),  #Adam
+            dict(weight_decay=0., amsgrad=False),  #Adam
+            dict(weight_decay=1., amsgrad=True),  #AdamW
+            dict(weight_decay=1., amsgrad=False),  #AdamW
+            dict(weight_decay=0., amsgrad=True),  #AdamW
+            dict(weight_decay=0., amsgrad=False),  #AdamW
+            dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),  # SGD
+            dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),  # SGD
+            dict(weight_decay=1, momentum=1, centered=True),  # RMSprop
+            dict(weight_decay=1, momentum=0, centered=True),  # RMSprop
+            dict(weight_decay=1, momentum=1, centered=False),  # RMSprop
+            dict(weight_decay=0, momentum=1, centered=False),  # RMSprop
+            dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)),  # Rprop
+            dict(weight_decay=0),  # ASGD
+            dict(weight_decay=1),  # ASGD
+            dict(weight_decay=0),  # Adamax
+            dict(weight_decay=1),  # Adamax
+            dict(weight_decay=0),  # Adadelta
+            dict(weight_decay=1),  # Adadelta
         ]
 
         kIterations = 1001
@@ -402,7 +402,7 @@ class TestOptim(TestCase):
             for p1, p2 in zip(res[0], res[1]):
                 if optimizer_pairs[index] == (optim.Adam, optim._multi_tensor.Adam) or \
                    optimizer_pairs[index] == (optim.AdamW, optim._multi_tensor.AdamW):
-                    self.assertEqual(p1, p2, atol=1e-2, rtol=1e-2)
+                    self.assertEqual(p1, p2)
                 else:
                     self.assertEqual(p1, p2)
 
