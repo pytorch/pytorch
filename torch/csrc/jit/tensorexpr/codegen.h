@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -71,7 +70,7 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Buffer& buffer)
+  BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
       : var_(tensor->function()

@@ -1124,6 +1124,9 @@ class RpcTest(RpcAgentTestFixture):
             fut1.wait()
             fut2.wait()
 
+        def get_name(event):
+            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
+
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
@@ -1134,22 +1137,18 @@ class RpcTest(RpcAgentTestFixture):
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
-                self.assertGreater(event.cuda_time_total, 0)
-                self.assertEqual(1, len(event.kernels))
-                kernel = event.kernels[0]
-                if event.node_id == dst_cuda_0:
-                    self.assertEqual(kernel.device, 0)
-                if event.node_id == dst_cuda_1:
-                    self.assertEqual(kernel.device, 1)
-
-                self.assertGreater(event.cuda_time, 0)
+                if get_name(event) in EXPECTED_REMOTE_EVENTS:
+                    self.assertGreater(event.cuda_time_total, 0)
+                    self.assertEqual(1, len(event.kernels))
+                    kernel = event.kernels[0]
+                    if event.node_id == dst_cuda_0:
+                        self.assertEqual(kernel.device, 0)
+                    if event.node_id == dst_cuda_1:
+                        self.assertEqual(kernel.device, 1)
+                    self.assertGreater(event.cuda_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
-
-        def get_name(event):
-            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
-
         remote_events = [event for event in function_events if event.is_remote]
         remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
         self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
@@ -2120,7 +2119,7 @@ class RpcTest(RpcAgentTestFixture):
         # This call is effectively A asking B to share its 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
 
-        self.assertEqual(len(rrefs), 3)
+        self.assertEqual(len(rrefs), 2)
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 

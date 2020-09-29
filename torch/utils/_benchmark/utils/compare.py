@@ -1,7 +1,7 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
 import itertools as it
-from typing import cast, List, Optional, Tuple
+from typing import DefaultDict, List, Optional, Tuple
 
 import numpy as np
 
@@ -21,7 +21,7 @@ TERMINATE = "\033[0m"
 class _Column(object):
     def __init__(
         self,
-        grouped_results: List[Tuple[common.Measurement, ...]],
+        grouped_results: List[Tuple[Optional[common.Measurement], ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
@@ -32,15 +32,19 @@ class _Column(object):
         self._time_scale = time_scale
         self._time_unit = time_unit
         self._trim_significant_figures = trim_significant_figures
-        self._highlight_warnings = highlight_warnings and any(r.has_warnings for r in self._flat_results)
+        self._highlight_warnings = (
+            highlight_warnings
+            and any(r.has_warnings for r in self._flat_results if r)
+        )
         leading_digits = [
-            int(np.ceil(np.log10(r.median / self._time_scale)))
+            int(np.ceil(np.log10(r.median / self._time_scale))) if r else None
             for r in self._flat_results
         ]
-        unit_digits = max(leading_digits)
+        unit_digits = max(d for d in leading_digits if d is not None)
         decimal_digits = min(
             max(m.significant_figures - digits, 0)
             for digits, m in zip(leading_digits, self._flat_results)
+            if (m is not None) and (digits is not None)
         ) if self._trim_significant_figures else 1
         length = unit_digits + decimal_digits + (1 if decimal_digits else 0)
         self._template = f"{{:>{length}.{decimal_digits}f}}{{:>{7 if self._highlight_warnings else 0}}}"
@@ -48,12 +52,16 @@ class _Column(object):
     def get_results_for(self, group):
         return self._grouped_results[group]
 
-    def num_to_str(self, value: float, estimated_sigfigs: int, spread: Optional[float]):
+    def num_to_str(self, value: Optional[float], estimated_sigfigs: int, spread: Optional[float]):
+        if value is None:
+            return " " * len(self.num_to_str(1, estimated_sigfigs, None))
+
         if self._trim_significant_figures:
             value = common.trim_sigfig(value, estimated_sigfigs)
+
         return self._template.format(
             value,
-            f" (! {spread:.0f}%)" if self._highlight_warnings and spread is not None else "")
+            f" (! {spread * 100:.0f}%)" if self._highlight_warnings and spread is not None else "")
 
 
 class _Row(object):
@@ -67,27 +75,31 @@ class _Row(object):
         self._row_name_str_len = row_name_str_len
         self._time_scale = time_scale
         self._colorize = colorize
-        self._columns = None
+        self._columns: Tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
     def register_columns(self, columns: Tuple[_Column, ...]):
         self._columns = columns
 
     def as_column_strings(self):
-        env = f"({self._results[0].env})" if self._render_env else ""
+        concrete_results = [r for r in self._results if r is not None]
+        env = f"({concrete_results[0].env})" if self._render_env else ""
         env = env.ljust(self._env_str_len + 4)
-        output = ["  " + env + self._results[0].as_row_name]
+        output = ["  " + env + concrete_results[0].as_row_name]
         for m, col in zip(self._results, self._columns or ()):
-            output.append(col.num_to_str(
-                m.median / self._time_scale,
-                m.significant_figures,
-                m.median / m._iqr if m.has_warnings else None
-            ))
+            if m is None:
+                output.append(col.num_to_str(None, 1, None))
+            else:
+                output.append(col.num_to_str(
+                    m.median / self._time_scale,
+                    m.significant_figures,
+                    m.iqr / m.median if m.has_warnings else None
+                ))
         return output
 
     @staticmethod
     def color_segment(segment, value, group_values):
-        best_value = min(group_values)
+        best_value = min([v for v in group_values if v is not None])
         if value <= best_value * 1.01 or value <= best_value + 100e-9:
             return BEST + BOLD + segment + TERMINATE * 2
         if value <= best_value * 1.1:
@@ -109,16 +121,21 @@ class _Row(object):
         row_contents = [column_strings[0].ljust(col_widths[0])]
         for col_str, width, result, column in zip(column_strings[1:], col_widths[1:], self._results, self._columns or ()):
             col_str = col_str.center(width)
-            if self._colorize:
-                group_medians = [r.median for r in column.get_results_for(self._row_group)]
+            if self._colorize and result is not None:
+                group_medians = [None if r is None else r.median for r in column.get_results_for(self._row_group)]
                 col_str = self.color_segment(col_str, result.median, group_medians)
             row_contents.append(col_str)
         return row_contents
 
 
 class Table(object):
-    def __init__(self, results: List[common.Measurement], colorize: bool,
-                 trim_significant_figures: bool, highlight_warnings: bool):
+    def __init__(
+            self,
+            results: List[common.Measurement],
+            colorize: bool,
+            trim_significant_figures: bool,
+            highlight_warnings: bool
+    ):
         assert len(set(r.label for r in results)) == 1
 
         self.results = results
@@ -136,17 +153,20 @@ class Table(object):
         self.rows, self.columns = self.populate_rows_and_columns()
 
     @staticmethod
-    def row_fn(m: common.Measurement):
+    def row_fn(m: common.Measurement) -> Tuple[int, Optional[str], str]:
         return m.num_threads, m.env, m.as_row_name
 
     @staticmethod
-    def col_fn(m: common.Measurement):
+    def col_fn(m: common.Measurement) -> Optional[str]:
         return m.description
 
-    def populate_rows_and_columns(self):
-        rows, columns = [], []
-
-        ordered_results: List[List[Optional[common.Measurement]]] = [[None for _ in self.column_keys] for _ in self.row_keys]
+    def populate_rows_and_columns(self) -> Tuple[Tuple[_Row, ...], Tuple[_Column, ...]]:
+        rows: List[_Row] = []
+        columns: List[_Column] = []
+        ordered_results: List[List[Optional[common.Measurement]]] = [
+            [None for _ in self.column_keys]
+            for _ in self.row_keys
+        ]
         row_position = {key: i for i, key in enumerate(self.row_keys)}
         col_position = {key: i for i, key in enumerate(self.column_keys)}
         for r in self.results:
@@ -187,10 +207,7 @@ class Table(object):
             prior_env = env
 
         for i in range(len(self.column_keys)):
-            grouped_results = cast(
-                List[Tuple[common.Measurement, ...]],  # All Nones should be gone.
-                [tuple(row[i] for row in g) for g in rows_by_group],
-            )
+            grouped_results = [tuple(row[i] for row in g) for g in rows_by_group]
             column = _Column(
                 grouped_results=grouped_results,
                 time_scale=self.time_scale,
@@ -204,13 +221,13 @@ class Table(object):
             ri.register_columns(columns_tuple)
         return rows_tuple, columns_tuple
 
-    def render(self):
+    def render(self) -> str:
         string_rows = [[""] + self.column_keys]
         for r in self.rows:
             string_rows.append(r.as_column_strings())
         num_cols = max(len(i) for i in string_rows)
-        for r in string_rows:
-            r.extend(["" for _ in range(num_cols - len(r))])
+        for sr in string_rows:
+            sr.extend(["" for _ in range(num_cols - len(sr))])
 
         col_widths = [max(len(j) for j in i) for i in zip(*string_rows)]
         finalized_columns = ["  |  ".join(i.center(w) for i, w in zip(string_rows[0], col_widths))]
@@ -218,12 +235,15 @@ class Table(object):
         for string_row, row in zip(string_rows[1:], self.rows):
             finalized_columns.extend(row.row_separator(overall_width))
             finalized_columns.append("  |  ".join(row.finalize_column_strings(string_row, col_widths)))
-        print("[" + (" " + (self.label or "") + " ").center(overall_width - 2, "-") + "]")
-        print("\n".join(finalized_columns))
-        print(f"\nTimes are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).")
-        if self._highlight_warnings and any(r.has_warnings for r in self.results):
-            print("(! XX%) Measurement has high variance, where XX is the median / IQR * 100.")
-        print("\n")
+
+        newline = "\n"
+        has_warnings = self._highlight_warnings and any(ri.has_warnings for ri in self.results)
+        return f"""
+[{(' ' + (self.label or '') + ' ').center(overall_width - 2, '-')}]
+{newline.join(finalized_columns)}
+
+Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
+{'(! XX%) Measurement has high variance, where XX is the IQR / median * 100.' + newline if has_warnings else ""}"""[1:]
 
 
 class Compare(object):
@@ -233,6 +253,9 @@ class Compare(object):
         self._trim_significant_figures = False
         self._colorize = False
         self._highlight_warnings = False
+
+    def __str__(self):
+        return "\n".join(self._render())
 
     def extend_results(self, results):
         for r in results:
@@ -252,21 +275,27 @@ class Compare(object):
         self._highlight_warnings = True
 
     def print(self):
-        self._render()
+        print(str(self))
 
     def _render(self):
-        results = common.merge_measurements(self._results)
+        results = common.Measurement.merge(self._results)
         results = self._group_by_label(results)
+        output = []
         for group in results.values():
-            self._layout(group)
+            output.append(self._layout(group))
+        return output
 
-    def _group_by_label(self, results):
-        grouped_results = collections.defaultdict(list)
+    def _group_by_label(self, results: List[common.Measurement]):
+        grouped_results: DefaultDict[str, List[common.Measurement]] = collections.defaultdict(list)
         for r in results:
             grouped_results[r.label].append(r)
         return grouped_results
 
     def _layout(self, results: List[common.Measurement]):
-        table = Table(results, self._colorize, self._trim_significant_figures,
-                      self._highlight_warnings)
-        table.render()
+        table = Table(
+            results,
+            self._colorize,
+            self._trim_significant_figures,
+            self._highlight_warnings
+        )
+        return table.render()

@@ -342,7 +342,7 @@ class Flattener : public IRMutator {
   Expr* mutate(const FunctionCall* v) override {
     const Tensor* t = v->tensor();
     const Buf* b = t->buf();
-    Buffer buffer = Buffer(BufHandle(b));
+    Placeholder buffer = Placeholder(BufHandle(b));
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
@@ -459,7 +459,7 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
   const Expr* initializer = t->initializer();
   if (initializer) {
-    buf_initializers_[t->func_var()] = initializer;
+    buf_initializers_[t->buf()] = initializer;
   }
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
@@ -506,7 +506,7 @@ class FunctionInliner : public IRMutator {
 
     if (v->nparams() != buf->ndim()) {
       throw malformed_input(
-          "Buffer indexed access is inconsistent with its rank", v);
+          "Placeholder indexed access is inconsistent with its rank", v);
     }
 
     std::vector<const Var*> index_vars;
@@ -1406,7 +1406,7 @@ class LoopComputeAtRewriter : public IRMutator {
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
   const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->func_var() != buf_) {
+    if (v->tensor()->buf() != buf_) {
       return v;
     }
     std::vector<const Expr*> new_indices;

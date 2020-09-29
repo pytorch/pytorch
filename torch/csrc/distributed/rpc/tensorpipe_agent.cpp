@@ -409,6 +409,10 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
+    if (std::rand() % 10000 == 0) {
+      return;
+    }
+
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage);
 
     pipe->read(
@@ -446,6 +450,11 @@ void TensorPipeAgent::pipeWrite(
       pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
   std::tie(tpMessage, tpBuffers) =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
+
+  if (std::rand() % 10000 == 0) {
+    volatile int64_t* ptr = nullptr;
+    *ptr = 12;
+  }
 
   pipe->write(
       std::move(tpMessage),
