@@ -1052,7 +1052,8 @@ class AbstractTestCases:
             for dtype in (
                 torch.float, torch.double,
                 torch.int8, torch.int16, torch.int32,
-                torch.bool):
+                torch.bool
+            ):
                 for device in ["cpu"]:
                     for ncopies in (100, 1000, 10000):
                         x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=torch.device(device))
