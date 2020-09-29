@@ -4798,7 +4798,7 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['l
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
+                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn'] + separate_complex_tests
 
@@ -6045,11 +6045,13 @@ class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
         for f in [torch.min, torch.max, torch.median]:
-            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
-            y = f(x)
-            y.backward()
-            self.assertEqual(x.grad.sum(), 1.)
-            self.assertEqual((x.grad == 1 / 3).sum(), 3)
+            x1 = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            x2 = torch.tensor([float('nan'), float('nan'), float('nan')], requires_grad=True)
+            for x in [x1, x2]:
+                y = f(x)
+                y.backward()
+                self.assertEqual(x.grad.sum(), 1.)
+                self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction

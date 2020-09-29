@@ -154,11 +154,11 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-    'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
-    'eq_', 'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
+    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
     'cosh', '__rmul__', 'sgn', 'view_as_real', 'real', 'imag', 'asin', 'acos', 'sub',
     'div', 'cat', 'view_as_complex', 'neg', 'complex', 'select', '_s_where', 'as_strided',
-    '_fft_with_size'
+    'slice'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -979,9 +979,11 @@ def emit_body(declaration):
         if base_name in GRADIENT_IMPLEMENTED_FOR_COMPLEX:
             return body
         for arg in differentiable_outputs:
+            name = arg['name']
             if arg['type'] == 'Tensor':
-                name = arg['name']
                 body.append('throw_error_for_complex_fns_backward_not_implemented({}, "{}");'.format(name, base_name))
+            elif arg['type'] == 'TensorList':
+                body.append('throw_error_for_complex_fns_backward_not_implemented({}, "{}");'.format(name[0], base_name))
         return body
 
     def emit_check_no_requires_grad(tensor_args, args_with_derivatives):
