@@ -279,3 +279,30 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 >>> # Use swa_model to make predictions on test data 
 >>> preds = swa_model(test_input)
+
+Functional Optimizer API
+---------------------------
+
+If you would like to update your parameters in a pure functional way, you can
+consider using the pure functional optimizer API. The functional APIs for
+optimizer allow you to only do the computation for the parameters you passed in,
+and inplace update the parameters accordingly.
+
+Note that in order to use the functional API, you should maintain the states
+for different algorithms on your own, and update some part of your non-tensor
+states before or after the call to this API (e.g. To use
+:func:`torch.optim.functional.adagrad`, `state_steps` for each parameter need
+to be updated before call to :func:`torch.optim.functional.adagrad`)
+
+As of now, we only exposed a limited set of functional APIs, we will
+expand the coverage and make all optimizers to have functional API in
+future releases.
+
+.. warning::
+    The functional optimizer API is still experimental and subject to change.
+
+
+.. currentmodule:: torch.optim.functional
+
+.. autofunction:: adagrad
+.. autofunction:: adam
