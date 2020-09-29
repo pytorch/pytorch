@@ -238,7 +238,7 @@ void take_out_cuda_template(
 
   output.resize_(index.sizes());
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, input.scalar_type(), "take_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cuda", [&] {
     dispatchTakePut<scalar_t>(input, output, index);
   });
 }
