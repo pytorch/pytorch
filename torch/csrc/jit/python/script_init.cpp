@@ -1583,6 +1583,14 @@ void initJitScriptBindings(PyObject* module) {
           "add_ignored_attribute",
           &ConcreteModuleTypeBuilder::addIgnoredAttribute)
       .def(
+          "add_ignored_attributes",
+          [](ConcreteModuleTypeBuilder& self,
+             const std::vector<std::string>& names) {
+            for (auto& name : names) {
+              self.addIgnoredAttribute(name);
+            }
+          })
+      .def(
           "set_module_dict",
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::DICT);
