@@ -4781,6 +4781,10 @@ class TestTorchDeviceType(TestCase):
                 if fn_name == 'abs':
                     torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
                     np_fn(a, out=a)
+                    if dtype.is_complex:
+                        with self.assertRaisesRegex(RuntimeError, "In-place abs is not supported for complex tensors."):
+                            torch_inplace_method(t)
+                        return
                     torch_inplace_method(t)
                     self.assertEqual(torch.from_numpy(a), t.cpu())
 
@@ -13732,6 +13736,15 @@ class TestTorchDeviceType(TestCase):
                   1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(floats, dtype=torch.float32, device=device)
         for base in floats:
+            self._test_pow(base, tensor)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
+    def test_complex_scalar_pow_tensor(self, device, dtype):
+        complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j]
+        tensor = torch.rand(100).to(dtype=dtype, device=device)
+        for base in complexes:
             self._test_pow(base, tensor)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
