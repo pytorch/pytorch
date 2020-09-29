@@ -199,10 +199,10 @@ void testExprVectorAdd01() {
     }
   */
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = a_buf.LoadVal(
+  ExprHandle load_a = a_buf.loadWithMask(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
-  ExprHandle load_b = b_buf.LoadVal(
+  ExprHandle load_b = b_buf.loadWithMask(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle value = load_a + load_b;
@@ -485,7 +485,7 @@ void testExprDynamicShapeAdd() {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a.load(i) + b.load(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);

@@ -196,55 +196,23 @@ class Placeholder {
     return data_->dims();
   }
 
-  // TODO: consider defer the storage flatten to a later stage.
-  template <typename... Args>
-  ExprHandle operator()(Args... args) const {
-    return LoadValue(std::forward<Args>(args)...);
-  }
-
-  ExprHandle LoadVal(const std::vector<ExprHandle>& indices) const {
-    return LoadVal(indices, ExprHandle(1));
-  }
-
-  ExprHandle LoadVal(
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& mask) const {
-    return ExprHandle(
-        new Load(data(), ExprHandleVectorToExprVector(indices), mask.node()));
-  }
-
-  ExprHandle LoadValue(
-      const ExprHandle& x,
-      const ExprHandle& y,
-      const ExprHandle& z) const {
-    return ExprHandle(
-        new Load(data(), {x.node(), y.node(), z.node()}, new IntImm(1)));
-  }
-  ExprHandle LoadValue(const ExprHandle& x, const ExprHandle& y) const {
-    return ExprHandle(new Load(data(), {x.node(), y.node()}, new IntImm(1)));
-  }
-  ExprHandle LoadValue(const ExprHandle& x) const {
-    return ExprHandle(new Load(data(), {x.node()}, new IntImm(1)));
-  }
+  template <typename... Ts>
+  inline ExprHandle load(const Ts&... ts) const;
 
   template <typename T>
-  ExprHandle call(const std::vector<T>& args) const {
-    std::vector<ExprHandle> params(args.begin(), args.end());
-    return LoadValue(params);
+  inline ExprHandle load(const std::vector<T>& args) const;
+
+  inline ExprHandle loadWithMask(
+      const std::vector<ExprHandle>& args,
+      const ExprHandle& mask) const {
+    return ExprHandle(
+        new Load(data(), ExprHandleVectorToExprVector(args), mask.node()));
   }
 
  private:
-  ExprHandle LoadValue(const std::vector<ExprHandle>& indices) const;
-
   const Buf* data_;
   std::vector<const Expr*> strides_;
 };
-
-inline ExprHandle Placeholder::LoadValue(
-    const std::vector<ExprHandle>& indices) const {
-  return ExprHandle(new Load(
-      dtype(), data(), ExprHandleVectorToExprVector(indices), new IntImm(1)));
-}
 
 TORCH_API Tensor* Compute(
     const std::string& func_name,
@@ -404,6 +372,21 @@ inline ExprHandle Tensor::call(const std::vector<T>& args) {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return FunctionCall::make(this, params);
 }
+
+template <typename... Ts>
+inline ExprHandle Placeholder::load(const Ts&... ts) const {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
+  return ExprHandle(
+      new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+template <typename T>
+inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
+  std::vector<ExprHandle> params(args.begin(), args.end());
+  return ExprHandle(
+      new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
