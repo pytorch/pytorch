@@ -5,7 +5,6 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-#include <torch/torch.h>
 
 namespace at {
 namespace native {
@@ -318,10 +317,10 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     }
   }
 
-  auto options =
-      torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false);
-  at::Tensor xmax_tensor = torch::tensor({xmax}, options);
-  at::Tensor xmin_tensor = torch::tensor({xmin}, options);
+  at::Tensor xmax_tensor = at::empty({1});
+  at::Tensor xmin_tensor = at::empty({1});
+  xmax_tensor[0] = xmax;
+  xmin_tensor[0] = xmin;
   return std::make_tuple(xmax_tensor, xmin_tensor);
 }
 } // namespace native
