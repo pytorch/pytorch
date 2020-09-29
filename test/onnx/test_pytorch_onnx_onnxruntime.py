@@ -899,7 +899,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -913,7 +913,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div_promotion_trace(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -931,14 +931,14 @@ class TestONNXRuntime(unittest.TestCase):
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     @skipIfONNXShapeInference(False)
-    def test_true_div_script(self):
-        class TrueDivModule(torch.nn.Module):
+    def test_div_promotion_script(self):
+        class DivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
                 # Otherwise shape and type are still avaiable from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
-                return torch.true_divide(x, y)
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -949,20 +949,20 @@ class TestONNXRuntime(unittest.TestCase):
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
         torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
@@ -1761,6 +1761,15 @@ class TestONNXRuntime(unittest.TestCase):
         class NarrowModel(torch.nn.Module):
             def forward(self, input):
                 return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_test(NarrowModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_narrow_dynamic(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, input.shape[0] - 1)
 
         x = torch.randn(3, 3, requires_grad=True)
         self.run_test(NarrowModel(), x)
@@ -2640,6 +2649,17 @@ class TestONNXRuntime(unittest.TestCase):
         shape = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, shape))
 
+    def test_view_dynamic_zero_dim(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.view(-1, 2)
+                return input.view(1, -1)
+
+        x = torch.ones(2)
+        another_x = torch.empty((0,))
+        self.run_test(ViewModel(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, ]})
+
     def test_view_as(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input, other):
@@ -2772,7 +2792,7 @@ class TestONNXRuntime(unittest.TestCase):
         class LenListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                return torch.ones(len(input.shape)) 
+                return torch.ones(len(input.shape))
 
         x = torch.randn(4, 5)
         self.run_test(LenListModel(), x)
@@ -3108,6 +3128,17 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(Full(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_list(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return torch.cat([x.add_(3), y.fill_(0)])
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Arithmetic(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
@@ -3806,138 +3837,102 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(12)
     @disableScriptTest()  # shape/type inference
     def test_crossentropyloss(self):
-        x = torch.randn(3, 5)
-        y = torch.empty(3, dtype=torch.long).random_(5)
-        self._crossentropyloss(x, y)
+        for ignore_index in [-100, 1]:
+            x = torch.randn(3, 5)
+            y = torch.empty(3, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
 
-        x = torch.randn(3, 5, 2)
-        y = torch.empty(3, 2, dtype=torch.long).random_(5)
-        self._crossentropyloss(x, y)
+            self._crossentropyloss(x, y, ignore_index)
 
-        x = torch.randn(3, 5, 2, 7)
-        y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
-        self._crossentropyloss(x, y)
+            x = torch.randn(3, 5, 2)
+            y = torch.empty(3, 2, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
+            self._crossentropyloss(x, y, ignore_index)
 
-    def _crossentropyloss(self, x, y):
+            x = torch.randn(3, 5, 2, 7)
+            y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
+            self._crossentropyloss(x, y, ignore_index)
+
+    def _crossentropyloss(self, x, y, ignore_index):
         class CrossEntropyLossNone(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossNone, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='none')
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none')
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossNone(), input=(x, y))
+        self.run_test(CrossEntropyLossNone(ignore_index), input=(x, y))
 
         class CrossEntropyLossNoneWeight(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossNoneWeight, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5))
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5), ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossNoneWeight(), input=(x, y))
+        self.run_test(CrossEntropyLossNoneWeight(ignore_index), input=(x, y))
 
         class CrossEntropyLossSum(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossSum, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='sum')
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum')
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossSum(), input=(x, y))
+        self.run_test(CrossEntropyLossSum(ignore_index), input=(x, y))
 
         class CrossEntropyLossSumWeight(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossSumWeight, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5))
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5), ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossSumWeight(), input=(x, y))
+        self.run_test(CrossEntropyLossSumWeight(ignore_index), input=(x, y))
 
         class CrossEntropyLossMean(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossMean, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss()
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossMean(), input=(x, y))
+        self.run_test(CrossEntropyLossMean(ignore_index), input=(x, y))
 
         class CrossEntropyLossMeanWeight(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, ignore_index):
                 super(CrossEntropyLossMeanWeight, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5), ignore_index=ignore_index)
 
             def forward(self, input, target):
                 return self.loss(input, target)
 
-        self.run_test(CrossEntropyLossMeanWeight(), input=(x, y))
+        self.run_test(CrossEntropyLossMeanWeight(ignore_index), input=(x, y))
 
-        class CrossEntropyLossNoneIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossNoneIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossNoneIgnoreIndex(), input=(x, y))
-
-        class CrossEntropyLossNoneWeightIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossNoneWeightIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5), ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossNoneWeightIgnoreIndex(), input=(x, y))
-
-        class CrossEntropyLossSumIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossSumIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossSumIgnoreIndex(), input=(x, y))
-
-        class CrossEntropyLossSumWeightIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossSumWeightIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5), ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossSumWeightIgnoreIndex(), input=(x, y))
-
-        class CrossEntropyLossMeanIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossMeanIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossMeanIgnoreIndex(), input=(x, y))
-
-        class CrossEntropyLossMeanWeightIgnoreIndex(torch.nn.Module):
-            def __init__(self):
-                super(CrossEntropyLossMeanWeightIgnoreIndex, self).__init__()
-                self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5), ignore_index=1)
-
-            def forward(self, input, target):
-                return self.loss(input, target)
-
-        self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()   # Output dtype mismatch
@@ -4022,6 +4017,9 @@ class TestONNXRuntime(unittest.TestCase):
         N, C = 5, 4
         input = torch.randn(N, 16)
         target = torch.empty(N, dtype=torch.long).random_(0, C)
+
+        # using test data containing default ignore_index=-100
+        target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -4041,6 +4039,9 @@ class TestONNXRuntime(unittest.TestCase):
         N, C = 5, 4
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+
+        # using test data containing default ignore_index=-100
+        target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -4060,6 +4061,9 @@ class TestONNXRuntime(unittest.TestCase):
         N, C = 5, 4
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+
+        # using test data containing default ignore_index=-100
+        target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -4079,6 +4083,9 @@ class TestONNXRuntime(unittest.TestCase):
         N, C = 5, 4
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+
+        # using test data containing default ignore_index=-100
+        target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -4098,6 +4105,9 @@ class TestONNXRuntime(unittest.TestCase):
         N, C = 5, 4
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+
+        # using test data containing default ignore_index=-100
+        target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)

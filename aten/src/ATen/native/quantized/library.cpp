@@ -107,9 +107,9 @@ TORCH_LIBRARY(quantized, m) {
   m.def("embedding_bag_unpack(__torch__.torch.classes.quantized.EmbeddingPackedParamsBase W_prepack) -> Tensor W_origin");
   m.def("embedding_bag_byte_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_unpack(Tensor weight) -> Tensor");
-  m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_4bit_prepack(Tensor weight, bool optimized_qparams=False) -> Tensor");
   m.def("embedding_bag_4bit_unpack(Tensor weight) -> Tensor");
-  m.def("embedding_bag_2bit_prepack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_2bit_prepack(Tensor weight, bool optimized_qparams=False) -> Tensor");
   m.def("embedding_bag_2bit_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
   m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
@@ -166,6 +166,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("mul_scalar_relu.Tensor(Tensor qa, Tensor b)-> Tensor qc");
   m.def("mul_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("max_pool1d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor");
   // NB: missing a space after comma here...
   m.def("max_pool2d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation,bool ceil_mode) -> Tensor");
   m.def("relu6(Tensor qx, bool inplace=False) -> Tensor");

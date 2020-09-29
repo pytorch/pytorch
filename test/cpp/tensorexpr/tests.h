@@ -23,6 +23,7 @@ namespace jit {
   _(ExprLongTest)                           \
   _(ExprHalfTest)                           \
   _(ExprDoubleTest)                         \
+  _(ExprDisallowBoolArithmetic)             \
   _(ExprVectorAdd01)                        \
   _(ExprCompareSelectEQ)                    \
   _(ExprCompareSelectDtypes)                \
@@ -55,6 +56,7 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(ExprSplitWithMaskRepeatedNoMask)        \
   _(SplitWithTailWithLoopOptions)           \
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
@@ -216,6 +218,8 @@ namespace jit {
   _(SimplifyReorderForCond)                 \
   _(SimplifyFuseConditions)                 \
   _(SimplifySyncThreads)                    \
+  _(SimplifyRampSubBroadcast)               \
+  _(SimplifyBroadcastTermExpander)          \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -441,6 +445,7 @@ namespace jit {
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
+  _(CudaHalfPropagation)                   \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
   _(CudaMaskThreadDim)                     \
