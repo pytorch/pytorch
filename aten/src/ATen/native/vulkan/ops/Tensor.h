@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class C10_EXPORT vTensor final {
+class vTensor final {
  public:
   vTensor() = default;
   vTensor(
@@ -123,7 +123,7 @@ class C10_EXPORT vTensor final {
     // Intentionally disabed to enforce a usage pattern wherein the Future's
     // lifetime exceeds that of the Payload as we use the Future's destructor
     // to eagerly (as opposed to lazily and upon first use) upload the
-    // modifications back onto the GPU in an effort to hide the copy latency.
+    // modifications back onto the GPU in an effort to hide the upload latency.
 
     Payload wait() const && = delete;
 
