@@ -481,7 +481,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// ```
 struct TORCH_API TripletMarginWithDistanceLossImpl : public Cloneable<TripletMarginWithDistanceLossImpl> {
   explicit TripletMarginWithDistanceLossImpl(
-      const TripletMarginWithDistanceLossOptions& options_ = {});
+      TripletMarginWithDistanceLossOptions options_ = {});
 
   void reset() override;
 

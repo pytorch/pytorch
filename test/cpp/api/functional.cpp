@@ -683,9 +683,9 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
 }
 
 TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
-  /// Check that if we use torch::pairwise_distance with the default
-  /// TripletMarginLoss options as our distance function, the outputs
-  /// are equal (i.e., equal under defaults).
+  // Check that if we use torch::pairwise_distance with the default
+  // TripletMarginLoss options as our distance function, the outputs
+  // are equal (i.e., equal under defaults).
 
   std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
       reductions = {torch::kSum, torch::kMean, torch::kNone};

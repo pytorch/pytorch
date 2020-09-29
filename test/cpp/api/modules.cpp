@@ -2086,9 +2086,9 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 }
 
 TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
-  /// Check that if we use torch::pairwise_distance with the default
-  /// TripletMarginLoss options as our distance function, the outputs
-  /// are equal (i.e., equal under defaults).
+  // Check that if we use torch::pairwise_distance with the default
+  // TripletMarginLoss options as our distance function, the outputs
+  // are equal (i.e., equal under defaults).
 
   std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
       reductions = {torch::kSum, torch::kMean, torch::kNone};
@@ -2119,8 +2119,12 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
 
         auto basicOutput = basicLoss->forward(anchor, positive, negative);
         auto distanceOutput = distanceLoss->forward(anchor, positive, negative);
+        auto basicOperatorOutput = basicLoss(anchor, positive, negative);
+        auto distanceOperatorOutput = distanceLoss(anchor, positive, negative);
 
         ASSERT_TRUE(distanceOutput.allclose(basicOutput, 1e-6, 1e-6));
+        ASSERT_TRUE(distanceOperatorOutput.allclose(distanceOutput, 1e-6, 1e-6));
+        ASSERT_TRUE(distanceOperatorOutput.allclose(basicOperatorOutput, 1e-6, 1e-6));
 
         // handle for torch::kNone reduction
         auto sum = distanceOutput.sum();
@@ -2134,8 +2138,8 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
 }
 
 TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
-  /// Check for parity between F::triplet_margin_with_distance_loss and
-  /// TripletMarginWithDistanceLoss.
+  // Check for parity between F::triplet_margin_with_distance_loss and
+  // TripletMarginWithDistanceLoss.
   auto pairwise_distance = [&](const torch::Tensor& x, const torch::Tensor& y) {
     return torch::pairwise_distance(x, y);
   };
@@ -2178,10 +2182,12 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
           TripletMarginWithDistanceLoss distanceLoss(moduleOptions);
 
           auto moduleOutput = distanceLoss->forward(anchor, positive, negative);
+          auto moduleOperatorOutput = distanceLoss(anchor, positive, negative);
           auto functionOutput = torch::nn::functional::triplet_margin_with_distance_loss(
             anchor, positive, negative, functionOptions);
 
           ASSERT_TRUE(moduleOutput.allclose(functionOutput, 1e-6, 1e-6));
+          ASSERT_TRUE(moduleOperatorOutput.allclose(functionOutput, 1e-6, 1e-6));
         }
       }
     }

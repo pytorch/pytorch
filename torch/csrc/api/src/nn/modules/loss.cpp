@@ -181,8 +181,8 @@ Tensor TripletMarginLossImpl::forward(
 // ============================================================================
 
 TripletMarginWithDistanceLossImpl::TripletMarginWithDistanceLossImpl(
-    const TripletMarginWithDistanceLossOptions& options_) // NOLINT(modernize-pass-by-value)
-    : options(options_) {}
+    TripletMarginWithDistanceLossOptions options_)
+    : options(std::move(options_)) {}
 
 void TripletMarginWithDistanceLossImpl::reset() {}
 
