@@ -949,10 +949,15 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name=""):
+    def __init__(self, dtype=torch.float16, custom_op_name="", compute_dtype=None):
         super(PlaceholderObserver, self).__init__(dtype=dtype)
+        # dtype of input of the target operator, e.g. for dynamic quantization
+        # ops, the dtype will be float32
         self.dtype = dtype
         self.custom_op = custom_op_name
+        # used for configuration of computation type for dynamic quantization
+        if compute_dtype:
+            self.compute_dtype = compute_dtype
 
     def forward(self, x):
         return x
@@ -1023,7 +1028,7 @@ default_debug_observer = RecordingObserver
 default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
 default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
-default_dynamic_quant_observer = PlaceholderObserver.with_args(dtype=torch.float)
+default_dynamic_quant_observer = PlaceholderObserver.with_args(dtype=torch.float, compute_dtype=torch.quint8)
 default_float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=torch.quint8,
                                                                     qscheme=torch.per_channel_affine_float_qparams,
                                                                     ch_axis=0)
