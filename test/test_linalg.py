@@ -181,7 +181,7 @@ class TestLinalg(TestCase):
             op(t)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron(self, device, dtype):
 
         def run_test_case(a_shape, b_shape):
