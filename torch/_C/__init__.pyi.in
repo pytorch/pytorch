@@ -371,6 +371,8 @@ def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
+def valgrind_supported_platform() -> bool: ...  # NVALGRIND
+def valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
 
 has_openmp: _bool
 has_mkl: _bool
