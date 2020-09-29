@@ -70,7 +70,7 @@ class ASGD(Optimizer):
                     states.append(state)
 
             if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, p, alpha=group['weight_decay'])
+                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
 
             # decay term
             torch._foreach_mul_(params_with_grad, 1 - group['lambd'] * state['eta'])

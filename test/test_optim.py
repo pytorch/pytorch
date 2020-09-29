@@ -283,6 +283,15 @@ class TestOptim(TestCase):
                  lambda opt: ExponentialLR(opt, gamma=0.99),
                  lambda opt: ReduceLROnPlateau(opt)]
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
@@ -300,52 +309,144 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             return
 
-    def test_adam(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
-                                            amsgrad=True)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
-                                            weight_decay=0.1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3, amsgrad=True)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
-                                            amsgrad=True),
-            [lambda opt: ExponentialLR(opt, gamma=0.9),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3, amsgrad=True),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
+        optimizer_pairs = [
+            (optim.Adam, optim._multi_tensor.Adam),
+            (optim.Adam, optim._multi_tensor.Adam),
+            (optim.Adam, optim._multi_tensor.Adam),
+            (optim.Adam, optim._multi_tensor.Adam),
+            (optim.AdamW, optim._multi_tensor.AdamW),
+            (optim.AdamW, optim._multi_tensor.AdamW),
+            (optim.AdamW, optim._multi_tensor.AdamW),
+            (optim.AdamW, optim._multi_tensor.AdamW),
+            (optim.SGD, optim._multi_tensor.SGD),
+            (optim.SGD, optim._multi_tensor.SGD),
+            (optim.RMSprop, optim._multi_tensor.RMSprop),
+            (optim.RMSprop, optim._multi_tensor.RMSprop),
+            (optim.RMSprop, optim._multi_tensor.RMSprop),
+            (optim.RMSprop, optim._multi_tensor.RMSprop),
+            (optim.Rprop, optim._multi_tensor.Rprop),
+            (optim.ASGD, optim._multi_tensor.ASGD),
+            (optim.ASGD, optim._multi_tensor.ASGD),
+            (optim.Adamax, optim._multi_tensor.Adamax),
+            (optim.Adamax, optim._multi_tensor.Adamax),
+            (optim.Adadelta, optim._multi_tensor.Adadelta),
+            (optim.Adadelta, optim._multi_tensor.Adadelta),
+        ]
 
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):	
-            optim.Adam(None, lr=1e-2, weight_decay=-1)
+        flag_params = [
+            dict(weight_decay=1., amsgrad=True),  # Adam
+            dict(weight_decay=1., amsgrad=False),  # Adam
+            dict(weight_decay=0., amsgrad=True),  # Adam
+            dict(weight_decay=0., amsgrad=False),  # Adam
+            dict(weight_decay=1., amsgrad=True),  # AdamW
+            dict(weight_decay=1., amsgrad=False),  # AdamW
+            dict(weight_decay=0., amsgrad=True),  # AdamW
+            dict(weight_decay=0., amsgrad=False),  # AdamW
+            dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),  # SGD
+            dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),  # SGD
+            dict(weight_decay=1, momentum=1, centered=True),  # RMSprop
+            dict(weight_decay=1, momentum=0, centered=True),  # RMSprop
+            dict(weight_decay=1, momentum=1, centered=False),  # RMSprop
+            dict(weight_decay=0, momentum=1, centered=False),  # RMSprop
+            dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)),  # Rprop
+            dict(weight_decay=0),  # ASGD
+            dict(weight_decay=1),  # ASGD
+            dict(weight_decay=0),  # Adamax
+            dict(weight_decay=1),  # Adamax
+            dict(weight_decay=0),  # Adadelta
+            dict(weight_decay=1),  # Adadelta
+        ]
+
+        kIterations = 1001
+        device = 'cuda'
+
+        for index in range(len(optimizer_pairs)):
+            res = []
+            for opt in optimizer_pairs[index]:
+                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
+                                      dtype=torch.float64, device=device, requires_grad=True)
+                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
+                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
+                                       dtype=torch.float64, device=device, requires_grad=True)
+                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
+                input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
+
+                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
+                                            torch.nn.Sigmoid(),
+                                            torch.nn.Linear(3, 1),
+                                            torch.nn.Sigmoid())
+                model.to(torch.float64).to(device)
+
+                pretrained_dict = model.state_dict()
+                pretrained_dict['0.weight'] = weight
+                pretrained_dict['0.bias'] = bias
+                pretrained_dict['2.weight'] = weight2
+                pretrained_dict['2.bias'] = bias2
+                model.load_state_dict(pretrained_dict)
+
+                optimizer = opt(model.parameters(), **flag_params[index])
+
+                for _ in range(kIterations): 
+                    optimizer.zero_grad()
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
+
+                    if iter == 0:
+                        model.parameters().__next__().grad = None
+
+                    optimizer.step()
+
+                res.append(model.parameters())
+
+            for p1, p2 in zip(res[0], res[1]):
+                self.assertEqual(p1, p2)
+
+
+    def test_adam(self):
+        for optimizer in [optim.Adam, optim_mt.Adam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
@@ -357,7 +458,12 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3)
             )
-
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
@@ -390,6 +496,9 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, rho=0.95)),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
@@ -443,6 +552,9 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-1)
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
@@ -471,6 +583,11 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-3),
                     lr=1e-2, momentum=0.1)
             )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, momentum=0.1, weight_decay=1)
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
@@ -483,6 +600,11 @@ class TestOptim(TestCase):
                 lambda weight, bias: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=1e-3, t0=100)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, weight_decay=1)
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)

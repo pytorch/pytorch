@@ -116,14 +116,28 @@ class SGD(Optimizer):
 
             if momentum != 0:
                 bufs = []
-                for i in range(len(states)):
-                    if 'momentum_buffer' not in state:
-                        buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
-                    else:
-                        buf = states[i]['momentum_buffer']
-                        buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
 
-                    bufs.append(buf)
+                all_states_with_momentum_buffer = True
+                for i in range(len(states)):
+                    if 'momentum_buffer' not in states[i]:
+                        all_states_with_momentum_buffer = False
+                        break
+                    else:
+                        bufs.append(states[i]['momentum_buffer'])
+
+                if all_states_with_momentum_buffer:
+                    torch._foreach_mul_(bufs, momentum)
+                    torch._foreach_add_(bufs, grads, alpha=1 - dampening)
+                else:
+                    bufs = []
+                    for i in range(len(states)):
+                        if 'momentum_buffer' not in states[i]:
+                            buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
+                        else:
+                            buf = states[i]['momentum_buffer']
+                            buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+
+                        bufs.append(buf)
 
                 if nesterov:
                     torch._foreach_add_(grads, bufs, alpha=momentum)

@@ -96,7 +96,7 @@ class RMSprop(Optimizer):
                     square_avg.append(state['square_avg'])
 
             if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, p, alpha=group['weight_decay'])
+                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
 
             torch._foreach_mul_(square_avg, alpha)
             torch._foreach_addcmul_(square_avg, grads, grads, value=1 - alpha)
