@@ -2756,12 +2756,12 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
     qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
       auto rdata = rtensor.data_ptr<float>();
-      const uint8_t* qdata = reinterpret_cast<uint8_t*>(qtensor.data_ptr<at::quint4x2>());
+      const underlying_t* qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
 
       for (int i = 0; i < numel; ++i) {
-        uint8_t qvalue = qdata[i / elem_per_byte];
+        underlying_t qvalue = qdata[i / elem_per_byte];
         qvalue >>= (i % elem_per_byte) * bit_width;
         qvalue &= (1 << bit_width) - 1;
         rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
