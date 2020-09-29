@@ -1731,7 +1731,7 @@ endif()
 # End ATen checks
 #
 
-# Define the fmt library.
+# ---[ fmt
 #
 # We define a custom target instead of using `add_subdirectory` because we need
 # to install the resulting target into the `Caffe2Targets` export set. Before
@@ -1739,28 +1739,14 @@ endif()
 # directory.
 # See: https://stackoverflow.com/questions/34443128/cmake-install-targets-in-subdirectories/34444949
 
-set(FMT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/fmt/include/fmt)
-set(FMT_HEADERS
-  ${FMT_INCLUDE_DIR}/chrono.h
-  ${FMT_INCLUDE_DIR}/color.h
-  ${FMT_INCLUDE_DIR}/compile.h
-  ${FMT_INCLUDE_DIR}/core.h
-  ${FMT_INCLUDE_DIR}/format.h
-  ${FMT_INCLUDE_DIR}/format-inl.h
-  ${FMT_INCLUDE_DIR}/locale.h
-  ${FMT_INCLUDE_DIR}/os.h
-  ${FMT_INCLUDE_DIR}/ostream.h
-  ${FMT_INCLUDE_DIR}/posix.h
-  ${FMT_INCLUDE_DIR}/printf.h
-  ${FMT_INCLUDE_DIR}/ranges.h
-)
-
+set(FMT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/fmt/include)
 add_library(torch-fmt INTERFACE)
 target_compile_definitions(torch-fmt INTERFACE FMT_HEADER_ONLY=1)
 target_include_directories(torch-fmt INTERFACE
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/fmt/include>
+  $<BUILD_INTERFACE:${FMT_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 install(TARGETS torch-fmt EXPORT Caffe2Targets)
-install(FILES ${FMT_HEADERS} DESTINATION include/fmt)
-
+install(DIRECTORY ${FMT_INCLUDE_DIR}
+        DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.h")
