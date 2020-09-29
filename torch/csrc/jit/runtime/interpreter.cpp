@@ -412,16 +412,6 @@ struct BailoutBlock {
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
 
-template <class Ttarget, class Tsource>
-Ttarget safe_narrow_cast(Tsource v) {
-  Ttarget res = static_cast<Ttarget>(v);
-  // Casting it back to check whether it overflew.
-  if (static_cast<Tsource>(res) != v) {
-    throw std::runtime_error("safe_narrow_cast<>() failed due to overflow");
-  }
-  return res;
-}
-
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -529,10 +519,7 @@ struct CodeImpl {
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
-    instructions_.emplace_back(
-        op,
-        safe_narrow_cast<int32_t, int64_t>(X),
-        safe_narrow_cast<int16_t, int64_t>(N));
+    instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -870,11 +857,7 @@ struct CodeImpl {
 
   void emitWarn(Node* node) {
     emitLoadInputs(node->inputs());
-    int64_t idx = -1;
-    if (node->hasAttribute(attr::warn_id)) {
-      idx = node->i(attr::warn_id);
-    }
-    insertInstruction(WARN, idx);
+    insertInstruction(WARN);
   }
 
   void emitEnter(Node* node) {
@@ -1020,7 +1003,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  private:
   // Tracks whether a WARN instruction has been executed before. So that we can
   // ensure each WARN instruction only executes once to mimic Python behavior.
-  std::unordered_set<int32_t> warned_indices_;
+  std::unordered_set<Node*> warned_indices_;
 
   // if we need to suspend, where do we reset the stack?
   // answer: to where it was when we were called, not
@@ -1516,16 +1499,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case WARN: {
+            Node* node = frames.back().function->instructions_source_.at(af.pc);
+
             // Keeps track of which WARN instruction has been executed before,
             // we only want to execute each WARN once to match default Python
             // warning behavior.
-            bool need_warn = true;
-            if (inst.X != -1) {
-              auto inserted = warned_indices_.insert(inst.X);
-              need_warn = inserted.second;
-            }
+            // TODO TODO need a lock here
+            auto inserted = warned_indices_.insert(node);
+            bool need_warn = inserted.second;
 
-            Node* node = frames.back().function->instructions_source_.at(af.pc);
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
