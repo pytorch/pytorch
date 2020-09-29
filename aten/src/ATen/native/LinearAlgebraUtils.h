@@ -241,18 +241,21 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
+  // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
-  // VT should be a row-major or a batch of row-major matrices
+  strides = at::detail::defaultStrides(sizes);
+  strides[input.dim() - 1] = n;
+  strides[input.dim() - 2] = 1;
   Tensor VT_empty;
   if (!input.is_cuda()) {
-    VT_empty = at::empty(sizes, input.options());
+    VT_empty = at::empty_strided(sizes, strides, input.options());
   } else {
     // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
     // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
     // moves the inputs between devices internally.
-    VT_empty = at::empty(sizes, input.options().device(at::kCPU));
+    VT_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
   sizes.pop_back();

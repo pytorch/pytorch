@@ -1412,7 +1412,7 @@ std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cuda(const Tensor& self, b
 
     if (compute_uv) {
       if (some) {
-        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
       }
     } else {
       VT_working_copy.zero_();

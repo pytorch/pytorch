@@ -1030,7 +1030,7 @@ std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cpu(const Tensor& self, bo
 
     if (compute_uv) {
       if (some) {
-        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
       }
     } else {
       VT_working_copy.zero_();
@@ -1062,16 +1062,30 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tenso
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/* the legacy version of torch.svd, implemented in terms of linalg_svd: note
+    the two main differences:
+
+    1. the 2nd parameter is bool some=True, which if effectively the opposite
+       of full_matrices=True
+
+    2. linalg_svd returns VT, while svd returns V. To accommodate the
+       difference, we transpose_() VT upon return
+*/
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
     bool full_matrices = !some;
-    return at::linalg_svd(self, full_matrices, compute_uv);
+    Tensor U, S, VT;
+    std::tie(U, S, VT) = at::linalg_svd(self, full_matrices, compute_uv);
+    VT.transpose_(-2, -1);
+    return std::make_tuple(U, S, VT);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                               const Tensor& self, bool some, bool compute_uv) {
     bool full_matrices = !some;
-    return at::linalg_svd_out(U, S, VT, self, full_matrices, compute_uv);
+    auto result = at::linalg_svd_out(U, S, VT, self, full_matrices, compute_uv);
+    VT.transpose_(-2, -1);
+    return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

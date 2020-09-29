@@ -151,6 +151,4 @@ def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
         # our C++ API always returns a full 3-tuple, but in this case numpy
         # returns only S
         return USV.S
-
-    USV.V.t_() # pytorch returns the transposed Vt, while numpy returns V
     return USV
