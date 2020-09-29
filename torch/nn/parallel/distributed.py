@@ -112,37 +112,36 @@ class DistributedDataParallel(Module):
     :class:`torch.nn.DataParallel` for single-node multi-GPU data
     parallel training.
 
-    Here is how to use it: on each host with N GPUs, you should spawn up N
-    processes, while ensuring that each process individually works on a single GPU
-    from 0 to N-1. Therefore, it is your job to ensure that your training script
-    operates on a single given GPU by calling:
+    To use ``DistributedDataParallel`` on a host with N GPUs, you should spawn
+    up ``N`` processes, ensuring that each process exclusively works on a single
+    GPU from 0 to N-1. This can be done by either setting
+    ``CUDA_VISIBLE_DEVICES`` for every process or by calling:
 
         >>> torch.cuda.set_device(i)
 
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
-        >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
+        >>> torch.distributed.init_process_group(
+        >>>     backend='nccl', world_size=N, init_method='...'
+        >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
     In order to spawn up multiple processes per node, you can use either
-    ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``
+    ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
 
     .. note ::
         Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
         for a brief introduction to all features related to distributed training.
 
-    .. note:: ``nccl`` backend is currently the fastest and
-        highly recommended backend to be used with Multi-Process Single-GPU
-        distributed training and this applies to both single-node and multi-node
-        distributed training
+    .. note:: ``nccl`` backend is currently the fastest and highly recommended
+        backend when using GPUs. This applies to both single-node and
+        multi-node distributed training.
 
     .. note:: This module also supports mixed-precision distributed training.
         This means that your model can have different types of parameters such
-        as mixed types of fp16 and fp32, the gradient reduction on these
+        as mixed types of ``fp16`` and ``fp32``, the gradient reduction on these
         mixed types of parameters will just work fine.
-        Also note that ``nccl`` backend is currently the fastest and highly
-        recommended backend for fp16/fp32 mixed-precision training.
 
     .. note:: If you use ``torch.save`` on one process to checkpoint the module,
         and ``torch.load`` on some other processes to recover it, make sure that
@@ -155,16 +154,56 @@ class DistributedDataParallel(Module):
         trained on a single node with ``batch=M*N`` (because the gradients
         between different nodes are averaged). You should take this into
         consideration when you want to obtain a mathematically equivalent
-        training process compared to the non-DistributedDataParallel
-        counterpart.
+        training process compared to the local training counterpart.
 
-    .. warning::
-        This module works only with the ``gloo`` and ``nccl`` backends.
+    .. note::
+        Parameters are never broadcast between processes. The module performs
+        an all-reduce step on gradients and assumes that they will be modified
+        by the optimizer in all processes in the same way. Buffers
+        (e.g. BatchNorm stats) are broadcast from the module in process of rank
+        0, to all other replicas in the system in every iteration.
+
+    .. note::
+        If you are using DistributedDataParallel in conjunction with the
+        :ref:`distributed-rpc-framework`, you should always use
+        :meth:`torch.distributed.autograd.backward` to compute gradients and
+        :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
+        parameters.
+
+        Example::
+
+            >>> import torch.distributed.autograd as dist_autograd
+            >>> from torch.nn.parallel import DistributedDataParallel as DDP
+            >>> from torch import optim
+            >>> from torch.distributed.optim import DistributedOptimizer
+            >>> from torch.distributed.rpc import RRef
+            >>>
+            >>> t1 = torch.rand((3, 3), requires_grad=True)
+            >>> t2 = torch.rand((3, 3), requires_grad=True)
+            >>> rref = rpc.remote("worker1", torch.add, args=(t1, t2))
+            >>> ddp_model = DDP(my_model)
+            >>>
+            >>> # Setup optimizer
+            >>> optimizer_params = [rref]
+            >>> for param in ddp_model.parameters():
+            >>>     optimizer_params.append(RRef(param))
+            >>>
+            >>> dist_optim = DistributedOptimizer(
+            >>>     optim.SGD,
+            >>>     optimizer_params,
+            >>>     lr=0.05,
+            >>> )
+            >>>
+            >>> with dist_autograd.context() as context_id:
+            >>>     pred = ddp_model(rref.to_here())
+            >>>     loss = loss_func(pred, loss)
+            >>>     dist_autograd.backward(context_id, loss)
+            >>>     dist_optim.step()
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
-        function of the output of this module) is a distributed synchronization
-        point. Take that into account in case different processes might be
+        function of the output of this module) are distributed synchronization
+        points. Take that into account in case different processes might be
         executing different code.
 
     .. warning::
@@ -175,7 +214,7 @@ class DistributedDataParallel(Module):
     .. warning::
         This module assumes all parameters are registered in the model of each
         distributed processes are in the same order. The module itself will
-        conduct gradient all-reduction following the reverse order of the
+        conduct gradient ``allreduce`` following the reverse order of the
         registered parameters of the model. In other words, it is users'
         responsibility to ensure that each distributed process has the exact
         same model and thus the exact same parameter registration order.
@@ -208,139 +247,84 @@ class DistributedDataParallel(Module):
 
     .. warning::
         You should never try to change your model's parameters after wrapping
-        up your model with DistributedDataParallel. In other words, when
-        wrapping up your model with DistributedDataParallel, the constructor of
-        DistributedDataParallel will register the additional gradient
+        up your model with ``DistributedDataParallel``. Because, when
+        wrapping up your model with ``DistributedDataParallel``, the constructor
+        of ``DistributedDataParallel`` will register the additional gradient
         reduction functions on all the parameters of the model itself at the
-        time of construction. If you change the model's parameters after
-        the DistributedDataParallel construction, this is not supported and
-        unexpected behaviors can happen, since some parameters' gradient
-        reduction functions might not get called.
-
-    .. note::
-        Parameters are never broadcast between processes. The module performs
-        an all-reduce step on gradients and assumes that they will be modified
-        by the optimizer in all processes in the same way. Buffers
-        (e.g. BatchNorm stats) are broadcast from the module in process of rank
-        0, to all other replicas in the system in every iteration.
-
-    .. note::
-        If you are using DistributedDataParallel in conjunction with the
-        :ref:`distributed-rpc-framework`, you should always use
-        :meth:`torch.distributed.autograd.backward` to compute gradients and
-        :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
+        time of construction. If you change the model's parameters afterwards,
+        gradient redunction functions no longer match the correct set of
         parameters.
 
-    Example::
-
-        >>> import torch.distributed.autograd as dist_autograd
-        >>> from torch.nn.parallel import DistributedDataParallel as DDP
-        >>> from torch import optim
-        >>> from torch.distributed.optim import DistributedOptimizer
-        >>> from torch.distributed.rpc import RRef
-        >>>
-        >>> t1 = torch.rand((3, 3), requires_grad=True)
-        >>> t2 = torch.rand((3, 3), requires_grad=True)
-        >>> rref = rpc.remote("worker1", torch.add, args=(t1, t2))
-        >>> ddp_model = DDP(my_model)
-        >>>
-        >>> # Setup optimizer
-        >>> optimizer_params = [rref]
-        >>> for param in ddp_model.parameters():
-        >>>     optimizer_params.append(RRef(param))
-        >>>
-        >>> dist_optim = DistributedOptimizer(
-        >>>     optim.SGD,
-        >>>     optimizer_params,
-        >>>     lr=0.05,
-        >>> )
-        >>>
-        >>> with dist_autograd.context() as context_id:
-        >>>     pred = ddp_model(rref.to_here())
-        >>>     loss = loss_func(pred, loss)
-        >>>     dist_autograd.backward(context_id, loss)
-        >>>     dist_optim.step()
+    .. warning::
+        Using ``DistributedDataParallel`` in conjunction with the
+        :ref:`distributed-rpc-framework` is experimental and subject to change.
 
     .. warning::
-        Using DistributedDataParallel in conjuction with the
-        :ref:`distributed-rpc-framework` is experimental and subject to change.
+        The ``gradient_as_bucket_view`` mode  does not yet work with Automatic
+        Mixed Precision (AMP). AMP maintains stashed gradients that are used for
+        unscaling gradients. With ``gradient_as_bucket_view=True``, these
+        stashed gradients will point to communication buckets in the first
+        iteration. In the next iteration, the communication buckets are mutated
+        and thus these stashed gradients will be unexpectedly mutated as well,
+        which might lead to wrong results.
 
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
                    only be provided when the input module resides on a single
-                   CUDA device. For single-device modules, the ``i``th
+                   CUDA device. For single-device modules, the i'th
                    :attr:`module` replica is placed on ``device_ids[i]``. For
-                   multi-device modules and CPU modules, device_ids must be None
-                   or an empty list, and input data for the forward pass must be
-                   placed on the correct device. (default: all devices for
-                   single-device modules)
-        output_device (int or torch.device): device location of output for
+                   multi-device modules and CPU modules, ``device_ids`` must be
+                   ``None`` or an empty list, and input data for the forward
+                   pass must be placed on the correct device. (default: all
+                   visible devices for single-device modules)
+        output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
-                      CPU modules, it must be None, and the module itself
-                      dictates the output location. (default: device_ids[0] for
-                      single-device modules)
-        broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
-                          the module at beginning of the forward function.
-                          (default: ``True``)
-        process_group: the process group to be used for distributed data
+                      CPU modules, it must be ``None``, and the module itself
+                      dictates the output location. (default: ``device_ids[0]``
+                      for single-device modules)
+        broadcast_buffers (bool): Flag that enables syncing (broadcasting)
+                          buffers of the module at beginning of the ``forward``
+                          function. (default: ``True``)
+        process_group: The process group to be used for distributed data
                        all-reduction. If ``None``, the default process group, which
-                       is created by ```torch.distributed.init_process_group```,
+                       is created by :func:`torch.distributed.init_process_group`,
                        will be used. (default: ``None``)
-        bucket_cap_mb: DistributedDataParallel will bucket parameters into
+        bucket_cap_mb: ``DistributedDataParallel`` will bucket parameters into
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
-                       :attr:`bucket_cap_mb` controls the bucket size in MegaBytes (MB)
-                       (default: 25)
-        find_unused_parameters (bool): Traverse the autograd graph of all tensors
-                                       contained in the return value of the wrapped
-                                       module's ``forward`` function.
-                                       Parameters that don't receive gradients as
-                                       part of this graph are preemptively marked
-                                       as being ready to be reduced. Note that all
-                                       ``forward`` outputs that are derived from
-                                       module parameters must participate in
-                                       calculating loss and later the gradient
-                                       computation. If they don't, this wrapper will
-                                       hang waiting for autograd to produce gradients
-                                       for those parameters. Any outputs derived from
-                                       module parameters that are otherwise unused can
-                                       be detached from the autograd graph using
-                                       ``torch.Tensor.detach``. (default: ``False``)
-        check_reduction: when setting to ``True``, it enables DistributedDataParallel
-                         to automatically check if the previous iteration's
-                         backward reductions were successfully issued at the
-                         beginning of every iteration's forward function.
-                         You normally don't need this option enabled unless you
-                         are observing weird behaviors such as different ranks
-                         are getting different gradients, which should not
-                         happen if DistributedDataParallel is correctly used.
-                         (default: ``False``)
-        gradient_as_bucket_view (bool): this is a prototype feature. When set to ``True``,
-                      gradients will be views pointing to different offsets of
-                      allreduce communication buckets. This can reduce peak memory
-                      usage, where the saved memory size will be equal to the total
-                      gradients size. Moreover, it avoids the overhead of copying
-                      between gradients and allreduce communication buckets.
-                      When gradients are views, ``detach_()`` cannot be called on the
-                      gradients. If hitting such errors, please fix it by referring to
-                      the :meth:`~torch.optim.Optimizer.zero_grad` function in
-                      ``torch/optim/optimizer.py`` as the solution.
-                      Warning! It is also found that ``gradient_as_bucket_view = true``
-                      does not work as expected when ``apex.amp`` is used for
-                      mixed precision training. ``apex.amp`` maintained stashed gradients
-                      that are used for unscaling gradients. These stashed gradients
-                      are pointed to gradients (will be communication buckets when
-                      ``gradient_as_bucket_view = true``) before starting new iteration.
-                      In new iteration, the communication buckets are mutated and thus
-                      these stashed gradients will be unexpectedly mutated as well,
-                      the unexpectedly muated stashed gradients may result in wrong
-                      results. To fix it, these stashed gradients should not be pointed
-                      to gradients, instead they should be copied from gradients when
-                      ``gradient_as_bucket_view = true``.
+                       :attr:`bucket_cap_mb` controls the bucket size in
+                       MegaBytes (MB). (default: 25)
+        find_unused_parameters (bool): Traverse the autograd graph from all
+                               tensors contained in the return value of the
+                               wrapped module's ``forward`` function. Parameters
+                               that don't receive gradients as part of this
+                               graph are preemptively marked as being ready to
+                               be reduced. Note that all ``forward`` outputs
+                               that are derived from module parameters must
+                               participate in calculating loss and later the
+                               gradient computation. If they don't, this wrapper
+                               will hang waiting for autograd to produce
+                               gradients for those parameters. Any outputs
+                               derived from module parameters that are otherwise
+                               unused can be detached from the autograd graph
+                               using ``torch.Tensor.detach``. (default: ``False``)
+        check_reduction: This argument is deprecated.
+        gradient_as_bucket_view (bool): This is a prototype feature and subject
+                      to changes. When set to ``True``, gradients will be views
+                      pointing to different offsets of ``allreduce`` communication
+                      buckets. This can reduce peak memory usage, where the
+                      saved memory size will be equal to the total gradients
+                      size. Moreover, it avoids the overhead of copying between
+                      gradients and ``allreduce`` communication buckets. When
+                      gradients are views, ``detach_()`` cannot be called on the
+                      gradients. If hitting such errors, please fix it by
+                      referring to the :meth:`~torch.optim.Optimizer.zero_grad`
+                      function in ``torch/optim/optimizer.py`` as a solution.
+
 
     Attributes:
-        module (Module): the module to be parallelized
+        module (Module): the module to be parallelized.
 
     Example::
 
@@ -410,6 +394,10 @@ class DistributedDataParallel(Module):
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
             # do not receive gradients.
+            warnings.warn(
+                "The `check_reduction` argument in `DistributedDataParallel` "
+                "module is deprecated. Please avoid using it."
+            )
             pass
 
         # used for intra-node param sync and inter-node sync as well
@@ -807,7 +795,9 @@ class DistributedDataParallel(Module):
           >>>      dist.init_process_group("nccl", rank=rank, world_size=2)
           >>>      torch.cuda.set_device(rank)
           >>>      model = nn.Linear(1, 1, bias=False).to(rank)
-          >>>      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], output_device=rank)
+          >>>      model = torch.nn.parallel.DistributedDataParallel(
+          >>>          model, device_ids=[rank], output_device=rank
+          >>>      )
           >>>      # Rank 1 gets one more input than rank 0.
           >>>      inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
           >>>      with model.join():
