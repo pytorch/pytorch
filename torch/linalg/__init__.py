@@ -3,6 +3,8 @@ import sys
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore
 
+import functools
+
 Tensor = torch.Tensor
 
 # Note: This not only adds doc strings for functions in the linalg namespace, but
@@ -140,3 +142,19 @@ Using the :attr:`dim` argument to compute matrix norms::
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
 """)
+
+_add_docstr(_linalg.linalg_eigh, r"""
+linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
+""")
+
+_add_docstr(_linalg.linalg_eigvalsh, r"""
+linalg.eigvalsh(input, UPLO='L') -> Tensor
+""")
+
+@functools.wraps(_linalg.linalg_eigh)
+def eigh(a, UPLO="L"):
+    return _linalg.linalg_eigh(a, UPLO)
+
+@functools.wraps(_linalg.linalg_eigh)
+def eigvalsh(a, UPLO="L"):
+    return _linalg.linalg_eigvalsh(a, UPLO)

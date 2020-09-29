@@ -13,4 +13,6 @@ Functions
 ---------
 
 .. autofunction:: det
+.. autofunction:: eigh
+.. autofunction:: eigvalsh
 .. autofunction:: norm
