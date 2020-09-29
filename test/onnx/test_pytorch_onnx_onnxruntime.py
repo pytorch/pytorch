@@ -899,7 +899,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -913,7 +913,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div_promotion_trace(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -931,14 +931,14 @@ class TestONNXRuntime(unittest.TestCase):
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     @skipIfONNXShapeInference(False)
-    def test_true_div_script(self):
-        class TrueDivModule(torch.nn.Module):
+    def test_div_promotion_script(self):
+        class DivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
                 # Otherwise shape and type are still avaiable from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
-                return torch.true_divide(x, y)
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -949,20 +949,20 @@ class TestONNXRuntime(unittest.TestCase):
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
         torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
@@ -2649,6 +2649,17 @@ class TestONNXRuntime(unittest.TestCase):
         shape = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, shape))
 
+    def test_view_dynamic_zero_dim(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.view(-1, 2)
+                return input.view(1, -1)
+
+        x = torch.ones(2)
+        another_x = torch.empty((0,))
+        self.run_test(ViewModel(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, ]})
+
     def test_view_as(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input, other):
@@ -2781,7 +2792,7 @@ class TestONNXRuntime(unittest.TestCase):
         class LenListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                return torch.ones(len(input.shape)) 
+                return torch.ones(len(input.shape))
 
         x = torch.randn(4, 5)
         self.run_test(LenListModel(), x)
