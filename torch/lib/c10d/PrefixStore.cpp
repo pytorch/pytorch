@@ -35,6 +35,10 @@ int64_t PrefixStore::add(const std::string& key, int64_t value) {
   return store_->add(joinKey(key), value);
 }
 
+int64_t PrefixStore::getNumKeys() {
+  return store_->getNumKeys();
+}
+
 bool PrefixStore::check(const std::vector<std::string>& keys) {
   auto joinedKeys = joinKeys(keys);
   return store_->check(joinedKeys);
