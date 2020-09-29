@@ -2,7 +2,7 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
     DispatcherArgument, ThisArgument, LegacyDispatcherArgument
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
 
@@ -62,6 +62,9 @@ def argument(a: Argument) -> DispatcherArgument:
             name=la.name,
             argument=la.argument,
         )
+
+def name(func: FunctionSchema) -> str:
+    return cpp.name(func)
 
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
     if local.use_c10_dispatcher() is UseC10Dispatcher.full:
