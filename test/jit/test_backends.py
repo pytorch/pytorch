@@ -101,7 +101,7 @@ class BasicModuleTest(JitBackendTestCase):
         self.module = BasicModule()
         self.scripted_module = torch.jit.script(BasicModule())
         self.lowered_module = to_test_backend_multi(
-            self.scripted_module._c,
+            self.scripted_module,
             {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}},
         )
 
@@ -161,7 +161,7 @@ class NestedModuleTest(JitBackendTestCase):
         # Both modules in self.scripted_module are ScriptModules.
         self.scripted_module = torch.jit.script(NestedModuleTest.NestedModule(BasicModule()))
         lowered_module = to_test_backend_multi(
-            self.scripted_module._c, {"forward": {"": ""}}
+            self.scripted_module, {"forward": {"": ""}}
         )
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
         self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(lowered_module))

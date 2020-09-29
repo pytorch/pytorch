@@ -13,7 +13,9 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#include <llvm/Transforms/Scalar.h>
 
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -299,6 +301,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
+  fn_->addAttribute(
+      llvm::AttributeList::AttrIndex::FunctionIndex,
+      llvm::Attribute::AlwaysInline);
   for (size_t i = 0; i < args.size(); i++) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
@@ -1642,6 +1647,8 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);
   FPM.doInitialization();
+  PM.add(llvm::createDeadCodeEliminationPass());
+  PM.add(llvm::createAlwaysInlinerLegacyPass());
   PM.run(M);
   for (auto& FF : M) {
     FPM.run(FF);
