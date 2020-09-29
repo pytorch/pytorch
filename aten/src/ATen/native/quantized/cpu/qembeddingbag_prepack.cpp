@@ -196,8 +196,14 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 
       float Xmin, Xmax;
       if (optimized_qparams) {
-        std::tie(Xmax, Xmin) = at::choose_qparams_optimized(
+        at::Tensor xmax_tensor, xmin_tensor;
+        std::tie(xmax_tensor, xmin_tensor) = at::choose_qparams_optimized(
             weight_contig[row], embedding_cols, 200, 0.16, bit_width);
+        TORCH_CHECK(
+            xmax_tensor.numel() == 1 && xmin_tensor.numel() == 1,
+            "Expected choose_qparams_optimized to return min/max tensors of size 1");
+        Xmax = xmax_tensor.item<float>();
+        Xmin = xmin_tensor.item<float>();
       } else {
         Xmin = *std::min_element(input_row, input_row + embedding_cols);
         Xmax = *std::max_element(input_row, input_row + embedding_cols);
@@ -254,7 +260,9 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 // To later de-quantize values, the scale (range / 15) and zero_point
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
-Tensor qembeddingbag_4bit_prepack(const Tensor& weight, bool optimized_qparams) {
+Tensor qembeddingbag_4bit_prepack(
+    const Tensor& weight,
+    bool optimized_qparams) {
   return _qembeddingbag_nbit_prepack_helper(
       weight, 4 /*bit_width*/, optimized_qparams);
 }
@@ -267,7 +275,9 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight, bool optimized_qparams) 
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
 // TODO() - Add 2Bit Embedding Lookup operator.
-Tensor qembeddingbag_2bit_prepack(const Tensor& weight, bool optimized_qparams) {
+Tensor qembeddingbag_2bit_prepack(
+    const Tensor& weight,
+    bool optimized_qparams) {
   return _qembeddingbag_nbit_prepack_helper(
       weight, 2 /*bit_width*/, optimized_qparams);
 }

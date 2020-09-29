@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <torch/torch.h>
 
 namespace at {
 namespace native {
@@ -248,12 +249,11 @@ float calculate_quant_loss(
   float inverse_scale = 1.0f / scale;
 
   float norm = 0.0f;
-  constexpr int VLEN = 8;
   int i = 0;
 
-// TODO add FBGEMM kernel
-// #ifdef USE_FBGEMM
-// #endif
+  // TODO add FBGEMM kernel
+  // #ifdef USE_FBGEMM
+  // #endif
 
   // remainder loop
   for (; i < numel; i++) {
@@ -271,7 +271,7 @@ float calculate_quant_loss(
   and tries to minimize the quant error by doing `torch.norm(x-fake_quant(x,s,z))`
   Returns the optimized xmax and xmin value of the tensor.
 */
-std::tuple<double, double> choose_qparams_optimized(
+std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const at::Tensor& input_tensor,
     int64_t numel,
     const int64_t n_bins,
@@ -318,7 +318,11 @@ std::tuple<double, double> choose_qparams_optimized(
     }
   }
 
-  return std::make_tuple((float) xmax, (float) xmin);
+  auto options =
+      torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false);
+  at::Tensor xmax_tensor = torch::tensor({xmax}, options);
+  at::Tensor xmin_tensor = torch::tensor({xmin}, options);
+  return std::make_tuple(xmax_tensor, xmin_tensor);
 }
 } // namespace native
 } // namespace at
