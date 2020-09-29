@@ -148,13 +148,13 @@ void UpdateTorchValueByOnnxValueInfo(
     auto torch_tensor_type =
         TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
-      v->setType(torch_tensor_type);
+      v->setType(MergeInferredType(v->type(), torch_tensor_type));
     }
   } else if (p_type.has_sequence_type()) {
     auto torch_list_type =
         TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
-      v->setType(torch_list_type);
+      v->setType(MergeInferredType(v->type(), torch_list_type));
     }
   }
 }
