@@ -36,6 +36,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
+  _(ComplexDoubleType)      \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -905,6 +906,7 @@ struct CAFFE2_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexDoubleType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -1171,6 +1173,7 @@ struct CAFFE2_API EnumType : public NamedType {
     switch (value->kind()) {
       case TypeKind::IntType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexDoubleType:
       case TypeKind::StringType:
         return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
       default:
@@ -1321,6 +1324,33 @@ struct CAFFE2_API FloatType : public NumberType {
   FloatType() : NumberType(TypeKind::FloatType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "float";
+  }
+};
+
+struct ComplexDoubleType;
+using ComplexDoublePtr = std::shared_ptr<ComplexDoubleType>;
+// This type represents a Python float number
+struct CAFFE2_API ComplexDoubleType : public NumberType {
+  static ComplexDoubleTypePtr create() {
+    return ComplexDoubleTypePtr(new ComplexDoubleType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "complex";
+  }
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+  }
+  static const TypeKind Kind = TypeKind::ComplexDoubleType;
+  // global singleton
+  static ComplexDoubleTypePtr get();
+
+ private:
+  ComplexDoubleTypePtr() : NumberType(TypeKind::ComplexDoubleType) {}
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "complex";
   }
 };
 
@@ -1646,6 +1676,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
     return TensorType::createContiguous(at::kFloat, at::kCPU, {});
+  } else if (typ->isSubtypeOf(ComplexDoubleType::get())) {
+    return TensorType::createContiguous(at::kComplexDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
@@ -1658,6 +1690,8 @@ inline TypePtr TensorType::fromBoolType() {
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
+  } else if (type == ComplexDoubleType::get()) {
+    return at::typeMetaToScalarType(c10::get_default_complex_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
@@ -1723,6 +1757,12 @@ template <>
 struct getTypePtr_<double> final {
   static TypePtr call() {
     return FloatType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::complex<double>> final {
+  static TypePtr call() {
+    return ComplexDoubleType::get();
   }
 };
 template <>
@@ -2456,6 +2496,11 @@ private:
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == ComplexDoubleType::Kind;
 }
 
 inline bool IValue::isTensorList() const {
