@@ -10,7 +10,6 @@ namespace caffe2 {
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int kWarpSize = warpSize;   // = 64 (Defined in hip_runtime.h)
 #else
-// dummy value for host compiler
 constexpr int kWarpSize = 32;
 #endif // __CUDA_ARCH__
 
