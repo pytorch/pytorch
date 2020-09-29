@@ -1,5 +1,5 @@
 import math
-from typing import Tuple
+from typing import Tuple, List, Union
 
 import torch
 from .optimizer import Optimizer, _params_t
@@ -36,13 +36,13 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
 
-        sparse_params = []
+        sparse_params : List[Union[List[int], int]] = []
         for index, param in enumerate(params):
             if isinstance(param, dict):
                 for d_index, d_param in enumerate(param.get("params", [])):
                     if d_param.is_sparse:
                         sparse_params.append([index, d_index])
-            elif param.is_sparse:
+            elif param.is_sparse:  # type: ignore
                 sparse_params.append(index)
         if sparse_params:
             raise ValueError(
