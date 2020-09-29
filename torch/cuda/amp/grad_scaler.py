@@ -197,13 +197,13 @@ class GradScaler(object):
 
         # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
         per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in optimizer.param_groups:
-            for param in group["params"]:
-                if param.grad is None:
-                    continue
-                if (not allow_fp16) and param.grad.dtype == torch.float16:
-                    raise ValueError("Attempting to unscale FP16 gradients.")
-                with torch.no_grad():
+        with torch.no_grad():
+            for group in optimizer.param_groups:
+                for param in group["params"]:
+                    if param.grad is None:
+                        continue
+                    if (not allow_fp16) and param.grad.dtype == torch.float16:
+                        raise ValueError("Attempting to unscale FP16 gradients.")
                     if param.grad.is_sparse:
                         # is_coalesced() == False means the sparse grad has values with duplicate indices.
                         # coalesce() deduplicates indices and adds all values that have the same index.
@@ -213,26 +213,16 @@ class GradScaler(object):
                             param.grad = param.grad.coalesce()
                         to_unscale = param.grad._values()
                     else:
-                        if param.grad.is_sparse:
-                            # is_coalesced() == False means the sparse grad has values with duplicate indices.
-                            # coalesce() deduplicates indices and adds all values that have the same index.
-                            # For scaled fp16 values, there's a good chance coalescing will cause overflow,
-                            # so we should check the coalesced _values().
-                            if param.grad.dtype is torch.float16:
-                                param.grad = param.grad.coalesce()
-                            to_unscale = param.grad._values()
-                        else:
-                            to_unscale = param.grad
+                        to_unscale = param.grad
 
-                        # TODO: is there a way to split by device and dtype without appending in the inner loop?
-                        per_device_and_dtype_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
+                    # TODO: is there a way to split by device and dtype without appending in the inner loop?
+                    per_device_and_dtype_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
 
-        with torch.no_grad():
-            for device, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._amp_foreach_non_finite_check_and_unscale_(grads,
-                                                                     per_device_found_inf.get(device),
-                                                                     per_device_inv_scale.get(device))
+                for device, per_dtype_grads in per_device_and_dtype_grads.items():
+                    for grads in per_dtype_grads.values():
+                        torch._amp_foreach_non_finite_check_and_unscale_(grads,
+                                                                         per_device_found_inf.get(device),
+                                                                         per_device_inv_scale.get(device))
 
         return per_device_found_inf._per_device_tensors
 
