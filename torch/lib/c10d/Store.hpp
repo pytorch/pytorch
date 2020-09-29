@@ -30,7 +30,11 @@ class Store {
 
   virtual int64_t add(const std::string& key, int64_t value) = 0;
 
+  virtual bool deleteKey(const std::string& key) = 0;
+
   virtual bool check(const std::vector<std::string>& keys) = 0;
+
+  virtual int64_t getNumKeys() = 0;
 
   virtual void wait(const std::vector<std::string>& keys) = 0;
 
