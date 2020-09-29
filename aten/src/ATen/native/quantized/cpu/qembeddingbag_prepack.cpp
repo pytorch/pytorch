@@ -280,13 +280,13 @@ class QEmbeddingPackWeights final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("embedding_bag_byte_prepack", TORCH_FN(qembeddingbag_byte_prepack));
-  m.impl("embedding_bag_4bit_prepack", TORCH_FN(qembeddingbag_4bit_prepack));
-  m.impl("embedding_bag_2bit_prepack", TORCH_FN(qembeddingbag_2bit_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_prepack"), TORCH_FN(qembeddingbag_byte_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_prepack"), TORCH_FN(qembeddingbag_4bit_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_2bit_prepack"), TORCH_FN(qembeddingbag_2bit_prepack));
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("embedding_bag_prepack", TORCH_FN(QEmbeddingPackWeights::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_prepack"), TORCH_FN(QEmbeddingPackWeights::run));
 }
 
 } // namespace
