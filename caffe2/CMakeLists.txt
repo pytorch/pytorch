@@ -6,7 +6,7 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification 
+# ---[ MSVC OpenMP modification
 if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()
@@ -298,7 +298,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT WIN32)
       add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
-      target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
+      target_link_libraries(process_group_agent PRIVATE torch c10d torch-fmt)
       add_dependencies(process_group_agent torch c10d)
 
       add_library(tensorpipe_agent
@@ -307,7 +307,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
         )
-      target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+      target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe torch-fmt)
       add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
         target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
@@ -971,7 +971,7 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
-  # Pass USE_RPC in order to reduce use of 
+  # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
   if(NOT WIN32)
@@ -1291,8 +1291,8 @@ if(BUILD_TEST)
   foreach(test_src ${ATen_VEC256_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
-        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY) 
-        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)  
+        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
+        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
         add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
         target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
@@ -1302,7 +1302,7 @@ if(BUILD_TEST)
         target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY}  CPU_CAPABILITY_${CPU_CAPABILITY})
         target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE  ${FLAGS})
         if(NOT MSVC)
-              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers) 
+              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers)
         endif(NOT MSVC)
         add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
     endforeach()

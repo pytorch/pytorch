@@ -1731,17 +1731,36 @@ endif()
 # End ATen checks
 #
 
-set(FMT_INSTALL ON)
-add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
-install(TARGETS fmt-header-only EXPORT Caffe2Targets DESTINATION lib)
-
-# Disable compiler feature checks for `fmt`.
+# Define the fmt library.
 #
-# CMake compiles a little program to check compiler features. Some of our build
-# configurations (notably the mobile build analyzer) will populate
-# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
-# `fmt` is compatible with a superset of the compilers that PyTorch is, it
-# shouldn't be too bad to just disable the checks.
-set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+# We define a custom target instead of using `add_subdirectory` because we need
+# to install the resulting target into the `Caffe2Targets` export set. Before
+# CMake 3.13, install(TARGETS) only accepts targets created within the same
+# directory.
+# See: https://stackoverflow.com/questions/34443128/cmake-install-targets-in-subdirectories/34444949
 
-list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS fmt::fmt-header-only)
+set(FMT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/fmt/include/fmt)
+set(FMT_HEADERS
+  ${FMT_INCLUDE_DIR}/chrono.h
+  ${FMT_INCLUDE_DIR}/color.h
+  ${FMT_INCLUDE_DIR}/compile.h
+  ${FMT_INCLUDE_DIR}/core.h
+  ${FMT_INCLUDE_DIR}/format.h
+  ${FMT_INCLUDE_DIR}/format-inl.h
+  ${FMT_INCLUDE_DIR}/locale.h
+  ${FMT_INCLUDE_DIR}/os.h
+  ${FMT_INCLUDE_DIR}/ostream.h
+  ${FMT_INCLUDE_DIR}/posix.h
+  ${FMT_INCLUDE_DIR}/printf.h
+  ${FMT_INCLUDE_DIR}/ranges.h
+)
+
+add_library(torch-fmt INTERFACE)
+target_compile_definitions(torch-fmt INTERFACE FMT_HEADER_ONLY=1)
+target_include_directories(torch-fmt INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/fmt/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+install(TARGETS torch-fmt EXPORT Caffe2Targets)
+install(FILES ${FMT_HEADERS} DESTINATION include/fmt)
+

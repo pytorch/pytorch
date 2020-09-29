@@ -81,7 +81,7 @@ if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
 
-target_link_libraries(c10 PUBLIC fmt::fmt-header-only)
+target_link_libraries(c10 PUBLIC torch-fmt)
 
 target_include_directories(
     c10 PUBLIC
