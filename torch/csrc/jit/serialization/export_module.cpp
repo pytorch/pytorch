@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
@@ -268,7 +267,6 @@ class ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
-
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
