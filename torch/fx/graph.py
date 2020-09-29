@@ -170,7 +170,7 @@ class Graph:
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
 
-    def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
+    def python_code(self, root_module: str) -> Tuple[str, str, List[str], List[str]]:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
