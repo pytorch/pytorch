@@ -276,15 +276,15 @@ class DistributedDataParallel(Module):
                    ``None`` or an empty list, and input data for the forward
                    pass must be placed on the correct device. (default: all
                    visible devices for single-device modules)
-        output_device (int or torch.device): device location of output for
+        output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
                       CPU modules, it must be ``None``, and the module itself
                       dictates the output location. (default: ``device_ids[0]``
                       for single-device modules)
-        broadcast_buffers (bool): flag that enables syncing (broadcasting)
+        broadcast_buffers (bool): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
                           function. (default: ``True``)
-        process_group: the process group to be used for distributed data
+        process_group: The process group to be used for distributed data
                        all-reduction. If ``None``, the default process group, which
                        is created by ```torch.distributed.init_process_group```,
                        will be used. (default: ``None``)
@@ -292,7 +292,7 @@ class DistributedDataParallel(Module):
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
                        :attr:`bucket_cap_mb` controls the bucket size in
-                       MegaBytes (MB) (default: 25)
+                       MegaBytes (MB). (default: 25)
         find_unused_parameters (bool): Traverse the autograd graph from all
                                tensors contained in the return value of the
                                wrapped module's ``forward`` function. Parameters
@@ -308,7 +308,7 @@ class DistributedDataParallel(Module):
                                unused can be detached from the autograd graph
                                using ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: This argument is deprecated.
-        gradient_as_bucket_view (bool): this is a prototype feature and subject
+        gradient_as_bucket_view (bool): This is a prototype feature and subject
                       to changes. When set to ``True``, gradients will be views
                       pointing to different offsets of allreduce communication
                       buckets. This can reduce peak memory usage, where the
@@ -322,7 +322,7 @@ class DistributedDataParallel(Module):
 
 
     Attributes:
-        module (Module): the module to be parallelized
+        module (Module): the module to be parallelized.
 
     Example::
 
