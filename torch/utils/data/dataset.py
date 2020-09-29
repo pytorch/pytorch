@@ -258,25 +258,26 @@ class BufferedShuffleDataset(IterableDataset[T_co]):
     r"""Dataset shuffled from the original dataset.
 
     This class is useful to shuffle an existing instance of an IterableDataset.
-    The buffer with buffer_size is filled with the items from the dataset first. Then,
+    The buffer with `buffer_size` is filled with the items from the dataset first. Then,
     each item will be yielded from the buffer by reservoir sampling via iterator.
 
-    For `buffer_size` smaller than 1, the `buffer_size` is set to 1 representing
-    non-shuffled dataset. For fully shuffling the whole dataset, the buffer size is
-    required to be greater than or equal to the size of dataset.
+    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
+    dataset is not shuffled. In order to fully shuffle the whole dataset, `buffer_size`
+    is required to be greater than or equal to the size of dataset.
 
     When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
     dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
+    And, the method to set up a random seed is different based on :attr:`num_workers`.
 
-    When it is used with :class:`~torch.utils.data.DataLoader` with :attr:`num_workers == 0`,
-    manually setting up a random seed for the single-process mode:
+    For single-process mode (:attr:`num_workers == 0`), the random seed is required to
+    be set before the :class:`~torch.utils.data.DataLoader` in the main process.
 
         >>> ds = BufferedShuffleDataset(dataset)
         >>> random.seed(...)
-        >>> print(list(torch.utils.data.DataLoaderDataLoader(ds, num_workers=0)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
 
-    When it is used with :class:`~torch.utils.data.DataLoader` with :attr:`num_workers > 0`,
-    using :attr:`worker_init_fn` to set up a random seed for all workers:
+    For multi-process mode (:attr:`num_workers > 0`), the random seed is set by a callable
+    function in each worker.
 
         >>> ds = BufferedShuffleDataset(dataset)
         >>> def init_fn(worker_id):
@@ -292,8 +293,9 @@ class BufferedShuffleDataset(IterableDataset[T_co]):
 
     def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
         super(BufferedShuffleDataset, self).__init__()
+        assert buffer_size > 0, "buffer_size should be larger than 0"
         self.dataset = dataset
-        self.buffer_size = buffer_size if buffer_size > 1 else 1
+        self.buffer_size = buffer_size
 
     def __iter__(self) -> Iterator[T_co]:
         buf: List[T_co] = []
