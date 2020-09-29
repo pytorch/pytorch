@@ -2,9 +2,7 @@
 #include <iostream>
 #include <string>
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
@@ -64,9 +62,8 @@ int main(int argc, char* argv[]) {
     //
     // Let's construct a simple load:
     BufHandle A("A", {ExprHandle(64), ExprHandle(32)}, kInt);
-    Placeholder A_buf(A);
     ExprHandle i = Var::make("i", kInt), j = Var::make("j", kInt);
-    ExprHandle load = Load::make(A_buf, {i, j}, /* mask= */ 1);
+    ExprHandle load = Load::make(A.dtype(), A, {i, j}, /* mask= */ 1);
     std::cout << "Tensor expression: " << *load.node() << std::endl;
     // Prints: Tensor expression: A[i, j]
   }
