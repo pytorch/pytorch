@@ -14240,7 +14240,7 @@ class TestTorchDeviceType(TestCase):
     def test_div_and_floordiv_vs_python(self, device):
         # Tests torch division ops which can handle both arguments being
         #   scalars.
-        # NOTE: torch.floor_divide currently truncates instead of flooring
+        # NOTE: torch.floor_divide currently truncates instead of flooring.
         #   the quotient. See https://github.com/pytorch/pytorch/issues/43874.
         def _scalar_helper(python_op, torch_op):
             for a, b in product(range(-10, 10), range(-10, 10)):
@@ -14274,7 +14274,7 @@ class TestTorchDeviceType(TestCase):
             _scalar_helper(lambda a, b: math.trunc(a / b), operator.floordiv)
             _scalar_helper(lambda a, b: math.trunc(a / b), torch.floor_divide)
 
-    # NOTE: the jit implements floor division correctly.
+    # NOTE: torch.floor_divide currently truncates instead of flooring.
     # See https://github.com/pytorch/pytorch/issues/43874.
     @onlyOnCPUAndCUDA
     def test_div_and_floordiv_script_vs_python(self, device):
@@ -14297,12 +14297,12 @@ class TestTorchDeviceType(TestCase):
                     continue
 
                 expected_div = a / b
-                expected_floordiv = math.trunc(a / b)
+                expected_truncdiv = math.trunc(a / b)
                 a_t = torch.tensor(a, device=device)
                 b_t = torch.tensor(b, device=device)
 
                 self.assertEqual(scripted_div(a_t, b_t), expected_div)
-                self.assertEqual(scripted_floordiv(a_t, b_t), expected_floordiv)
+                self.assertEqual(scripted_floordiv(a_t, b_t), expected_truncdiv)
 
         # Creates jitted functions of one tensor
         def _wrapped_div_scalar(a):
