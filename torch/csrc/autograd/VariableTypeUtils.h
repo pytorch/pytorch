@@ -68,8 +68,10 @@ inline void throw_error_out_requires_grad(const char* name) {
 }
 
 inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
-  TORCH_CHECK(tensor.requires_grad() && tensor.is_complex(), name,
-              " does not support automatic differentiation for outputs with complex dtype.");
+  if (tensor.requires_grad()) {
+    TORCH_CHECK(!tensor.is_complex(), name,
+                " does not support automatic differentiation for outputs with complex dtype.");
+  }
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
