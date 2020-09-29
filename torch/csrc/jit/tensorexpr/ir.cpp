@@ -40,7 +40,7 @@ static bool indicesValid(const std::vector<const Expr*>& indices) {
 }
 
 Load::Load(
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : Load(
@@ -70,7 +70,7 @@ Load::Load(
 }
 
 ExprHandle Load::make(
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<ExprHandle>& indices,
     const ExprHandle& mask) {
   return ExprHandle(
@@ -86,7 +86,7 @@ ExprHandle Load::make(
 }
 
 Store::Store(
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<const Expr*>& indices,
     const Expr* value,
     const Expr* mask)
@@ -129,7 +129,7 @@ Store::Store(
 }
 
 Store* Store::make(
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value,
     const ExprHandle& mask) {

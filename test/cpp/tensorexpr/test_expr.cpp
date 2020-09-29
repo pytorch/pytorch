@@ -62,8 +62,8 @@ void testExprLetTest02() {
 
 void testExprLetStmtTest01() {
   KernelScope kernel_scope;
-  Buffer a_buf("a", kFloat, {1});
-  Buffer b_buf("b", kFloat, {1});
+  Placeholder a_buf("a", kFloat, {1});
+  Placeholder b_buf("b", kFloat, {1});
 
   ExprHandle load_a = Load::make(a_buf, {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
@@ -186,9 +186,9 @@ void testExprVectorAdd01() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   /*
   Build the following:
@@ -236,9 +236,9 @@ void testExprVectorAdd01() {
 void testExprCompareSelectEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -280,9 +280,9 @@ void testExprCompareSelectDtypes() {
   //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 0.0f);
@@ -322,8 +322,8 @@ void testExprCompareSelectDtypes() {
 void testExprIntrinsicsDtypes() {
   KernelScope kernel_scope;
   constexpr int N = 256;
-  Buffer a(BufHandle("A", {N}, kDouble));
-  Buffer b(BufHandle("B", {N}, kDouble));
+  Placeholder a(BufHandle("A", {N}, kDouble));
+  Placeholder b(BufHandle("B", {N}, kDouble));
   std::vector<double> a_buffer(N, -10.0);
   std::vector<double> b_buffer(N, 0.0);
   std::vector<double> b_ref(N, 10.0);
@@ -479,9 +479,9 @@ void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}, kFloat));
-    Buffer b(BufHandle("b", {n}, kFloat));
-    Buffer c(BufHandle("c", {n}, kFloat));
+    Placeholder a(BufHandle("a", {n}, kFloat));
+    Placeholder b(BufHandle("b", {n}, kFloat));
+    Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
@@ -499,7 +499,7 @@ void testCond01() {
   KernelScope kernel_scope;
   const int N = 16;
   PaddedBuffer<float> a_v(N);
-  Buffer a_buf("a", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
   Stmt* assign_x2 =
       Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 2, 1);
@@ -562,7 +562,7 @@ void testStmtClone() {
   KernelScope kernel_scope;
   const int N = 16;
 
-  Buffer a_buf("a", kInt, {N});
+  Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
   Stmt* body = Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
   Stmt* loop = For::make(index, 0, N, body);

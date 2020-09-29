@@ -113,7 +113,7 @@ Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(
       func_name,

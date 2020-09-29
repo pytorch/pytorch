@@ -161,7 +161,7 @@ void testLLVMByteToDoubleCastTest() {
 void testLLVMLetTest01() {
   KernelScope kernel_scope;
 
-  Buffer a(BufHandle("A", {1}, kFloat));
+  Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
@@ -182,7 +182,7 @@ void testLLVMLetTest01() {
 void testLLVMLetTest02() {
   KernelScope kernel_scope;
 
-  Buffer a(BufHandle("A", {1}, kFloat));
+  Placeholder a(BufHandle("A", {1}, kFloat));
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
@@ -205,7 +205,7 @@ void testLLVMLetTest02() {
 void testLLVMLetTestMultitype() {
   KernelScope kernel_scope;
 
-  Buffer a(BufHandle("A", {1}, kDouble));
+  Placeholder a(BufHandle("A", {1}, kDouble));
   std::vector<double> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
@@ -229,7 +229,7 @@ void testLLVMLetTestMultitype() {
 
 void testLLVMBufferTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {32}, kFloat));
+  Placeholder a(BufHandle("A", {32}, kFloat));
   std::vector<int32_t> v(5);
   std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
@@ -239,7 +239,7 @@ void testLLVMBufferTest() {
 
 void testLLVMBlockTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {32}, kInt));
+  Placeholder a(BufHandle("A", {32}, kInt));
   std::vector<int32_t> v = {1, 2};
   std::vector<void*> args({v.data()});
 
@@ -257,8 +257,8 @@ void testLLVMBlockTest() {
 
 void testLLVMLoadStoreTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {1}, kInt));
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
 
@@ -276,9 +276,9 @@ void testLLVMLoadStoreTest() {
 
 void testLLVMIfThenElseTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
-  Buffer c(BufHandle("C", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {1}, kInt));
+  Placeholder c(BufHandle("C", {1}, kInt));
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
   std::vector<int32_t> c_buffer = {1};
@@ -300,8 +300,8 @@ void testLLVMIfThenElseTest() {
 
 void testLLVMVecLoadStoreTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {1}, kInt));
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
@@ -326,8 +326,8 @@ void testLLVMVecLoadStoreTest() {
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
   void testLLVMVecFloat_##Name##Lane##Lanes##Test() {            \
     KernelScope kernel_scope;                                    \
-    Buffer a(BufHandle("A", {1}, kFloat));                       \
-    Buffer b(BufHandle("B", {1}, kFloat));                       \
+    Placeholder a(BufHandle("A", {1}, kFloat));                  \
+    Placeholder b(BufHandle("B", {1}, kFloat));                  \
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
@@ -371,8 +371,8 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
   void testLLVMVecDouble_##Name##Lane##Lanes##Test() {           \
     KernelScope kernel_scope;                                    \
-    Buffer a(BufHandle("A", {1}, kDouble));                      \
-    Buffer b(BufHandle("B", {1}, kDouble));                      \
+    Placeholder a(BufHandle("A", {1}, kDouble));                 \
+    Placeholder b(BufHandle("B", {1}, kDouble));                 \
     float val = 0.5f;                                            \
     std::vector<double> a_buffer(Lanes, val);                    \
     std::vector<double> b_buffer(Lanes, val);                    \
@@ -415,13 +415,13 @@ DOUBLE_INTRINSICS_TEST(lgamma, 4)
 
 void testLLVMVectorizerLoadStoreTest() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
 
   Tensor* c = Compute("c", {{4, "i"}}, [&](const VarHandle& i) {
     return Load::make(a, {i}, 1);
   });
 
-  Buffer c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->func_var()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
   l.vectorize(dynamic_cast<Block*>(s)->front());
@@ -440,8 +440,8 @@ void testLLVMVectorizerLoadStoreTest() {
 void testLLVMMemcpyTest() {
   KernelScope kernel_scope;
   constexpr int N = 32;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
   std::vector<int32_t> a_buffer(N, 42);
   std::vector<int32_t> b_buffer(N, 0);
 
@@ -464,7 +464,7 @@ void testLLVMMemcpyTest() {
 void testLLVMBzeroTest() {
   KernelScope kernel_scope;
   constexpr int N = 32;
-  Buffer b(BufHandle("B", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
   std::vector<int32_t> b_buffer(N, 11);
 
   auto mask = IntImm::make(1);
@@ -483,9 +483,9 @@ void testLLVMBzeroTest() {
 void testLLVMElemwiseAdd() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int32_t> a_buffer(N, 41);
   std::vector<int32_t> b_buffer(N, 1);
   std::vector<int32_t> c_buffer(N, 1);
@@ -518,9 +518,9 @@ void testLLVMElemwiseAdd() {
 void testLLVMElemwiseAddFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -550,8 +550,8 @@ void testLLVMElemwiseAddFloat() {
 void testLLVMElemwiseLog10Float() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
   std::vector<float> a_buffer(N, 10.0f);
   std::vector<float> b_buffer(N, 2.0f);
 
@@ -581,8 +581,8 @@ void testLLVMElemwiseLog10Float() {
 void testLLVMElemwiseLog1pFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
   std::vector<float> a_buffer(N, expf(3.0f) - 1);
   std::vector<float> b_buffer(N, 42.0f);
 
@@ -612,9 +612,9 @@ void testLLVMElemwiseLog1pFloat() {
 void testLLVMElemwiseMaxInt() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
@@ -647,9 +647,9 @@ void testLLVMElemwiseMaxInt() {
 void testLLVMElemwiseMinInt() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
@@ -682,9 +682,9 @@ void testLLVMElemwiseMinInt() {
 void testLLVMElemwiseMaxFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -717,9 +717,9 @@ void testLLVMElemwiseMaxFloat() {
 void testLLVMElemwiseMaxNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -753,9 +753,9 @@ void testLLVMElemwiseMaxNaNFloat() {
 void testLLVMElemwiseMinFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -788,9 +788,9 @@ void testLLVMElemwiseMinFloat() {
 void testLLVMElemwiseMinNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kFloat));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kFloat));
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
@@ -824,9 +824,9 @@ void testLLVMElemwiseMinNaNFloat() {
 void testLLVMElemwiseMod() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int32_t> a_buffer(N, 41);
   std::vector<int32_t> b_buffer(N, 23);
   std::vector<int32_t> c_buffer(N, 18);
@@ -859,9 +859,9 @@ void testLLVMElemwiseMod() {
 void testLLVMCompareSelectIntEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -905,9 +905,9 @@ void testLLVMCompareSelectIntEQ() {
 void testLLVMCompareSelectFloatEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kFloat));
-  Buffer b(BufHandle("B", {N}, kFloat));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kFloat));
+  Placeholder b(BufHandle("B", {N}, kFloat));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<float> a_buffer(N, 1.0f);
   std::vector<float> b_buffer(N, 1.0f);
   std::vector<int> c_buffer(N, 0);
@@ -944,9 +944,9 @@ void testLLVMCompareSelectFloatEQ() {
 void testLLVMCompareSelectByteGT() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kByte));
-  Buffer b(BufHandle("B", {N}, kByte));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kByte));
+  Placeholder b(BufHandle("B", {N}, kByte));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 0);
   std::vector<int> c_buffer(N, 0);
@@ -990,9 +990,9 @@ void testLLVMCompareSelectByteGT() {
 void testLLVMCompareSelectByteGE() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kByte));
-  Buffer b(BufHandle("B", {N}, kByte));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kByte));
+  Placeholder b(BufHandle("B", {N}, kByte));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 0);
   std::vector<int> c_buffer(N, 0);
@@ -1031,9 +1031,9 @@ void testLLVMCompareSelectByteGE() {
 void testLLVMCompareSelectByteLT() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kByte));
-  Buffer b(BufHandle("B", {N}, kByte));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kByte));
+  Placeholder b(BufHandle("B", {N}, kByte));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 128);
   std::vector<int> c_buffer(N, 0);
@@ -1077,9 +1077,9 @@ void testLLVMCompareSelectByteLT() {
 void testLLVMCompareSelectByteLE() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kByte));
-  Buffer b(BufHandle("B", {N}, kByte));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kByte));
+  Placeholder b(BufHandle("B", {N}, kByte));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<uint8_t> a_buffer(N, 0);
   std::vector<uint8_t> b_buffer(N, 128);
   std::vector<int> c_buffer(N, 0);
@@ -1117,7 +1117,7 @@ void testLLVMCompareSelectByteLE() {
 
 void testLLVMStoreFloat() {
   KernelScope kernel_scope;
-  Buffer result(BufHandle("result", {1}, kFloat));
+  Placeholder result(BufHandle("result", {1}, kFloat));
   std::vector<float> result_buffer = {0.0f};
   auto expr = Store::make(
       result, {IntImm::make(0)}, FloatImm::make(3.14f), IntImm::make(1));
@@ -1135,7 +1135,7 @@ void testLLVMSimpleMath01() {
   });
   LoopNest l({tensor});
   Stmt* stmt = l.root_stmt();
-  Buffer f_buf(BufHandle(tensor->func_var()));
+  Placeholder f_buf(BufHandle(tensor->func_var()));
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -1152,13 +1152,13 @@ void testLLVMSimpleMath01() {
 void testLLVMComputeMul() {
   KernelScope kernel_scope;
   const int N = 1024;
-  Buffer a(BufHandle("a", {N}, kFloat));
-  Buffer b(BufHandle("b", {N}, kFloat));
+  Placeholder a(BufHandle("a", {N}, kFloat));
+  Placeholder b(BufHandle("b", {N}, kFloat));
   Tensor* c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
     return Load::make(a, {i}, 1) * Load::make(b, {i}, 1);
   });
 
-  Buffer c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->func_var()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
 
@@ -1176,15 +1176,15 @@ void testLLVMBroadcastAdd() {
   KernelScope kernel_scope;
   const int M = 32;
   const int N = 1024;
-  Buffer a(BufHandle("a", {M, N}, kFloat));
-  Buffer b(BufHandle("b", {N}, kFloat));
+  Placeholder a(BufHandle("a", {M, N}, kFloat));
+  Placeholder b(BufHandle("b", {N}, kFloat));
   Tensor* c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         ExprHandle mask(1);
         return Load::make(a, {i, j}, mask) + Load::make(b, {j}, mask);
       });
 
-  Buffer c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->func_var()));
   LoopNest l({c});
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
@@ -1223,9 +1223,9 @@ void testLLVMDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}, kFloat));
-    Buffer b(BufHandle("b", {n}, kFloat));
-    Buffer c(BufHandle("c", {n}, kFloat));
+    Placeholder a(BufHandle("a", {n}, kFloat));
+    Placeholder b(BufHandle("b", {n}, kFloat));
+    Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
@@ -1245,9 +1245,9 @@ void testLLVMBindDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}, kFloat));
-    Buffer b(BufHandle("b", {n}, kFloat));
-    Buffer c(BufHandle("c", {n}, kFloat));
+    Placeholder a(BufHandle("a", {n}, kFloat));
+    Placeholder b(BufHandle("b", {n}, kFloat));
+    Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
@@ -1266,8 +1266,8 @@ void testLLVMTensorDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}, kFloat));
-    Buffer b(BufHandle("b", {n}, kFloat));
+    Placeholder a(BufHandle("a", {n}, kFloat));
+    Placeholder b(BufHandle("b", {n}, kFloat));
     Tensor* c = Compute(
         "c", {{n, "n"}}, [&](const VarHandle& i) { return a(i) + b(i); });
     LoopNest l({c});
@@ -1289,8 +1289,8 @@ void testLLVMDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}, kFloat));
-    Buffer b(BufHandle("b", {m, n}, kFloat));
+    Placeholder a(BufHandle("a", {m, n}, kFloat));
+    Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -1321,7 +1321,7 @@ void testLLVMEmptyStmt() {
 
 void testLLVMEliminatedStmt() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {1}, kFloat));
+  Placeholder a(BufHandle("a", {1}, kFloat));
 
   Tensor* c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
 
@@ -1342,7 +1342,7 @@ void testLLVMSimpleReduction() {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Buffer a("a", kFloat, {1, M, N});
+  Placeholder a("a", kFloat, {1, M, N});
 
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
@@ -1381,7 +1381,7 @@ void testLLVMRFactorReduction() {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Buffer a("a", kFloat, {1, M, N});
+  Placeholder a("a", kFloat, {1, M, N});
 
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
@@ -1431,7 +1431,7 @@ void DISABLED_testLLVMRFactorVectorizedReduction() {
   int N = 64;
   const int kTotalSize = M * N;
 
-  Buffer a("a", kFloat, {1, M, N});
+  Placeholder a("a", kFloat, {1, M, N});
 
   // TODO: why doesn't implicit vector<DimArg> work?
   std::vector<DimArg> axis = {DimArg(1)};
