@@ -650,8 +650,7 @@ and cpu device, then the tensor will share storage with the array.
 Args:
     {data}
     dtype (:class:`torch.dtype`, optional): the dtype of the returned tensor.
-        If None, returns a tensor with the same dtype as :attr:`data` if
-        :attr:`data` is a tensor, and an inferred dtype, otherwise.
+        If None, the dtype is inferred from :attr:`data`.
     device (:class:`torch.device`, optional): the device of the returned tensor.
         If None, returns a tensor on the same device as :attr:`data` if
         :attr:`data` is a tensor, and a tensor on the device of the 
