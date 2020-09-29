@@ -663,6 +663,7 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
+        print('matches:', matches)
         for node in model.graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
@@ -756,6 +757,7 @@ class Quantizer:
         for name, module in model.named_modules():
             if is_activation_post_process(module) and not is_submodule_of_fake_quant(name, module, module_dict):
                 to_be_removed.append(name)
+        print('to be removed:', to_be_removed)
         for n in to_be_removed:
             delattr(model, n)
         _remove_qconfig(model)
@@ -851,10 +853,13 @@ class Quantizer:
             else:
                 matched.append(node)
 
+        print('graph:', graph)
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
+                        print('pattern:', type(pattern))
+                        print('is match:', node, pattern, value, node.op, node.target)
                         matched = []
                         record_match(pattern, node, matched)
                         for n in matched:

@@ -43,6 +43,7 @@ from quantization.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
+from quantization.test_quantize import TestEagerModeQATOps  # noqa: F401
 
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401

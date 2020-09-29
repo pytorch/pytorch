@@ -482,6 +482,21 @@ class InheritInputQParamOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
+@register_quant_pattern(torch.nn.qat.Sigmoid)
+class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        print('in sigmoid convert')
+        if node.op == 'call_module':
+            module = quantizer.modules[node.target]
+            print('convert fixed qpram op')
+            print('module training:', module.training)
+            qcls = get_static_quant_module_class(type(module))
+            quantized = qcls.from_float(module)
+            parent_name, name = _parent_name(node.target)
+            setattr(quantizer.modules[parent_name], name, quantized)
+            print('swap modules:', quantizer.modules[node.target])
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardsigmoid)
@@ -491,7 +506,6 @@ class InheritInputQParamOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
-@register_quant_pattern(torch.nn.Sigmoid)
 @register_quant_pattern(torch.nn.Tanh)
 @register_quant_pattern(torch.nn.functional.dropout)
 @register_quant_pattern(torch.nn.functional.hardsigmoid)
@@ -508,7 +522,7 @@ class InheritInputQParamOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.max)
 @register_quant_pattern(torch.min)
-@register_quant_pattern(torch.sigmoid)
+# @register_quant_pattern(torch.sigmoid)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)

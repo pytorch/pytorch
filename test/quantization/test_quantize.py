@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.qat as nnqat
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -1197,6 +1198,28 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model(x)
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
+
+class TestEagerModeQATOps(QuantizationTestCase):
+    def test_fixed_qparam_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.sigmoid(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qat_qconfig
+        m = prepare_qat(m)
+        self.assertEqual(type(m.sigmoid), nnqat.Sigmoid)
+        m = convert(m)
+        self.assertEqual(type(m.sigmoid), nnq.Sigmoid)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

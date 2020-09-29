@@ -50,12 +50,14 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+    nnqat.Sigmoid: nnq.Sigmoid,
 }
 
 # Map for swapping float module to qat modules
 QAT_MODULE_MAPPINGS = {
     nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
+    nn.Sigmoid: nnqat.Sigmoid,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,

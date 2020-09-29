@@ -124,3 +124,13 @@ class ELU(torch.nn.ELU):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
+
+class Sigmoid(torch.nn.Sigmoid):
+    r""" This is the quantized version of :class:`~torch.nn.Sigmoid`
+    """
+    @classmethod
+    def from_float(cls, mod):
+        assert type(mod) in [torch.nn.Sigmoid, torch.nn.qat.Sigmoid], \
+            'Can only convert from nn.Sigmoid' + \
+            ' or nn.qat.Sigmoid to nn.quantized.Sigmoid'
+        return cls()
