@@ -205,10 +205,8 @@ def embedding_bag(g,
                   include_last_offset):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
-
     from torch.onnx.symbolic_opset9 import select
     import warnings
-
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
                   "Please use opset 11 or higher to export model for dynamic input shape.'")
     if offsets.type().sizes() is not None:

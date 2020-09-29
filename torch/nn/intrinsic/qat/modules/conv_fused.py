@@ -162,7 +162,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -170,10 +170,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert mod.qconfig, 'Input float module must have a valid qconfig'
+        qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
@@ -278,8 +277,8 @@ class ConvBnReLU2d(ConvBn2d):
         return F.relu(ConvBn2d._forward(self, input))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(ConvBnReLU2d, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(ConvBnReLU2d, cls).from_float(mod)
 
 class ConvReLU2d(nnqat.Conv2d):
     r"""
@@ -313,8 +312,8 @@ class ConvReLU2d(nnqat.Conv2d):
             self._conv_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(ConvReLU2d, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(ConvReLU2d, cls).from_float(mod)
 
 def update_bn_stats(mod):
     if type(mod) in set([ConvBnReLU2d, ConvBn2d]):

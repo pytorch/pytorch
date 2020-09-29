@@ -6,6 +6,7 @@ import pickle
 import copy
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch.fx.experimental import GraphManipulation
 
 from torch.fx.proxy import TraceError
 
@@ -174,10 +175,12 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        t = Proxy(g.result)
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
+        t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
-        g.output((t + t).node)
-        gm = GraphModule(m, g)
+        new_g.output((t + t).node)
+        gm = GraphModule(m, new_g)
         self.assertEqual(gm(3, 4), 14)
 
     @skipIfNoTorchVision
@@ -336,7 +339,7 @@ class TestFX(JitTestCase):
                 placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.create_node('get_param', 'interpreter')
+            interpreter_node = graph.create_node('get_attr', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -466,9 +469,10 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
 
         def transform(traced):
-            new_graph = copy.deepcopy(traced.graph)
+            new_graph = torch.fx.Graph()
+            new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
+                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
@@ -567,7 +571,7 @@ class TestFX(JitTestCase):
         g = Graph()
         a = g.placeholder('a')
         b = g.call_module('linear', (a,))
-        c = g.get_param('bias')
+        c = g.get_attr('bias')
         d = g.call_method('add', (b, c))
         e = g.call_function(torch.sin, (d,))
         g.output(e)
@@ -584,7 +588,7 @@ class TestFX(JitTestCase):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
         b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_param', 'zip.zap.zam')
+        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
 
@@ -600,6 +604,42 @@ class TestFX(JitTestCase):
         ref_out : torch.Tensor = linear_mod(x) + add_param
         self.assertEqual(out, ref_out)
 
+    def test_symbolic_trace_assert(self):
+        message = "assert_foobar"
+
+        class AssertsTensorShape(torch.nn.Module):
+            def forward(self, x):
+                torch.Assert(x.shape[1] > 4, message)
+                return x
+
+        m = AssertsTensorShape()
+        # verify traceability
+        traced = symbolic_trace(m)
+        # verify assertion on traced model works correctly at runtime
+        traced(torch.rand(4, 5))
+        with self.assertRaisesRegex(AssertionError, message):
+            traced(torch.rand(4, 3))
+
+    def test_get_all_users_of(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
+        add_param : torch.Tensor = torch.rand(3, 4)
+        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+            {'linear_mod': linear_mod, 'y_attr' : add_param}, graph)
+        expected_uses: Dict[int, List[int]] = {
+            0: [1],
+            1: [3],
+            2: [3],
+            3: []
+        }
+        for i, node in enumerate(graph.nodes):
+            user_indexes = GraphManipulation.get_all_users_of(gm, i)
+            assert user_indexes == expected_uses[i]
 
 if __name__ == '__main__':
     run_tests()

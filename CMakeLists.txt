@@ -103,7 +103,7 @@ endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
-if(NOT LINUX)
+if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
   # On macOS, if USE_DISTRIBUTED is enabled (specified by the user),
   # then make Gloo build with the libuv transport.
@@ -225,6 +225,12 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
+
+# Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
+if(WIN32)
+  set(USE_TENSORPIPE OFF)
+  message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
