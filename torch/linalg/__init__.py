@@ -140,3 +140,17 @@ Using the :attr:`dim` argument to compute matrix norms::
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
 """)
+
+def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
+    """
+    XXX write docstring
+    """
+    assert not hermitian # XXX implement me
+    USV = _linalg.linalg_svd(a, full_matrices, compute_uv)
+    if not compute_uv:
+        # our C++ API always returns a full 3-tuple, but in this case numpy
+        # returns only S
+        return USV.S
+
+    USV.V.t_() # pytorch returns the transposed Vt, while numpy returns V
+    return USV

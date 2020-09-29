@@ -568,6 +568,20 @@ class TestLinalg(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
+    # Tests torch.linalg.svd, vs. NumPy
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.double)
+    def test_svd(self, device, dtype):
+        t = torch.randn((10, 10), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        for full_matrices in (True, False):
+            for compute_uv in (True, False):
+                expected = np.linalg.svd(np_t, full_matrices, compute_uv)
+                actual = torch.linalg.svd(t, full_matrices, compute_uv)
+                self.assertEqual(actual, expected)
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
