@@ -83,6 +83,7 @@ int64_t RedisStoreHandler::getNumKeys() {
 
 bool RedisStoreHandler::deleteKey(const std::string& /* unused */) {
   CHECK(false) << "deleteKey not implemented for RedisStoreHandler";
+  return false;
 }
 
 bool RedisStoreHandler::check(const std::vector<std::string>& names) {
