@@ -120,7 +120,7 @@ at::Tensor index_backward(at::Tensor zeros_like_self, at::TensorList indices, co
 at::Tensor _cudnn_ctc_loss_backward(const at::Tensor& grad_out, const at::Tensor& loss, const at::Tensor& raw_grad, bool zero_infinity);
 
 Tensor linalg_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v);
+          bool full_matrices, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v);
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v);
 std::tuple<Tensor, Tensor> triangular_solve_backward(

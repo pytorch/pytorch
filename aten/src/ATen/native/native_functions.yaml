@@ -8012,15 +8012,15 @@
   python_module: linalg
   variants: function
 
-- func: linalg_svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
+- func: linalg_svd.U(Tensor self, bool full_matrices=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   python_module: linalg
 
-- func: linalg_svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
+- func: linalg_svd(Tensor self, bool full_matrices=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   python_module: linalg
   use_c10_dispatcher: full
   variants: method, function
 
-- func: _linalg_svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+- func: _linalg_svd_helper(Tensor self, bool full_matrices, bool compute_uv) -> (Tensor, Tensor, Tensor)
   python_module: linalg
   use_c10_dispatcher: full
   variants: function
