@@ -1220,8 +1220,8 @@ def build_table(
     line_length = [-SPACING_SIZE]
     MAX_STACK_ENTRY = 5
 
-    def add_column(padding):
-        row_format[0] += '{: >' + str(padding) + '}' + (' ' * SPACING_SIZE)
+    def add_column(padding, text_dir='>'):
+        row_format[0] += '{: ' + text_dir + str(padding) + '}' + (' ' * SPACING_SIZE)
         header_sep[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length[0] += padding + SPACING_SIZE
 
@@ -1235,7 +1235,7 @@ def build_table(
 
     if has_stack:
         headers.append('Source Location')
-        add_column(src_column_width)
+        add_column(src_column_width, text_dir='<')
 
     row_format = row_format[0]
     header_sep = header_sep[0]
