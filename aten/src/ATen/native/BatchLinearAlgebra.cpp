@@ -922,15 +922,22 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, c10::optional<std:
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_data, lda, w_data, &work_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, &info);
   lwork = std::max(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
   Tensor work = at::empty({lwork}, v.options());
-  lrwork = std::max(1, static_cast<int>(rwork_query));
-  Tensor rwork = at::empty({lrwork}, v.options());
   liwork = std::max(1, static_cast<int>(iwork_query));
   Tensor iwork = at::empty({liwork}, at::kInt);
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(v.dtype()))) {
+    lrwork = std::max(1, static_cast<int>(rwork_query));
+    ScalarType dtype = toValueType(typeMetaToScalarType(v.dtype()));
+    rwork = at::empty({lrwork}, v.options().dtype(dtype));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
     value_t* w_working_ptr = &w_data[i * w_stride];
-    lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork.data_ptr<value_t>(), lrwork, iwork.data_ptr<int>(), liwork, &info);
+    lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -944,11 +951,8 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v,
 
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
-  auto eigvals = at::empty(self_sizes, self.options());
-
-  if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
+  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
 
   auto eigvecs = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "syevd_cpu", [&]{
