@@ -865,6 +865,24 @@ static std::ostream& operator<<(
   return out;
 }
 
+#ifdef USE_ROCM
+static const char* resource_string = R"(
+#include <hip/hip_runtime.h>
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
+template<typename T>
+__device__ T maximum(T a, T b) {
+  return isnan(a) ? a : (a > b ? a : b);
+}
+
+template<typename T>
+__device__ T minimum(T a, T b) {
+  return isnan(a) ? a : (a < b ? a : b);
+}
+
+)";
+#else
 static const char* resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
@@ -881,6 +899,7 @@ T minimum(T a, T b) {
 }
 
 )";
+#endif
 
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
@@ -914,7 +933,14 @@ void CudaCodeGen::Initialize() {
   }
 
   std::string func_name = GetUniqueFuncName("func");
-  os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
+  os() << "extern \"C\" __global__" << std::endl;
+#ifdef USE_ROCM
+  // TODO: If the work group can be larger than 256, we have to annotate
+  //       it. These values have a particular chance of not being correct.
+  os() << "__attribute__((amdgpu_flat_work_group_size(128, 1024)))"
+       << std::endl;
+#endif
+  os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
