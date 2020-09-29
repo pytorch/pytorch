@@ -576,9 +576,9 @@ class DistributedDataParallel(Module):
 
             >>> ddp = torch.nn.DistributedDataParallel(model, pg)
             >>> with ddp.no_sync():
-            ...   for input in inputs:
-            ...     ddp(input).backward()  # no synchronization, accumulate grads
-            ... ddp(another_input).backward()  # synchronize grads
+            >>>   for input in inputs:
+            >>>     ddp(input).backward()  # no synchronization, accumulate grads
+            >>> ddp(another_input).backward()  # synchronize grads
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
