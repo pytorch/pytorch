@@ -138,7 +138,8 @@ def assert_and_get_unique_device(module):
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize))
+            isinstance(module, torch.quantization.FakeQuantize) or
+            isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def is_submodule_of_fake_quant(name, module, named_modules):
     parent_name, _ = _parent_name(name)

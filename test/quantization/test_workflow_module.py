@@ -13,6 +13,7 @@ from torch.quantization import (
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
+    default_affine_fixed_qparams_fake_quant,
     get_observer_dict,
     prepare,
     QConfig,
@@ -756,7 +757,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(ref_qparams, my_qparams)
 
 
-class TestFakeQuantizePerTensor(TestCase):
+class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -1016,6 +1017,21 @@ class TestFakeQuantizePerTensor(TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fixed_qparams_fq_module(self, device, X):
+        X, (scale, zero_point, torch_type) = X
+        X = to_tensor(X, device)
+        fq_module = default_affine_fixed_qparams_fake_quant()
+        fixed_scale = fq_module.scale.clone()
+        fixed_zero_point = fq_module.zero_point.clone()
+        # run fq module and make sure the quantization parameters does not change
+        torch.quantization.enable_observer(fq_module)
+        fq_module(X)
+        self.assertEqual(fixed_scale, fq_module.scale)
+        self.assertEqual(fixed_zero_point, fq_module.zero_point)
+
     def test_fq_serializable(self):
         observer = default_observer
         quant_min = 0
@@ -1120,8 +1136,6 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertEqual(fq_module.calculate_qparams(),
                          loaded_module.calculate_qparams())
 
-
-class TestFakeQuantizePerChannel(TestCase):
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
