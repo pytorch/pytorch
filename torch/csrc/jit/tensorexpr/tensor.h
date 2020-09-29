@@ -104,6 +104,9 @@ class Function : public KernelScopedObject {
 
 class Tensor : KernelScopedObject {
  public:
+  Tensor(Function* function, int output_index)
+      : function_(function), output_index_(output_index) {}
+
   Function* function() const {
     return function_;
   }
@@ -115,27 +118,23 @@ class Tensor : KernelScopedObject {
   const Expr* body() const {
     return function()->body(output_index());
   }
-  const Buf* func_var() const {
+  const Buf* buf() const {
     return function()->func_var(output_index());
   }
   int ndim() const {
-    return buf_->dims().size();
+    return buf()->dims().size();
   }
   const Expr* dim(int index) const {
-    return buf_->dim(index);
+    return buf()->dim(index);
   }
   std::vector<const Expr*> dims() const {
-    return buf_->dims();
+    return buf()->dims();
   }
   const Var* arg(int index) const {
     return function()->arg(index);
   }
   const std::vector<const Var*>& args() const {
     return function()->args();
-  }
-
-  const Buf* buf() const {
-    return buf_;
   }
 
   void initializeTo(const Expr* initializer) {
@@ -145,8 +144,6 @@ class Tensor : KernelScopedObject {
     return initializer_;
   }
 
-  Tensor(const Buf* buf, Function* function, int output_index)
-      : buf_(buf), function_(function), output_index_(output_index) {}
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
   template <typename T>
@@ -155,7 +152,6 @@ class Tensor : KernelScopedObject {
   inline ExprHandle call(const Ts&... ts);
 
  private:
-  const Buf* buf_;
   Function* function_;
   int output_index_;
   const Expr* initializer_{nullptr};
@@ -306,7 +302,7 @@ Tensor* Reduce(
   dims.insert(dims.end(), reduce_dims.begin(), reduce_dims.end());
   Function* func =
       new Function(func_name, func_result, dims, all_vars, reduce_op);
-  Tensor* t = new Tensor(func_result, func, 0);
+  Tensor* t = new Tensor(func, 0);
   t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
   return t;
 }
@@ -373,7 +369,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   std::string func_name() const override {
-    return tensor_->func_var()->name_hint();
+    return tensor_->buf()->name_hint();
   }
 
   Tensor* tensor_;

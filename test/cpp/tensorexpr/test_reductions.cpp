@@ -138,7 +138,7 @@ void testReduceSum3D() {
   }
 
   // This is the same as just reducing the original result across that axis.
-  Placeholder c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->buf()));
   Tensor* e = Reduce("sum3", {{2, "l"}}, Sum(), c_buf, {{3, "m"}});
   LoopNest loop3({e});
   loop3.prepareForCodegen();
@@ -446,7 +446,7 @@ void testReduceRfactorLike() {
   std::vector<float> out(1, -1.f);
 
   Tensor* l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
-  Placeholder in_rf(BufHandle(l1->func_var()));
+  Placeholder in_rf(BufHandle(l1->buf()));
 
   Tensor* l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
 

@@ -459,7 +459,7 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
   const Expr* initializer = t->initializer();
   if (initializer) {
-    buf_initializers_[t->func_var()] = initializer;
+    buf_initializers_[t->buf()] = initializer;
   }
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
@@ -1406,7 +1406,7 @@ class LoopComputeAtRewriter : public IRMutator {
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
   const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->func_var() != buf_) {
+    if (v->tensor()->buf() != buf_) {
       return v;
     }
     std::vector<const Expr*> new_indices;

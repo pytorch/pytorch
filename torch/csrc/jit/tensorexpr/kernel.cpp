@@ -1264,7 +1264,7 @@ void TensorExprKernel::flattenTensors(BackendType backendType) {
     // Flatten the index for GPU kernels.
     // TODO: move this to fusing axis when it is ready.
     Tensor* newOut = Compute(
-        tensor->func_var()->name_hint() + "_flat",
+        tensor->buf()->name_hint() + "_flat",
         {totalCount},
         [tensor](const VarHandle& index) -> ExprHandle {
           std::vector<ExprHandle> dims;
