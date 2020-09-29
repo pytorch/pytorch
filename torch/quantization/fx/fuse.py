@@ -33,6 +33,8 @@ class Fuser:
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
+            if node.op == 'return':
+                continue
             root_node, obj = fusion_pairs.get(node.name, (None, None))
             if root_node is node:
                 env[node.name] = obj.fuse(self, load_arg)
