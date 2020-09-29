@@ -50,8 +50,8 @@ You can build C++ libtorch.so directly with cmake.  For example, to build a v1.6
    cmake -DBUILD_SHARED_LIBS:BOOL=ON -DCMAKE_BUILD_TYPE:STRING=Release -DPYTHON_EXECUTABLE=`which python3` -DUSE_CUDA:BOOL=ON -DUSE_CUDNN:BOOL=ON -DCMAKE_INSTALL_PREFIX:PATH=../pytorch-install ../pytorch
    cmake --build . --target install
 
-You can build the `Debug` version instead of `Release` and you can turn options off with `OFF` instead of `ON`.  Currently USE_CUDNN and USE_CUDA default to `ON` when those packages are available, and these and other options need not be specified when the default values are desired.
+You can build the ``Debug`` version instead of ``Release`` and you can turn options off with ``OFF`` instead of ``ON``.  Currently USE_CUDNN and USE_CUDA default to ``ON`` when those packages are available, and these and other options need not be specified when the default values are desired.
 
-Also note that if you want to build the current `master` version then the `git checkout ...` and `git clean ...` commands are not needed.  Furthermore in this case, `git submodule ...` is not needed if the `git clone ...` command is changed to `git clone --recurse-submodules https://github.com/pytorch/pytorch.git` instead.
+Also note that if you want to build the current ``master`` version then the ``git checkout ...`` and ``git clean ...`` commands are not needed.  Furthermore in this case, ``git submodule ...`` is not needed if the ``git clone ...`` command is changed to ``git clone --recurse-submodules https://github.com/pytorch/pytorch.git`` instead.
 
 You will get errors if you do not have needed dependencies such as Python3's PyYAML package.
