@@ -55,7 +55,7 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Buffer;
+class Placeholder;
 
 class Cast : public ExprNode<Cast> {
  public:
@@ -391,7 +391,7 @@ class TORCH_API Load : public ExprNode<Load> {
     return buf_;
   }
   static ExprHandle make(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
   static ExprHandle make(
@@ -401,7 +401,7 @@ class TORCH_API Load : public ExprNode<Load> {
       const ExprHandle& mask);
 
   Load(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
   Load(
