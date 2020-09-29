@@ -270,7 +270,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
             if output_activation_post_process:
                 if type(self.linear) == torch.nn.intrinsic.LinearReLU:
-                    float_linear_module = self.linear[1].activation_post_process
+                    float_linear_module = self.linear[1]
                 else:
                     float_linear_module = self.linear
                 float_linear_module.activation_post_process = output_activation_post_process

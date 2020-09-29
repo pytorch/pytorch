@@ -1388,7 +1388,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = torch.rand(1, 3, 10, 10)
         # This model is not executable since we just put all ops
         # in the same forward
-        m = M()
+        m = M().eval()
         original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
@@ -1483,7 +1483,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         # This model is not executable since we just put all ops
         # in the same forward
-        m = M()
+        m = M().eval()
         original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
