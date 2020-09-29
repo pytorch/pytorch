@@ -421,7 +421,7 @@ void testLLVMVectorizerLoadStoreTest() {
     return Load::make(a, {i}, 1);
   });
 
-  Placeholder c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
   l.vectorize(dynamic_cast<Block*>(s)->front());
@@ -1135,7 +1135,7 @@ void testLLVMSimpleMath01() {
   });
   LoopNest l({tensor});
   Stmt* stmt = l.root_stmt();
-  Placeholder f_buf(BufHandle(tensor->func_var()));
+  Placeholder f_buf(BufHandle(tensor->buf()));
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -1158,7 +1158,7 @@ void testLLVMComputeMul() {
     return Load::make(a, {i}, 1) * Load::make(b, {i}, 1);
   });
 
-  Placeholder c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
 
@@ -1184,7 +1184,7 @@ void testLLVMBroadcastAdd() {
         return Load::make(a, {i, j}, mask) + Load::make(b, {j}, mask);
       });
 
-  Placeholder c_buf(BufHandle(c->func_var()));
+  Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
