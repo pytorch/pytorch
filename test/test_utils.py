@@ -768,7 +768,7 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(len(measurement.times), repeats)
             self.assertEqual(measurement.number_per_run, number_per_run)
 
-    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows")
+    @unittest.skipIf(not torch._C.valgrind_supported_platform(), "Unsupported platform.")
     def test_collect_callgrind(self):
         timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
 

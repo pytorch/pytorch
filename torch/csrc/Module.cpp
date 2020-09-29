@@ -19,7 +19,6 @@
 #include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <callgrind.h>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -60,6 +59,14 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
+#endif
+
+#if (!defined(_WIN32) && !defined(_WIN64))
+#include <callgrind.h>
+#else
+// In theory Valgrind.h should detect when it is not on a supported platform,
+// but in practice some Windows builds fail.
+#define NVALGRIND
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
