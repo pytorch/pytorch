@@ -885,7 +885,7 @@ class ExprEval {
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
-    Buffer ret_buf("ret_val", dtype_, {1});
+    Placeholder ret_buf("ret_val", dtype_, {1});
     std::vector<const Expr*> indices;
     const Expr* zero = new IntImm(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {

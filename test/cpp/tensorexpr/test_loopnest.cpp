@@ -575,8 +575,8 @@ void testExprSplitWithMask01() {
   KernelScope kernel_scope;
   const int M = 26;
   const int N = 5;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {M, N});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {M, N});
   Tensor* tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf(m, n) + b_buf(m, n) + 1.0f;
@@ -612,8 +612,8 @@ void testExprSplitWithMask01() {
 void testExprSplitWithMaskRepeatedNoMask() {
   KernelScope kernel_scope;
   const int M = 64;
-  Buffer a_buf("a", kFloat, {M});
-  Buffer b_buf("b", kFloat, {M});
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf(m) + b_buf(m) + 1.0f;
   });
@@ -644,8 +644,8 @@ void testExprSplitWithMaskRepeatedNoMask() {
 void testSplitWithTailWithLoopOptions() {
   KernelScope kernel_scope;
   const int M = 21;
-  Buffer a_buf("a", kFloat, {M});
-  Buffer b_buf("b", kFloat, {M});
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf(m) + b_buf(m) + 1.0f;
   });
@@ -674,8 +674,8 @@ void testSplitWithTailWithLoopOptions() {
 void testSplitWithMaskWithLoopOptions() {
   KernelScope kernel_scope;
   const int M = 21;
-  Buffer a_buf("a", kFloat, {M});
-  Buffer b_buf("b", kFloat, {M});
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
     return a_buf(m) + b_buf(m) + 1.0f;
   });
@@ -699,8 +699,8 @@ void testScheduleBroadcastAddBuffer() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -748,8 +748,8 @@ void testScheduleFunctionCall01() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -805,10 +805,10 @@ void testScheduleInlineSimple() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
@@ -886,10 +886,10 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
@@ -1122,8 +1122,8 @@ void testScheduleInlineIntrinsics() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
 
   Tensor* x = Compute(
       "x",
@@ -1487,7 +1487,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -1520,10 +1520,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a(i) + b(i);
@@ -1558,8 +1558,8 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}, kFloat));
-    Buffer b(BufHandle("b", {m, n}, kFloat));
+    Placeholder a(BufHandle("a", {m, n}, kFloat));
+    Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -2082,7 +2082,7 @@ void testLoopNestReorderExtraStatements() {
       });
   LoopNest l({tensor});
 
-  Buffer extra(BufHandle("res", {6, 3}, kFloat));
+  Placeholder extra(BufHandle("res", {6, 3}, kFloat));
 
   auto loops = l.getLoopStmtsFor(tensor);
 
@@ -2222,7 +2222,7 @@ void LoopNestReorderTestHelper(
       [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
-  Buffer extra(BufHandle("extra", {5}, kInt));
+  Placeholder extra(BufHandle("extra", {5}, kInt));
 
   auto loops = l.getLoopStmtsFor(c);
   int j = 0;
@@ -2333,10 +2333,10 @@ void testLoopNestReorderInternalLoopNest() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
@@ -2856,7 +2856,7 @@ void testNormalizeAndSplitWithTail() {
 
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
       Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
   LoopNest l({b});
@@ -2904,7 +2904,7 @@ void testDetectInlineRankMismatch() {
   KernelScope kernel_scope;
   const int kTotalSize = 8;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Tensor* a = Compute(
       "a", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a_buf(i); });
   Tensor* reshape = Compute(
@@ -2914,7 +2914,7 @@ void testDetectInlineRankMismatch() {
   LoopNest l({reshape});
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
-      "Buffer indexed access is inconsistent with its rank");
+      "Placeholder indexed access is inconsistent with its rank");
 }
 
 } // namespace jit

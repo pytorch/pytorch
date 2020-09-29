@@ -161,11 +161,11 @@ class Tensor : KernelScopedObject {
   const Expr* initializer_{nullptr};
 };
 
-class Buffer {
+class Placeholder {
  public:
-  Buffer(const BufHandle& data) : data_(data.node()) {
+  Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
-      throw malformed_input("Buffer dtype must be Handle");
+      throw malformed_input("Placeholder dtype must be Handle");
     }
 
     std::vector<ExprHandle> stride_handles(ndim());
@@ -178,11 +178,11 @@ class Buffer {
     }
     strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
-  Buffer(
+  Placeholder(
       const std::string& name,
       const Dtype& dtype,
       const std::vector<ExprHandle>& dims)
-      : Buffer(BufHandle(name, dims, dtype)) {}
+      : Placeholder(BufHandle(name, dims, dtype)) {}
 
   const Buf* data() const {
     return data_;
@@ -232,7 +232,7 @@ class Buffer {
   std::vector<const Expr*> strides_;
 };
 
-inline ExprHandle Buffer::LoadValue(
+inline ExprHandle Placeholder::LoadValue(
     const std::vector<ExprHandle>& indices) const {
   return Load::make(*this, indices, ExprHandle(1));
 }
@@ -322,12 +322,12 @@ Tensor* Reduce(
   return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
 }
 
-// Overload for the common case of all dimensions of a Buffer.
+// Overload for the common case of all dimensions of a Placeholder.
 TORCH_API Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    const Buffer& buffer,
+    const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args);
 
 // Overload for the common case of all dimensions of a prevously Computed

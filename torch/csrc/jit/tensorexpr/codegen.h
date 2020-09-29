@@ -70,7 +70,7 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Buffer& buffer)
+  BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
       : var_(tensor->function()

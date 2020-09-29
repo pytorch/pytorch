@@ -91,7 +91,7 @@ class Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Buffer& buf)
+  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
