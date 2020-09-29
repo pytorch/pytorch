@@ -192,7 +192,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-static bool texpr_fuser_enabled_ = true;
+static bool texpr_fuser_enabled_ = false;
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
