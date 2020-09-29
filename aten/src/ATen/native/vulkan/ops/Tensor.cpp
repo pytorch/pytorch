@@ -216,6 +216,17 @@ vTensor::Image::Object vTensor::image(const Access::Flags access) & {
   return view_.image().object;
 }
 
+vTensor::View::View()
+  : context_(nullptr),
+    image_{},
+    buffer_{},
+    staging_{},
+    fence_{},
+    required_{},
+    active_{} {
+  verify();
+}
+
 vTensor::View::View(
     api::Context* const context,
     const IntArrayRef sizes,
@@ -230,6 +241,7 @@ vTensor::View::View(
     sizes_(sizes),
     options_(options) {
   verify();
+  ops::verify(options);
 
   if (requires_image(sizes_)) {
     required_ |= Component::Image;
@@ -290,18 +302,12 @@ vTensor::Fence& vTensor::View::fence() const {
 // synchronization must be handled appropriately.
 //
 //      T              T + 1
-//
 // Read  Staging |  Read  Staging
-//
 // Write Staging |  Write Staging
-//
-// Read  Buffer  |  Read  Buffer
-//
-// Write Buffer  |  Write Buffer
-//
-// Read  Image   |  Read  Image
-//
-// Write Image   |  Write Image
+// Read   Buffer |  Read  Buffer
+// Write  Buffer |  Write Buffer
+// Read    Image |  Read  Image
+// Write   Image |  Write Image
 //
 
 void vTensor::View::transition(const Active view) const {
@@ -325,38 +331,44 @@ void vTensor::View::transition(const Active view) const {
   // map() and unmap() if not dealing with coherent host memory.  Other than
   // that, host to host dependencies require no device-side synchronization.
   // This is regardless of whether we are dealing with UMA or discrete systems.
-  // That leaves us with 36 - 4 = 32 possible transitions.
+  // This section handle the following 4 transitions, and and leaves us with
+  // 36 - 4 = 32 possible remaining transitions.
 
-  if ((active_.component == Component::Staging) &&
-      (view.component == Component::Staging)) {
+  // Read  Staging -> Read  Staging
+  // Read  Staging -> Write Staging
+  // Write Staging -> Read  Staging
+  // Write Staging -> Write Staging
+
+  if ((Component::Staging == active_.component) &&
+      (Component::Staging == view.component)) {
     return;
   }
 
-  // RAR (Read after Read) is not a hazard.  That leaves us with 32 - 8 = 24
-  // possible transitions.
+  // RAR (Read after Read) is not a hazard; no synchronization is required
+  // unless we are dealing with an image layout transition which this section
+  // does not handle in favor of deferring to the the rest of this function.
+  // Follwing 8 transitions are handled here leaving us with/ 32 - 8 = 24
+  // possibilities remaining.
+
+  // Read Staging -> Read Buffer
+  // Read Staging -> Read Image   (no layout transition)
+  // Read Buffer  -> Read Staging
+  // Read Buffer  -> Read Buffer
+  // Read Buffer  -> Read Image   (no layout transition)
+  // Read Image   -> Read Staging
+  // Read Image   -> Read Buffer
+  // Read Image   -> Read Image   (no layout transition)
 
   if ((0u == (active_.access & Memory::Access::Read)) &&
       (0u == (view.access & Memory::Access::Read))) {
     return;
   }
 
-  // All transitions after this point require an explicit synchronization.
+  // All transitions after this point require an explicit synchronization of
+  // one type or another.
 
   api::Command::Buffer command_buffer = context_->command().pool.allocate();
   command_buffer.begin();
-
-  // WAR (Write after Read) hazards do not need a memory barrier. Execution
-  // barriers are sufficient.  This section handles the following 8 WAR
-  // transitions, leaving us with 24 - 8 = 16 transitions remaining.
-
-  // Read Staging -> Write Buffer
-  // Read Staging -> Write Image
-  // Read Buffer  -> Write Staging
-  // Read Buffer  -> Write Buffer
-  // Read Buffer  -> Write Image
-  // Read Image   -> Write Staging
-  // Read Image   -> Write Buffer
-  // Read Image   -> Write Image
 
   const auto stage = [](const Active view) -> VkPipelineStageFlags {
     switch(view.component) {
@@ -369,10 +381,26 @@ void vTensor::View::transition(const Active view) const {
     }
   };
 
+  // WAR (Write after Read) hazards do not need a memory barrier. Execution
+  // barriers are sufficient.  That is unless we are dealing with image
+  // layout transitions which do require an image memory barrier. This section
+  // handles the following 8 WAR transitions, leaving us with 24 - 8 = 16
+  // transitions remaining.
+
+  // Read Staging -> Write Buffer
+  // Read Staging -> Write Image
+  // Read Buffer  -> Write Staging
+  // Read Buffer  -> Write Buffer
+  // Read Buffer  -> Write Image
+  // Read Image   -> Write Staging
+  // Read Image   -> Write Buffer
+  // Read Image   -> Write Image
+
   if ((0u == (active_.access & Memory::Access::Read)) &&
       // Notice how we include Read-Writes, in addition to Writes, as a
       // Write operation in the condition below as well, as we should.
       (active_.access & Memory::Access::Write)) {
+    command_buffer.barrier();
   }
 
   // Handle the remaining 16 RAW or WAW hazards.  Additionally, if transitioning
