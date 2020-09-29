@@ -1167,12 +1167,18 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         class Properties(object):
+            __ignored_properties__ = ["unsupported"]
+
             def __init__(self, a: int):
                 self.a = a
 
             @property
             def attr(self) -> int:
                 return self.a - 1
+
+            @property
+            def unsupported(self) -> int:
+                return sum([self.a])
 
             @attr.setter
             def attr(self, value: int):

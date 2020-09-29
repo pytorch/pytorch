@@ -208,7 +208,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims_;
 };
 
-// TODO: Merge this class with 'Buffer'
+// TODO: Merge this class with 'Placeholder'
 class TORCH_API BufHandle : public ExprHandle {
  public:
   BufHandle(
