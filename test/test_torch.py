@@ -4690,6 +4690,22 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    @onlyCPU
+    def test_set_deterministic_beta_warning(self, device):
+        det = torch.is_deterministic()
+        try:
+            # Ensures setting to false does not throw a warning
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                torch.set_deterministic(False)
+                self.assertEqual(len(w), 0)
+
+            # Setting set_deterministic(True) throws a warning once per process
+            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is in beta"):
+                torch.set_deterministic(True)
+        finally:
+            torch.set_deterministic(det)
+
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
