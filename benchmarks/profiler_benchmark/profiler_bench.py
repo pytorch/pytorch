@@ -94,7 +94,7 @@ if __name__ == '__main__':
                 globals = {"payload": payload},
                 timer=timeit.default_timer,
             ).blocked_autorange(min_run_time=args.timer_min_run_time)
-            print(m)
+            print(t)
         else:
             runtimes = timeit.repeat(payload, repeat=args.n, number=1)
             avg_time = statistics.mean(runtimes) * 1000.0
