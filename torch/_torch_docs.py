@@ -6883,7 +6883,7 @@ Example::
 
 add_docstr(torch.sqrt,
            r"""
-sqrt(input， *, out=None) -> Tensor
+sqrt(input, *, out=None) -> Tensor
 
 Returns a new tensor with the square-root of the elements of :attr:`input`.
 
