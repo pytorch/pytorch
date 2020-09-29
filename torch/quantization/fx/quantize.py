@@ -345,6 +345,8 @@ class Quantizer:
         quants = self._find_quants(model.graph, matches)
 
         self.activation_post_process_map = dict()
+        # map from node name to activation_post_process module name
+        activation_post_process_name_map = dict()
         env = {}
         observed_graph = Graph()
         observed_node_names_set = set()
@@ -374,15 +376,24 @@ class Quantizer:
                 if qconfig is None:
                     continue
 
-                def insert_observer(node, observer, device):
+                def insert_observer_module(node, observer, device):
                     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
                     observer_name = get_new_observer_name(model)
+                    if device:
+                        observer.to(device)
                     setattr(model, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
+                    return observer_name
+
+                # insert a call to activation_post_process module
+                def insert_observer_call(node, observer_name):
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
+                    activation_post_process_name_map[node.name] = observer_name
                     observed_node_names_set.add(node.name)
-                    if device:
-                        getattr(model, observer_name).to(device)
+
+                def insert_observer(node, new_observer, device):
+                    observer_name = insert_observer_module(node, new_observer, device)
+                    insert_observer_call(node, observer_name)
 
                 if isinstance(obj, CustomModuleQuantizeHandler):
                     custom_module = self.modules[node.target]
@@ -417,7 +428,18 @@ class Quantizer:
 
                 # inserting observers for output of observed module, or mark the output
                 # as observed
-                if isinstance(obj, CopyNode):
+                if isinstance(obj, InheritInputQParamOpQuantizeHandler):
+                    assert node.op in [
+                        'call_module',
+                        'call_function',
+                        'call_method'], \
+                        'InheritInputQParamOp of type ' + node.op + ' is not handled'
+                    # use the same observer as input
+                    observed_input = node.args[0]
+                    if observed_input.name in activation_post_process_name_map:
+                        print('inserting observer of input', observed_input.target)
+                        insert_observer_call(node, activation_post_process_name_map[observed_input.name])
+                elif isinstance(obj, CopyNode):
                     assert node.op in [
                         'call_module',
                         'call_function',
@@ -654,12 +676,12 @@ class Quantizer:
                         quantized = True
 
                     # Need to get correct quantized/non-quantized state for the output of CopyNode
-                    if isinstance(obj, CopyNode):
+                    if isinstance(obj, CopyNode) or isinstance(obj, InheritInputQParamOpQuantizeHandler):
                         assert node.op in [
                             'call_module',
                             'call_function',
                             'call_method'], \
-                            'CopyNode of type ' + node.op + ' is not handled'
+                            'Node of type ' + node.op + ' is not handled'
                         quantized = is_quantized(node.args[0])
 
                     if not activation_is_statically_quantized(qconfig):

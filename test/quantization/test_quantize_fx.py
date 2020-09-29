@@ -1488,6 +1488,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
         prepared = prepare_fx(original, qconfig_dict)
+        # check the correct number of activation_post_process is inserted
+        count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 26
+        }
+        self.checkGraphModuleNodes(
+            prepared,
+            expected_node_occurrence=count_check)
         # not runnable
         quantized = convert_fx(prepared)
 
