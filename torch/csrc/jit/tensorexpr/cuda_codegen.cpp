@@ -866,11 +866,22 @@ static std::ostream& operator<<(
 }
 
 #ifdef USE_ROCM
-static const char* resource_string = R"(
+static const char* device_resource_string = R"(
 #include <hip/hip_runtime.h>
 #define POS_INFINITY INFINITY
 #define NEG_INFINITY -INFINITY
 
+)";
+#else
+static const char* device_resource_string = R"(
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
+
+)";
+#endif
+
+static const char* shared_resource_string = R"(
 template<typename T>
 __device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
@@ -882,24 +893,6 @@ __device__ T minimum(T a, T b) {
 }
 
 )";
-#else
-static const char* resource_string = R"(
-#define NAN __int_as_float(0x7fffffff)
-#define POS_INFINITY __int_as_float(0x7f800000)
-#define NEG_INFINITY __int_as_float(0xff800000)
-
-template<typename T>
-T maximum(T a, T b) {
-  return isnan(a) ? a : (a > b ? a : b);
-}
-
-template<typename T>
-T minimum(T a, T b) {
-  return isnan(a) ? a : (a < b ? a : b);
-}
-
-)";
-#endif
 
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
@@ -917,7 +910,7 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  os() << resource_string;
+  os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
