@@ -504,9 +504,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -527,7 +527,10 @@ void testHashLargeExpression() {
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
-      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
+      Load::make(
+          BufHandle(d.data()),
+          {Ramp::make(0, 1, 4)},
+          Broadcast::make(IntImm::make(1), 4)),
       Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
 
   auto if_stmt = Cond::make(
@@ -555,9 +558,9 @@ void testHashLargeExpression() {
 void testHashForLoopOptions() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto for_stmt = For::make(
@@ -2771,8 +2774,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // Will eliminate zero loop For.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2784,8 +2787,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // still works if start is not zero.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2798,8 +2801,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2812,8 +2815,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2825,8 +2828,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2841,8 +2844,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Will remove the loop if the body is run once.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2856,8 +2859,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // still works if start is not zero.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2872,8 +2875,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2888,8 +2891,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2903,8 +2906,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2919,8 +2922,8 @@ void testSimplifyForWontLoseLoopOptions() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     LoopOptions options;
@@ -2939,8 +2942,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Multiple layers of For will be simplified out.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -2956,8 +2959,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain an outer loop if the inner loop is eliminated.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -2979,8 +2982,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain inner loop if outer loops is eliminated.
-    Placeholder a(BufHandle("A", {4}, kInt));
-    Placeholder c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -3240,9 +3243,9 @@ void testDontSimplifyRand() {
 
 void testSimplifyReorderForCond() {
   KernelScope kernel_scope;
-  Placeholder a(BufHandle("A", {4}, kInt));
-  Placeholder b(BufHandle("B", {1}, kInt));
-  Placeholder c(BufHandle("C", {4}, kInt));
+  BufHandle a("A", {4}, kInt);
+  BufHandle b("B", {1}, kInt);
+  BufHandle c("C", {4}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -3440,8 +3443,8 @@ void testSimplifyReorderForCond() {
 
 void testSimplifyFuseConditions() {
   KernelScope kernel_scope;
-  Placeholder a(BufHandle("A", {2}, kInt));
-  Placeholder b(BufHandle("B", {2}, kInt));
+  BufHandle a("A", {2}, kInt);
+  BufHandle b("B", {2}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);

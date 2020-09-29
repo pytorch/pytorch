@@ -19,7 +19,7 @@ void testATen_cast_Float() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   ExprHandle to_float = Cast::make(kFloat, load_a);
   Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
@@ -47,7 +47,7 @@ void testATennegInt() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   ExprHandle to_float = Sub::make(0, load_a);
   Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
@@ -75,7 +75,7 @@ void testATennegFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   ExprHandle to_float = Sub::make(0, load_a);
   Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
@@ -105,9 +105,9 @@ void testATenaddInt() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
   Stmt* store_d = Store::make(d_buf, {index}, load_a + load_b * load_c, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
@@ -142,9 +142,9 @@ void testATenaddFloat() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
   Stmt* store_d = Store::make(d_buf, {index}, load_a + load_b * load_c, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
@@ -179,9 +179,9 @@ void testATensubInt() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
   Stmt* store_d = Store::make(d_buf, {index}, load_a - load_b * load_c, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
@@ -216,9 +216,9 @@ void testATensubFloat() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
   Stmt* store_d = Store::make(d_buf, {index}, load_a - load_b * load_c, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
@@ -253,9 +253,9 @@ void testATenlerp() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
   Stmt* store_d =
       Store::make(d_buf, {index}, load_a + load_c * (load_b - load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
@@ -292,10 +292,10 @@ void testATenaddcmulInt() {
   Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  ExprHandle load_d = Load::make(d_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
+  ExprHandle load_d = Load::make(BufHandle(d_buf.data()), {index}, 1);
   Stmt* store_e =
       Store::make(e_buf, {index}, load_a + load_b * load_c * load_d, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
@@ -335,10 +335,10 @@ void testATenaddcmulFloat() {
   Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  ExprHandle load_d = Load::make(d_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
+  ExprHandle load_c = Load::make(BufHandle(c_buf.data()), {index}, 1);
+  ExprHandle load_d = Load::make(BufHandle(d_buf.data()), {index}, 1);
   Stmt* store_e =
       Store::make(e_buf, {index}, load_a + load_b * load_c * load_d, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
@@ -376,8 +376,8 @@ void testATenmulInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c = Store::make(c_buf, {index}, load_a * load_b, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
@@ -408,8 +408,8 @@ void testATenmulFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c = Store::make(c_buf, {index}, load_a * load_b, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
@@ -440,8 +440,8 @@ void testATendivInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c = Store::make(c_buf, {index}, load_a / load_b, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
@@ -472,8 +472,8 @@ void testATendivFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c = Store::make(c_buf, {index}, load_a / load_b, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
@@ -504,8 +504,8 @@ void testATenmaxInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c =
       Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
@@ -537,8 +537,8 @@ void testATenmaxFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c =
       Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
@@ -570,8 +570,8 @@ void testATenminInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c =
       Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
@@ -603,8 +603,8 @@ void testATenminFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {index}, 1);
   Stmt* store_c =
       Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
@@ -635,7 +635,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, FloatImm::make(1.0f) / load_a, 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -662,7 +662,7 @@ void testATenreluInt() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, Max::make(load_a, 0, false), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -689,7 +689,7 @@ void testATenreluFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(
       b_buf,
       {index},
@@ -720,7 +720,7 @@ void testATenlogFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, log(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -747,7 +747,7 @@ void testATenlog10Float() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, log10(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -774,7 +774,7 @@ void testATenlog2Float() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, log2(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -801,7 +801,7 @@ void testATenexpFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, exp(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -828,7 +828,7 @@ void testATenerfFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, erf(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -855,7 +855,7 @@ void testATencosFloat() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {index}, 1);
   Stmt* store_b = Store::make(b_buf, {index}, cos(load_a), 1);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
@@ -895,8 +895,8 @@ void testATeneqInt() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kEQ),
           mask));
 
@@ -926,8 +926,8 @@ void testATengeInt() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kGE),
           mask));
 
@@ -957,8 +957,8 @@ void testATengtInt() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kGT),
           mask));
 
@@ -988,8 +988,8 @@ void testATenleInt() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kLE),
           mask));
 
@@ -1019,8 +1019,8 @@ void testATenltInt() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kLT),
           mask));
 

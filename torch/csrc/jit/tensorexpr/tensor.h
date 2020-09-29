@@ -202,17 +202,29 @@ class Placeholder {
     return LoadValue(std::forward<Args>(args)...);
   }
 
+  ExprHandle LoadVal(const std::vector<ExprHandle>& indices) const {
+    return LoadVal(indices, ExprHandle(1));
+  }
+
+  ExprHandle LoadVal(
+      const std::vector<ExprHandle>& indices,
+      const ExprHandle& mask) const {
+    return ExprHandle(
+        new Load(data(), ExprHandleVectorToExprVector(indices), mask.node()));
+  }
+
   ExprHandle LoadValue(
       const ExprHandle& x,
       const ExprHandle& y,
       const ExprHandle& z) const {
-    return Load::make(*this, {x, y, z}, ExprHandle(1));
+    return ExprHandle(
+        new Load(data(), {x.node(), y.node(), z.node()}, new IntImm(1)));
   }
   ExprHandle LoadValue(const ExprHandle& x, const ExprHandle& y) const {
-    return Load::make(*this, {x, y}, ExprHandle(1));
+    return ExprHandle(new Load(data(), {x.node(), y.node()}, new IntImm(1)));
   }
   ExprHandle LoadValue(const ExprHandle& x) const {
-    return Load::make(*this, {x}, ExprHandle(1));
+    return ExprHandle(new Load(data(), {x.node()}, new IntImm(1)));
   }
 
   template <typename T>
@@ -230,7 +242,8 @@ class Placeholder {
 
 inline ExprHandle Placeholder::LoadValue(
     const std::vector<ExprHandle>& indices) const {
-  return Load::make(*this, indices, ExprHandle(1));
+  return ExprHandle(new Load(
+      dtype(), data(), ExprHandleVectorToExprVector(indices), new IntImm(1)));
 }
 
 TORCH_API Tensor* Compute(

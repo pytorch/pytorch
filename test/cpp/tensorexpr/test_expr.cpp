@@ -65,7 +65,7 @@ void testExprLetStmtTest01() {
   Placeholder a_buf("a", kFloat, {1});
   Placeholder b_buf("b", kFloat, {1});
 
-  ExprHandle load_a = Load::make(a_buf, {0}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
   Stmt* let_store = Let::make(var, load_a);
   Stmt* store_b = Store::make(b_buf, {0}, var, 1);
@@ -199,12 +199,10 @@ void testExprVectorAdd01() {
     }
   */
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(
-      a_buf,
+  ExprHandle load_a = a_buf.LoadVal(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
-  ExprHandle load_b = Load::make(
-      b_buf,
+  ExprHandle load_b = b_buf.LoadVal(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle value = load_a + load_b;
@@ -254,8 +252,8 @@ void testExprCompareSelectEQ() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               CompareSelectOperation::kEQ),
           mask));
 
@@ -300,8 +298,8 @@ void testExprCompareSelectDtypes() {
           c,
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
+              Load::make(BufHandle(a.data()), {i}, mask),
+              Load::make(BufHandle(b.data()), {i}, mask),
               FloatImm::make(3.14f),
               FloatImm::make(2.78f),
               CompareSelectOperation::kEQ),
@@ -331,7 +329,11 @@ void testExprIntrinsicsDtypes() {
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto fabs_expr = For::make(
-      i, 0, N, Store::make(b, {i}, fabs(Load::make(a, {i}, mask)), mask));
+      i,
+      0,
+      N,
+      Store::make(
+          b, {i}, fabs(Load::make(BufHandle(a.data()), {i}, mask)), mask));
 
   SimpleIREvaluator ir_eval(fabs_expr, a, b);
   ir_eval(a_buffer, b_buffer);

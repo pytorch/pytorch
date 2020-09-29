@@ -2229,7 +2229,7 @@ void LoopNestReorderTestHelper(
   for (auto* l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
-    Load* load = new Load(extra, {new IntImm(j)}, new IntImm(1));
+    Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
     Add* add = new Add(load, new IntImm(1));
     Stmt* store = Store::make(extra, {j}, ExprHandle(add), 1);
     if (prepend) {

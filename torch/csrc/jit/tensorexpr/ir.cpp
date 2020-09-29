@@ -39,15 +39,20 @@ static bool indicesValid(const std::vector<const Expr*>& indices) {
   return true;
 }
 
-Load::Load(
-    const Placeholder& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buffer.dtype(), dtypeOfIndices(indices)),
-          buffer.data(),
-          indices,
-          mask) {}
+void Load::verify_dtypes() const {
+  if (indices_.size() > 0 && buf_->base_handle()->dtype() != kHandle) {
+    throw malformed_input(
+        "Load base handle dtype must be Handle", buf_->base_handle());
+  }
+
+  if (!indicesValid(indices_)) {
+    throw malformed_input("invalid indices in Load");
+  }
+  Dtype index_dtype = dtypeOfIndices(indices_);
+  if (index_dtype.lanes() != mask_->dtype().lanes()) {
+    throw malformed_input("lane mismatch in Load mask");
+  }
+}
 
 Load::Load(
     Dtype dtype,
@@ -55,27 +60,19 @@ Load::Load(
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input(
-        "Load base handle dtype must be Handle", buf->base_handle());
-  }
-
-  if (!indicesValid(indices)) {
-    throw malformed_input("invalid indices in Load");
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input("lane mismatch in Load mask");
-  }
+  verify_dtypes();
 }
 
-ExprHandle Load::make(
-    const Placeholder& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(
-      new Load(buffer, ExprHandleVectorToExprVector(indices), mask.node()));
-}
+Load::Load(
+    const Buf* buf,
+    const std::vector<const Expr*>& indices,
+    const Expr* mask)
+    : Load(
+          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
+          buf,
+          indices,
+          mask) {}
+
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
@@ -83,6 +80,13 @@ ExprHandle Load::make(
     const ExprHandle& mask) {
   return ExprHandle(new Load(
       dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
+}
+
+ExprHandle Load::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& mask) {
+  return Load::make(buf.dtype(), buf, indices, mask);
 }
 
 Store::Store(
