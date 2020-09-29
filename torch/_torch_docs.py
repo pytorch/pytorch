@@ -2740,20 +2740,27 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
-add_docstr(torch.floor_divide,
-           r"""
+add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
-for type promotion and broadcasting rules.
+.. warning::
+    This function's name is a misnomer. It actually rounds the
+    quotient towards zero instead of taking its floor. This behavior
+    will be deprecated in a future PyTorch release.
+
+Computes :attr:`input` divided by :attr:`other`, elementwise, and rounds each
+quotient towards zero. Equivalently, it truncates the quotient(s):
 
 .. math::
-    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+    \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
+
+Supports broadcasting to a common shape, type promotion, and integer and float inputs.
+
 Args:
-    input (Tensor): the numerator tensor
-    other (Tensor or Scalar): the denominator
+    input (Tensor or Number): the dividend
+    other (Tensor or Number): the divisor
 
 Keyword args:
     {out}
@@ -9069,7 +9076,7 @@ where ``L`` is the :attr:`window_length`. This function computes:
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 
 Calling ``torch.kaiser_window(L, B, periodic=True)`` is equivalent to calling
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``. 
+``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
 The :attr:`periodic` argument is intended as a helpful shorthand
 to produce a periodic window as input to functions like :func:`torch.stft`.
 
