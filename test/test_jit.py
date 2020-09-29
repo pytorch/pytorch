@@ -1425,7 +1425,7 @@ graph(%Ra, %Rb):
             self.assertEqual(outputs, m(*inputs))
 
     @slowTest
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
         with enable_profiling_mode_for_profiling_tests():
             class MyModule(torch.nn.Module):
@@ -9994,6 +9994,21 @@ a")
             ModuleTooManyAssign()
         with self.assertRaisesRegex(RuntimeError, "Argument y not provided."):
             ModuleDefault()
+
+    def test_type_inferred_from_empty_annotation(self):
+        """
+        Test that the type inferred from an empty or missing annotation is Torch.Tensor wtih `inferred=true`
+        """
+        @torch.jit.script
+        def fn(x):
+            return x
+
+        graph = fn.graph
+        n = next(graph.inputs())
+        self.assertTrue(n.type() == torch._C.TensorType.getInferred())
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
+            fn(1)
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):

@@ -108,10 +108,10 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     env = {}
 
     def load_arg(a):
-        return map_arg(a, lambda node: env[node.name])
+        return map_arg(a, lambda node: env[node])
     for producer_node in producer_nodes:
-        env[producer_node.name] = graph.node_copy(producer_node, load_arg)
-    graph.output(load_arg(producer_nodes[-1].name))
+        env[producer_node] = graph.node_copy(producer_node, load_arg)
+    graph.output(load_arg(producer_nodes[-1]))
     graph_module = GraphModule(root, graph)
     return graph_module
 

@@ -397,12 +397,18 @@
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: addmv_
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: addmv_out
 
 - func: _addmv_impl_(Tensor(a!) self, Tensor self2, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1068,6 +1074,8 @@
 - func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: count_nonzero
 
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   use_c10_dispatcher: full
@@ -2242,6 +2250,11 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool3d
 
+- func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    QuantizedCPU: quantized_max_pool1d
+
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
@@ -2427,6 +2440,8 @@
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: mode
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
