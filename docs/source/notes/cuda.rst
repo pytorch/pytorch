@@ -214,6 +214,10 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
+Use of a caching allocator can interfere with memory checking tools such as
+``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
+
 .. _cufft-plan-cache:
 
 cuFFT plan cache
