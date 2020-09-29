@@ -87,6 +87,5 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.nn.RNN`
   * :class:`torch.nn.AdaptiveLogSoftmaxWithLoss`
   * :class:`torch.autograd.Function`
-  * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
   * :class:`torch.Generator`
