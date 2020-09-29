@@ -13,7 +13,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
 import torch.distributed as dist
 from typing import Dict, Optional
 
@@ -34,12 +34,14 @@ TESTS = [
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
-    'distributed/test_distributed',
+    'distributed/test_distributed_fork',
+    'distributed/test_distributed_spawn',
     'test_distributions',
     'test_expecttest',
     'test_foreach',
     'test_indexing',
     'test_jit',
+    'test_linalg',
     'test_logging',
     'test_mkldnn',
     'test_multiprocessing',
@@ -64,6 +66,7 @@ TESTS = [
     'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
+    'test_vmap',
     'test_namedtuple_return_api',
     'test_jit_profiling',
     'test_jit_legacy',
@@ -87,7 +90,8 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
-    'test_functional_autograd_benchmark'
+    'test_functional_autograd_benchmark',
+    'test_package',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -95,7 +99,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
-    'distributed/test_distributed',
+    'distributed/test_distributed_fork',
 ]
 
 ROCM_BLOCKLIST = [
@@ -138,10 +142,11 @@ SLOW_TESTS = [
     'test_jit_profiling',
     'test_torch',
     'distributed/nn/jit/test_instantiator',
-    'distributed/test_distributed',
+    'distributed/test_distributed_fork',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
+    'distributed/test_distributed_spawn',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',
@@ -214,7 +219,7 @@ def get_executable_command(options, allow_pytest):
 
 
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
-    unittest_args = options.additional_unittest_args
+    unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append('--verbose')
     if test_module in RUN_PARALLEL_BLOCKLIST:
@@ -301,12 +306,17 @@ def test_distributed(test_module, test_directory, options):
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if sys.platform == 'win32' and backend != 'gloo':
+            continue
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
+            if sys.platform == 'win32' and not with_init_file:
+                continue
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:
-                with_init = ' with file init_method' if with_init_file else ''
+                init_str = "with {} init_method"
+                with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
                     'Running distributed tests for the {} backend{}'.format(
                         backend, with_init))
@@ -315,10 +325,10 @@ def test_distributed(test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                if test_module == "test_distributed":
-                    init_method = 'file://{}/'.format(tmp_dir)
+                if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
-                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
@@ -347,7 +357,8 @@ CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
-    'distributed/test_distributed': test_distributed,
+    'distributed/test_distributed_fork': test_distributed,
+    'distributed/test_distributed_spawn': test_distributed,
 }
 
 

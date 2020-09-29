@@ -6,6 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
@@ -31,10 +32,16 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 
 void exp_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exp_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "exp_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::exp(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::exp(a);
+    });
+  });
+}
+
+void exp2_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exp2_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::exp2(a);
     });
   });
 }
@@ -43,6 +50,14 @@ void expm1_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "expm1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::expm1(a);
+    });
+  });
+}
+
+void i0_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "i0_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_i0(a);
     });
   });
 }
@@ -71,21 +86,17 @@ void rsqrt_kernel_cuda(TensorIterator& iter) {
 
 void sqrt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sqrt_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sqrt_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::sqrt(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::sqrt(a);
     });
   });
 }
 
 void sigmoid_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        scalar_t one = scalar_t(1);
-        return  one / (one + std::exp(- a));
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      scalar_t one = scalar_t(1);
+      return  one / (one + std::exp(- a));
     });
   });
 }
@@ -97,34 +108,30 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
       iter.dtype(),
       "logit_cuda",
       [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "logit_cuda", [&] {
-          using T_ACC = acc_type<scalar_t, true>;
-          const T_ACC eps = eps_scalar.to<T_ACC>();
-          if (eps < T_ACC(0)) {
-            gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-              const T_ACC x_acc = static_cast<T_ACC>(x);
-              return c10::cuda::compat::log(x_acc / (T_ACC(1) - x_acc));
-            });
-          } else {
-            const T_ACC lo = eps;
-            const T_ACC hi = T_ACC(1) - eps;
-            gpu_kernel(
-                iter, [lo, hi] GPU_LAMBDA(scalar_t x) -> scalar_t {
-                  const T_ACC x_acc = static_cast<T_ACC>(x);
-                  T_ACC z = x_acc < lo ? lo : (x_acc > hi ? hi : x_acc);
-                  return c10::cuda::compat::log(z / (T_ACC(1) - z));
-                });
-          }
-        });
+        using T_ACC = acc_type<scalar_t, true>;
+        const T_ACC eps = eps_scalar.to<T_ACC>();
+        if (eps < T_ACC(0)) {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+            const T_ACC x_acc = static_cast<T_ACC>(x);
+            return c10::cuda::compat::log(x_acc / (T_ACC(1) - x_acc));
+          });
+        } else {
+          const T_ACC lo = eps;
+          const T_ACC hi = T_ACC(1) - eps;
+          gpu_kernel(
+              iter, [lo, hi] GPU_LAMBDA(scalar_t x) -> scalar_t {
+                const T_ACC x_acc = static_cast<T_ACC>(x);
+                T_ACC z = x_acc < lo ? lo : (x_acc > hi ? hi : x_acc);
+                return c10::cuda::compat::log(z / (T_ACC(1) - z));
+              });
+        }
       });
 }
 
 void erf_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "erf_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "erf_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::erf(a);
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::erf(a);
     });
   });
 }
@@ -173,9 +180,22 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   });
 }
 
+void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "kaiser_window_cuda", [&] {
+      const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return calc_i0(static_cast<scalar_t>(beta) * ::sqrt(1 - ::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+      });
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
+REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
@@ -186,6 +206,7 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 
 } // namespace native
 } // namespace at

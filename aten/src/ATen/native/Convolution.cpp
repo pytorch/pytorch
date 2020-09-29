@@ -198,6 +198,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
+    return false;
+  }
   if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
     if (deterministic && is_dilated()) {
       // cudnn doesn't support deterministic dilated convolution fully yet
@@ -581,9 +584,11 @@ at::Tensor convolution(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
+  // See Note [Enabling Deterministic Operations]
+  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministic();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN() || ctx.deterministic(), ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
+                          ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
 }
 
 at::Tensor convolution_overrideable(

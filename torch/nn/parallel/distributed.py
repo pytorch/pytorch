@@ -3,6 +3,8 @@ import copy
 import itertools
 import os
 import inspect
+import logging
+import warnings
 
 import torch
 
@@ -192,7 +194,6 @@ class DistributedDataParallel(Module):
         parameters).
 
     .. warning::
-
         If you plan on using this module with a ``nccl`` backend or a ``gloo``
         backend (that uses Infiniband), together with a DataLoader that uses
         multiple workers, please change the multiprocessing start method to
@@ -315,6 +316,28 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
+        gradient_as_bucket_view (bool): this is a prototype feature. When set to ``True``,
+                      gradients will be views pointing to different offsets of
+                      allreduce communication buckets. This can reduce peak memory
+                      usage, where the saved memory size will be equal to the total
+                      gradients size. Moreover, it avoids the overhead of copying
+                      between gradients and allreduce communication buckets.
+                      When gradients are views, ``detach_()`` cannot be called on the
+                      gradients. If hitting such errors, please fix it by referring to
+                      the :meth:`~torch.optim.Optimizer.zero_grad` function in
+                      ``torch/optim/optimizer.py`` as the solution.
+                      Warning! It is also found that ``gradient_as_bucket_view = true``
+                      does not work as expected when ``apex.amp`` is used for
+                      mixed precision training. ``apex.amp`` maintained stashed gradients
+                      that are used for unscaling gradients. These stashed gradients
+                      are pointed to gradients (will be communication buckets when
+                      ``gradient_as_bucket_view = true``) before starting new iteration.
+                      In new iteration, the communication buckets are mutated and thus
+                      these stashed gradients will be unexpectedly mutated as well,
+                      the unexpectedly muated stashed gradients may result in wrong
+                      results. To fix it, these stashed gradients should not be pointed
+                      to gradients, instead they should be copied from gradients when
+                      ``gradient_as_bucket_view = true``.
 
     Attributes:
         module (Module): the module to be parallelized
@@ -329,7 +352,8 @@ class DistributedDataParallel(Module):
                  process_group=None,
                  bucket_cap_mb=25,
                  find_unused_parameters=False,
-                 check_reduction=False):
+                 check_reduction=False,
+                 gradient_as_bucket_view=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -380,6 +404,7 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
+        self.gradient_as_bucket_view = gradient_as_bucket_view
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -431,7 +456,6 @@ class DistributedDataParallel(Module):
 
         if self.device_ids and len(self.device_ids) > 1:
 
-            import warnings
             warnings.warn(
                 "Single-Process Multi-GPU is not the recommended mode for "
                 "DDP. In this mode, each DDP instance operates on multiple "
@@ -516,7 +540,8 @@ class DistributedDataParallel(Module):
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
-            self.find_unused_parameters)
+            self.find_unused_parameters,
+            self.gradient_as_bucket_view)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
@@ -581,11 +606,24 @@ class DistributedDataParallel(Module):
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, ones, self.ddp_join_divide_by_initial_world_size
+                work, self.ddp_join_divide_by_initial_world_size
             )
+
+        # Calling _rebuild_buckets before forward compuation,
+        # It may allocate new buckets before deallocating old buckets
+        # inside _rebuild_buckets. To save peak memory usage,
+        # call _rebuild_buckets before the peak memory usage increases
+        # during forward computation.
+        # This should be called only once during whole training period.
+        if self.reducer._rebuild_buckets():
+            logging.info("Reducer buckets have been rebuilt in this iteration.")
 
         if self.require_forward_param_sync:
             self._sync_params()
+
+        if self.ddp_join_enabled:
+            # Notify joined ranks whether they should sync in backwards pass or not.
+            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
@@ -637,6 +675,19 @@ class DistributedDataParallel(Module):
         )
         dist.all_reduce(all_active_procs, group=self.process_group)
         return all_active_procs.item()
+
+    # When running in join mode, schedules an allreduce to notify joined ranks
+    # of whether backwards pass synchronization will run this iteraton or not.
+    def _check_global_requires_backward_grad_sync(self, is_joined_rank):
+        if not is_joined_rank and self.require_backward_grad_sync:
+            requires_sync_tensor = torch.ones(1, device=self.device)
+        else:
+            requires_sync_tensor = torch.zeros(1, device=self.device)
+
+        work = dist.all_reduce(
+            requires_sync_tensor, group=self.process_group, async_op=True
+        )
+        return work, requires_sync_tensor
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.
@@ -789,9 +840,20 @@ class DistributedDataParallel(Module):
             if enable and not has_error:
                 all_procs_joined = False
                 is_last_joiner = True
-                buckets_rebuilt = False
-                # Schedules allreduce to match fwd pass allreduce in non-joined procs
+                i = 0
+                WARN_THRESHOLD = 1000
+                warnings.simplefilter("once")
                 while not all_procs_joined:
+                    if i > WARN_THRESHOLD:
+                        my_rank = dist.get_rank(self.process_group)
+                        warnings.warn(
+                            "Detected uneven input skew of greater "
+                            f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
+                            f"has at least {WARN_THRESHOLD} fewer inputs than "
+                            "other currently active ranks. This level of skew could "
+                            "lead to performance degradation during training."
+                        )
+                    # Schedules allreduce to match fwd pass allreduce in non-joined procs
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
                         all_procs_joined = True
@@ -799,20 +861,36 @@ class DistributedDataParallel(Module):
                         # Some DDP process still needs to be joined.
                         if is_last_joiner:
                             is_last_joiner = False
+                        # It will rebuild buckets only once during training period
+                        self.reducer._rebuild_buckets()
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
+
+                        (
+                            work,
+                            should_sync_backwards_tensor,
+                        ) = self._check_global_requires_backward_grad_sync(
+                            is_joined_rank=True
+                        )
+                        work.wait()
+                        # If nonzero, then we should sync in the bwd pass.
+                        should_sync_backwards = should_sync_backwards_tensor.item() != 0
+                        # Forward param sync is disabled in the next iteration
+                        # if we are skipping grad sync this iteration. Hence, we
+                        # set require_forward_param_sync appropriately here.
+                        self.require_forward_param_sync = should_sync_backwards
+                        if not should_sync_backwards:
+                            continue
                         # Schedules one allreduce per gradient bucket to match
                         # the backwards pass allreduce.
                         self._match_all_reduce_for_bwd_pass()
                         # Check if we need to allreduce locally unused params.
                         if self.find_unused_parameters:
                             self._match_unused_params_allreduce()
-                        # If buckets not rebuilt, will push original bucket
-                        # indices to simulate a rebuild.
-                        if not buckets_rebuilt and not self.find_unused_parameters:
-                            self.reducer._push_all_rebuilt_params()
-                            buckets_rebuilt = self.reducer._rebuild_buckets()
+                        # It will push rebuilt params only once during training period
+                        self.reducer._push_all_rebuilt_params()
+                        i += 1
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)

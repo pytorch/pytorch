@@ -83,6 +83,7 @@ class TestProfiler(JitTestCase):
         # that guards a tensorexpr group
         optimized_block = next(g.findNode("prim::If").blocks())
         if_nodes = list(optimized_block.findAllNodes("prim::If"))
+
         self.assertEqual(len(if_nodes), 1)
         FileCheck().check("Group[Subgraph").run(str(if_nodes[0]))
         # no broadcasts occurred, sum_to_size have been specialized out
@@ -93,7 +94,7 @@ class TestProfiler(JitTestCase):
         y = torch.ones([1], requires_grad=True)
         broadcast_f(x, y)
         b = broadcast_f(x, y)
-        b.backward(torch.ones([2, 2], dtype=torch.float))
+        b.backward(torch.ones([2, 2], dtype=torch.float), retain_graph=True)
         b.backward(torch.ones([2, 2], dtype=torch.float))
         # warmup_backward(b, torch.ones([2, 2], dtype=torch.float))
         g = torch.jit.last_executed_optimized_graph()
@@ -145,3 +146,70 @@ class TestProfiler(JitTestCase):
         foo(2, 3)
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_not("TensorExpr").run(g)
+
+    def test_not_optimizing_property(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x + y + 1 + 2 + 3, x.size()
+
+        x = torch.ones(1)
+        foo(x, x)
+        foo(x, x)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("aten::size").run(g)
+        x = torch.ones([2, 3, 5])
+        self.assertEqual(foo(x, x), (x + x + 1 + 2 + 3, x.size()))
+
+    def test_fallback_graph_not_specialized(self):
+        @torch.jit.script
+        def foo(a, b):
+            c = a * b
+            d = c * b
+            e = d * b
+            return d + e
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+        foo(x, y)
+        foo(x, y)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("CallFunction").check_next("Tensor = prim::TupleUnpack").run(g)
+
+    def test_autograd_fallback_graph(self):
+        @torch.jit.script
+        def foo(a, b):
+            c = a * b
+            d = c * b
+            e = d * b
+            return d + e
+
+        x = torch.ones(1, requires_grad=True)
+        y = torch.ones(1, requires_grad=True)
+        foo(x, y)
+        b = foo(x, y)
+        b.backward(torch.ones([1], dtype=torch.float), retain_graph=True)
+        b.backward(torch.ones([1], dtype=torch.float))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("fallback_function").check_next("CallFunction").run(g)
+
+    def test_iterative_fusion(self):
+        @torch.jit.script
+        def foo(a, b, c, d):
+            a = a + b
+            b.add_(3)
+            c = c + b + d
+            a = a + 1
+            return a, c
+
+        x = torch.ones(1, requires_grad=False)
+        foo(x, x, x, x)
+        foo(x, x, x, x)
+
+        # when we iterate through the block, we will start
+        # by fusing a = a + b with a = a + 1
+        # if we were to continue iteration from that fusion point,
+        # would miss the fusion opportunity of c = c + d + b
+
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(len(list(g.findAllNodes("prim::TensorExprGroup"))), 2)

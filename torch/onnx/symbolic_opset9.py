@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -108,11 +103,11 @@ def mul(g, self, other):
 
 
 def div(g, self, other):
-    return g.op("Div", self, other)
+    return true_divide(g, self, other)
 
 
 def floor_divide(g, self, other):
-    out = div(g, self, other)
+    out = g.op('Div', self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
     # (eg. -0.1 should become -0 )
@@ -149,19 +144,19 @@ def true_divide(g, self, other):
     # Case 1: both values are floating
     # Performs div as usual
     if sym_help._is_fp(self) and sym_help._is_fp(other):
-        return div(g, self, other)
+        return g.op("Div", self, other)
 
     # Case 2: self is floating, other is not
     # Casts other to self's dtype
     if sym_help._is_fp(self):
-        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
-        return div(g, self, other)
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        return g.op("Div", self, other)
 
     # Case 3: other is floating, self is not
     # Casts self to other's dtype
     if sym_help._is_fp(other):
-        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
-        return div(g, self, other)
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
+        return g.op("Div", self, other)
 
     # Case 4: neither is floating
     # Casts both inputs to the default scalar type
@@ -171,9 +166,9 @@ def true_divide(g, self, other):
     if torch.get_default_dtype() is torch.double:
         onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Double']
 
-    g.op("Cast", self, to_i=onnx_scalar_type)
-    g.op("Cast", other, to_i=onnx_scalar_type)
-    return div(g, self, other)
+    self = g.op("Cast", self, to_i=onnx_scalar_type)
+    other = g.op("Cast", other, to_i=onnx_scalar_type)
+    return g.op("Div", self, other)
 
 
 def reciprocal(g, self):
@@ -190,6 +185,10 @@ def cat(g, tensor_list, dim):
 def stack(g, tensor_list, dim):
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in sym_help._unpack_list(tensor_list)]
     return g.op("Concat", *unsqueezed, axis_i=dim)
+
+
+def _list(g, self):
+    return self
 
 
 def mm(g, self, other):
@@ -221,7 +220,7 @@ def sqrt(g, self):
 
 
 def rsqrt(g, self):
-    return div(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
+    return g.op("Div", sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
 
 
 def tanh(g, self):
@@ -375,7 +374,7 @@ def expand(g, self, size, implicit):
         # Expand with -1 dim value means dim is unchanged.
         # Since onnx::expand supports two-way broadcasting,
         # -1 dim value can be exported to onnx as 1
-        size = view(g, stack(g, size, 0), [-1])
+        size = view(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1])))
     dtype = 4  # dim type is int64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
@@ -462,12 +461,9 @@ def view(g, self, size):
     if sym_help._is_value(size):
         shape = size
     else:
-        if self.isCompleteTensor():
-            self_sizes = self.type().sizes()
-            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-                return g.op("Flatten", self, axis_i=1)
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
+
 
 def view_as(g, self, other):
     shape = g.op("Shape", other)
@@ -620,6 +616,10 @@ def ceil(g, input):
 
 def floor(g, input):
     return g.op("Floor", input)
+
+
+def _len(g, self):
+    return g.op("Size", self)
 
 
 @parse_args('v', 't', 't')
@@ -1175,7 +1175,7 @@ def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, gr
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
-    sym_help.assert_training_mode(training, "dropout")
+    sym_help.assert_training_mode(training, "batch_norm")
     input_sizes = input.type().sizes()
 
     if weight is None or sym_help._is_none(weight):
@@ -1221,7 +1221,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     denominator = sqrt(g, add(g, variance, eps_cst))
 
-    layer_norm = div(g, numerator, denominator)
+    layer_norm = g.op("Div", numerator, denominator)
 
     if not (weight is None or sym_help._is_none(weight)):
         layer_norm = mul(g, layer_norm, weight)
@@ -1527,6 +1527,13 @@ def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
+def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None and self.isCompleteTensor():
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return empty(g, sizes, dtype, layout, device, pin_memory)
+
+
 def scalar_tensor(g, scalar, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
@@ -1534,24 +1541,26 @@ def scalar_tensor(g, scalar, dtype, *options):
     scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
     return scalar
 
+
 def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if sym_help._is_packed_list(data):
         if dtype is None:
             dtype = sym_help._unpack_list(data)[0].type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        input_list = list()   
+        input_list = list()
         for t in sym_help._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = g.op("Reshape", t, shape_reference)
             t = g.op("Cast", t, to_i=sym_help.scalar_type_to_onnx[dtype])
-            input_list.append(t)    
+            input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            dtype = sym_help._maybe_get_const(data, 't').type().scalarType()
+            dtype = data.type().scalarType()
             dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
+
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
@@ -1571,9 +1580,8 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'v', 'i', 'v', 'v', 'v')
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if dtype is None:
+    if dtype is None and self.isCompleteTensor():
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return zeros(g, sizes, dtype, layout, device, pin_memory)
@@ -1621,6 +1629,13 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+
+
+def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
+    if dtype is None and self.isCompleteTensor():
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
 def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
@@ -1689,6 +1704,7 @@ def unsqueeze(g, self, dim):
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
     return g.op("Unsqueeze", self, axes_i=[dim])
+
 
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
@@ -1764,12 +1780,12 @@ def pixel_shuffle(g, self, upscale_factor):
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = view(g, self, [-1, output_channel, upscale_factor, upscale_factor,
-                                dims[2], dims[3]])
+    after_view = view(g, self, g.op("Constant", value_t=torch.tensor([-1, output_channel, upscale_factor,
+                                                                      upscale_factor, dims[2], dims[3]])))
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
-                [-1, output_channel, dims[2] * upscale_factor, dims[3] *
-                 upscale_factor])
+                g.op("Constant", value_t=torch.tensor([-1, output_channel, dims[2] * upscale_factor,
+                                                       dims[3] * upscale_factor])))
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -2117,7 +2133,7 @@ def narrow(g, input, dim, start, length):
 
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, 'i')
@@ -2127,7 +2143,7 @@ def argmax(g, input, dim, keepdim):
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = reshape(g, input, (-1,))
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, 'i')
@@ -2222,7 +2238,7 @@ def _std(g, input, dim, unbiased, keepdim):
 # torch.std(input, unbiased=True)
 # torch.std(input, dim, keepdim=False, unbiased=True)
 def std(g, input, *args):
-    if args[0].type().isSubtypeOf(ListType.ofInts()):
+    if len(args) == 3:
         return _std(g, input, *args)
     else:
         return _std(g, input, None, args[0], None)
@@ -2243,7 +2259,23 @@ def arange(g, *args):
             dtype = 4  # default to int64
         return dtype
 
-    if len(args) == 5:
+    if len(args) == 2:
+        # aten::arange(Scalar end, Tensor out)
+        end = g.op("Unsqueeze", args[0], axes_i=[0])
+        dtype = 4  # default to int64
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, end, dtype, None, None)), axes_i=[1])
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 4:
+        # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
+        dtype = 4  # default to int64
+        step = g.op("Unsqueeze", args[2], axes_i=[0])
+        end = g.op("Unsqueeze", args[1], axes_i=[0])
+        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        range_tensor = g.op("Div", g.op("Sub", end, start), step)
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, range_tensor, None, None, None)), axes_i=[1])
+        arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 5:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[1])
         end = g.op("Unsqueeze", args[0], axes_i=[0])
@@ -2418,7 +2450,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 def meshgrid(g, tensor_list):
-    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors = [view(g, t, g.op("Constant", value_t=torch.LongTensor([-1]))) for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
     out = []
@@ -2440,7 +2472,7 @@ def remainder(g, input, other):
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
-    erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
+    erf = g.op('Erf', g.op('Div', self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
 

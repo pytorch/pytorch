@@ -12,7 +12,8 @@ namespace c10d {
 void broadcast_coalesced(
     std::shared_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
-    size_t buffer_size, int rank = 0);
+    size_t buffer_size,
+    int rank = 0);
 
 // This class passes bucket contents tensor (for multiple replicas) to
 // DDP communication hook.
@@ -20,12 +21,15 @@ void broadcast_coalesced(
 // mappings as well.
 class GradBucket {
  public:
-  explicit GradBucket(std::vector<at::Tensor> tensors);
+  explicit GradBucket(const std::vector<at::Tensor>& tensors)
+      : tensors_(tensors) {}
   // Each tensor in the list that getTensors returns refers to the replica on
   // each device. There will be multiple replicas only in the case of single
   // process multiple device mode. In the single process single device mode,
   // this list would consist of only a single tensor.
-  const std::vector<at::Tensor>& getTensors() const;
+  const std::vector<at::Tensor>& getTensors() const {
+    return tensors_;
+  }
 
  private:
   std::vector<at::Tensor> tensors_;
@@ -34,7 +38,7 @@ class GradBucket {
 // DDP's c10d reducer allows communication hooks defined as a sub class
 // of CommHookInterface. CommHookInterface is an abstract class and can
 // be used to implement both Python and CPP hooks.
-struct TORCH_API CommHookInterface {
+struct TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
@@ -55,7 +59,7 @@ struct TORCH_API CommHookInterface {
 
 // PythonCommHook enables registering a python hook to c10d reducer and is a
 // sub class of CommHookInterface.
-class TORCH_API PythonCommHook : public CommHookInterface {
+class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
  public:
   // The constructor takes a state and a callable hook. Inputs are Python
   // objects. The state is passed to the hook in runHook function can be used to

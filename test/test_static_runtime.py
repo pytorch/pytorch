@@ -16,6 +16,7 @@ class StaticRuntime:
     def __call__(self, *inps):
         return self.static_runtime.run(inps)
 
+
 def linear_shim(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     output = input.matmul(weight.t())
@@ -23,6 +24,8 @@ def linear_shim(input, weight, bias=None):
         output += bias
     ret = output
     return ret
+
+
 torch.nn.functional.linear = linear_shim
 
 
@@ -92,6 +95,7 @@ def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
 
+
 class TestStaticRuntime(TestCase):
     def test_multihead_attention_layer(self):
         HID_DIM = 256
@@ -102,7 +106,8 @@ class TestStaticRuntime(TestCase):
         DROPOUT = 0.1
         device = torch.device("cpu")
         attention = MultiHeadAttentionLayer(HID_DIM, HEADS, DROPOUT, device).to(device)
-        src = torch.randn(BATCH_SIZE, QUERY_LEN, HID_DIM).to(device)
+        with torch.no_grad():
+            src = torch.randn(BATCH_SIZE, QUERY_LEN, HID_DIM).to(device)
         src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
 
         attention.eval()
@@ -125,23 +130,34 @@ class TestStaticRuntime(TestCase):
         bot_l_acc = StaticRuntime(bot_l)
         top_l = create_mlp(ln_top, sigmoid_top)
         top_l_acc = StaticRuntime(top_l)
-        bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
-        top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
+        with torch.no_grad():
+            bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
+            top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
         ref_bot = bot_l(bot_inp)
         acc_bot = bot_l_acc(bot_inp)[0]
         torch.testing.assert_allclose(acc_bot, ref_bot)
         ref_top = top_l(top_inp)
         acc_top = top_l_acc(top_inp)[0]
         torch.testing.assert_allclose(acc_top, ref_top)
+        for _ in range(5):
+            with torch.no_grad():
+                bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
+                top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
+            ref_bot = bot_l(bot_inp)
+            acc_bot = bot_l_acc(bot_inp)[0]
+            torch.testing.assert_allclose(acc_bot, ref_bot)
+            ref_top = top_l(top_inp)
+            acc_top = top_l_acc(top_inp)[0]
+            torch.testing.assert_allclose(acc_top, ref_top)
 
+    def test_trivial_graph(self):
+        s = torch.full((2, 2), 2)
+        tg = torch.jit.script(trivial_graph)
+        o_ref = tg(s, s, s)
+        tg_a = StaticRuntime(tg)
+        o_test = tg_a(s, s, s)[0]
+        torch.testing.assert_allclose(o_ref, o_test)
 
-    # def test_trivial_graph(self):
-    #     s = torch.full((2, 2), 2)
-    #     tg = torch.jit.script(trivial_graph)
-    #     o_ref = tg(s, s, s)
-    #     tg_a = StaticRuntime(tg)
-    #     o_test = tg_a(s, s, s)[0]
-    #     torch.testing.assert_allclose(o_ref, o_test)
 
 if __name__ == "__main__":
     run_tests()

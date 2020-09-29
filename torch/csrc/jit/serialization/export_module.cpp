@@ -269,32 +269,24 @@ class ScriptModuleSerializer {
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
 
-    try {
-      writeExtraFiles(module, extra_files);
-      // Serialize the model object
-      writeArchive("data", module._ivalue());
-      // Then we serialize all code info.
-      writeCode(module.type());
-      // The tensor constants from the code are written to a separate archive
-      // so loading the code does not depend on loading the data
-      std::vector<IValue> ivalue_constants(
-          constant_table_.begin(), constant_table_.end());
-      writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-      if (bytecode_format) {
-        writeByteCode(module, save_mobile_debug_info);
-        writeMobileMetadata(module, extra_files);
-      }
+    writeExtraFiles(module, extra_files);
+    // Serialize the model object
+    writeArchive("data", module._ivalue());
+    // Then we serialize all code info.
+    writeCode(module.type());
+    // The tensor constants from the code are written to a separate archive
+    // so loading the code does not depend on loading the data
+    std::vector<IValue> ivalue_constants(
+        constant_table_.begin(), constant_table_.end());
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    if (bytecode_format) {
+      writeByteCode(module, save_mobile_debug_info);
+      writeMobileMetadata(module, extra_files);
+    }
 
-      // Acquires and sets minimum (dynamic) version
-      for (auto& item : file_streams_) {
-        writer_.setMinVersion(item.value().minVersion());
-      }
-    } catch (c10::Error& error) {
-      std::cerr << "Error in module serializer: " << error.what() << std::endl;
-      std::terminate();
-    } catch (...) {
-      std::cerr << "Error in module serializer: " << std::endl;
-      std::terminate();
+    // Acquires and sets minimum (dynamic) version
+    for (auto& item : file_streams_) {
+      writer_.setMinVersion(item.value().minVersion());
     }
   }
 
@@ -379,7 +371,7 @@ class ScriptModuleSerializer {
   }
 
   void writeCode(const at::NamedTypePtr& root_type) {
-    class_deps_.push_back(root_type);
+    class_deps_.add(root_type);
     for (size_t i = 0; i < class_deps_.size(); ++i) {
       // note: convertNameType may extend class_deps_, so re-checking
       // .size() is necessary
@@ -469,7 +461,7 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
-  std::vector<c10::NamedTypePtr> class_deps_;
+  PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be

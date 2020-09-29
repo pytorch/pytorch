@@ -14,13 +14,15 @@
 namespace torch {
 namespace jit {
 
+TORCH_API std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g);
+TORCH_API std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    const torch::jit::Module& m);
+
+class ProcessedNode;
 class TORCH_API StaticRuntime {
  public:
-  explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g)
-      : graph_(std::move(g)) {}
-
-  explicit StaticRuntime(const torch::jit::Module& m);
-
+  explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g);
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps) const;
 
 #ifdef FBCODE_CAFFE2
@@ -30,21 +32,28 @@ class TORCH_API StaticRuntime {
 #endif
 
  private:
-  torch::jit::Module module_;
   std::shared_ptr<torch::jit::Graph> graph_;
 
   // Static runtime states
-  // Constant table (including weights)
-  ConstantMap constant_table_;
+  // Value table (including weights)
+  mutable ConstantMap workspace_;
+
   // The nodes we need to run
-  std::vector<std::pair<Node*, Operation>> nodes_;
+  std::vector<ProcessedNode> nodes_;
+};
 
-  void getInputIValues(
-      Node* node,
-      const ConstantMap& ws,
-      std::vector<IValue>& stack) const;
+class ProcessedNode {
+ public:
+  ProcessedNode(Node* n);
+  void run(StaticRuntime::ConstantMap& workspace) const;
+  Node* get_node() const {
+    return node_;
+  }
 
-  void runNodes(ConstantMap& ws_) const;
+ private:
+  Node* node_;
+  c10::optional<Operation> op_;
+  c10::optional<std::function<void(StaticRuntime::ConstantMap&)>> fn_;
 };
 
 } // namespace jit

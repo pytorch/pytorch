@@ -8,12 +8,18 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
 #include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
 #include <magma.h>
 #include <magma_types.h>
+
+const bool use_magma_ = true;
+#else
+const bool use_magma_ = false;
+
 #endif
 
 namespace at {
@@ -339,6 +345,24 @@ void magmaCholesky<float>(
 }
 
 template<>
+void magmaCholesky<c10::complex<double>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<double>* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zpotrf_gpu(uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholesky<c10::complex<float>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<float>* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cpotrf_gpu(uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaCholeskyBatched<double>(
     magma_uplo_t uplo, magma_int_t n, double** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
@@ -351,6 +375,22 @@ void magmaCholeskyBatched<float>(
     magma_uplo_t uplo, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_spotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyBatched<c10::complex<double>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<double>** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  magma_zpotrf_batched(uplo, n, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyBatched<c10::complex<float>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -713,7 +753,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 #endif
 }
 
-Tensor _inverse_helper_cuda(const Tensor& self) {
+Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
     std::vector<int64_t> infos(batchCount(self), 0);
@@ -731,6 +771,18 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
     singleCheckErrors(info, "inverse_cuda");
   }
   return self_inv_working_copy;
+}
+
+Tensor _inverse_helper_cuda(const Tensor& self) {
+#ifdef USE_CUSOLVER
+  if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
+    return _inverse_helper_cuda_lib(self);    // cusolver or cublas
+  } else {
+    return _inverse_helper_cuda_legacy(self); // magma-cuda
+  }
+#else
+  return _inverse_helper_cuda_legacy(self); // magma-cuda
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -886,7 +938,7 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
     self_working_copy = cloneBatchedColumnMajor(self);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda", [&]{
     apply_cholesky<scalar_t>(self_working_copy, false, infos);
   });
   if (self.dim() > 2) {
