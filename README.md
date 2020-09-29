@@ -184,6 +184,13 @@ On MacOS
 conda install pkg-config libuv
 ```
 
+On Windows
+```bash
+# Add these packages if torch.distributed is needed.
+# Distributed package support on Windows is a prototype feature and is subject to changes.
+conda install -y -q -c rdonnelly libuv
+```
+
 #### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
