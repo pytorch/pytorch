@@ -241,13 +241,13 @@ class EventList(list):
         """Averages all function events over their keys.
 
         Arguments:
-            group_by_input_shapes: The key would become
-            (event name, input dimensions) rather than just event name.
-            This is useful to see which dimensionality contributes to the runtime
-            the most and may help with dimension specific optimizations or
-            choosing best candidates for quantization (aka fitting a roof line)
+            group_by_input_shapes: group entries by
+            (event name, input shapes) rather than just event name.
+            This is useful to see which input shapes contribute to the runtime
+            the most and may help with size-specific optimizations or
+            choosing the best candidates for quantization (aka fitting a roof line)
 
-            group_by_stack_n: Group by top n stack trace entries
+            group_by_stack_n: group by top n stack trace entries
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -314,7 +314,7 @@ class profile(object):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
-        with_stack (bool, optional): record source information for the ops
+        with_stack (bool, optional): record source information (file and line number) for the ops
 
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler

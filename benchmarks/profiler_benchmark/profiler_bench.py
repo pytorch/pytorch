@@ -36,6 +36,8 @@ if __name__ == '__main__':
     parser.add_argument('--workload', default='loop', type=str)
     parser.add_argument('--internal_iter', default=256, type=int)
     parser.add_argument('--n', default=100, type=int)
+    parser.add_argument('--use_timer', action='store_true')
+    parser.add_argument('--timer_min_run_time', default=100, type=int)
 
     args = parser.parse_args()
 
@@ -86,12 +88,20 @@ if __name__ == '__main__':
             def payload():
                 return workload(input_x)
 
-        runtimes = timeit.repeat(payload, repeat=args.n, number=1)
-        avg_time = statistics.mean(runtimes) * 1000.0
-        stddev_time = statistics.stdev(runtimes) * 1000.0
-        print("\tavg. time: {:.3f} ms, stddev: {:.3f} ms".format(
-            avg_time, stddev_time))
-        if args.workload == "loop":
-            print("\ttime per iteration: {:.3f} ms".format(
-                avg_time / args.internal_iter))
+        if args.use_timer:
+            t = Timer(
+                "payload()",
+                globals = {"payload": payload},
+                timer=timeit.default_timer,
+            ).blocked_autorange(min_run_time=args.timer_min_run_time)
+            print(m)
+        else:
+            runtimes = timeit.repeat(payload, repeat=args.n, number=1)
+            avg_time = statistics.mean(runtimes) * 1000.0
+            stddev_time = statistics.stdev(runtimes) * 1000.0
+            print("\tavg. time: {:.3f} ms, stddev: {:.3f} ms".format(
+                avg_time, stddev_time))
+            if args.workload == "loop":
+                print("\ttime per iteration: {:.3f} ms".format(
+                    avg_time / args.internal_iter))
         print()
