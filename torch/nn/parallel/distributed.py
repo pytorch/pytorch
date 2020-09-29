@@ -320,8 +320,7 @@ class DistributedDataParallel(Module):
                       gradients are views, ``detach_()`` cannot be called on the
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
-                      function in [``torch/optim/optimizer.py``](https://github.com/pytorch/pytorch/blob/a0f0cb1608427a0d196ce635de04afe54f7ca0e1/torch/optim/optimizer.py#L184-L192)
-                      as a solution.
+                      function in ``torch/optim/optimizer.py`` as a solution.
 
 
     Attributes:
