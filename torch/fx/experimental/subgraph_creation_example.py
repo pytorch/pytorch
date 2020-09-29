@@ -3,7 +3,7 @@ from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx.graph_module import GraphModule
 from torch.fx.symbolic_trace import symbolic_trace
-from typing import Callable, List, Dict, Set, Any, Optional
+from typing import Callable, List, Dict, Set, Any, Optional, Tuple
 
 class MyModule(torch.nn.Module):
     def __init__(self):
@@ -136,8 +136,8 @@ def split_module(
                 partition.targets[node.target] = target_attr
                 target = target_atoms[-1]
 
-            new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,
-                                                   kwargs=gathered_kwargs)
+            new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,  # type: ignore 
+                                                   kwargs=gathered_kwargs)  # type: ignore  
             partition.environment[node] = new_node
 
     # Set up values to construct base module
@@ -174,12 +174,13 @@ def split_module(
         base_mod_attrs[submod_name] = GraphModule(partition.targets, partition.graph)
 
         # Emit call in base graph to this submodule
-        output_val = base_mod_graph.call_module(submod_name, [base_mod_env[name] for name in partition.inputs])
+        output_args : Optional[Tuple[torch.fx.node.Argument, ...]] = tuple([base_mod_env[name] for name in partition.inputs])
+        output_val = base_mod_graph.call_module(submod_name, output_args)
         if len(partition.outputs) > 1:
             # Unpack multiple return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)
             for i, output_name in enumerate(partition.outputs):
-                base_mod_env[output_name] = output_val_proxy[i].node
+                base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore
         else:
             base_mod_env[list(partition.outputs)[0]] = output_val
 
