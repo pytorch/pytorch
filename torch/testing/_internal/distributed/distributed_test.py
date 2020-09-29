@@ -3360,7 +3360,7 @@ class DistributedTest:
 
             device_id = self.rank
             # Ensure the test works for both find_unused_parameter and broadcast_buffer settings.
-            for (find_unused, broadcast_buffers) in itertools.product([True, False], [True, False]):
+            for (find_unused, broadcast_buffers) in itertools.product([False, True], [False, True]):
                 model = TestModel(self.rank).float().to(device_id)
                 # Note that the model can have different shape buffers if we pass
                 # them in to be ignored as well.
@@ -3390,8 +3390,8 @@ class DistributedTest:
                 ddp = torch.nn.parallel.DistributedDataParallel(
                     model,
                     device_ids=[device_id],
-                    find_unused_parameters=False,
-                    broadcast_buffers=True,
+                    find_unused_parameters=find_unused,
+                    broadcast_buffers=broadcast_buffers,
                 )
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
