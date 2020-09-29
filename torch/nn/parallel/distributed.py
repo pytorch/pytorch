@@ -512,20 +512,41 @@ class DistributedDataParallel(Module):
             for module_buffers in named_module_buffers
         ]
         # Build tuple of (module, parameter) for all parameters that require grads.
-        modules_and_parameters = [
-            [
-                (module, parameter)
-                for module_name, module in replica.named_modules()
-                for parameter in [
-                    param
-                    # for name, param in named_parameters(module, recurse=False)
-                    for param_name, param in module.named_parameters(recurse=False)
-                    if param.requires_grad
-                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
+        if self.device_ids and len(self.device_ids) > 1:
+            # Single-process multi-device mode,does not support self.parameters_to_ignore.
+            if self.parameters_to_ignore:
+                raise ValueError(
+                    "Single-Process multi-device mode does not "
+                    "support ignoring certain parameters upfront. Please consider "
+                    "using one DDP instance per device."
+                )
+
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module in replica.modules()
+                    for parameter in filter(
+                        lambda parameter: parameter.requires_grad,
+                        parameters(module, recurse=False))
+                ] for replica in self._module_copies]
+        else:
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module_name, module in replica.named_modules()
+                    for parameter in [
+                        param
+                        # Note that we access module.named_parameters instead of
+                        # parameters(module). parameters(module) is only needed in the
+                        # single-process multi device case, where it accesses replicated
+                        # parameters through _former_parameters.
+                        for param_name, param in module.named_parameters(recurse=False)
+                        if param.requires_grad
+                        and f"{module_name}.{param_name}" not in self.parameters_to_ignore
+                    ]
                 ]
+                for replica in self._module_copies
             ]
-            for replica in self._module_copies
-        ]
 
         # Build list of parameters.
         parameters = [
