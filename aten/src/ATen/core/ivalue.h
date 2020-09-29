@@ -346,11 +346,16 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
-  // ComplexDouble
-  IValue(c10::intrusive_ptr<c10::complex<double>> c);
+ // ComplexDouble
+  IValue(c10::complex<double> c)
+  : tag(Tag::ComplexDouble), is_intrusive_ptr(false) {
+    payload.as_complexdouble = c;
+  }
   bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
-  c10::intrusive_ptr<c10::complex<double>> toComplexDouble() &&;
-  c10::intrusive_ptr<c10::complex<double>> toComplexDouble() const &;
+  c10::complex<double> toComplexDouble() const {
+    AT_ASSERT(isComplexDouble());
+    return payload.as_complexdouble;
+  }
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
@@ -426,6 +431,12 @@ struct CAFFE2_API IValue final {
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
   std::vector<double> toDoubleVector() const;
+
+  // ComplexDoubleList
+  bool isComplexDoubleList() const;
+  c10::List<c10::complex<double>> toComplexDoubleList() &&;
+  c10::List<c10::complex<double>> toComplexDoubleList() const &;
+  std::vector<c10::complex<double>> toComplexDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -753,6 +764,7 @@ struct CAFFE2_API IValue final {
     int64_t as_int;
     double as_double;
     bool as_bool;
+    c10::complex<double> as_complexdouble;
     c10::intrusive_ptr_target* as_intrusive_ptr;
     struct {
       DeviceType type;

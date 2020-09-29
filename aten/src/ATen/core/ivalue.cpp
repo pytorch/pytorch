@@ -111,8 +111,6 @@ TypePtr IValue::type() const {
       return GeneratorType::get();
     case Tag::Quantizer:
       return QuantizerType::get();
-    case Tag::ComplexDouble:
-      return ComplexDoubleType::get();
     case Tag::Enum:
       return toEnumHolder()->type();
   }
@@ -261,6 +259,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return lhs.toTensor().eq(rhs.toTensor());
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::ComplexDouble:
+      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::Bool:
@@ -283,7 +283,6 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
-    case Tag::ComplexDouble:
       return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
@@ -612,6 +611,14 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << std::setprecision(std::numeric_limits<double>::max_digits10)
         << v.toDouble()
         << std::setprecision(orig_prec);
+    } case IValue::Tag::ComplexDouble: {
+      c10::complex<double> d = v.toComplexDouble();
+      IValue real(d.real()), imag(d.imag());
+      auto sign = "";
+      if (d.imag() >= 0) {
+        sign = "+";
+      }
+      return out << real << sign << imag << "j";
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
