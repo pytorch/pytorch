@@ -8224,6 +8224,23 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: _syevd_helper(Tensor self, bool compute_v, str? UPLO) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _syevd_helper_cpu
+    # CUDA: _syevd_helper_cuda
+
+- func: linalg_eigh(Tensor self, str? UPLO) -> (Tensor, Tensor)
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+
+- func: linalg_eigvalsh(Tensor self, str? UPLO) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
