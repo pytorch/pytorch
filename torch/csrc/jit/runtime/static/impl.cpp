@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/runtime/static/impl.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
@@ -14,20 +14,16 @@ namespace jit {
 using c10::DispatchKey;
 using c10::RegisterOperators;
 
-StaticRuntime::StaticRuntime(const torch::jit::Module& m)
-    : module_(m.copy()), graph_(nullptr) {
-  module_.eval();
-  module_ = freeze_module(module_);
-  graph_ = module_.get_method("forward").graph();
+std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g) {
+  Inline(*g);
+  ConstantPropagation(g);
+  Canonicalize(g);
+  ConstantPropagation(g);
+  RemoveTensorMutation(g);
+  ConstantPropagation(g);
 
-  Inline(*graph_);
-  ConstantPropagation(graph_);
-  Canonicalize(graph_);
-  ConstantPropagation(graph_);
-  RemoveTensorMutation(graph_);
-  ConstantPropagation(graph_);
-
-  for (auto n : graph_->nodes()) {
+  for (auto n : g->nodes()) {
     if (n->kind() == c10::Symbol::fromQualString("prim::GetAttr")) {
       throw std::runtime_error("Cannot accelerate unfrozen graphs");
     }
@@ -45,12 +41,25 @@ StaticRuntime::StaticRuntime(const torch::jit::Module& m)
   }
 
   // remove unused input 0 from graph
-  if (graph_->inputs().at(0)->type()->is_module()) {
-    if (!graph_->inputs().at(0)->hasUses()) {
-      graph_->eraseInput(0);
+  if (g->inputs().at(0)->type()->is_module()) {
+    if (!g->inputs().at(0)->hasUses()) {
+      g->eraseInput(0);
     }
   }
 
+  return g;
+}
+
+std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    const torch::jit::Module& m) {
+  auto module = m.copy();
+  module.eval();
+  module = freeze_module(module);
+  auto g = module.get_method("forward").graph();
+  return PrepareForStaticRuntime(g);
+}
+
+StaticRuntime::StaticRuntime(std::shared_ptr<torch::jit::Graph> g) : graph_(g) {
   // fill workspace_ with constants
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
@@ -63,19 +72,13 @@ StaticRuntime::StaticRuntime(const torch::jit::Module& m)
 }
 
 std::vector<at::Tensor> StaticRuntime::run(
-    const std::vector<at::Tensor>& inps) {
+    const std::vector<at::Tensor>& inps) const {
   // Container for inputs, outputs, and activations (excluding parameters)
 
-  int start = 0;
-  if (graph_->inputs().size() != inps.size()) {
-    start = 1;
-    CHECK_EQ(graph_->inputs().size(), inps.size() + 1);
-    CHECK((graph_->inputs().at(0)->type()->is_module()));
-    workspace_[graph_->inputs()[0]] = module_._ivalue();
-  }
+  TORCH_INTERNAL_ASSERT(graph_->inputs().size() == inps.size());
 
   for (size_t i = 0; i < inps.size(); i++) {
-    workspace_[graph_->inputs()[i + start]] = inps[i];
+    workspace_[graph_->inputs()[i]] = inps[i];
   }
 
   for (const auto& n : nodes_) {
