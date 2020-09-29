@@ -613,7 +613,7 @@ namespace {
                 (tensors.seq_length >=10 && bsize <=32));
       }
     } else if (prop->major >= 8) {
-      // Based on tests by Vasily Volkov.  He only tried bsize <= 128,
+      // Based on tests by Vasily Volkov and xwang233.  Vasily only tried bsize <= 128,
       // so conservatively enable persistence for bsize <= 128 only.
       // TODO:  Run more tests for bsize > 128.
       if (rnn.mode == CUDNN_GRU) {
