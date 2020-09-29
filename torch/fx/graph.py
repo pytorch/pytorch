@@ -97,7 +97,8 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
-        n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
+        sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
+        n = Node(self, sanitized_name, op, target, args, kwargs)
         self._nodes.append(n)
         return n
 
@@ -174,6 +175,14 @@ class Graph:
         if op[0].isdigit():
             op = f'_{op}'
 
+        return self._register_name_used(op)
+
+    def _register_name_used(self, op : str) -> str:
+        """
+        Even if a user provides us with a name, we must register that that
+        name is used to prevent duplication of names from further nodes as
+        well as ensure that the name provided does not shadow a builtin.
+        """
         if op not in self._used_names:
             self._used_names[op] = 0
             # Avoid shadowing PyTorch and Python builtins.
