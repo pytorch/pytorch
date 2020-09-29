@@ -73,6 +73,10 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
 
+#ifdef USE_FBGEMM
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+      input, input_rows, input_columns, output_data);
+#else
   for (std::size_t row = 0; row < input_rows; ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
     const float* input_row_scale_zp =
@@ -84,15 +88,17 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
   } // input_rows
+#endif // USE_FBGEMM
   return output;
 }
 
-Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
+Tensor _qembeddingbag_nbit_unpack_helper(
+    const Tensor& packed_weight,
+    int BIT_RATE) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
-  constexpr int NUM_ELEM_PER_BYTE = 2;
-  constexpr int BIT_RATE = 4;
+  int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
   // The rest of input_columns is the number of values in the original row.
@@ -106,6 +112,10 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
       packed_weight.options().dtype(kFloat),
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
+#ifdef USE_FBGEMM
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+      BIT_RATE, input_data, input_rows, input_columns, output_data);
+#else
   auto output_columns = output_dimensions[1];
   for (size_t row = 0; row < input_rows; ++row) {
     float* output_row = output_data + row * output_columns;
@@ -123,7 +133,33 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
       output_row[col] = scale * quantized + zero_point;
     } // output_columns
   } // input_rows
+#endif // USE_FBGEMM
+
   return output;
+}
+
+// De-quantizes the result of the qembeddingbag_4bit_prepack operator.
+// The input is expected to first have quantized values,
+// then 2-byte fp16 scale and 2-byte zero_offset.
+// The output is a matrix containing only the values, but de-quantized.
+// De-quantization is performed by multiplying each value by its
+// row's scale and zero_point parameters. The de-quantized values
+// will thus not be exactly equal to the original, un-quantized
+// floating point values.
+Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
+  return _qembeddingbag_nbit_unpack_helper(packed_weight, 4 /*BIT_RATE*/);
+}
+
+// De-quantizes the result of the qembeddingbag_2bit_prepack operator.
+// The input is expected to first have quantized values,
+// then 2-byte fp16 scale and 2-byte zero_offset.
+// The output is a matrix containing only the values, but de-quantized.
+// De-quantization is performed by multiplying each value by its
+// row's scale and zero_point parameters. The de-quantized values
+// will thus not be exactly equal to the original, un-quantized
+// floating point values.
+Tensor qembeddingbag_2bit_unpack(const Tensor& packed_weight) {
+  return _qembeddingbag_nbit_unpack_helper(packed_weight, 2 /*BIT_RATE*/);
 }
 
 class QEmbeddingUnpackWeights final {
@@ -137,6 +173,7 @@ class QEmbeddingUnpackWeights final {
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl("embedding_bag_byte_unpack", qembeddingbag_byte_unpack);
   m.impl("embedding_bag_4bit_unpack", qembeddingbag_4bit_unpack);
+  m.impl("embedding_bag_2bit_unpack", qembeddingbag_2bit_unpack);
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {

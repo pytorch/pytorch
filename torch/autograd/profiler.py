@@ -1,5 +1,7 @@
 import itertools
+from typing import Any
 import torch
+from torch.futures import Future
 
 from collections import defaultdict, namedtuple
 from operator import attrgetter
@@ -91,6 +93,12 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
+                        assert (
+                            event.cpu_parent is None
+                        ), "There is already a CPU parent event for {}".format(
+                            event.key
+                        )
+                        event.set_cpu_parent(parent)
                         break
 
                 current_events.append(event)
@@ -105,7 +113,7 @@ class EventList(list):
     def cpu_children_populated(self):
         return self._cpu_children_populated
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -114,6 +122,11 @@ class EventList(list):
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
                 ``cuda_time_total``, ``cpu_memory_usage``, ``cuda_memory_usage``,
                 ``self_cpu_memory_usage``, ``self_cuda_memory_usage``, ``count``.
+            top_level_events_only(bool, optional): Boolean flag to determine the
+                selection of events to display. If true, the profiler will only
+                display events at top level like top-level invocation of python
+                `lstm`, python `add` or other functions, nested events like low-level
+                cpu/cuda ops events are omitted for profiler result readability.
 
         Returns:
             A string containing the table.
@@ -124,7 +137,8 @@ class EventList(list):
             row_limit=row_limit,
             header=header,
             use_cuda=self._use_cuda,
-            profile_memory=self._profile_memory)
+            profile_memory=self._profile_memory,
+            top_level_events_only=top_level_events_only)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -216,6 +230,7 @@ class EventList(list):
         for evt in self:
             stats[get_key(evt, group_by_input_shapes)].add(
                 evt, group_by_input_shapes)
+
         return EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
 
     def total_average(self):
@@ -346,10 +361,12 @@ class profile(object):
             raise RuntimeError("can't export a trace that didn't finish running")
         self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         self._check_finish()
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, header=header)
+            sort_by=sort_by, row_limit=row_limit, header=header,
+            top_level_events_only=top_level_events_only
+        )
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -410,21 +427,23 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, name: str):
+        self.name: str = name
         # Whether or not we should run record function's end callbacks when exiting.
-        self.run_callbacks_on_exit = True
+        self.run_callbacks_on_exit: bool = True
+        # Stores underlying RecordFunction as a tensor. TODO: move to custom
+        # class (https://github.com/pytorch/pytorch/issues/35026).
+        self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
             torch.ops.profiler._record_function_exit(self.handle)
-        return False
 
-    def _call_end_callbacks_on_future(self, fut):
+    def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
         _call_end_callbacks_on_future is meant to be used for profiling async
         calls that return a future. Calling this function will extend recording
@@ -621,6 +640,7 @@ class FormattedTimesMixin(object):
     cpu_time_total_str = attr_formatter('cpu_time_total')
     cuda_time_total_str = attr_formatter('cuda_time_total')
     self_cpu_time_total_str = attr_formatter('self_cpu_time_total')
+    self_cuda_time_total_str = attr_formatter('self_cuda_time_total')
 
     @property
     def cpu_time(self):
@@ -657,6 +677,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.kernels = []
         self.count = 1
         self.cpu_children = []
+        self.cpu_parent = None
         self.input_shapes = input_shapes
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
@@ -675,6 +696,16 @@ class FunctionEvent(FormattedTimesMixin):
         """
         assert(isinstance(child, FunctionEvent))
         self.cpu_children.append(child)
+
+    def set_cpu_parent(self, parent):
+        """Set the immediate CPU parent of type FunctionEvent
+
+        One profiling FunctionEvent should have only one CPU parent such that
+        the child's range interval is completely inside the parent's. We use
+        this connection to determine the event is from top-level op or not.
+        """
+        assert(isinstance(parent, FunctionEvent))
+        self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
     # metrics of other events, have only total cpu time
@@ -705,6 +736,11 @@ class FunctionEvent(FormattedTimesMixin):
     @property
     def cuda_time_total(self):
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
+
+    @property
+    def self_cuda_time_total(self):
+        return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) - \
+            sum([child.cuda_time_total for child in self.cpu_children])
 
     @property
     def cpu_time_total(self):
@@ -749,11 +785,14 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_time_total = 0
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
+        self.self_cuda_time_total = 0
         self.input_shapes = None
         self.cpu_memory_usage = 0
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
         self.self_cuda_memory_usage = 0
+        self.cpu_children = None
+        self.cpu_parent = None
 
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
@@ -763,6 +802,8 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.node_id = other.node_id
             self.is_async = other.is_async
             self.is_remote = other.is_remote
+            self.cpu_parent = other.cpu_parent
+            self.cpu_children = other.cpu_children
             if group_by_input_shapes:
                 self.input_shapes = other.input_shapes
 
@@ -775,6 +816,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_time_total += other.cpu_time_total
         self.cuda_time_total += other.cuda_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
+        self.self_cuda_time_total += other.self_cuda_time_total
         self.cpu_memory_usage += other.cpu_memory_usage
         self.cuda_memory_usage += other.cuda_memory_usage
         self.self_cpu_memory_usage += other.self_cpu_memory_usage
@@ -788,11 +830,12 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            'cuda_time={} input_shapes={}> '
+            ' self_cuda_time={} cuda_time={} input_shapes={}> '
             'cpu_memory_usage={} cuda_memory_usage={}'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
+                self.self_cuda_time_total_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
                 self.cpu_memory_usage,
@@ -1043,7 +1086,8 @@ def build_table(
         header=None,
         row_limit=100,
         use_cuda=True,
-        profile_memory=False):
+        profile_memory=False,
+        top_level_events_only=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -1056,20 +1100,21 @@ def build_table(
     has_input_shapes = any(
         [event.input_shapes is not None for event in events])
     name_column_width = max([len(evt.key) for evt in events]) + 4
-    DEFAULT_COLUMN_WIDTH = 15
+    DEFAULT_COLUMN_WIDTH = 12
     SHAPES_COLUMN_WIDTH = 45
 
     headers = [
         'Name',
-        'Self CPU total %',
-        'Self CPU total',
+        'Self CPU %',
+        'Self CPU',
         'CPU total %',
         'CPU total',
         'CPU time avg',
     ]
     if use_cuda:
         headers.extend([
-            'CUDA total %',
+            'Self CUDA',
+            'Self CUDA %',
             'CUDA total',
             'CUDA time avg',
         ])
@@ -1084,7 +1129,7 @@ def build_table(
                 'Self CUDA Mem',
             ])
     headers.append(
-        'Number of Calls'
+        '# of Calls'
     )
     # Only append Node ID if any event has a valid (>= 0) Node ID
     append_node_id = any([evt.node_id != -1 for evt in events])
@@ -1098,7 +1143,7 @@ def build_table(
     line_length = [-SPACING_SIZE]
 
     def add_column(padding):
-        row_format[0] += '{: <' + str(padding) + '}  '
+        row_format[0] += '{: >' + str(padding) + '}  '
         header_sep[0] += '-' * padding + '  '
         line_length[0] += padding + SPACING_SIZE
 
@@ -1123,18 +1168,27 @@ def build_table(
         result.append('\n')  # Yes, newline after the end as well
 
     self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
-    cuda_time_total = sum([evt.cuda_time_total for evt in events])
+    cuda_time_total = sum([evt.self_cuda_time_total for evt in events])
     # Actual printing
     if header is not None:
         append('=' * line_length)
         append(header)
+    if top_level_events_only:
+        append('=' * line_length)
+        append('This report only display top-level ops statistics')
     append(header_sep)
     append(row_format.format(*headers))
 
     append(header_sep)
-    if row_limit > 0:
-        events = events[:row_limit]
+
+    event_limit = 0
     for evt in events:
+        if event_limit == row_limit:
+            break
+        if top_level_events_only and evt.cpu_parent is not None:
+            continue
+        else:
+            event_limit += 1
         row_values = [
             evt.key,  # Name
             # Self CPU total, 0 for async events. %
@@ -1148,8 +1202,9 @@ def build_table(
         ]
         if use_cuda:
             row_values.extend([
+                evt.self_cuda_time_total_str,
                 # CUDA time total %
-                format_time_share(evt.cuda_time_total, cuda_time_total),
+                format_time_share(evt.self_cuda_time_total, cuda_time_total),
                 evt.cuda_time_total_str,
                 evt.cuda_time_str,  # Cuda time avg
             ])

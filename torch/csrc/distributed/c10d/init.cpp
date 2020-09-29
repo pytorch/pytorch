@@ -1,7 +1,11 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
+#ifndef _WIN32
 #include <c10d/HashStore.hpp>
+#include <c10d/TCPStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
+#endif
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -17,8 +21,6 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
-#include <c10d/TCPStore.hpp>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -92,6 +94,14 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
+  int64_t getNumKeys() override {
+    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
+  }
+
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+  }
+
   bool check(const std::vector<std::string>& keys) override {
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
@@ -159,6 +169,7 @@ PyObject* c10d_init(PyObject* _unused) {
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
+              bool,
               bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
@@ -166,6 +177,7 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
+          py::arg("gradient_as_bucket_view") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
@@ -180,7 +192,26 @@ PyObject* c10d_init(PyObject* _unused) {
           [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
-      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def(
+          "_rebuild_buckets",
+          &::c10d::Reducer::rebuild_buckets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_bucket_tensors",
+          &::c10d::Reducer::get_bucket_tensors,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_push_all_rebuilt_params",
+          &::c10d::Reducer::push_rebuilt_params_for_all_indices,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_forward_pass_work_handle",
+          &::c10d::Reducer::set_forward_pass_work_handle,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_local_used_maps",
+          &::c10d::Reducer::get_local_used_maps_on_device);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -281,6 +312,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "delete_key",
+              &::c10d::Store::deleteKey,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "num_keys",
+              &::c10d::Store::getNumKeys,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "set_timeout",
               &::c10d::Store::setTimeout,
               py::call_guard<py::gil_scoped_release>())
@@ -302,6 +341,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&, int>());
 
+#ifndef _WIN32
   shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
       .def(py::init<>());
 
@@ -319,6 +359,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+#endif
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
@@ -586,6 +627,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
 
+#ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
       [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
@@ -599,6 +641,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::arg("process_groups"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -634,7 +677,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupGloo::Options>())
+           ::c10d::ProcessGroupGloo::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -665,23 +709,41 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
-  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+  auto processGroupNCCL = shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
+      .def(py::init<
+           const std::shared_ptr<::c10d::Store>&,
+           int,
+           int,
+           ::c10d::ProcessGroupNCCL::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
-          py::init<
-              const std::shared_ptr<::c10d::Store>&,
-              int,
-              int,
-              const std::chrono::milliseconds&>(),
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      const std::chrono::milliseconds& timeout){
+            ::c10d::ProcessGroupNCCL::Options options;
+            options.isHighPriorityStream = false;
+            options.opTimeout = timeout;
+            return std::make_shared<::c10d::ProcessGroupNCCL>(
+                store, rank, size, options);
+          }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+          py::call_guard<py::gil_scoped_release>());
+
+  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+      .def(py::init<>())
+      .def_readwrite("is_high_priority", &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
+      .def_readwrite("op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
 #endif
 
 #ifdef USE_C10D_MPI
@@ -691,9 +753,12 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
-    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-  });
+  processGroupMPI.def_static(
+    "create",
+    [](std::vector<int> ranks) {
+      return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+    },
+    py::call_guard<py::gil_scoped_release>());
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
@@ -737,21 +802,24 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
-                returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
-                but it is subject to some subtle differences compared to ``torch.futures.Future``
-                due to compromises made for performance reasons.
+                ``get_future`` API supports only NCCL backend and single-process single-device mode.
+                The ``torch._C.Future`` object returned by this API can be used in
+                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                differences compared to ``torch.futures.Future`` due to compromises made for performance
+                reasons.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
                 with PyTorch's default device streams to ensure we can have asynchronous CUDA
-                execution and it does not wait for the entire operation to complete on GPU.
-                If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
-                operation to complete before returning. In addition, if a callback function was
-                added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
-                the callback inline.
+                execution and it does not wait for the entire operation to complete on GPU. Note that
+                ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                In addition, if a callback function was added by ``fut.then()``, it will wait until
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns if the work was completed on the GPU.
+                Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
 
   module.def(
@@ -770,12 +838,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
-         size_t buffer_size) {
-        broadcast_coalesced(std::move(process_group), tensors, buffer_size);
+         size_t buffer_size,
+         int rank) {
+        broadcast_coalesced(
+            std::move(process_group), tensors, buffer_size, rank);
       },
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      // The source of truth rank to broadcast the tensors from.
+      py::arg("src") = 0,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

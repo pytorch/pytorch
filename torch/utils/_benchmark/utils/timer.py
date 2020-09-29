@@ -1,14 +1,14 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 
 import timeit
-from typing import List, Optional
+from typing import Callable, List, NoReturn, Optional
 
 import numpy as np
 import torch
 from torch.utils._benchmark.utils import common
 
 
-__all__ = ["Timer"]
+__all__ = ["Timer", "timer"]
 
 
 if torch.has_cuda and torch.cuda.is_available():
@@ -20,6 +20,8 @@ else:
 
 
 class Timer(object):
+    _timer_cls = timeit.Timer
+
     def __init__(
         self,
         stmt="pass",
@@ -41,32 +43,26 @@ class Timer(object):
         globals = dict(globals or {})
         globals.setdefault("torch", torch)
 
-        self._stmt = stmt
-        self._label = label
-        self._sub_label = sub_label
-        self._description = description
-        self._env = env
-        self._num_threads = num_threads
-        self._timer = timeit.Timer(stmt=stmt, setup=setup, timer=timer, globals=globals)
-
-    def _construct_measurement(self, number_per_run: int, times: List[float]):
-        return common.Measurement(
-            number_per_run=number_per_run,
-            times=times,
-            num_threads=self._num_threads,
-            label=self._label,
-            sub_label=self._sub_label,
-            description=self._description,
-            env=self._env,
-            stmt=self._stmt,
+        self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
+        self._task_spec = common.TaskSpec(
+            stmt=stmt,
+            setup=setup,
+            label=label,
+            sub_label=sub_label,
+            description=description,
+            env=env,
+            num_threads=num_threads,
         )
 
     def timeit(self, number=1000000):
-        # Warmup
-        self._timer.timeit(number=max(int(number // 100), 1))
-        with common.set_torch_threads(self._num_threads):
-            return self._construct_measurement(
-                number_per_run=number, times=[self._timer.timeit(number=number)]
+        with common.set_torch_threads(self._task_spec.num_threads):
+            # Warmup
+            self._timer.timeit(number=max(int(number // 100), 1))
+
+            return common.Measurement(
+                number_per_run=number,
+                raw_times=[self._timer.timeit(number=number)],
+                task_spec=self._task_spec
             )
 
     def repeat(self, repeat=-1, number=-1):
@@ -75,8 +71,32 @@ class Timer(object):
     def autorange(self, callback=None):
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def blocked_autorange(self, callback=None, min_run_time=0.2):
-        with common.set_torch_threads(self._num_threads):
+    def _threaded_measurement_loop(
+        self,
+        number: int,
+        time_hook: Callable[[], float],
+        stop_hook: Callable[[List[float]], bool],
+        min_run_time: float,
+        max_run_time: Optional[float] = None,
+        callback: Optional[Callable[[int, float], NoReturn]] = None
+    ):
+        total_time = 0.0
+        can_stop = False
+        times: List[float] = []
+        with common.set_torch_threads(self._task_spec.num_threads):
+            while (total_time < min_run_time) or (not can_stop):
+                time_spent = time_hook()
+                times.append(time_spent)
+                total_time += time_spent
+                if callback:
+                    callback(number, time_spent)
+                can_stop = stop_hook(times)
+                if max_run_time and total_time > max_run_time:
+                    break
+        return times
+
+    def _estimate_block_size(self, min_run_time: float):
+        with common.set_torch_threads(self._task_spec.num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
             overhead = np.median([self._timer.timeit(0) for _ in range(5)])
@@ -89,15 +109,53 @@ class Timer(object):
                 if time_taken > min_run_time:
                     break
                 number *= 10
+        return number
 
-            total_time = 0.0
-            times = []
+    def adaptive_autorange(
+            self,
+            threshold=0.1,
+            max_run_time=10,
+            callback: Optional[Callable[[int, float], NoReturn]] = None,
+            min_run_time=0.01
+    ):
+        number = self._estimate_block_size(min_run_time=0.05)
 
-            while total_time < min_run_time:
-                time_taken = self._timer.timeit(number)
-                total_time += time_taken
-                if callback:
-                    callback(number, time_taken)
-                times.append(time_taken)
+        def time_hook() -> float:
+            return self._timer.timeit(number)
 
-            return self._construct_measurement(number_per_run=number, times=times)
+        def stop_hook(times) -> bool:
+            if len(times) > 3:
+                return common.Measurement(
+                    number_per_run=number,
+                    raw_times=times,
+                    task_spec=self._task_spec
+                ).meets_confidence(threshold=threshold)
+            return False
+        times = self._threaded_measurement_loop(
+            number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
+
+        return common.Measurement(
+            number_per_run=number,
+            raw_times=times,
+            task_spec=self._task_spec
+        )
+
+    def blocked_autorange(self, callback=None, min_run_time=0.2):
+        number = self._estimate_block_size(min_run_time)
+
+        def time_hook() -> float:
+            return self._timer.timeit(number)
+
+        def stop_hook(times) -> bool:
+            return True
+
+        times = self._threaded_measurement_loop(
+            number, time_hook, stop_hook,
+            min_run_time=min_run_time,
+            callback=callback)
+
+        return common.Measurement(
+            number_per_run=number,
+            raw_times=times,
+            task_spec=self._task_spec
+        )

@@ -22,6 +22,7 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Param,
     prim::Return,
     prim::PythonOp,
+    aten::format,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {

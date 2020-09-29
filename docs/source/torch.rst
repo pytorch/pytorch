@@ -75,6 +75,7 @@ Creation Ops
     dequantize
     complex
     polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -89,6 +90,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -250,6 +252,7 @@ Pointwise Ops
     abs
     absolute
     acos
+    arccos
     acosh
     arccosh
     add
@@ -257,9 +260,13 @@ Pointwise Ops
     addcmul
     angle
     asin
+    arcsin
     asinh
+    arcsinh
     atan
+    arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -273,12 +280,15 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
     erfinv
     exp
+    exp2
     expm1
+    fix
     floor
     floor_divide
     fmod
@@ -298,9 +308,12 @@ Pointwise Ops
     logical_xor
     logit
     hypot
+    i0
     mul
+    multiply
     mvlgamma
     neg
+    negative
     nextafter
     polygamma
     pow
@@ -317,6 +330,8 @@ Pointwise Ops
     sinh
     sqrt
     square
+    sub
+    subtract
     tan
     tanh
     true_divide
@@ -330,6 +345,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
@@ -339,6 +358,7 @@ Reduction Ops
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -359,7 +379,9 @@ Comparison Ops
     eq
     equal
     ge
+    greater_equal
     gt
+    greater
     isclose
     isfinite
     isinf
@@ -369,10 +391,13 @@ Comparison Ops
     isreal
     kthvalue
     le
+    less_equal
     lt
-    max
-    min
+    less
+    maximum
+    minimum
     ne
+    not_equal
     sort
     topk
 
@@ -393,6 +418,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
@@ -479,6 +505,7 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr
@@ -494,6 +521,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------
@@ -504,5 +532,8 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic
+    vmap
+    Assert

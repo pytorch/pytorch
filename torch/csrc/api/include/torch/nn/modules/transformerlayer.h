@@ -33,6 +33,8 @@ namespace nn {
 class TORCH_API TransformerEncoderLayerImpl : public Cloneable<TransformerEncoderLayerImpl> {
 
   public:
+    TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead)
+     : TransformerEncoderLayerImpl(TransformerEncoderLayerOptions(d_model, nhead)) {}
     explicit TransformerEncoderLayerImpl(const TransformerEncoderLayerOptions& options_);
 
     Tensor forward(
@@ -111,9 +113,6 @@ class TORCH_API TransformerDecoderLayerImpl : public Cloneable<TransformerDecode
   void reset() override;
 
   void reset_parameters();
-
-  /// Pretty prints the `TransformerDecoderLayer` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
 
   /// Pass the inputs (and mask) through the decoder layer.
   ///Args:

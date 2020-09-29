@@ -3,17 +3,13 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
-        ("rocm", [
-            ("3.5.1", [
-                X("3.6"),
-            ]),
-        ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
-                XImportant("3.6"),
                 ("3.6", [
+                    ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
+                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -25,25 +21,38 @@ CONFIG_TREE_DATA = [
                     ("asan", [XImportant(True)]),
                 ]),
             ]),
+            ("7", [
+                ("3.6", [
+                    ("onnx", [XImportant(True)]),
+                ]),
+            ]),
         ]),
         ("cuda", [
             ("9.2", [
-                X("3.6"),
                 ("3.6", [
-                    ("cuda_gcc_override", [X("gcc5.4")])
+                    X(True),
+                    ("cuda_gcc_override", [
+                        ("gcc5.4", [
+                            ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
                 ])
             ]),
-            ("10.1", [X("3.6")]),
-            ("10.2", [
-                XImportant("3.6"),
+            ("10.1", [
                 ("3.6", [
-                    ("libtorch", [XImportant(True)])
+                    ('build_only', [X(True)]),
+                ]),
+            ]),
+            ("10.2", [
+                ("3.6", [
+                    ("important", [X(True)]),
+                    ("libtorch", [X(True)]),
                 ]),
             ]),
             ("11.0", [
-                X("3.8"),
                 ("3.8", [
-                    ("libtorch", [X(True)])
+                    X(True),
+                    ("libtorch", [XImportant(True)])
                 ]),
             ]),
         ]),
@@ -56,11 +65,23 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
+                    ("vulkan", [XImportant(True)]),
                 ]),
             ]),
         ]),
         ("gcc", [
-            ("9", [XImportant("3.8")]),
+            ("9", [
+                ("3.8", [
+                    ("coverage", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
+        ("rocm", [
+            ("3.7", [
+                ("3.6", [
+                    ('build_only', [XImportant(True)]),
+                ]),
+            ]),
         ]),
     ]),
 ]
@@ -130,14 +151,29 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "asan": AsanConfigNode,
             "xla": XlaConfigNode,
+            "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
+            "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "build_only": BuildOnlyConfigNode,
-            "cuda_gcc_override": CudaGccOverrideConfigNode
+            "cuda_gcc_override": CudaGccOverrideConfigNode,
+            "coverage": CoverageConfigNode,
+            "pure_torch": PureTorchConfigNode,
         }
         return next_nodes[experimental_feature]
+
+
+class PureTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PURE_TORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_pure_torch"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class XlaConfigNode(TreeConfigNode):
@@ -157,6 +193,28 @@ class AsanConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_asan"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class ONNXConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Onnx=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_onnx"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class VulkanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Vulkan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_vulkan"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -200,7 +258,7 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
         self.props["cuda_gcc_override"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
 
 class BuildOnlyConfigNode(TreeConfigNode):
 
@@ -208,7 +266,16 @@ class BuildOnlyConfigNode(TreeConfigNode):
         self.props["build_only"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
+
+
+class CoverageConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["is_coverage"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):

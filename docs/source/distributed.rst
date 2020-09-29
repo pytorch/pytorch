@@ -52,12 +52,22 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
-are built and included in PyTorch distributed (NCCL only when building with CUDA).
-MPI is an
-optional backend that can only be included if you build PyTorch from source. (e.g.
-building PyTorch on a host that has MPI installed.)
+PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
+distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
+included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+installed.)
 
+.. warning ::
+    As of PyTorch v1.7, Windows support for the distributed package only covers collective
+    communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
+    the `init_method` argument in :func:`init_process_group` must point to a file. This works
+    for both local and shared file systems:
+
+    - Local file system, ``init_method="file:///d:/tmp/some_file"``
+    - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
+
+    Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^
@@ -317,13 +327,19 @@ Collective functions
 
 .. autofunction:: broadcast
 
+.. autofunction:: broadcast_object_list
+
 .. autofunction:: all_reduce
 
 .. autofunction:: reduce
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_object
+
 .. autofunction:: gather
+
+.. autofunction:: gather_object
 
 .. autofunction:: scatter
 

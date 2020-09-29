@@ -4,6 +4,11 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
+
 #include <deque>
 #include <unordered_set>
 #include <vector>
@@ -11,14 +16,6 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
-class Statement;
-class Val;
-class Expr;
-
-class Fusion;
-
-enum class ValType;
 
 /*
  * IterVisitor starts from leaf nodes, fusion outputs, or the provided values.
@@ -49,11 +46,31 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // These functions will start at outputs and propagate up through the DAG
   // to inputs based on depth first traversal. Next could be called on a node
   // multiple times.
-  virtual std::vector<Statement*> next(
-      Statement* stmt,
-      bool respect_compute_at);
-  virtual std::vector<Statement*> next(Expr* expr, bool respect_compute_at);
-  virtual std::vector<Statement*> next(Val* v);
+  virtual std::vector<Statement*> next(Statement* stmt) {
+    if (stmt->isVal()) {
+      return next(stmt->as<Val>());
+    } else if (stmt->isExpr()) {
+      return next(stmt->as<Expr>());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "IterVisitor could not detect type in next_dispatch.");
+    }
+  }
+
+  virtual std::vector<Statement*> next(Val* v) {
+    FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
+    if (FusionGuard::getCurFusion()->origin(v) != nullptr) {
+      return {FusionGuard::getCurFusion()->origin(v)};
+    }
+    return {};
+  }
+
+  virtual std::vector<Statement*> next(Expr* expr) {
+    FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
+    std::vector<Statement*> next_stmts{expr->inputs().begin(),
+                                       expr->inputs().end()};
+    return next_stmts;
+  }
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
@@ -78,46 +95,38 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // throughout traversal).
   std::vector<std::vector<Statement*>> stmt_stack;
 
+  // Statements to stop traversal on if they're hit (pretends they're leaf
+  // nodes in next)
+  std::unordered_set<Statement*> termination_stmts;
+
   void traverse_(
-      Fusion* const fusion,
+      Fusion* fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false,
-      bool traverse_all_paths = false,
-      bool respect_compute_at = false);
+      bool traverse_all_paths = false);
 
  public:
   // Starts at nodes provided in from, traverses from these nodes to inputs.
   // Calls handle on all Statement*s in topological sorted order.
   // traverseAllPaths = false only call handle on each Statement* once
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
-  //   Handle on a Statement* for every path from "from" nodes, to inputs.
+  // Handle on a Statement* for every path from "from" nodes, to inputs.
+  // to argument allows specification of nodes to stop at if we want to stop
+  // beffore we hit all leaf nodes. This can be helpful when we want to traverse
+  // from TensorView::domain(), to the rfactor domain, instead of root domain.
   void traverseFrom(
-      Fusion* const fusion,
+      Fusion* fusion,
       const std::vector<Val*>& from,
-      bool traverseAllPaths = false,
-      bool respectComputeAt = false);
+      bool traverseAllPaths = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
-  // respect_compute_at = true traverse computeAt input exprs later
-  void traverse(
-      Fusion* const fusion,
-      bool from_outputs_only = false,
-      bool breadth_first = false,
-      bool respect_compute_at = false);
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
+  void traverse(Fusion* fusion, bool from_outputs_only = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
-  // respect_compute_at = true traverse computeAt input exprs later
-  void traverseAllPaths(
-      Fusion* const fusion,
-      bool from_outputs_only = false,
-      bool breadth_first = false,
-      bool respect_compute_at = false);
-
-  static std::unordered_set<Val*> getTerminatingOutputs(Fusion* const);
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
+  void traverseAllPaths(Fusion* fusion, bool from_outputs_only = false);
 
   static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);
 };
@@ -192,7 +201,7 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
   //   Handle on a Statement* for every path from "from" nodes, to inputs.
   void traverseFrom(
-      Fusion* const fusion,
+      Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
 };
@@ -222,6 +231,36 @@ class TORCH_CUDA_API DependencyCheck {
   static std::unordered_set<Val*> getAllValsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
+
+  // Return registered outputs of the fusion that are a dependency of any val of
+  static std::unordered_set<Val*> getAllOutputsOf(
+      const std::unordered_set<Val*>& of);
+};
+
+// Expr sort will take a fusion and return a topologically sorted list of
+// expressions.
+class ExprSort : public IterVisitor {
+ private:
+  std::vector<Expr*> exprs;
+
+  void handle(Expr* expr) override;
+
+ public:
+  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only);
+
+  static std::vector<Expr*> getExprs(
+      Fusion* fusion,
+      const std::vector<Val*>& from);
+};
+
+class InputsOf : public IterVisitor {
+ private:
+  std::unordered_set<Val*> inputs;
+
+  void handle(Val* v) final;
+
+ public:
+  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 } // namespace fuser
