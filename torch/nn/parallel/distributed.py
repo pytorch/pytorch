@@ -256,7 +256,7 @@ class DistributedDataParallel(Module):
         parameters.
 
     .. warning::
-        Using ``DistributedDataParallel`` in conjuction with the
+        Using ``DistributedDataParallel`` in conjunction with the
         :ref:`distributed-rpc-framework` is experimental and subject to change.
 
     .. warning::
