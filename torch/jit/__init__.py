@@ -2231,7 +2231,8 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
 
         for name, submodule in orig._modules.items():
-            tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
+            if submodule is not None:
+                tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
