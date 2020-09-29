@@ -292,6 +292,12 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
 endif()
 
+if(WIN32 AND USE_DISTRIBUTED)
+  if(NOT DEFINED ENV{libuv_ROOT})
+    set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+  endif()
+endif()
+
 if(MSVC)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
