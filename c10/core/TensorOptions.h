@@ -4,7 +4,6 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Device.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/DispatchKeySet.h>
