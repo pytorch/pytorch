@@ -410,8 +410,8 @@ class Quantizer:
                         prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
                     observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
-                    mark_observed_standalone_module(observed_standalone_module)
                     standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
+                    observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_standalone_module)
                     self.modules[node.target] = observed_standalone_module
