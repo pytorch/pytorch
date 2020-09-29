@@ -40,6 +40,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     train_one_epoch,
     run_ddp,
+    LinearModelWithSubmodule,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -58,6 +59,7 @@ from torch.testing import FileCheck
 import itertools
 import operator
 import unittest
+import io
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -587,28 +589,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
-        class TwoLayerLinear(nn.Module):
-            def __init__(self):
-                super(TwoLayerLinear, self).__init__()
-                self.fc1 = nn.Linear(5, 5)
-                self.fc2 = nn.Linear(5, 5)
 
-            def forward(self, x):
-                x = self.fc1(x)
-                return self.fc2(x)
-
-        class Model(nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-                self.subm = TwoLayerLinear()
-                self.fc = nn.Linear(5, 5)
-
-            def forward(self, x):
-                x = self.subm(x)
-                x = self.fc(x)
-                return x
-
-        model = Model()
+        model = LinearModelWithSubmodule()
         qengine = torch.backends.quantized.engine
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
 
@@ -646,30 +628,9 @@ class TestQuantizeFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_save_observer_state_dict(self):
-        class TwoLayerLinear(nn.Module):
-            def __init__(self):
-                super(TwoLayerLinear, self).__init__()
-                self.fc1 = nn.Linear(5, 5)
-                self.fc2 = nn.Linear(5, 5)
-
-            def forward(self, x):
-                x = self.fc1(x)
-                return self.fc2(x)
-
-        class Model(nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-                self.subm = TwoLayerLinear()
-                self.fc = nn.Linear(5, 5)
-
-            def forward(self, x):
-                x = self.subm(x)
-                x = self.fc(x)
-                return x
-
-        model = Model().eval()
+        orig = LinearModelWithSubmodule().eval()
+        model = orig
         qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
-
         # symbolically trace
         model = symbolic_trace(model)
         model = prepare_fx(model, qconfig_dict)
@@ -681,18 +642,18 @@ class TestQuantizeFx(QuantizationTestCase):
         quant = convert_fx(model)
 
         # save state_dict of model
-        import io
+        obs_dict = torch.quantization.get_observer_state_dict(model)
         b = io.BytesIO()
-        torch.save(model.state_dict(), b)
+        torch.save(obs_dict, b)
         b.seek(0)
 
         # Load the stats into new model
-        model_2 = Model().eval()
+        model_2 = orig
         model_2 = symbolic_trace(model_2)
         model_2 = prepare_fx(model_2, qconfig_dict)
 
         loaded_dict = torch.load(b)
-        model_2.load_state_dict(loaded_dict)
+        torch.quantization.load_observer_state_dict(model_2, loaded_dict)
 
         quant_2 = convert_fx(model_2)
 
