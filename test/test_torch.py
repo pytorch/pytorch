@@ -13079,7 +13079,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(traced_tuple, expected_tuple)
         self.assertEqual(traced_nontuple, expected_nontuple)
-        self.assertEqual(traced_out, expected_tuple)
+        self.assertEqual(traced_out, expected_nontuple)
 
     @onlyOnCPUAndCUDA
     def test_nonzero_discontiguous(self, device):
