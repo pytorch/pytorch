@@ -440,7 +440,7 @@ class QMaxPool_arr_args final {
       std::vector<int64_t> dilation,
       bool ceil_mode) {
     if (kSpatialDim == 1) {
-      return quantized_max_pool1d(qx, kernel_size, stride, padding,
+      return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     } else if (kSpatialDim == 2) {
       return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
