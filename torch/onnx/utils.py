@@ -17,8 +17,8 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto, Graph
-from typing import Union, Type, Callable, Tuple, List
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from typing import Union, Tuple, List
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -444,7 +444,7 @@ def _model_to_graph(model, args, verbose=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
-    if training is None or training == TrainingMode.EVAL or (training == TrainingMode.PRESERVE and not is_originally_training):
+    if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
@@ -1054,9 +1054,9 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
         isscalar = True
     type = type.lower()
     tensor: Union[torch.CharTensor, torch.ShortTensor,
-                   torch.IntTensor, torch.LongTensor,
-                   torch.HalfTensor, torch.FloatTensor,
-                   torch.DoubleTensor]
+                  torch.IntTensor, torch.LongTensor,
+                  torch.HalfTensor, torch.FloatTensor,
+                  torch.DoubleTensor]
     if type == "char":
         tensor = torch.CharTensor(*dims)
     elif type == "short":
