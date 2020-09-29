@@ -63,7 +63,7 @@ class TestForeach(TestCase):
             foreach_op_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
             if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors1, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors1, expected)
 
@@ -78,7 +78,7 @@ class TestForeach(TestCase):
             foreach_op_(tensors1)
             self.assertEqual(res, tensors1)
             if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors1, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors1, expected)
 
@@ -100,7 +100,7 @@ class TestForeach(TestCase):
             foreach_op_(tensors, tensors1, tensors2, value)
             self.assertEqual(res, tensors)
             if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors, expected)
 
@@ -123,7 +123,7 @@ class TestForeach(TestCase):
             if dtype == torch.bool:
                 expected = [e.to(torch.bool) for e in expected]
             if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors1, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors1, expected)
 
@@ -286,7 +286,7 @@ class TestForeach(TestCase):
 
                 res = foreach_bin_op(tensors, scalar)
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(res, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(res, expected)
 
@@ -297,7 +297,7 @@ class TestForeach(TestCase):
 
                 foreach_bin_op_(tensors, scalar)
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(tensors, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
 
@@ -346,7 +346,7 @@ class TestForeach(TestCase):
                     return
                 else:
                     if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                        self.assertEqual(res, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                        self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                     else:
                         self.assertEqual(res, expected)
 
@@ -357,7 +357,7 @@ class TestForeach(TestCase):
 
                 foreach_bin_op_(tensors, scalars)
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(tensors, expected, atol=1.e-4, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
 
