@@ -52,6 +52,7 @@ FROM conda as conda-installs
 ARG INSTALL_CHANNEL=pytorch-nightly
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y pytorch torchvision cudatoolkit=11.0.221 && \
     /opt/conda/bin/conda clean -ya
+RUN /opt/conda/bin/pip install torchelastic
 
 FROM ${BASE_IMAGE} as official
 LABEL com.nvidia.volumes.needed="nvidia_driver"
