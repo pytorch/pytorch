@@ -334,14 +334,14 @@ class TestOptim(TestCase):
         ]
 
         flag_params = [
-            dict(weight_decay=1., amsgrad=True),  #Adam
-            dict(weight_decay=1., amsgrad=False),  #Adam
-            dict(weight_decay=0., amsgrad=True),  #Adam
-            dict(weight_decay=0., amsgrad=False),  #Adam
-            dict(weight_decay=1., amsgrad=True),  #AdamW
-            dict(weight_decay=1., amsgrad=False),  #AdamW
-            dict(weight_decay=0., amsgrad=True),  #AdamW
-            dict(weight_decay=0., amsgrad=False),  #AdamW
+            dict(weight_decay=1., amsgrad=True),  # Adam
+            dict(weight_decay=1., amsgrad=False),  # Adam
+            dict(weight_decay=0., amsgrad=True),  # Adam
+            dict(weight_decay=0., amsgrad=False),  # Adam
+            dict(weight_decay=1., amsgrad=True),  # AdamW
+            dict(weight_decay=1., amsgrad=False),  # AdamW
+            dict(weight_decay=0., amsgrad=True),  # AdamW
+            dict(weight_decay=0., amsgrad=False),  # AdamW
             dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),  # SGD
             dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),  # SGD
             dict(weight_decay=1, momentum=1, centered=True),  # RMSprop
