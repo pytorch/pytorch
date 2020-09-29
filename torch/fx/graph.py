@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target
 
-from typing import Callable, Any, List, Dict, Optional, Tuple
+from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
 import torch
 import keyword
@@ -129,7 +129,14 @@ class Graph:
 
     def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
-            to the graph of self"""
+            to the graph of self. Example:
+
+            g : torch.fx.Graph = ...
+            new_graph = torch.fx.graph()
+            value_remap = {}
+            for node in g.nodes:
+                value_remap[node] = new_graph.node_copy(node, lambda n : value_remap[n])
+        """
         args = map_arg(node.args, arg_transform)
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
@@ -272,9 +279,62 @@ class Graph:
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
-        if self.result:
+        if hasattr(self, 'result'):
             s += f'\n    return {format_arg(self.result)}'
         return s
+
+    def lint(self, root : Optional[torch.nn.Module] = None):
+        """
+        Runs various checks on this Graph to make sure it is well-formed. In
+        particular:
+            - Checks Nodes have correct ownership (owned by this graph)
+            - Checks Nodes appear in topological order
+            - If `root` is provided, checks that `target`s exist in `root`
+        """
+
+        # Check topo order
+        def check_arg(arg : Node, n : Optional[Node] = None) -> None:
+            context_str = f' of Node \'{n}\' ' if n else ' '
+            if arg.graph is not self:
+                raise RuntimeError(f'Argument \'{arg}\'{context_str}does not belong to this Graph, '
+                                   f'but was used as an argument! If you are copying nodes from another graph, make '
+                                   f'sure to use `arg_transform` on node_copy() to remap values\n{self}')
+            if arg not in seen_values:
+                raise RuntimeError(f'Argument \'{arg}\'{context_str}was used before it has been '
+                                   f'defined! Please check that Nodes in the graph are topologically ordered\n{self}')
+
+        seen_names : Set[str] = set()
+        seen_values : Set[Node] = set()
+        for node in self._nodes:
+            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr']:
+                raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
+            if node.graph is not self:
+                raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
+            map_arg(node.args, lambda arg: check_arg(arg, node))
+            map_arg(node.kwargs, lambda arg: check_arg(arg, node))
+            seen_values.add(node)
+
+            if node.name in seen_names:
+                raise RuntimeError(f'Node redefined name {node.name}!')
+            seen_names.add(node.name)
+
+        if hasattr(self, 'result'):
+            map_arg(self.result, check_arg)
+
+        # Check targets are legit
+        if root:
+            for node in self._nodes:
+                if node.op in ['get_attr', 'call_module']:
+                    assert isinstance(node.target, str)
+                    target_atoms = node.target.split('.')
+                    m_itr = root
+                    for i, atom in enumerate(target_atoms):
+                        m_itr = getattr(m_itr, atom, None)
+                        if m_itr is None:
+                            seen_qualname = '.'.join(target_atoms[:i])
+                            raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
+                                               f'{atom} of {seen_qualname}')
+
 
 reflectable_magic_methods = {
     'add': '{} + {}',
