@@ -43,18 +43,8 @@ class Timer(object):
         # specified as a convenience feature.
         globals = dict(globals or {})
         globals.setdefault("torch", torch)
-
-<<<<<<< HEAD
-        self._stmt = stmt
-        self._setup = setup
-        self._label = label
-        self._sub_label = sub_label
-        self._description = description
-        self._env = env
-        self._num_threads = num_threads
         self._globals = globals
-=======
->>>>>>> fbcode/warm
+
         self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
         self._task_spec = common.TaskSpec(
             stmt=stmt,
@@ -161,19 +151,19 @@ class Timer(object):
         def stop_hook(times) -> bool:
             return True
 
-            times = self._threaded_measurement_loop(
-                number, time_hook, stop_hook,
-                min_run_time=min_run_time,
-                callback=callback)
+        times = self._threaded_measurement_loop(
+            number, time_hook, stop_hook,
+            min_run_time=min_run_time,
+            callback=callback)
 
-            return common.Measurement(
-                number_per_run=number,
-                raw_times=times,
-                task_spec=self._task_spec
-            )
+        return common.Measurement(
+            number_per_run=number,
+            raw_times=times,
+            task_spec=self._task_spec
+        )
 
     def collect_callgrind(self, number=100, collect_baseline=True):
-        if not isinstance(self._stmt, str):
+        if not isinstance(self._task_spec.stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
         # __init__ adds torch, and Timer adds __builtins__
@@ -191,5 +181,8 @@ class Timer(object):
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
         return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
-            stmt=self._stmt, setup=self._setup, number=number, num_threads=self._num_threads,
+            stmt=self._task_spec.stmt,
+            setup=self._task_spec.setup,
+            number=number,
+            num_threads=self._task_spec.num_threads,
             collect_baseline=collect_baseline)

@@ -775,7 +775,7 @@ class TestBenchmarkUtils(TestCase):
         # Don't collect baseline to speed up unit test by ~30 seconds.
         stats = timer.collect_callgrind(number=1000, collect_baseline=False)
 
-        self.assertEqual(stats.counts(include_lookdict_unicode=False), 38830150, atol=0, rtol=0.0001)
+        self.assertEqual(stats.counts(include_lookdict_unicode=False), 38904265, atol=0, rtol=0.0001)
 
     def test_compare(self):
         # Simulate several approaches.
