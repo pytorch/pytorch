@@ -281,6 +281,7 @@ UNPACK_METHODS = {
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
     'c10::optional<ArrayRef<double>>': 'doublelistOptional',
+    'ArrayRef<double>': 'doublelist',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',
@@ -404,6 +405,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
     'std::tuple<double,int64_t>',
+    'std::tuple<double,double>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
@@ -1139,30 +1141,11 @@ def group_overloads(declarations, is_python_method):
 # See Note[Order of overloads matters]
 def sort_declarations(grouped_decls):
 
-    # TODO: This is a hack!
-    #
-    # For some reason, when you specify a Scalar argument in a native
-    # function, you get a Declarations.yaml entry that looks like this:
-    #
-    #   - default: 1
-    #     dynamic_type: Scalar
-    #     is_nullable: false
-    #     kwarg_only: true
-    #     name: alpha
-    #     type: Scalar
-    #
-    # This is contrast to when there is a 'real' argument in TH
-    # Declarations.cwrap; this gets (correctly?) translated into
-    # dynamic_type: real, and type: Scalar.  I would like to fix this
-    # at the source but I have never understood what dynamic_type is
-    # supposed to be.
-    def normalized_dynamic_type(arg):
-        if arg['dynamic_type'] == 'real':
-            return 'Scalar'
+    def dynamic_type(arg):
         return arg['dynamic_type']
 
     def is_coord_smaller(arg1, arg2):
-        return normalized_dynamic_type(arg1) == 'Scalar' and arg2['dynamic_type'] == 'Tensor'
+        return dynamic_type(arg1) == 'Scalar' and arg2['dynamic_type'] == 'Tensor'
 
     def is_smaller(d1, d2):
         """Returns True if d1 < d2 in the partial order."""
@@ -1170,7 +1153,7 @@ def sort_declarations(grouped_decls):
         if len(args1) != len(args2):
             return False
         any_smaller = any(is_coord_smaller(arg1, arg2) for arg1, arg2 in zip(args1, args2))
-        all_smaller_or_equal = all(normalized_dynamic_type(arg1) == normalized_dynamic_type(arg2) or
+        all_smaller_or_equal = all(dynamic_type(arg1) == dynamic_type(arg2) or
                                    is_coord_smaller(arg1, arg2)
                                    for arg1, arg2 in zip(args1, args2))
         return any_smaller and all_smaller_or_equal

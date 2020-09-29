@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import unittest
 
@@ -159,7 +159,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=max_segments,
-            max_seq_size=max_segments * max_segment_length,
+            max_seq_size=max_segment_length,
             debug=True,
             adjust_batch=True,
             use_onnx=False,
@@ -226,6 +226,8 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             size=[len(indices)]
         ).astype(np.float32)
 
+        assert(len(weights) < 64000)
+
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.extend(
@@ -264,11 +266,15 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=batch_size,
-            max_seq_size=batch_size * np.max(lengths),
+            max_seq_size=np.max(lengths),
             debug=True,
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
@@ -289,6 +295,11 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             print_test_debug_info(
                 "slws_fused_8bit_rowwise_inv_scale",
                 {
+                    "seed": seed,
+                    "num_rows": num_rows,
+                    "embedding_dim": embedding_dim,
+                    "batch_size": batch_size,
+                    "max_weight": max_weight,
                     "indices": indices,
                     "data": data.shape,
                     "lengths": lengths,
@@ -363,6 +374,10 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
