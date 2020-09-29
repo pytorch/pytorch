@@ -206,6 +206,7 @@ jobs:
           export CIRCLE_SHA1="$CIRCLE_SHA1"
           export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
           export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+          export CIRCLE_JOB="$CIRCLE_JOB"
           cd workspace
           python test/print_test_stats.py test
           EOL
