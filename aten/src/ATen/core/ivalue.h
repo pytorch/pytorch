@@ -89,6 +89,7 @@ struct OptionalArray {
   _(None)                    \
   _(Tensor)                  \
   _(Double)                  \
+  _(ComplexDouble)           \
   _(Int)                     \
   _(Bool)                    \
   _(Tuple)                   \
@@ -344,6 +345,12 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDouble());
     return payload.as_double;
   }
+
+  // ComplexDouble
+  IValue(c10::intrusive_ptr<c10::complex<double>> c);
+  bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
+  c10::intrusive_ptr<c10::complex<double>> toComplexDouble() &&;
+  c10::intrusive_ptr<c10::complex<double>> toComplexDouble() const &;
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);

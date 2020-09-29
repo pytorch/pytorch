@@ -111,6 +111,8 @@ TypePtr IValue::type() const {
       return GeneratorType::get();
     case Tag::Quantizer:
       return QuantizerType::get();
+    case Tag::ComplexDouble:
+      return ComplexDoubleType::get();
     case Tag::Enum:
       return toEnumHolder()->type();
   }
@@ -281,6 +283,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
+    case Tag::ComplexDouble:
       return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());

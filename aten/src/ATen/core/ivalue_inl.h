@@ -90,6 +90,14 @@ inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() const & {
   AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
   return toIntrusivePtr<at::Quantizer>();
 }
+inline c10::intrusive_ptr<c10::complex<double>> IValue::toComplexDouble() && {
+  AT_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  return moveToIntrusivePtr<c10::complex<double>>();
+}
+inline c10::intrusive_ptr<c10::complex<double>> IValue::toComplexDouble() const & {
+  AT_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  return toIntrusivePtr<c10::complex<double>>();
+}
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return moveToIntrusivePtr<ivalue::ConstantString>();
@@ -672,6 +680,7 @@ DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
+DEFINE_TO(c10::intrusive_ptr<c10::complex<double>>, toComplexDouble)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
@@ -1067,6 +1076,11 @@ inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
 
 inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
 : tag(Tag::Quantizer), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
+inline IValue::IValue(c10::intrusive_ptr<c10::complex<double>> c)
+: tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 
