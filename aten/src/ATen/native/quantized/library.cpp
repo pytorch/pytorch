@@ -166,6 +166,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("mul_scalar_relu.Tensor(Tensor qa, Tensor b)-> Tensor qc");
   m.def("mul_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("max_pool1d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor");
   // NB: missing a space after comma here...
   m.def("max_pool2d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation,bool ceil_mode) -> Tensor");
   m.def("relu6(Tensor qx, bool inplace=False) -> Tensor");
