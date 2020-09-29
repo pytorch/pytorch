@@ -57,7 +57,7 @@ class RpcMultiProcessTestCase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self.output_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.output_dir.cleanup())
+        self.addCleanup(self.output_dir.cleanup)
         self.subprocess_init_data["output_dir"] = self.output_dir.name
 
     def subprocess_init(self, data):
