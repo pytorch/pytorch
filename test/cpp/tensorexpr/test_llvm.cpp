@@ -183,13 +183,12 @@ void testLLVMLetTest02() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  auto block = Block::make({
-      Let::make(x, 3.f),
-      Let::make(y, 6.f),
-      a.store(
-          {IntImm::make(0)},
-          ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)), ),
-  });
+  auto block = Block::make(
+      {Let::make(x, 3.f),
+       Let::make(y, 6.f),
+       a.store(
+           {IntImm::make(0)},
+           ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -204,15 +203,15 @@ void testLLVMLetTestMultitype() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block = Block::make({
-      Let::make(x, 3),
-      Let::make(y, 6.f),
-      a.store(
-          {0},
-          Cast::make(
-              kDouble,
-              ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f))), ),
-  });
+  auto block =
+      Block::make({Let::make(x, 3),
+                   Let::make(y, 6.f),
+                   a.store(
+                       {0},
+                       Cast::make(
+                           kDouble,
+                           ExprHandle(2.f) +
+                               (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -521,7 +520,7 @@ void testLLVMElemwiseLog10Float() {
       N / 4,
       b.storeWithMask(
           {Ramp::make(i * 4, 1, 4)},
-          log10(a.load(Ramp::make(i * 4, 1, 4))),
+          log10(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
           mask));
 
   LLVMCodeGen cg(expr, {a, b});
@@ -551,7 +550,7 @@ void testLLVMElemwiseLog1pFloat() {
       N / 4,
       b.storeWithMask(
           {Ramp::make(i * 4, 1, 4)},
-          log1p(a.load(Ramp::make(i * 4, 1, 4))),
+          log1p(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
           mask));
 
   LLVMCodeGen cg(expr, {a, b});
@@ -576,8 +575,8 @@ void testLLVMElemwiseMaxInt() {
   std::vector<int> c_buffer(N, 1);
 
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i, 0, N, c.store(c, {i}, Max::make(a.load(i), b.load(i), false)));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Max::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -603,8 +602,8 @@ void testLLVMElemwiseMinInt() {
   std::vector<int> c_buffer(N, 1);
 
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i, 0, N, c.store(c, {i}, Min::make(a.load(i), b.load(i), false)));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Min::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -1161,7 +1160,7 @@ void testLLVMDynamicShape2D() {
     Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     l.prepareForCodegen();

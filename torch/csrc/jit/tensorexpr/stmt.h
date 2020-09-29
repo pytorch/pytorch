@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <list>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
