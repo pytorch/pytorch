@@ -400,11 +400,7 @@ class TestOptim(TestCase):
                 res.append(model.parameters())
 
             for p1, p2 in zip(res[0], res[1]):
-                if optimizer_pairs[index] == (optim.Adam, optim._multi_tensor.Adam) or \
-                   optimizer_pairs[index] == (optim.AdamW, optim._multi_tensor.AdamW):
-                    self.assertEqual(p1, p2, atol=1e-2, rtol=1e-2)
-                else:
-                    self.assertEqual(p1, p2)
+                self.assertEqual(p1, p2)
 
 
     def test_adam(self):
