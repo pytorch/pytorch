@@ -2,9 +2,7 @@
 
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
