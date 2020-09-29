@@ -3,11 +3,12 @@
 #include <math.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/ForeachUtils.h>
-#include <ATen/native/cuda/ForeachFunctors.cuh>
+#include <ATen/native/TensorIterator.h>
 
 
 namespace {
@@ -44,6 +45,9 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
                                              const Tensor& inv_scale)
 {
   // The only way we reach this function is through _amp_foreach_non_finite_check_and_unscale_cuda_, so no input checks.
+
+  // It's not obvious gpu_kernel always guards onto its argument.  Guarding here just in case.
+  const OptionalDeviceGuard device_guard(device_of(scaled_grad));
 
   // Acts on scaled_grad in place.
   auto iter = TensorIterator::unary_op(scaled_grad, scaled_grad);
@@ -150,6 +154,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 
       using opmath_t = get_opmath_t<scalar_t>::opmath_t;
 
+      // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
       multi_tensor_apply<1>(tensor_lists,
                             UnaryOpFunctor_<scalar_t>(),
                             [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (opmath_t val) -> opmath_t {
