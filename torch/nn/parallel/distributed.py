@@ -132,8 +132,8 @@ class DistributedDataParallel(Module):
         Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
         for a brief introduction to all features related to distributed training.
 
-    .. note:: ``nccl`` backend is currently the fastest and
-        highly recommended backend and this applies to both single-node and
+    .. note:: ``nccl`` backend is currently the fastest and highly recommended
+        backend when using GPUs. This applies to both single-node and
         multi-node distributed training.
 
     .. note:: This module also supports mixed-precision distributed training.
