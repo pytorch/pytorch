@@ -522,15 +522,12 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Placeholder d(BufHandle("D", {1}, kInt));
-  Placeholder e(BufHandle("E", {1}, kInt));
+  BufHandle d("D", {1}, kInt);
+  BufHandle e("E", {1}, kInt);
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
-      Load::make(
-          BufHandle(d.data()),
-          {Ramp::make(0, 1, 4)},
-          Broadcast::make(IntImm::make(1), 4)),
+      Load::make(d, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
       Broadcast::make(Cast::make(kInt, DoubleImm::make(1)), 4));
 
   auto if_stmt = Cond::make(
@@ -2635,8 +2632,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
-    Placeholder a(BufHandle("A", {1}, kInt));
-    Placeholder b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2651,8 +2648,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant false then take the false_value.
     // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
-    Placeholder a(BufHandle("A", {1}, kInt));
-    Placeholder b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2668,8 +2665,8 @@ void testSimplifyConstantCond() {
     // condition is simplified before checking.
     // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {1}, kInt));
-    Placeholder b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2685,7 +2682,7 @@ void testSimplifyConstantCond() {
     // If both branches are the same then don't do the condition.
     // x ? A[0] = x : A[0] = x => A[0] = x
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, x, 1);
@@ -2701,7 +2698,7 @@ void testSimplifyConstantCond() {
     // If both branches simplify to the same thing it still works.
     // x ? (x + x) : (2 * x) => x
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
     Stmt* false_val = Store::make(a, {0}, x + x, 1);
@@ -2717,7 +2714,7 @@ void testSimplifyConstantCond() {
     // But not if they dont
     // x ? x : (2 * x) => x ? x : (2 * x)
     VarHandle x("x", kInt);
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
@@ -3054,7 +3051,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3077,7 +3074,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3100,7 +3097,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
-    Placeholder a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3861,7 +3858,7 @@ void testSimplifyFuseConditions() {
 
 void testSimplifySyncThreads() {
   KernelScope kernel_scope;
-  Placeholder a(BufHandle("A", {4}, kInt));
+  BufHandle a("A", {4}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
 
@@ -3977,7 +3974,7 @@ void testSimplifyBroadcastTermExpander() {
   // relevant path in TermExpander::mutate. The two bc1 terms are brought
   // together and simplified to 2 * bc1, which then needs to make 2 multi-lane.
   ExprHandle simplified = IRSimplifier::simplify(bc1 + (bc0 / bc2) + bc1);
-  Placeholder buf(BufHandle("buf", {num_lanes}, kInt));
+  BufHandle buf("buf", {num_lanes}, kInt);
   // The result isn't fully simplified currently and thus would be brittle to
   // match. Observe its value instead.
   auto store = Store::make(

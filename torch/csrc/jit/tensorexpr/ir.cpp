@@ -90,17 +90,6 @@ ExprHandle Load::make(
 }
 
 Store::Store(
-    const Placeholder& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* value,
-    const Expr* mask)
-    : Store(buffer.data(), indices, value, mask) {
-  if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
-    throw malformed_input("invalid dtype in Store");
-  }
-}
-
-Store::Store(
     const Buf* buf,
     std::vector<const Expr*> indices,
     const Expr* value,
@@ -130,15 +119,6 @@ Store::Store(
     throw malformed_input();
   }
   */
-}
-
-Store* Store::make(
-    const Placeholder& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buffer, ExprHandleVectorToExprVector(indices), value.node(), mask.node());
 }
 
 Store* Store::make(

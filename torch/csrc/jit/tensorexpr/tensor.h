@@ -209,6 +209,21 @@ class Placeholder {
         new Load(data(), ExprHandleVectorToExprVector(args), mask.node()));
   }
 
+  inline Store* store(
+      const std::vector<ExprHandle>& args,
+      const ExprHandle& val) const {
+    return new Store(
+        data(), ExprHandleVectorToExprVector(args), val.node(), new IntImm(1));
+  }
+
+  inline Store* storeWithMask(
+      const std::vector<ExprHandle>& args,
+      const ExprHandle& val,
+      const ExprHandle& mask) const {
+    return new Store(
+        data(), ExprHandleVectorToExprVector(args), val.node(), mask.node());
+  }
+
  private:
   const Buf* data_;
   std::vector<const Expr*> strides_;

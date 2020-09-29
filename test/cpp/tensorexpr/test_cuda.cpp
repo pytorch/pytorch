@@ -448,12 +448,12 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
   //   }
   // }
 
-  Store* init_store = Store::make(output_buf, {0}, 0.f, 1);
+  Store* init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
   ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1}, 1);
   ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0}, 1);
   ExprHandle add_value = load_output + load_data;
-  Store* store_output = Store::make(output_buf, {0}, add_value, 1);
+  Store* store_output = output_buf.store({0}, add_value);
   For* for_output = For::make(i1, 0, N, store_output);
   Stmt* reduce_block = Block::make({init_store, for_output});
   VarHandle thread_idx("tidx", kInt);
@@ -517,7 +517,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {1});
 
-  Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
+  Store* init_store = b_buf.store({0}, 0.f);
   VarHandle t("t", kInt);
   VarHandle b("b", kInt);
 
@@ -536,7 +536,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t}, 1);
   ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0}, 1);
   ExprHandle add_value = load_b + load_a;
-  Store* store_b = Store::make(b_buf, {0}, add_value, 1);
+  Store* store_b = b_buf.store({0}, add_value);
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
   Stmt* reduce_block = Block::make({for_init, for_b});
@@ -607,15 +607,15 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[0] = 0
   //   for n in 0..2:
   //     a[0] = a[0] + n
-  Store* store_a0_0 = Store::make(a_buf, {0}, 0.f, 1);
+  Store* store_a0_0 = a_buf.store({0}, 0.f);
   ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0}, 1);
   ExprHandle v1 = load_a0 + n;
-  Store* store_a0_v1 = Store::make(a_buf, {0}, v1, 1);
+  Store* store_a0_v1 = a_buf.store({0}, v1);
   For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
 
   //   for m in 0..1024: // thread-idx
   //     b[m] = m
-  Store* store_bm_m = Store::make(b_buf, {m}, m + 0.f, 1);
+  Store* store_bm_m = b_buf.store({m}, m + 0.f);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
   For* loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
@@ -623,10 +623,10 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[1] = 1
   //   for l in 0..2:
   //     a[1] = a[1] + l
-  Store* store_a1_1 = Store::make(a_buf, {1}, 1.f, 1);
-  ExprHandle load_a1 = Load::make(BufHandle(a_buf.data()), {1}, 1);
+  Store* store_a1_1 = a_buf.store({1}, 1.f);
+  ExprHandle load_a1 = a_buf.load(1);
   ExprHandle v2 = load_a1 + l;
-  Store* store_a1_v2 = Store::make(a_buf, {1}, v2, 1);
+  Store* store_a1_v2 = a_buf.store({1}, v2);
   For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
   Stmt* reduce_block =
@@ -741,12 +741,12 @@ void testCudaSharedMemReduce_1() {
     //    b(k) = 0
     //    for n in 0..64:  // thread_idx
     //      b(k) = b(k) + c(n)
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
-    ExprHandle load_bk = Load::make(BufHandle(b.data()), {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
     ExprHandle v_add = load_bk + load_cn;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
     block.push_back(loop_n3);
   }
@@ -848,7 +848,7 @@ void testCudaLocalMemReduce_1() {
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block_k.push_back(store_bk_0);
   }
   std::vector<Stmt*> block_n;
@@ -866,8 +866,7 @@ void testCudaLocalMemReduce_1() {
     //      for m in 0..128:
     //        c(0) = c(0) + a(k, m, n)
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
-    ExprHandle a_kmn =
-        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n}, 1);
+    ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
     Store* store_c0_v = Store::make(c, {0}, v_add);
     For* loop_m = For::make(m, 0, M, store_c0_v);
@@ -875,10 +874,10 @@ void testCudaLocalMemReduce_1() {
   }
   {
     //      b(k) = b(k) + c(0)
-    ExprHandle load_bk = Load::make(BufHandle(b.data()), {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
     ExprHandle v_add = load_bk + load_c0;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
@@ -1057,8 +1056,8 @@ void testCudaPrioritizeDependents() {
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
-  For* loop = For::make(
-      i, 0, 12, Block::make({Store::make(c, {i}, ite, 1)}), block_idx_opt);
+  For* loop =
+      For::make(i, 0, 12, Block::make({c.store({i}, ite)}), block_idx_opt);
 
   CudaCodeGen cuda_cg(loop, a, b, c);
 
@@ -1777,14 +1776,13 @@ void testCudaMaskCompoundInnerLoop() {
                j,
                0,
                A_SIZE,
-               Store::make(c_buf, {i, j}, ExprHandle(2) * a_buf.load(i, j), 1),
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
                threadBound),
            For::make(
                k,
                0,
                B_SIZE,
-               Store::make(
-                   d_buf, {i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k), 1),
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
                threadBound)}),
       blockBound);
 
@@ -1917,14 +1915,13 @@ void testCudaMaskInnerLoopOneBlock() {
                j,
                0,
                A_SIZE,
-               Store::make(c_buf, {i, j}, ExprHandle(2) * a_buf.load(i, j), 1),
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
                threadBound),
            For::make(
                k,
                0,
                B_SIZE,
-               Store::make(
-                   d_buf, {i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k), 1),
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
                threadBound)}));
 
   stmt = FlattenIndexes(stmt);

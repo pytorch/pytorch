@@ -2089,10 +2089,13 @@ void testLoopNestReorderExtraStatements() {
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  Stmt* store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f), 1);
-  Stmt* store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f), 1);
+  Stmt* store_1 =
+      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f), 1);
+  Stmt* store_2 =
+      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f), 1);
   // stmt 3 is the Function body.
-  Stmt* store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f), 1);
+  Stmt* store_3 =
+      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f), 1);
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2232,7 +2235,7 @@ void LoopNestReorderTestHelper(
     // times the loop executes.
     Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
     Add* add = new Add(load, new IntImm(1));
-    Stmt* store = Store::make(extra, {j}, ExprHandle(add), 1);
+    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add, new IntImm(1));
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
