@@ -98,6 +98,10 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+  }
+
   bool check(const std::vector<std::string>& keys) override {
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
@@ -306,6 +310,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "add",
               &::c10d::Store::add,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "delete_key",
+              &::c10d::Store::deleteKey,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "num_keys",
