@@ -11,7 +11,6 @@ import textwrap
 from typing import DefaultDict, Dict, Optional, Tuple
 
 import torch
-from torch.utils._benchmark.utils.valgrind_wrapper import callgrind_bindings
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
@@ -164,7 +163,7 @@ class CallgrindStats(object):
 class _ValgrindWrapper(object):
     def __init__(self):
         self._commands_available: Dict[str, bool] = {}
-        if callgrind_bindings.supported_platform():
+        if torch._C.valgrind_supported_platform():
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
@@ -181,7 +180,7 @@ class _ValgrindWrapper(object):
         self._baseline_cache: Dict[Tuple[int, int], Tuple[Tuple[Tuple[int, str], ...], Tuple[Tuple[int, str], ...]]] = {}
 
     def _validate(self):
-        if not callgrind_bindings.supported_platform():
+        if not torch._C.valgrind_supported_platform():
             raise OSError("Valgrind is not supported on this platform.")
 
         missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
@@ -358,7 +357,6 @@ class _ValgrindWrapper(object):
             import time
 
             import torch
-            from torch.utils._benchmark.utils.valgrind_wrapper import callgrind_bindings
             torch.set_num_threads({num_threads})
 
             PID = os.getpid()
@@ -421,13 +419,13 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            callgrind_bindings.toggle()
+            torch._C.valgrind_toggle()
             {blocked_stmt}
 
             # Sleep is to allow the interpreter to catch up before we stop collecting in
             # order to reduce jitter.
             time.sleep(0.01)
-            callgrind_bindings.toggle()
+            torch._C.valgrind_toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(stmt, " " * 4),
             blocked_stmt=blocked_stmt,

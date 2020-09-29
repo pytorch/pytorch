@@ -667,17 +667,6 @@ def configure_extension_build():
                 sources=[]),
         )
 
-    # This is a placeholder while Nikita and I figure out how to add this to CMake.
-    extensions.append(
-        Extension(
-            name=str('torch.utils._benchmark.utils.valgrind_wrapper.callgrind_bindings'),
-            sources=['torch/utils/_benchmark/utils/valgrind_wrapper/callgrind_bindings.cpp'],
-            include_dirs=[
-                'third_party/pybind11/include',  # Just hard code since this isn't permanent
-                'third_party/valgrind',
-            ]),
-    )
-
     cmdclass = {
         'build_ext': build_ext,
         'clean': clean,
@@ -872,7 +861,6 @@ if __name__ == '__main__':
                 'share/cmake/Gloo/*.cmake',
                 'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
-                'utils/_benchmark/utils/valgrind_wrapper/*.cpp',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',

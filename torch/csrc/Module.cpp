@@ -19,6 +19,7 @@
 #include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <callgrind.h>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -820,6 +821,26 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+
+  py_module.def(
+    "valgrind_supported_platform", [](){
+      #if defined(NVALGRIND)
+      return false;
+      #else
+      return true;
+      #endif
+    }
+  );
+
+  py_module.def(
+    "valgrind_toggle", [](){
+      #if defined(NVALGRIND)
+      TORCH_CHECK(false, "Valgrind is not supported.");
+      #else
+      CALLGRIND_TOGGLE_COLLECT;
+      #endif
+    }
+  );
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
