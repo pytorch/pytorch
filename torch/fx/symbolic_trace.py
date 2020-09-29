@@ -155,7 +155,7 @@ class Tracer(TracerBase):
         return GraphModule(root, self.graph)
 
     def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}), self)
+        return Proxy(self.placeholder(name), self)
 
 # Symbolic tracing API
 #

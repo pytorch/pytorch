@@ -219,10 +219,11 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
+        for inp in self.graph.inputs:
+            env[inp.name] = next(args_iter)
+
         for node in self.graph.nodes:
-            if node.op == 'placeholder':
-                result = next(args_iter)
-            elif node.op == 'get_attr':
+            if node.op == 'get_attr':
                 result = self.state_dict[node.target]
             elif node.op == 'call_function':
                 result = node.target(*load_arg(node.args), **load_arg(node.kwargs))
@@ -232,6 +233,8 @@ class Quantizer:
                 result = getattr(self_obj, node.target)(*args, **kwargs)
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+            else:
+                raise RuntimeErrror(f'Unsupported opcode {node.op}')
 
             env[node.name] = result
             root_node, obj = self.matches.get(node.name, (None, None))
@@ -267,10 +270,10 @@ class Quantizer:
             r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
             return r
 
+        for inp in self.graph.inputs:
+            env[inp.name] = self.quantized_graph.placeholder(inp.target)
         for node in self.graph.nodes:
             root_node, obj = self.matches.get(node.name, (None, None))
-            if node.op == 'return':
-                continue
             if root_node is None:
                 # not quantized just copy it
                 env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
