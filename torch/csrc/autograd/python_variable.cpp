@@ -388,19 +388,19 @@ PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_get_names(THPVariable *self, void *unused)
+PyObject *THPVariable_get_names(PyObject *self, void *unused)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "names");
+  if (check_has_torch_function(self)) {
+    return handle_torch_function_getter((THPVariable*)self, "names");
   }
   // The long-term plan is to return a list of (python) torch.Dimname.
   // However, for now, return a list of string.
-  size_t size = self->cdata.dim();
+  size_t size = ((THPVariable *)self)->cdata.dim();
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  const auto dimnames = self->cdata.names();
+  const auto dimnames = ((THPVariable *)self)->cdata.names();
   for (size_t i = 0; i < size; ++i) {
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
@@ -423,12 +423,12 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_names(THPVariable *self, PyObject *names) {
+int THPVariable_set_names(PyObject *self, PyObject *names) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_setter(self, "names", names);
+  if (check_has_torch_function(self)) {
+    return handle_torch_function_setter((THPVariable*)self, "names", names);
   }
-  auto& var = self->cdata;
+  auto& var = ((THPVariable *)self)->cdata;
   if (names == Py_None) {
     at::internal_set_names_inplace(var, at::nullopt);
   } else {

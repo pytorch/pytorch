@@ -527,12 +527,12 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_qEngine(PyObject */* unused */)
+PyObject *THPModule_qEngine(PyObject *self, PyObject *args)
 {
   return THPUtils_packInt64(static_cast<int>(at::globalContext().qEngine()));
 }
 
-PyObject *THPModule_supportedQEngines(PyObject */* unused */)
+PyObject *THPModule_supportedQEngines(PyObject *self, PyObject *args)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
@@ -546,7 +546,7 @@ PyObject *THPModule_supportedQEngines(PyObject */* unused */)
   return list.release();
 }
 
-PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
+PyObject *THPModule_isEnabledXNNPACK(PyObject *self, PyObject *args)
 {
   if (at::globalContext().isXNNPACKAvailable()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -608,10 +608,10 @@ static PyMethodDef TorchMethods[] = {
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
   {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,   nullptr},
-  {"_get_qengine", (PyCFunction)THPModule_qEngine, METH_NOARGS, nullptr},
+  {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
-  {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
-  {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+  {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
+  {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", (PyCFunction)THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", (PyCFunction)THPModule_disable_torch_function, METH_VARARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
