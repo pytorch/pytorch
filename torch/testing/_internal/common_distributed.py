@@ -398,6 +398,8 @@ class MultiProcessTestCase(TestCase):
                     self._check_no_test_errors(elapsed_time)
                 else:
                     self._check_return_codes(elapsed_time)
+            except unittest.SkipTest:
+                raise
             except Exception:
                 self.on_test_failure()
                 raise
