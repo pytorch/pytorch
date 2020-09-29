@@ -245,7 +245,7 @@ float calculate_quant_loss(
   float scale = data_range == 0
       ? 1.0
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
-  float inverse_scale = 1.0f / scale;
+  float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
 
   float norm = 0.0f;
   int i = 0;
