@@ -19,6 +19,8 @@ PropertyStub = collections.namedtuple('Property', ('resolution_callback', 'def_'
 
 # TODO: there should be a more principled way of doing this.
 ignored_attributes = [
+    "qconfig",
+    "_qconfig_map",
     "_version",
     "_parameters",
     "_buffers",
