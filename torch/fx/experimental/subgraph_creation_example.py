@@ -136,8 +136,10 @@ def split_module(
                 partition.targets[node.target] = target_attr
                 target = target_atoms[-1]
 
-            new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,  # type: ignore 
-                                                   kwargs=gathered_kwargs)  # type: ignore  
+            assert isinstance(gathered_args, tuple)
+            assert isinstance(gathered_kwargs, dict)
+            new_node = partition.graph.create_node(op=node.op, target=target, args=gathered_args,
+                                                   kwargs=gathered_kwargs)
             partition.environment[node] = new_node
 
     # Set up values to construct base module
