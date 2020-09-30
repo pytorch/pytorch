@@ -132,7 +132,7 @@ class CallgrindStats(object):
             for c, fn in stats:
                 fn = re.sub(r"^.+build/\.\./", "build/../", fn)
                 for new_prefix in prefix_truncations:
-                    fn = re.sub(r"^.+" + new_prefix, new_prefix, fn)
+                    fn = re.sub(r"^.+/" + re.escape(new_prefix), new_prefix, fn)
 
                 # Strip library name. e.g. `libtorch.so`
                 fn = re.sub(r"\s\[.+\]$", "", fn)
