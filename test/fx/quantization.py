@@ -281,7 +281,6 @@ class Quantizer:
                 else:
                     quant_env[node.name] = r
 
-        self.quantized_graph.output(load_arg(self.graph.result, quantized=False))
         return GraphModule(self.root, self.quantized_graph)
 
     def _find_matches(self, patterns):

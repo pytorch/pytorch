@@ -309,6 +309,7 @@ class TestFX(JitTestCase):
                 operator.mul : "mul"
             }
 
+            output_node : Optional[Node] = None
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
@@ -335,9 +336,10 @@ class TestFX(JitTestCase):
                         else:
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
-
+                elif n.op == 'output':
+                    continue
                 else:
-                    raise RuntimeError('Unsupported opcode' + n.op)
+                    raise RuntimeError('Unsupported opcode ' + n.op)
 
             interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
             # Load constants
@@ -348,6 +350,7 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
+            assert isinstance(mod.graph.result, torch.fx.Node)
             interpreter.set_output_name(mod.graph.result.name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
@@ -706,7 +709,8 @@ class TestFX(JitTestCase):
             0: [1],
             1: [3],
             2: [3],
-            3: []
+            3: [4],
+            4: [],
         }
         for i, node in enumerate(graph.nodes):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)

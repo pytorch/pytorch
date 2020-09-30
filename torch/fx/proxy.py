@@ -10,6 +10,9 @@ from .node import Target, Node, Argument, base_types
 class TracerBase:
     graph: Graph
 
+    def output(self, result : Argument) -> Node:
+        return self.create_node(kind='output', target='output', args=(result,), kwargs={})
+
     def create_node(self, kind : str, target : Union[str, Callable],
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
         """

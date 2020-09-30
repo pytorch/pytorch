@@ -52,5 +52,4 @@ def replace_target_nodes_with(
             val_map[node] = new_graph.create_node(new_op, new_target, args, kwargs, node.name)
         else:
             val_map[node] = new_graph.node_copy(node, lambda n : val_map[n])
-    new_graph.output(map_arg(fx_module.graph.result, lambda n: val_map[n]))
     fx_module.graph = new_graph
