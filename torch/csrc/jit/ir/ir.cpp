@@ -326,6 +326,8 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
         << *fg->g(attr::Subgraph);
   }
+  out.flush();
+
   /*
   // Uncomment this to debug all_nodes issues
   {
