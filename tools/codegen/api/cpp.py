@@ -197,6 +197,7 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
 
 @dataclass(frozen=True)
 class CppSignature:
+    returns: Sequence[Return]
     arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]
 
     def cpp_arguments(self) -> Sequence[CppArgument]:
@@ -204,34 +205,12 @@ class CppSignature:
 
     # Return arguments as a comma separated list, i.e. like they would be in a C++
     # function signature. Include default values for arguments.
-    def cpp_arguments_str(self) -> str:
-        return ', '.join(map(str, self.cpp_arguments()))
-
-    # Return a copy of the CppSignature with the `this` argument removed
-    def exclude_this(self) -> 'CppSignature':
-        return CppSignature(
-            arguments=[a for a in self.arguments if not isinstance(a, ThisArgument)]
-        )
-
-    # Return a copy of the CppSignature with all default values removed from the signature
-    def no_defaults(self) -> 'CppSignature':
-        arguments: List[Union[Argument, TensorOptionsArguments, ThisArgument]] = []
-        for argument in self.arguments:
-            if isinstance(argument, Argument) or isinstance(argument, ThisArgument):
-                arguments.append(dataclasses.replace(
-                    argument,
-                    default=None))
-            elif isinstance(argument, TensorOptionsArguments):
-                arguments.append(dataclasses.replace(
-                    argument,
-                    dtype=dataclasses.replace(argument.dtype, default=None),
-                    layout=dataclasses.replace(argument.layout, default=None),
-                    device=dataclasses.replace(argument.device, default=None),
-                    pin_memory=dataclasses.replace(argument.pin_memory, default=None),
-                ))
-            else:
-                raise "Unhandled case"
-        return CppSignature(arguments=arguments)
+    def cpp_arguments_str(self, with_defaults: bool) -> str:
+        args_without_this = [argument(a) for a in self.arguments if not isinstance(a, ThisArgument)]
+        if with_defaults:
+            return ', '.join(map(str, args_without_this))
+        else:
+            return ', '.join(map(lambda s: s.str_no_default(), args_without_this))
 
     # Return a string with a comma separated list of expressions that could be used
     # to call this operator. This can be used to generate code that wraps operators
@@ -241,10 +220,14 @@ class CppSignature:
     # - SCATTER: Expect a `TensorOptions options` in the scope and scatter it into `options.dtype, ...`
     # - GATHER: Expect `dtype, ...` in the scope and gather them into a TensorOptions for calling
     def exprs_str(self,
-                  process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH
+                  process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH,
+                  exclude_this: bool = False,
                   ) -> str:
-        args = self.cpp_arguments()
-        exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=process_tensoroptions)
+        args = self.arguments
+        if exclude_this:
+            args = [a for a in args if not isinstance(a, ThisArgument)]
+        cpp_args = list(map(argument, args))
+        exprs = dispatcher.cpparguments_exprs(cpp_args, process_tensoroptions=process_tensoroptions)
         return ', '.join(map(lambda a: a.expr, exprs))
 
     def types_str(self) -> str:
@@ -252,8 +235,9 @@ class CppSignature:
         exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
         return ', '.join(map(lambda a: a.type, exprs))
 
+
 @dataclass(frozen=True)
-class CppBinding:
+class CppSignatureGroup:
     # arguments contains the arguments for the C++ signature as it is represented
     # in the JIT schema.
     signature: CppSignature
@@ -275,9 +259,9 @@ class CppBinding:
             return self.signature
 
 
-def binding(
+def signature_group(
     func: FunctionSchema, *, method: bool = False,
-) -> CppBinding:
+) -> CppSignatureGroup:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
     args.extend(func.out_arguments)
 
@@ -321,13 +305,13 @@ def binding(
     args.extend(func.kwarg_only_arguments)
 
     if has_tensoroptions_argument:
-        return CppBinding(
-            signature=CppSignature(arguments=args),
-            gathered_signature=CppSignature(arguments=gathered_args),
+        return CppSignatureGroup(
+            signature=CppSignature(arguments=args, returns=func.returns),
+            gathered_signature=CppSignature(arguments=gathered_args, returns=func.returns),
         )
     else:
         assert gathered_args == args
-        return CppBinding(
-            signature=CppSignature(arguments=args),
+        return CppSignatureGroup(
+            signature=CppSignature(arguments=args, returns=func.returns),
             gathered_signature=None,
         )
