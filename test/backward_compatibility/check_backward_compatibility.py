@@ -108,7 +108,7 @@ allow_list = [
     ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
     ("aten::_foreach_div", datetime.date(2020, 10, 1)),
     ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
-    ("aten::smooth_l1_loss", datetime.date(2020, 10, 15)),
+    ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
 ]
 
 
