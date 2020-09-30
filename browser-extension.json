@@ -1,7 +1,7 @@
 {
   "__comment": "Configuration for browser extension that does small UI changes, like removing the 'merge pull request' button, and adding buttons for 'import to phabricator' or 'land to fbsource' - currently FB-Only, though we hope to change that",
   "allowDirectMerges": [
-    "nightly", "nightly2", "v0.4.1", "release/1.5", "release/1.6"
+    "nightly", "nightly2", "v0.4.1", "release/1.5", "release/1.6", "release/1.7"
   ],
   "allowBotCommands": false,
   "internalRepository": "fbsource"
