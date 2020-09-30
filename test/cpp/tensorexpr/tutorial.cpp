@@ -1,4 +1,12 @@
-// TODO: Add an intro
+// *** Tensor Expressions ***
+//
+// This tutorial covers basics of NNC's tensor expressions, shows basic APIs to
+// work with them and outlines how they are used in the overall TorchScript
+// compilation pipeline. This doc is permanently "work in progress" since NNC is
+// under active development and things might change fast.
+//
+// Tutorial's code is compiled in the standard pytorch build, and the executable
+// can be found in `build/bin/tutorial_tensorexpr`.
 #include <iostream>
 #include <string>
 
