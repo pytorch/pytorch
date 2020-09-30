@@ -2388,7 +2388,9 @@ t2.start()
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
+                print(f"HEY about to run {op}")
                 output = getattr(module, op)(*args, **add_kwargs)
+                print(f"HEY one {op}")
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
                                     "autocast for torch.{} produced {}, should produce {}"
