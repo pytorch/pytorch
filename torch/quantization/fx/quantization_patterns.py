@@ -5,8 +5,8 @@ from torch.fx.graph import (
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import (
-    default_symmetric_fixed_qparam_fake_quant,
     default_affine_fixed_qparam_fake_quant,
+    default_symmetric_fixed_qparam_fake_quant,
 )
 
 from ..quantization_mappings import (
