@@ -1,6 +1,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
-from torch import Tensor, vmap
+from torch import Tensor
+from torch._vmap_internals import vmap
 import functools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
