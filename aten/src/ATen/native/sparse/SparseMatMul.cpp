@@ -250,9 +250,10 @@ void sparse_matmul_kernel(
 
   std::memcpy(output_indices.data_ptr<int64_t>(), major_indices.data_ptr<int64_t>(), sizeof(int64_t) * nnz);
   output._indices().set_(output_indices.view({2, nnz}));
+
 }
 
-template <typename scalar_t, bool grad_by_row>
+template <typename scalar_t, short grad_order>
 void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
   /* 
     Computes  the backward output  for matrix C = A*B.
@@ -262,15 +263,15 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
     A_grad = C_grad @ B^T
     B_grad = A^T @ C_grad
 
-    if grad_by_row == true:
+    if grad_order == 1:
       output = x^T @ C_grad 
     else:
       output = C_grad @ x^T 
   */
   Tensor grad_filled = at::ones(grad.sizes(), grad.options().layout(kStrided));
-  if (grad_by_row) {
+  if (grad_order == 1) {
     sparse_matmul_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_filled.to_sparse());
-  } else {
+  } else if (grad_order == 0) {
     sparse_matmul_kernel<scalar_t>(output, grad_filled.to_sparse(), x.transpose(0, 1).coalesce());
   }
 }
@@ -300,26 +301,26 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
 Tensor sparse_sparse_matmul_backward_cpu(
     const Tensor& grad,
     const Tensor& var,
-    int64_t mult_order) {
+    int64_t grad_order) {
   TORCH_CHECK(
-      mult_order == 0 || mult_order == 1,
-      ": mult_order not in [0, 1] at sparse_matmul_backward_cpu function");
-  Tensor output = at::native::empty_like(grad);
-  if (mult_order == 0) {
+      grad_order == 0 || grad_order == 1,
+      ": grad_order not in [0, 1] at sparse_sparse_matmul_backward_cpu function");
+  Tensor output = at::native::empty_like(var);
+  if (grad_order == 0) {
     std::vector<int64_t> size = {var.size(1), grad.size(1)};
     at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
     
     AT_DISPATCH_FLOATING_TYPES(
-        output.scalar_type(), "sparse_matmul_kernel_grad_by_row", [&] {
-          sparse_matmul_kernel_grad<scalar_t, true>(output,  grad, var);
+        output.scalar_type(), "sparse_matmul_kernel_grad_order", [&] {
+          sparse_matmul_kernel_grad<scalar_t, 1>(output,  grad, var);
         });
-  } else if (mult_order == 1) {
+  } else if (grad_order == 1) {
     std::vector<int64_t> size = {grad.size(0), var.size(0)};
     at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
 
     AT_DISPATCH_FLOATING_TYPES(
         output.scalar_type(), "sparse_matmul_kernel_grad_by_col", [&] {
-          sparse_matmul_kernel_grad<scalar_t, false>(output, grad, var);
+          sparse_matmul_kernel_grad<scalar_t, 0>(output, grad, var);
         });
   }
   return output;
