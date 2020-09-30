@@ -872,6 +872,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(FloorModule(), x)
 
     # NOTE: Starting from 1.7, PyTorch performs floor divide with floor instead of truncation.
+    #       The update is applied to ONNX export as well.
     def test_floor_div(self):
         class FloorDivModule(torch.nn.Module):
             def forward(self, x_f32, x_f64, x_i64, y_f32, y_f64, y_i64):
