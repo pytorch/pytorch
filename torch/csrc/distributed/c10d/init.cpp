@@ -324,7 +324,6 @@ Example::
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 get(key: str) -> str
 
@@ -344,7 +343,9 @@ Example::
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
-)")
+)",
+              py::arg("key"),
+              py::call_guard<py::gil_scoped_release>());
           .def(
               "add",
               &::c10d::Store::add,
@@ -391,7 +392,6 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
-    >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
