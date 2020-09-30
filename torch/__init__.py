@@ -326,14 +326,16 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 def set_deterministic(d):
-    r""" Sets whether native PyTorch operations must use deterministic
-    algorithms. When True, operations without deterministic algorithms
-    will throw a :class:RuntimeError when called.
+    r""" Sets whether PyTorch operations must use "deterministic"
+    algorithms. That is, algorithms which, given the same input, and when
+    run on the same software and hardware, always produce the same output.
+    When True, operations will use deterministic algorithms when available,
+    and if only nondeterministic algorithms are available they will throw a
+    :class:RuntimeError when called.
 
     .. warning::
-        This feature is a beta feature, so it does not affect every
-        nondeterministic operation yet. The following operations are
-        affected by this flag.
+        This feature is in beta, and its design and implementation may change
+        in the future.
 
     The following normally-nondeterministic operations will act
     deterministically when `d=True`:

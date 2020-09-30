@@ -131,6 +131,23 @@ class TestOptimizer(unittest.TestCase):
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
+        class MyMobileOptimizedTagTest(torch.nn.Module):
+            def __init__(self):
+                super(MyMobileOptimizedTagTest, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+
+            def forward(self, x):
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                return F.relu(o)
+
+        mobile_optimized_tag_module = MyMobileOptimizedTagTest()
+        m = torch.jit.script(mobile_optimized_tag_module)
+        m.eval()
+        opt_m = optimize_for_mobile(m)
+        tag = getattr(opt_m, "mobile_optimized", None)
+        self.assertTrue(tag)
+
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
                 super(MyPreserveMethodsTest, self).__init__()
