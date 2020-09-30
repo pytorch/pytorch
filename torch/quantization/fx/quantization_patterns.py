@@ -4,6 +4,10 @@ from torch.fx.graph import (
 )
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.quantization import (
+    default_symmetric_fixed_qparams_fake_quant,
+    default_affine_fixed_qparams_fake_quant,
+)
 
 from ..quantization_mappings import (
     get_static_quant_module_class,
@@ -482,20 +486,23 @@ class InheritInputQParamOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-@register_quant_pattern(torch.nn.qat.Sigmoid)
-class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('sigmoid', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_fake_quant)
+class FixedQParamOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
-        print('in sigmoid convert')
-        if node.op == 'call_module':
-            module = quantizer.modules[node.target]
-            print('convert fixed qpram op')
-            print('module training:', module.training)
-            qcls = get_static_quant_module_class(type(module))
-            quantized = qcls.from_float(module)
-            parent_name, name = _parent_name(node.target)
-            setattr(quantizer.modules[parent_name], name, quantized)
-            print('swap modules:', quantizer.modules[node.target])
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
+# class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+#     def convert(self, quantizer, node, load_arg, debug=False):
+#         if node.op == 'call_module':
+#             module = quantizer.modules[node.target]
+#             qcls = get_static_quant_module_class(type(module))
+#             quantized = qcls.from_float(module)
+#             parent_name, name = _parent_name(node.target)
+#             setattr(quantizer.modules[parent_name], name, quantized)
+#         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.Dropout)
@@ -522,7 +529,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.max)
 @register_quant_pattern(torch.min)
-# @register_quant_pattern(torch.sigmoid)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
@@ -545,8 +551,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
 @register_quant_pattern('shape')
-@register_quant_pattern('sigmoid')
-@register_quant_pattern('sigmoid_')
 @register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')
@@ -562,7 +566,7 @@ class CopyNode(QuantizeHandler):
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)
-class DefaultQuant(QuantizeHandler):
+class DefaultQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node):
         assert self.all_nodes
         root_module = quantizer.modules['']

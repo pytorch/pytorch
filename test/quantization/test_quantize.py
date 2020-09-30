@@ -26,6 +26,7 @@ from torch.quantization import (
     float_qparams_dynamic_qconfig,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
+    FixedQParamsFakeQuantize,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -1217,9 +1218,10 @@ class TestEagerModeQATOps(QuantizationTestCase):
         m = M().train()
         m.qconfig = default_qat_qconfig
         m = prepare_qat(m)
-        self.assertEqual(type(m.sigmoid), nnqat.Sigmoid)
+        self.assertEqual(type(m.sigmoid.activation_post_process), FixedQParamsFakeQuantize)
         m = convert(m)
-        self.assertEqual(type(m.sigmoid), nnq.Sigmoid)
+        # make sure activation post process is removed
+        self.assertFalse(hasattr(m.sigmoid, 'activation_post_process'))
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

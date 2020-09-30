@@ -20,6 +20,7 @@ from torch.quantization import (
     prepare_qat_fx,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
+    FixedQParamsFakeQuantize,
 )
 
 from torch.quantization import (
@@ -1396,7 +1397,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.leaky_relu = torch.nn.LeakyReLU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
@@ -1429,11 +1429,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = F.hardsigmoid(x, inplace=True)
                 x = x.hardsigmoid()
                 x.hardsigmoid_()
-                x = self.sigmoid(x)
-                x = torch.sigmoid(x)
-                # F.sigmoid is deprecated
-                x = x.sigmoid()
-                x.sigmoid_()
                 x = self.tanh(x)
                 # F.tanh is deprecated
                 x = torch.tanh(x)
@@ -1488,7 +1483,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
             def forward(self, x):
                 x = self.conv(x)
+                # F.sigmoid is deprecated
                 x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x.sigmoid_()
                 x = self.conv(x)
                 return x
 
@@ -1501,7 +1500,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         prepared = prepare_qat_fx(original, qconfig_dict)
         # check the correct number of activation_post_process is inserted
         count_check = {
-            ns.call_module(torch.nn.qat.Sigmoid): 1
+            ns.call_module(FixedQParamsFakeQuantize) : 4,
         }
         self.checkGraphModuleNodes(
             prepared,
@@ -1520,7 +1519,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Sigmoid),
+            ns.call_module(nn.Sigmoid),
             ns.call_module(nnq.Conv2d),
             ns.call_method('dequantize'),
         ]
