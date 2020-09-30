@@ -98,6 +98,10 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+  }
+
   bool check(const std::vector<std::string>& keys) override {
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
@@ -363,6 +367,33 @@ Example:
 )",
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "delete_key",
+              &::c10d::Store::deleteKey,
+              R"(
+delete_key(key: str) -> bool
+
+Deletes the key-value pair associated with ``key`` from the store. Returns
+`true` if the key was successfully deleted, and `false` if it was not.
+
+.. warning::
+    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+
+Arguments:
+    key (str): The key to be deleted from the store
+
+Example:
+    >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set("first_key")
+    >>> # This should return true
+    >>> store.delete_key("first_key")
+    >>> # This should return false
+    >>> store.delete_key("bad_key")
+)",
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "num_keys",
               &::c10d::Store::getNumKeys,
               R"(
@@ -374,8 +405,8 @@ and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
 .. warning::
-    The ``num_keys`` API is only supported by the TCPStore. Using this API with
-    the FileStore or HashStore will result in an exception.
+    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
 
 Example:
     >>> import torch.distributed as dist

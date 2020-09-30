@@ -358,6 +358,10 @@ int64_t FileStore::getNumKeys() {
   TORCH_CHECK(false, "getNumKeys not implemented for FileStore");
 }
 
+bool FileStore::deleteKey(const std::string& /* unused */) {
+  TORCH_CHECK(false, "deleteKey not implemented for FileStore");
+}
+
 bool FileStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDONLY, timeout_);

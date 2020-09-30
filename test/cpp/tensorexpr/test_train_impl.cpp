@@ -1,8 +1,6 @@
 #include "test/cpp/tensorexpr/test_train.h"
 #include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
@@ -408,7 +406,7 @@ std::string dot(const VGraph& g) {
 
 std::tuple<
     Stmt*,
-    std::map<const VTensor*, Buffer>,
+    std::map<const VTensor*, Placeholder>,
     std::map<const VTensor*, Tensor*>,
     std::map<std::string, VarHandle>>
 to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
@@ -458,7 +456,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     return order;
   };
 
-  std::map<const VTensor*, Buffer> inputs;
+  std::map<const VTensor*, Placeholder> inputs;
   std::map<const VTensor*, Tensor*> bindings;
   std::map<std::string, torch::jit::tensorexpr::VarHandle> vbindings;
 
@@ -481,7 +479,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       if (vars.size() == 0) {
         vars.emplace_back(IntImm::make(1));
       }
-      Buffer inpB(BufHandle(get_name(id), exprs, kFloat));
+      Placeholder inpB(BufHandle(get_name(id), exprs, kFloat));
       auto inpT =
           Compute("input" + get_name(id), vars, [&](const VarHandle& i) {
             return Load::make(inpB, {i}, 1);

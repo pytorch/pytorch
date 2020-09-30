@@ -52,12 +52,22 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
-are built and included in PyTorch distributed (NCCL only when building with CUDA).
-MPI is an
-optional backend that can only be included if you build PyTorch from source. (e.g.
-building PyTorch on a host that has MPI installed.)
+PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
+distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
+included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+installed.)
 
+.. warning ::
+    As of PyTorch v1.7, Windows support for the distributed package only covers collective
+    communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
+    the `init_method` argument in :func:`init_process_group` must point to a file. This works
+    for both local and shared file systems:
+
+    - Local file system, ``init_method="file:///d:/tmp/some_file"``
+    - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
+
+    Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^
@@ -267,7 +277,9 @@ The distributed package comes with a distributed key-value store, which can be
 used to share information between processes in the group as well as to
 initialize the distributed pacakge in
 :func:`torch.distributed.init_process_group` (by explicitly creating the store
-as an alternative to specifying ``init_method``.)
+as an alternative to specifying ``init_method``.) There are 3 choices for
+Key-Value Stores: :class:`~torch.distributed.TCPStore`,
+:class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`.
 
 .. autoclass:: TCPStore
 .. autoclass:: HashStore
@@ -278,8 +290,8 @@ as an alternative to specifying ``init_method``.)
 .. autofunction:: torch.distributed.Store.get
 .. autofunction:: torch.distributed.Store.add
 .. autofunction:: torch.distributed.Store.wait
-.. autofunction:: torch.distributed.Store.wait
 .. autofunction:: torch.distributed.Store.num_keys
+.. autofunction:: torch.distributed.Store.delete_key
 .. autofunction:: torch.distributed.Store.set_timeout
 
 Groups
