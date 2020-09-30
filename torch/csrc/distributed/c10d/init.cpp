@@ -345,7 +345,7 @@ Example::
     >>> store.get("first_key")
 )",
               py::arg("key"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "add",
               &::c10d::Store::add,
