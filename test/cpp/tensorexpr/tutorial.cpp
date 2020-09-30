@@ -7,6 +7,33 @@
 //
 // Tutorial's code is compiled in the standard pytorch build, and the executable
 // can be found in `build/bin/tutorial_tensorexpr`.
+//
+// *** What is NNC ***
+//
+// NNC stands for Neural Net Compiler. It is a component of TorchScript JIT
+// responsible for on-the-fly code generation for kernels, which are often a
+// combination of multiple aten (torch) operators.
+//
+// When JIT interpreter executes a torchscript model, it automatically extracts
+// subgraphs for which a specialized code can be JIT generated. This usually
+// improves performance as the 'combined' kernel for the subgraph could avoid
+// unnecessary memory traffic that's unavoidable when the subgraph is
+// interpreted as-is, operator by operator. This optimization is often referred
+// to as 'fusion'. Relatedly, the process of finding and extracting subgraphs
+// suitable for NNC code generation is done by a JIT pass called 'fuser'.
+//
+// *** What is TE ***
+//
+// TE stands for Tensor Expressions. TE is a commonly used approach for
+// compiling kernels performing tensor (~matrix) computation. The idea behind it
+// is that operators are represented as a mathematical formula describing what
+// computation they do and then the TE engine can perform mathematical
+// simplification and other optimizations using those formulas and eventually
+// generate executable code that would produce the same results as the original
+// sequence of operators, but more efficiently.
+//
+// NNC's design and implementation of TE was heavily inspired by Halide and TVM
+// projects.
 #include <iostream>
 #include <string>
 
@@ -97,17 +124,28 @@ int main(int argc, char* argv[]) {
     //   independent computations over the same domain) for its elements, as a
     //   function of indices
     //
-    // We use Function objects to represent this. Let's build one:
-    std::vector<const Expr*> dims = {new IntImm(64), new IntImm(32)};
+    // We use Function objects to represent this. Let's build one.
+    //
+    // First, we need to specify the domain, or dimensions in which the
+    // computation would be performed. Let's create a 64x32 domain:
+    std::vector<const Expr*> dims = {
+        new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
+                                         // and represents an integer constant
 
-    // Function arguments:
+    // Next we need to create Function arguments. The arguments of a Function
+    // are Vars, and they play role of placeholders. The computation that the
+    // function would describe would use these arguments.
     const Var* i = new Var("i", kInt);
     const Var* j = new Var("j", kInt);
     std::vector<const Var*> args = {i, j};
-    // Element expressions:
+
+    // Now we can define the function computations using these arguments. Let's
+    // create two computations, the first would add the arguments of the
+    // function, the second would multiply them.
     Expr* func_body1 = new Mul(i, j);
     Expr* func_body2 = new Add(i, j);
 
+    // Finally, we pass all these pieces together to Function constructor:
     Function* func =
         new Function({"X", "Y"}, dims, args, {func_body1, func_body2});
     std::cout << "Tensor function: " << *func << std::endl;
