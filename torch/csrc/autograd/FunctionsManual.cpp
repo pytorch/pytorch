@@ -1655,6 +1655,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
+
+// XXX TODO: this is wrong! It expects to receive "V" but linalg_svd now returns VT
 Tensor linalg_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool full_matrices, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   TORCH_CHECK(compute_uv,
