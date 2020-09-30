@@ -758,9 +758,6 @@ class TestFX(JitTestCase):
         shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
         self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
 
-
-
-
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
