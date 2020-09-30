@@ -851,8 +851,8 @@ void take_out_cpu_template(
     TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
             index.layout(), " on index tensor");
 
-    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match.
-            But got different types: ", output.scalar_type(), " and ", input.scalar_type());
+    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match.",
+            "But got different types: ", output.scalar_type(), " and ", input.scalar_type());
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
 
     output.resize_(index.sizes());
