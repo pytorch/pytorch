@@ -54,6 +54,8 @@ run_tests() {
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
             $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
+        elif [[ "${JOB_BASE_NAME}" == *-jit-legacy-executor ]]; then
+            $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
         fi
     fi
 }
