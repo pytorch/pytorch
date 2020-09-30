@@ -20,7 +20,7 @@ from torch.quantization import (
     prepare_qat_fx,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
-    FixedQParamsFakeQuantize,
+    FixedQParamFakeQuantize,
 )
 
 from torch.quantization import (
@@ -1396,8 +1396,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.leaky_relu = torch.nn.LeakyReLU()
-                self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1424,16 +1422,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = F.leaky_relu(x, inplace=True)
                 x = x.leaky_relu()
                 x.leaky_relu_()
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x = F.hardsigmoid(x, inplace=True)
-                x = x.hardsigmoid()
-                x.hardsigmoid_()
-                x = self.tanh(x)
-                # F.tanh is deprecated
-                x = torch.tanh(x)
-                x = x.tanh()
-                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1480,6 +1468,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1488,6 +1478,16 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = torch.sigmoid(x)
                 x = x.sigmoid()
                 x.sigmoid_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = x.hardsigmoid()
+                x.hardsigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1500,7 +1500,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         prepared = prepare_qat_fx(original, qconfig_dict)
         # check the correct number of activation_post_process is inserted
         count_check = {
-            ns.call_module(FixedQParamsFakeQuantize) : 4,
+            ns.call_module(FixedQParamFakeQuantize) : 13,
         }
         self.checkGraphModuleNodes(
             prepared,
