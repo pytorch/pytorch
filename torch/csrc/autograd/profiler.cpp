@@ -247,7 +247,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       evt.setSequenceNr(fn.seqNr());
       evt.setFwdThreadId(fn.forwardThreadId());
       evt.setScope((uint8_t)fn.scope());
-
+#ifndef C10_MOBILE
       // backward nodes source range corresponds to the forward node
       // TODO: consider using C++ stack trace
       if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
@@ -257,7 +257,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
         }
         evt.setStack(callstackStr(cs));
       }
-
+#endif
       getEventList().record(std::move(evt));
     }
   }
