@@ -527,12 +527,12 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_qEngine(PyObject *self, PyObject *args)
+PyObject *THPModule_qEngine(PyObject *_unused, PyObject *noargs)
 {
   return THPUtils_packInt64(static_cast<int>(at::globalContext().qEngine()));
 }
 
-PyObject *THPModule_supportedQEngines(PyObject *self, PyObject *args)
+PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
@@ -546,7 +546,7 @@ PyObject *THPModule_supportedQEngines(PyObject *self, PyObject *args)
   return list.release();
 }
 
-PyObject *THPModule_isEnabledXNNPACK(PyObject *self, PyObject *args)
+PyObject *THPModule_isEnabledXNNPACK(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().isXNNPACKAvailable()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;

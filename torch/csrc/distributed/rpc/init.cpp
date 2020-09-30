@@ -31,7 +31,7 @@ constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* self, PyObject* args) {
+PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {

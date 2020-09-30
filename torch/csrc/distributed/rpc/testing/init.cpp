@@ -17,7 +17,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* faulty_agent_init(PyObject* self, PyObject* args) {
+PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyProcessGroupAgent and its backend options object to the
   // python module torch.distributed.rpc._testing
   auto faulty_agent_module =
