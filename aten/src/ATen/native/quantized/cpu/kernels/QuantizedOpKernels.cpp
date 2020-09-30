@@ -2586,7 +2586,7 @@ void quantize_tensor_per_channel_affine_cpu(
       });
 }
 
-template<typename T, typename N, typename Q, typename U>
+template<typename T, typename N, typename Q>
 void dequantize_per_channel_affine_kernel(
       Tensor qtensor,
       Tensor rtensor,
@@ -2612,7 +2612,7 @@ void dequantize_per_channel_affine_kernel(
   check_tensor_memory_format(qtensor, rtensor);
   const auto* qd = qtensor.data_ptr<Q>();
   float* rd = rtensor.data_ptr<float>();
-  const auto elem_per_byte = CHAR_BIT / bit_width;
+  const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
     for (auto b = 0; b < batches; ++b) {
@@ -2621,9 +2621,11 @@ void dequantize_per_channel_affine_kernel(
           auto i = b * channel * elements_per_channel + e * channel + c;
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
-          U qvalue = qd[i / elem_per_byte].val_;
-          qvalue >>= (i % elem_per_byte) * bit_width;
-          qvalue &= (1 << bit_width) - 1;
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
           rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
         }
       }
@@ -2636,9 +2638,11 @@ void dequantize_per_channel_affine_kernel(
               c * elements_per_channel + e;
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
-          U qvalue = qd[i / elem_per_byte].val_;
-          qvalue >>= (i % elem_per_byte) * bit_width;
-          qvalue &= (1 << bit_width) - 1;
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
           rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
         }
       }
@@ -2654,7 +2658,7 @@ void dequantize_tensor_per_channel_affine_cpu(
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
-        dequantize_per_channel_affine_kernel<double, int64_t, scalar_t, underlying_t>(qtensor, rtensor, scales, zero_points, axis);
+        dequantize_per_channel_affine_kernel<double, int64_t, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
       });
 }
 
@@ -2730,7 +2734,7 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
     int64_t axis) {
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
-        dequantize_per_channel_affine_kernel<float, float, scalar_t, underlying_t>(qtensor, rtensor, scales, zero_points, axis, bit_width);
+        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis, bit_width);
       });
 }
 
