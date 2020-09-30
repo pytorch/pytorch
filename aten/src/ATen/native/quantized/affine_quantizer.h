@@ -158,8 +158,7 @@ template <typename DST_T>
 CAFFE2_API DST_T
 requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
 
-template <typename T>
-CAFFE2_API T quantize_val_float_qparams(float scale, float zero_point, float value);
+int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax);
 
 } // namespace native
 } // namespace at

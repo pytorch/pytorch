@@ -360,6 +360,50 @@ class TestQuantizedTensor(TestCase):
         zero_points = torch.tensor([0.1, 0.2, 1.], dtype=torch.float)
         self._test_quantize_per_channel(r, scales, zero_points, 0, True)
 
+    def test_quantize_per_channel_sub_byte(self):
+        """ Tests the per channel quantization scheme for 4-bit qtensors.
+        The scale and zero point for this have to be in floating point. """
+        r = torch.rand(3, 2, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.03, 0.1], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, 0, torch.quint4x2)
+
+        def _get_qranges(bit_width):
+            if bit_width == 4:
+                return 0, 15
+
+        def _quantize_per_channel_sub_byte_ref(data, scales, zero_points, axis, bit_width):
+            dims = data.size()
+            data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
+            qtensor_size = math.ceil(data.numel() / 2)
+            res = torch.empty(qtensor_size, dtype=torch.uint8)
+            elem_per_byte = 8 / bit_width
+            quant_min, quant_max = _get_qranges(bit_width)
+            for i in range(data.size()[0]):
+                for j in range(data.size()[1]):
+                    for k in range(data.size()[2]):
+                        inv_scale = 1.0 / scales[j]
+                        index = i * data.size()[1] * data.size()[2] + j * data.size()[2] + k
+                        qvalue = np.clip(
+                            np.round(data[i][j][k] * inv_scale + zero_points[j]), quant_min, quant_max).to(dtype=torch.int)
+                        res_idx = int(index / elem_per_byte)
+                        if (index % elem_per_byte == 0):
+                            res[res_idx] = qvalue
+                        else:
+                            res[res_idx] |= (qvalue << ((index % elem_per_byte) * bit_width))
+            return res
+
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 0, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+
+        # Check 4D tensor with non-zero axis.
+        r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis=1, dtype=torch.quint4x2)
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 1, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+
     def test_qtensor_permute(self):
         scale = 0.02
         zero_point = 1
@@ -447,7 +491,9 @@ class TestQuantizedTensor(TestCase):
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32, cuda is not supported yet
-        for dtype in [torch.quint8, torch.qint8]:
+        for dtype in [torch.quint8, torch.qint8, torch.quint4x2]:
+            if dtype == torch.quint4x2:
+                zero_points = torch.ones(10, dtype=torch.float)
             qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
