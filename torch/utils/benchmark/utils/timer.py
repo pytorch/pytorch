@@ -5,7 +5,7 @@ from typing import Callable, List, NoReturn, Optional
 
 import numpy as np
 import torch
-from torch.utils._benchmark.utils import common
+from torch.utils.benchmark.utils import common
 
 
 __all__ = ["Timer", "timer"]
