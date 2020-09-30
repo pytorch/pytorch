@@ -20,7 +20,7 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 class CallgrindStats(object):
     stmt: str
     setup: str
-    number: int
+    number_per_run: int
     num_threads: int
     built_with_debug_symbols: bool
     baseline_inclusive_stats: Tuple[FunctionCount, ...]
@@ -144,7 +144,7 @@ class CallgrindStats(object):
         return CallgrindStats(
             stmt=self.stmt,
             setup=self.setup,
-            number=self.number,
+            number_per_run=self.number_per_run,
             num_threads=self.num_threads,
             built_with_debug_symbols=self.built_with_debug_symbols,
             baseline_inclusive_stats=strip(self.baseline_inclusive_stats),
@@ -230,7 +230,7 @@ class _ValgrindWrapper(object):
         return CallgrindStats(
             stmt=stmt,
             setup=setup,
-            number=number,
+            number_per_run=number,
             num_threads=num_threads,
             built_with_debug_symbols=self._build_type == "RelWithDebInfo",
             baseline_inclusive_stats=baseline_inclusive_stats,
