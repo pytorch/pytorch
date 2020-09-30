@@ -1809,7 +1809,10 @@ t2.start()
         def perfect_storm_grads(inject_inf):
             grads = [g.clone(), g.clone()[:, :5], g.to(dtype=torch.float16), g.to(dtype=torch.float16)]
             if TEST_MULTIGPU:
-                grads += [g.to(device="cuda:1") for g in grads]
+                grads += [g.to(device="cuda:1"),
+                          g.to(device="cuda:1")[:, :5],
+                          g.to(device="cuda:1", dtype=torch.float16),
+                          g.to(device="cuda:1", dtype=torch.float16)]
             if inject_inf >= 0:
                 grads[inject_inf][2, 2] = float('inf')
             return grads
