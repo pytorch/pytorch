@@ -121,7 +121,7 @@ class CallgrindStats(object):
             -23234231 /tmp/second_build_dir/thing.c:foo(...)
 
         Stripping prefixes can ameliorate this issue by regularizing the
-        strings and causing better cancelation of equivilent call sites
+        strings and causing better cancellation of equivilent call sites
         when diffing.
         """
         def strip(stats: Tuple[FunctionCount, ...]) -> Tuple[FunctionCount, ...]:

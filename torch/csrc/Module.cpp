@@ -61,12 +61,10 @@
 #endif
 #endif
 
-#if (!defined(_WIN32) && !defined(_WIN64))
-#include <callgrind.h>
-#else
-// In theory Valgrind.h should detect when it is not on a supported platform,
-// but in practice some Windows builds fail.
+#if (defined(_WIN32) || defined(_WIN64) || defined(FBCODE_CAFFE2) || defined(C10_MOBILE))
 #define NVALGRIND
+#else
+#include <callgrind.h>
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
