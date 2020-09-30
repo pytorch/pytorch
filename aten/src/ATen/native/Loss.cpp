@@ -296,8 +296,10 @@ Tensor soft_margin_loss(
 }
 
 Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
-  if (beta <= 0)
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  if (beta == 0) {
       return at::native::l1_loss(input, target, reduction);
+  }
   Tensor loss;
   auto iter = TensorIterator::binary_op(loss, input, target);
   smooth_l1_stub(iter.device_type(), iter, beta);
@@ -305,8 +307,10 @@ Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t r
 }
 
 Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  if (beta <= 0)
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  if (beta == 0) {
       return at::native::l1_loss_out(result, input, target, reduction);
+  }
   if (reduction != Reduction::None) {
     Tensor loss;
     auto iter = TensorIterator::binary_op(loss, input, target);
