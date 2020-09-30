@@ -296,6 +296,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 std::vector<uint8_t> value_(value.begin(), value.end());
                 store.set(key, value_);
               },
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 set(key: str, value: str) -> None
 
@@ -313,8 +314,7 @@ Example:
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
           .def(
@@ -324,6 +324,7 @@ Example:
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 get(key: str) -> str
 
@@ -340,11 +341,11 @@ Example:
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "add",
               &::c10d::Store::add,
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 add(key: str, amount: int) -> None
 
@@ -364,11 +365,11 @@ Example:
     >>> store.add("first_key", 6)
     >>> # Should return 7
     >>> store.get("first_key")
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "delete_key",
               &::c10d::Store::deleteKey,
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 delete_key(key: str) -> bool
 
@@ -391,11 +392,11 @@ Example:
     >>> store.delete_key("first_key")
     >>> # This should return false
     >>> store.delete_key("bad_key")
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "num_keys",
               &::c10d::Store::getNumKeys,
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 num_keys() -> int
 
@@ -414,11 +415,11 @@ Example:
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
     >>> store.num_keys()
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "set_timeout",
               &::c10d::Store::setTimeout,
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 set_timeout(timeout: timedelta) -> None
 
@@ -435,13 +436,13 @@ Example:
     >>> store.set_timeout(timedelta(seconds=10))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"])
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "wait",
               [](::c10d::Store& store, const std::vector<std::string>& keys) {
                 store.wait(keys);
               },
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 wait(keys: List[str]) -> None
 
@@ -458,8 +459,7 @@ Example:
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> # This will throw an exception after 30 seconds
     >>> store.wait(["bad_key"])
-)",
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "wait",
               [](::c10d::Store& store,
@@ -467,6 +467,7 @@ Example:
                  const std::chrono::milliseconds& timeout) {
                 store.wait(keys, timeout);
               },
+              py::call_guard<py::gil_scoped_release>(),
               R"(
 wait(keys: List[str], timeout: timedelta) -> None
 
@@ -483,8 +484,7 @@ Example:
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
-)",
-              py::call_guard<py::gil_scoped_release>());
+)");
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store,
       R"(
