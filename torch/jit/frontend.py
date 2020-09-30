@@ -197,12 +197,14 @@ def check_and_indent_multiline_strings(sourcelines):
             indices.append(index)
 
     # Adding leading space for every line of the multiline string
-    for i in range(0, len(indices), 2):
-        start = indices[i]
-        end = indices[i + 1]
-        leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
-        for lines in range(start + 1, end + 1):
-            sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
+    indices_length = len(indices)
+    for i in range(0, indices_length, 2):
+        if i+1 < indices_length:
+            start = indices[i]
+            end = indices[i + 1]
+            leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
+            for lines in range(start + 1, end + 1):
+                sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
     return sourcelines
 
 def get_jit_def(fn, def_name, self_name=None):
