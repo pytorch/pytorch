@@ -10,6 +10,28 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
+
+#define NCCL_GROUP_START()                               \
+  do {                                                   \
+    C10D_NCCL_CHECK(ncclGroupStart());                   \
+      fprintf(                                           \
+          stdout,                                        \
+          "NCCL group start in: %s:%d\n",                \
+          __FILE__,                                      \
+          __LINE__);                                     \
+  } while (0)
+
+
+#define NCCL_GROUP_END()                                 \
+  do {                                                   \
+    C10D_NCCL_CHECK(ncclGroupEnd());                     \
+      fprintf(                                           \
+          stdout,                                        \
+          "NCCL group end in: %s:%d\n",                  \
+          __FILE__,                                      \
+          __LINE__);                                     \
+  } while (0)
+
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -23,14 +45,12 @@ struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupStart());
-    std::cout << "AutoNcclGroup start" << std::endl;
+    NCCL_GROUP_START();
 #endif
   }
   ~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    C10D_NCCL_CHECK(ncclGroupEnd());
-    std::cout << "AutoNcclGroup end" << std::endl;
+    NCCL_GROUP_END();
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
@@ -179,7 +199,7 @@ ncclResult_t ncclAlltoall(
   int numranks;
   size_t rankdiff = count * size;
   C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
+  NCCL_GROUP_START();
   for (int r = 0; r < numranks; r++) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
@@ -190,7 +210,7 @@ ncclResult_t ncclAlltoall(
           ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
     }
   }
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  NCCL_GROUP_END();
   return ncclSuccess;
 }
 
@@ -205,9 +225,10 @@ ncclResult_t ncclAlltoallv(
     ncclDataType_t type,
     ncclComm_t comm,
     cudaStream_t stream) {
+  std::cout << "alltoallv triggered" << std::endl;
   int numranks;
   C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
+  NCCL_GROUP_START();
   for (int r = 0; r < numranks; r++) {
     // NCCL uses 0 byte message for synchronization
     // Avoid send/recv when message size is zero
@@ -230,7 +251,7 @@ ncclResult_t ncclAlltoallv(
           stream));
     }
   }
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  NCCL_GROUP_END();
   return ncclSuccess;
 }
 #endif
@@ -786,11 +807,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // nccl communicator is actually created before encountering any communication calls.
   // This is why we need the following for loop.
   for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
-    C10D_NCCL_CHECK(ncclGroupEnd());
+    NCCL_GROUP_END();
   }
 
   // [Note 1] Create the NCCL communicators for each GPU
-  C10D_NCCL_CHECK(ncclGroupStart());
+  NCCL_GROUP_START();
 
   for (size_t i = 0; i < devices.size(); ++i) {
     // GPU world size and GPU rank
@@ -824,11 +845,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // [Note 2 ]
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  NCCL_GROUP_END();
 
   // See [Group Start/End Note]
   for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
-    C10D_NCCL_CHECK(ncclGroupStart());
+    NCCL_GROUP_START();
   }
 
   ncclStreams_.emplace(devicesKey, std::move(streamVal));
@@ -1374,6 +1395,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
+  std::cout << " alltoall_base triggered" << std::endl;
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
@@ -1507,14 +1529,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
 
 void ProcessGroupNCCL::groupStart() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  C10D_NCCL_CHECK(ncclGroupStart());
+  NCCL_GROUP_START();
 #endif
   ++ncclActiveGroupCounter_;
 }
 
 void ProcessGroupNCCL::groupEnd() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  C10D_NCCL_CHECK(ncclGroupEnd());
+  NCCL_GROUP_END();
 #endif
   --ncclActiveGroupCounter_;
 }

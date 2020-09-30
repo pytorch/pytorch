@@ -99,6 +99,27 @@ ncclRedOp_t to_nccl_red_op(int var) {
   return (ncclRedOp_t)(var);
 }
 
+#define NCCL_GROUP_START()                               \
+  do {                                                   \
+    NCCL_CHECK(from_nccl_result(ncclGroupStart()));      \
+      fprintf(                                           \
+          stdout,                                        \
+          "NCCL group start in: %s:%d\n",                \
+          __FILE__,                                      \
+          __LINE__);                                     \
+  } while (0)
+
+
+#define NCCL_GROUP_END()                                 \
+  do {                                                   \
+    NCCL_CHECK(from_nccl_result(ncclGroupEnd()));        \
+      fprintf(                                           \
+          stdout,                                        \
+          "NCCL group end in: %s:%d\n",                  \
+          __FILE__,                                      \
+          __LINE__);                                     \
+  } while (0)
+
 namespace torch {
 namespace cuda {
 namespace nccl {
@@ -111,15 +132,12 @@ struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(from_nccl_result(ncclGroupStart()));
-    std::cout << "AutoNcclGroup start nccl.cpp" << std::endl;
+    NCCL_GROUP_START();
 #endif
-    std::cout << "group guard?" << std::endl;
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(from_nccl_result(ncclGroupEnd()));
-    std::cout << "AutoNcclGroup end nccl.cpp" << std::endl;
+    NCCL_GROUP_END();
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
