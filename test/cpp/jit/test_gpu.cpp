@@ -1674,7 +1674,6 @@ TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
     tv3->split(-1, 4);
 
     tv2->computeAt(tv3, 1);
-    tv2->split(-1, 4); // Kernel will break without this split
     tv3->axis(0)->parallelize(ParallelType::BIDx);
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1690,6 +1689,42 @@ TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
 
     TORCH_CHECK(at::allclose(outputs[0], t3));
   }
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+  TensorView* tv1 = makeDummyTensor(2);
+  fusion.addInput(tv1);
+  TensorView* tv2 = add(tv0, new Float(2.0));
+  TensorView* tv3 = mul(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  tv2->merge(0);
+  tv2->split(-1, 8);
+  tv2->split(-1, 4);
+  tv3->merge(0);
+  tv3->split(-1, 8);
+
+  tv2->computeAt(tv3, 1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({63, 65}, options);
+  at::Tensor t1 = at::rand_like(t0, options);
+
+  auto t2 = t0.add(2.0);
+  auto t3 = t1.mul(t2);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  TORCH_CHECK(at::allclose(outputs[0], t3));
 }
 
 TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
