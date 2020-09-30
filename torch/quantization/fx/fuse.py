@@ -40,7 +40,6 @@ class Fuser:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
-        self.fused_graph.output(load_arg(input_graph.result))
         model = GraphModule(input_root, self.fused_graph)
         return model
 
