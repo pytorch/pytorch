@@ -35,6 +35,7 @@ class TestFX(JitTestCase):
         kwargs = kwargs if kwargs else {}
         ref_outs = m(*args, **kwargs)
         gm = symbolic_trace(m)
+        gm.graph.lint(gm)
         test_outs = gm(*args, **kwargs)
         self.assertEqual(ref_outs, test_outs)
 
@@ -168,6 +169,7 @@ class TestFX(JitTestCase):
         sym = NoLeafModulesTracer().trace(mrm)
         for node in sym.graph.nodes:
             self.assertNotEqual(node.op, 'call_module')
+        sym.graph.lint(sym)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -181,7 +183,39 @@ class TestFX(JitTestCase):
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
+        gm.graph.lint(gm)
         self.assertEqual(gm(3, 4), 14)
+
+    def test_graph_unique_names(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = M()
+        g = symbolic_trace(m).graph
+        new_g = torch.fx.Graph()
+        new_g.graph_copy(g)
+        t = Proxy(new_g.nodes[-1])
+        # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
+        new_g.output((t + t).node)
+        gm = GraphModule(m, new_g)
+        seen_names : Set[str] = set()
+        for node in gm.graph.nodes:
+            assert node.name not in seen_names
+            seen_names.add(node.name)
+
+    def test_graph_unique_names_manual(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,), name='foo_1_1')
+        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr', name='foo_1')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+        graph2 = torch.fx.Graph()
+        graph2.graph_copy(graph)
+        seen_names : Set[str] = set()
+        for node in graph2.nodes:
+            assert node.name not in seen_names
+            seen_names.add(node.name)
 
     @skipIfNoTorchVision
     def test_resnet(self):
@@ -205,6 +239,7 @@ class TestFX(JitTestCase):
             quantizer.observe((torch.rand(1, 3, 224, 224),))
 
         qgraph = quantizer.quantize()
+        qgraph.graph.lint(qgraph)
         qgraph_script = torch.jit.script(qgraph)
 
         d = qgraph(ip)
@@ -348,6 +383,8 @@ class TestFX(JitTestCase):
             # Register output
             graph.output(output_node)
 
+            graph.lint(wrapper)
+
             # Return final GraphModule!!!
             return GraphModule(wrapper, graph)
 
@@ -379,6 +416,7 @@ class TestFX(JitTestCase):
 
         m = M()
         m_g = symbolic_trace(m)
+        m_g.graph.lint(m_g)
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
@@ -396,6 +434,7 @@ class TestFX(JitTestCase):
 
         m = M()
         g = TaggingTracer().trace(m).graph
+        g.lint(m)
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
@@ -423,6 +462,7 @@ class TestFX(JitTestCase):
 
         wfq = WrapperForQualname()
         traced2 = symbolic_trace(wfq)
+        traced2.graph.lint(traced2)
         traced2(torch.rand(4, 4))
 
     def test_symbolic_trace_sequential(self):
@@ -436,6 +476,7 @@ class TestFX(JitTestCase):
             Simple()
         )
         traced = symbolic_trace(seq)
+        traced.graph.lint(traced)
         x = torch.rand(3, 4)
         self.assertEqual(traced(x), seq(x))
 
@@ -446,6 +487,7 @@ class TestFX(JitTestCase):
 
         ct = ConstTensor()
         traced = symbolic_trace(ct)
+        traced.graph.lint(traced)
         traced(torch.rand(4, 4))
 
     def test_pickle_graphmodule(self):
@@ -459,14 +501,17 @@ class TestFX(JitTestCase):
 
         n = Nested()
         traced = symbolic_trace(n)
+        traced.graph.lint(traced)
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
+        loaded.graph.lint(loaded)
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
     def test_deepcopy_graphmodule_with_transform(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
+        traced.graph.lint(traced)
 
         def transform(traced):
             new_graph = torch.fx.Graph()
@@ -476,6 +521,7 @@ class TestFX(JitTestCase):
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
+        transformed.graph.lint(transformed)
         copied = copy.deepcopy(transformed)
         self.assertNotEqual(id(type(transformed)), id(type(copied)))
         x = torch.randn(3, 4)
@@ -501,7 +547,9 @@ class TestFX(JitTestCase):
 
         baz = Baz()
         traced = symbolic_trace(baz)
+        traced.graph.lint(traced)
         copied = copy.deepcopy(traced)
+        copied.graph.lint(copied)
 
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
@@ -547,12 +595,32 @@ class TestFX(JitTestCase):
         input = torch.randn(3)
         ref_out = m(input)
         gm = symbolic_trace(m)
+        gm.graph.lint(gm)
         out = gm(input)
         self.assertEqual(out, ref_out)
+
+    def test_replace_target_nodes_with(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+        assert (input1 + input2) == traced(input1, input2)
+        GraphManipulation.replace_target_nodes_with(
+            fx_module=traced,
+            old_op="call_function",
+            old_target=operator.add,
+            new_op="call_function",
+            new_target=operator.mul,
+        )
+        assert (input1 * input2) == traced(input1, input2)
 
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
+        traced.graph.lint(traced)
         printed = str(traced)
         assert 'GraphModuleImpl()' in printed
         assert 'torch.relu' in printed
@@ -563,6 +631,7 @@ class TestFX(JitTestCase):
                 return torch.squeeze(x + 3.0, dim=2)
         st = KwargPrintTest()
         traced = symbolic_trace(st)
+        traced.graph.lint(traced)
         stringed = str(traced.graph)
         for s in ['args', 'kwargs', 'uses']:
             assert s in stringed
@@ -579,6 +648,7 @@ class TestFX(JitTestCase):
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
         gm = GraphModule(mod, g)
+        gm.graph.lint(gm)
         input = torch.rand(3)
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
@@ -596,6 +666,7 @@ class TestFX(JitTestCase):
         add_param : torch.Tensor = torch.rand(3, 4)
         gm : torch.fx.GraphModule = torch.fx.GraphModule(
             {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
+        gm.graph.lint(gm)
 
         assert 'self.foo.bar.baz' in gm.code
 
@@ -640,6 +711,27 @@ class TestFX(JitTestCase):
         for i, node in enumerate(graph.nodes):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)
             assert user_indexes == expected_uses[i]
+
+    def test_copy_no_remap(self):
+        traced = symbolic_trace(SimpleTest())
+        g = traced.graph
+        copied = torch.fx.Graph()
+        for node in g.nodes:
+            copied.node_copy(node)
+        with self.assertRaisesRegex(RuntimeError, 'does not belong to this Graph'):
+            copied.lint()
+
+    def test_wrong_topo(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
+        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph.output(d)
+        nodes = graph._nodes
+        nodes[2], nodes[3] = nodes[3], nodes[2]
+        with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
+            graph.lint()
 
 if __name__ == '__main__':
     run_tests()

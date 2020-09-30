@@ -35,6 +35,10 @@ int64_t PrefixStore::add(const std::string& key, int64_t value) {
   return store_->add(joinKey(key), value);
 }
 
+bool PrefixStore::deleteKey(const std::string& key) {
+  return store_->deleteKey(joinKey(key));
+}
+
 int64_t PrefixStore::getNumKeys() {
   return store_->getNumKeys();
 }

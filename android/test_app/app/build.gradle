@@ -40,6 +40,7 @@ android {
         buildConfigField("String", "LOGCAT_TAG", "@string/app_name")
         buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
         buildConfigField("boolean", "NATIVE_BUILD", 'false')
+        buildConfigField("boolean", "USE_VULKAN_DEVICE", 'false')
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
     buildTypes {
@@ -66,9 +67,17 @@ android {
             addManifestPlaceholders([APP_NAME: "MBQ"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbq\"")
         }
+        mbvulkan {
+            dimension "model"
+            applicationIdSuffix ".mbvulkan"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2-vulkan.pt\"")
+            buildConfigField("boolean", "USE_VULKAN_DEVICE", 'true')
+            addManifestPlaceholders([APP_NAME: "MBQ"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbvulkan\"")
+        }
         resnet18 {
             dimension "model"
-            applicationIdSuffix ".resneti18"
+            applicationIdSuffix ".resnet18"
             buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
             addManifestPlaceholders([APP_NAME: "RN18"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
