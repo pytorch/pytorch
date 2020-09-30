@@ -461,7 +461,7 @@ class TestObserver(QuantizationTestCase):
         in a quantized model.
         """
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
-                    MinMaxDynamicQuantObserver, PerChannelMinMaxObserver,
+                    PerChannelMinMaxObserver,
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver]
 
         for obs in obs_list:
