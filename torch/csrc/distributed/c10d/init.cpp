@@ -308,7 +308,7 @@ Arguments:
     key (str): The key to be added to the store.
     value (str): The value associated with ``key`` to be added to the store.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
@@ -328,14 +328,17 @@ Example:
               R"(
 get(key: str) -> str
 
-Returns the value associated with the given ``key`` in the store. If ``key`` is not
+Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
 when initializing the store, before throwing an exception.
 
 Arguments:
     key (str): The function will return the value associated with this key.
 
-Example:
+Returns:
+    Value associated with ``key`` if ``key`` is in the store.
+
+Example::
     >>> import torch.distributed as dist
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
@@ -357,7 +360,7 @@ Arguments:
     key (str): The key in the store whose counter will be incremented.
     amount (int): The quantity by which the counter will be incremented.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
@@ -383,7 +386,10 @@ Deletes the key-value pair associated with ``key`` from the store. Returns
 Arguments:
     key (str): The key to be deleted from the store
 
-Example:
+Returns:
+    `true` if ``key`` was deleted, otherwise `false`.
+
+Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
@@ -409,7 +415,10 @@ the workers using the store.
     The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
     with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
 
-Example:
+Returns:
+    The number of keys present in the store.
+
+Example::
     >>> import torch.distributed as dist
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
@@ -429,7 +438,7 @@ Sets the store's default timeout. This timeout is used during initialization and
 Arguments:
     timeout (timedelta): timeout to be set in the store.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
@@ -453,7 +462,7 @@ will throw an exception.
 Arguments:
     keys (list): List of keys on which to wait until they are set in the store.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
@@ -478,7 +487,7 @@ Arguments:
     keys (list): List of keys on which to wait until they are set in the store.
     timeout (timedelta): Time to wait for the keys to be added before throwing an exception.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
@@ -494,7 +503,7 @@ Arguments:
     file_name (str): path of the file in which to store the key-value pairs
     world_size (int): The total number of processes using the store
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> store1 = dist.FileStore("/tmp/filestore", 2)
     >>> store2 = dist.FileStore("/tmp/filestore", 2)
@@ -510,7 +519,7 @@ Example:
       R"(
 A thread-safe store implementation based on an underlying hashmap (C++ std::unordered_map).
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> store = dist.HashStore()
     >>> # store can be used from other threads
@@ -531,10 +540,9 @@ Arguments:
     port (int): The port on which the server store should listen for incoming requests.
     world_size (int): The total number of store users (number of clients + 1 for the server).
     is_master (bool): True when initializing the server store, False for client stores.
-    timeout (timedelta): Timeout used by the store during initialization and for methods such
-as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
+    timeout (timedelta): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
 
-Example:
+Example::
     >>> import torch.distributed as dist
     >>> server_store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> client_store = dist.TCPStore("127.0.0.1", 0, false)
@@ -559,13 +567,12 @@ Example:
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store,
       R"(
-A wrapper around any of the 3 file stores (:class:`~torch.distributed.TCPStore`,
+A wrapper around any of the 3 key-value stores (:class:`~torch.distributed.TCPStore`,
 :class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`)
 that adds a prefix to each key inserted to the store.
 
 Arguments:
-    prefix (str): The prefix string that is prepended to each key before being
-inserted into the store.
+    prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
