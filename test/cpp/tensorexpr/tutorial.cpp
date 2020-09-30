@@ -314,8 +314,8 @@ int main(int argc, char* argv[]) {
     // computation we want to perform - and a list of placeholders and tensors
     // used in the computation. The latter part is crucial since that's the only
     // way the codegen could use to correlate symbols in the statement to actual
-    // data arrays that we will be passing when we will actually be performing the
-    // computation.
+    // data arrays that we will be passing when we will actually be performing
+    // the computation.
     //
     // Let's create a Simple IR Evaluator codegen for our computation:
     SimpleIREvaluator ir_eval(loopnest.root_stmt(), {A, B, X});
