@@ -167,11 +167,7 @@ void testLLVMLetTest01() {
   VarHandle x("x", kFloat);
   auto block = Block::make({
       Let::make(x, 3.f),
-      Store::make(
-          a,
-          {IntImm::make(0)},
-          ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f)),
-          IntImm::make(1)),
+      a.store({0}, ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f))),
   });
 
   LLVMCodeGen cg(block, {a});
@@ -187,15 +183,12 @@ void testLLVMLetTest02() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  auto block = Block::make({
-      Let::make(x, 3.f),
-      Let::make(y, 6.f),
-      Store::make(
-          a,
-          {IntImm::make(0)},
-          ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)),
-          IntImm::make(1)),
-  });
+  auto block = Block::make(
+      {Let::make(x, 3.f),
+       Let::make(y, 6.f),
+       a.store(
+           {IntImm::make(0)},
+           ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -210,17 +203,15 @@ void testLLVMLetTestMultitype() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block = Block::make({
-      Let::make(x, 3),
-      Let::make(y, 6.f),
-      Store::make(
-          a,
-          {IntImm::make(0)},
-          Cast::make(
-              kDouble,
-              ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f))),
-          IntImm::make(1)),
-  });
+  auto block =
+      Block::make({Let::make(x, 3),
+                   Let::make(y, 6.f),
+                   a.store(
+                       {0},
+                       Cast::make(
+                           kDouble,
+                           ExprHandle(2.f) +
+                               (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -244,9 +235,9 @@ void testLLVMBlockTest() {
   std::vector<void*> args({v.data()});
 
   auto block = Block::make({
-      Store::make(a, {IntImm::make(0)}, IntImm::make(3), IntImm::make(1)),
-      Store::make(a, {IntImm::make(1)}, IntImm::make(4), IntImm::make(1)),
-      Store::make(a, {IntImm::make(0)}, IntImm::make(4), IntImm::make(1)),
+      a.store({0}, 3),
+      a.store({1}, 4),
+      a.store({0}, 4),
   });
 
   LLVMCodeGen cg(block, {a});
@@ -262,11 +253,7 @@ void testLLVMLoadStoreTest() {
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
 
-  auto store = Store::make(
-      b,
-      {IntImm::make(0)},
-      Load::make(a, {IntImm::make(0)}, IntImm::make(1)),
-      IntImm::make(1));
+  auto store = b.store({0}, a.load(0));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -283,14 +270,7 @@ void testLLVMIfThenElseTest() {
   std::vector<int32_t> b_buffer = {-11};
   std::vector<int32_t> c_buffer = {1};
 
-  auto store = Store::make(
-      b,
-      {IntImm::make(0)},
-      IfThenElse::make(
-          Load::make(c, {IntImm::make(0)}, IntImm::make(1)), // cond
-          Load::make(a, {IntImm::make(0)}, IntImm::make(1)), // then
-          IntImm::make(0)), // else
-      IntImm::make(1));
+  auto store = b.store({0}, IfThenElse::make(c.load(0), a.load(0), 0));
   LLVMCodeGen cg(store, {a, b, c});
   std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -305,10 +285,10 @@ void testLLVMVecLoadStoreTest() {
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
-  auto store = Store::make(
-      b,
+  auto store = b.storeWithMask(
       {Ramp::make(0, 1, 4)},
-      Load::make(a, {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
+      a.loadWithMask(
+          {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
       Broadcast::make(IntImm::make(1), 4));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
@@ -331,11 +311,9 @@ void testLLVMVecLoadStoreTest() {
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
-    auto store = Store::make(                                    \
-        b,                                                       \
+    auto store = b.storeWithMask(                                \
         {Ramp::make(0, 1, Lanes)},                               \
-        Name(Load::make(                                         \
-            a,                                                   \
+        Name(a.loadWithMask(                                     \
             {Ramp::make(0, 1, Lanes)},                           \
             Broadcast::make(IntImm::make(1), Lanes))),           \
         Broadcast::make(IntImm::make(1), Lanes));                \
@@ -376,11 +354,9 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
     float val = 0.5f;                                            \
     std::vector<double> a_buffer(Lanes, val);                    \
     std::vector<double> b_buffer(Lanes, val);                    \
-    auto store = Store::make(                                    \
-        b,                                                       \
+    auto store = b.storeWithMask(                                \
         {Ramp::make(0, 1, Lanes)},                               \
-        Name(Load::make(                                         \
-            a,                                                   \
+        Name(a.loadWithMask(                                     \
             {Ramp::make(0, 1, Lanes)},                           \
             Broadcast::make(IntImm::make(1), Lanes))),           \
         Broadcast::make(IntImm::make(1), Lanes));                \
@@ -417,9 +393,8 @@ void testLLVMVectorizerLoadStoreTest() {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
 
-  Tensor* c = Compute("c", {{4, "i"}}, [&](const VarHandle& i) {
-    return Load::make(a, {i}, 1);
-  });
+  Tensor* c =
+      Compute("c", {{4, "i"}}, [&](const VarHandle& i) { return a.load(i); });
 
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
@@ -445,10 +420,8 @@ void testLLVMMemcpyTest() {
   std::vector<int32_t> a_buffer(N, 42);
   std::vector<int32_t> b_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr =
-      For::make(i, 0, N, Store::make(b, {i}, Load::make(a, {i}, mask), mask));
+  auto expr = For::make(i, 0, N, b.store({i}, a.load(i)));
 
   LLVMCodeGen cg(expr, {a, b});
 
@@ -467,9 +440,8 @@ void testLLVMBzeroTest() {
   Placeholder b(BufHandle("B", {N}, kInt));
   std::vector<int32_t> b_buffer(N, 11);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(i, 0, N, Store::make(b, {i}, IntImm::make(0), mask));
+  auto expr = For::make(i, 0, N, b.store({i}, 0));
 
   LLVMCodeGen cg(expr, {b});
 
@@ -490,17 +462,8 @@ void testLLVMElemwiseAdd() {
   std::vector<int32_t> b_buffer(N, 1);
   std::vector<int32_t> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Add::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask)),
-          mask));
+  auto expr = For::make(i, 0, N, c.store({i}, Add::make(a.load(i), b.load(i))));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -525,14 +488,8 @@ void testLLVMElemwiseAddFloat() {
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c, {i}, Load::make(a, {i}, mask) + Load::make(b, {i}, mask), mask));
+  auto expr = For::make(i, 0, N, c.store({i}, a.load(i) + b.load(i)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -561,10 +518,9 @@ void testLLVMElemwiseLog10Float() {
       i,
       0,
       N / 4,
-      Store::make(
-          b,
+      b.storeWithMask(
           {Ramp::make(i * 4, 1, 4)},
-          log10(Load::make(a, {Ramp::make(i * 4, 1, 4)}, mask)),
+          log10(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
           mask));
 
   LLVMCodeGen cg(expr, {a, b});
@@ -592,10 +548,9 @@ void testLLVMElemwiseLog1pFloat() {
       i,
       0,
       N / 4,
-      Store::make(
-          b,
+      b.storeWithMask(
           {Ramp::make(i * 4, 1, 4)},
-          log1p(Load::make(a, {Ramp::make(i * 4, 1, 4)}, mask)),
+          log1p(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
           mask));
 
   LLVMCodeGen cg(expr, {a, b});
@@ -619,17 +574,9 @@ void testLLVMElemwiseMaxInt() {
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Max::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Max::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -654,17 +601,9 @@ void testLLVMElemwiseMinInt() {
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Min::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Min::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -689,17 +628,9 @@ void testLLVMElemwiseMaxFloat() {
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Max::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Max::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -724,17 +655,9 @@ void testLLVMElemwiseMaxNaNFloat() {
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Max::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Max::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -760,17 +683,9 @@ void testLLVMElemwiseMinFloat() {
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Min::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Min::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -795,17 +710,9 @@ void testLLVMElemwiseMinNaNFloat() {
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Min::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask), false),
-          mask));
+  auto expr =
+      For::make(i, 0, N, c.store({i}, Min::make(a.load(i), b.load(i), false)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -831,17 +738,8 @@ void testLLVMElemwiseMod() {
   std::vector<int32_t> b_buffer(N, 23);
   std::vector<int32_t> c_buffer(N, 18);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
-  auto expr = For::make(
-      i,
-      0,
-      N,
-      Store::make(
-          c,
-          {i},
-          Mod::make(Load::make(a, {i}, mask), Load::make(b, {i}, mask)),
-          mask));
+  auto expr = For::make(i, 0, N, c.store({i}, Mod::make(a.load(i), b.load(i))));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -872,20 +770,15 @@ void testLLVMCompareSelectIntEQ() {
     c_ref[i] = 0;
   }
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -912,20 +805,15 @@ void testLLVMCompareSelectFloatEQ() {
   std::vector<float> b_buffer(N, 1.0f);
   std::vector<int> c_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -957,20 +845,15 @@ void testLLVMCompareSelectByteGT() {
     c_ref[i] = 1;
   }
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kGT),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kGT)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -998,20 +881,15 @@ void testLLVMCompareSelectByteGE() {
   std::vector<int> c_buffer(N, 0);
   std::vector<int> c_ref(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kGE),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kGE)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -1044,20 +922,15 @@ void testLLVMCompareSelectByteLT() {
     c_ref[i] = 0;
   }
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kLT),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kLT)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -1085,20 +958,15 @@ void testLLVMCompareSelectByteLE() {
   std::vector<int> c_buffer(N, 0);
   std::vector<int> c_ref(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kLE),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kLE)));
 
   LLVMCodeGen cg(expr, {a, b, c});
 
@@ -1119,8 +987,7 @@ void testLLVMStoreFloat() {
   KernelScope kernel_scope;
   Placeholder result(BufHandle("result", {1}, kFloat));
   std::vector<float> result_buffer = {0.0f};
-  auto expr = Store::make(
-      result, {IntImm::make(0)}, FloatImm::make(3.14f), IntImm::make(1));
+  auto expr = result.store({0}, FloatImm::make(3.14f));
   LLVMCodeGen cg(expr, {result});
   std::vector<void*> args({result_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -1155,7 +1022,7 @@ void testLLVMComputeMul() {
   Placeholder a(BufHandle("a", {N}, kFloat));
   Placeholder b(BufHandle("b", {N}, kFloat));
   Tensor* c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
-    return Load::make(a, {i}, 1) * Load::make(b, {i}, 1);
+    return a.load(i) * b.load(i);
   });
 
   Placeholder c_buf(BufHandle(c->buf()));
@@ -1180,8 +1047,7 @@ void testLLVMBroadcastAdd() {
   Placeholder b(BufHandle("b", {N}, kFloat));
   Tensor* c = Compute(
       "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        ExprHandle mask(1);
-        return Load::make(a, {i, j}, mask) + Load::make(b, {j}, mask);
+        return a.load(i, j) + b.load(j);
       });
 
   Placeholder c_buf(BufHandle(c->buf()));
@@ -1227,7 +1093,7 @@ void testLLVMDynamicShapeAdd() {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -1249,7 +1115,7 @@ void testLLVMBindDynamicShapeAdd() {
     Placeholder b(BufHandle("b", {n}, kFloat));
     Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -1268,8 +1134,9 @@ void testLLVMTensorDynamicShapeAdd() {
     VarHandle n("n", kInt);
     Placeholder a(BufHandle("a", {n}, kFloat));
     Placeholder b(BufHandle("b", {n}, kFloat));
-    Tensor* c = Compute(
-        "c", {{n, "n"}}, [&](const VarHandle& i) { return a(i) + b(i); });
+    Tensor* c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
+      return a.load(i) + b.load(i);
+    });
     LoopNest l({c});
     Stmt* s = l.root_stmt();
     LLVMCodeGen cg(s, {a, b, c, n});
@@ -1293,7 +1160,7 @@ void testLLVMDynamicShape2D() {
     Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     l.prepareForCodegen();
