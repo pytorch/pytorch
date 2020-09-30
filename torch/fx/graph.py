@@ -82,6 +82,7 @@ class Graph:
         """
         val_map : Dict[Node, Node] = {}
         for inp in g._inputs:
+            assert isinstance(inp.target, str)
             val_map[inp] = self.placeholder(inp.target)
         for node in g._nodes:
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
