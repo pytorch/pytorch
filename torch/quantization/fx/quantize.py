@@ -438,7 +438,6 @@ class Quantizer:
                     # use the same observer as input
                     observed_input = node.args[0]
                     if observed_input.name in activation_post_process_name_map:
-                        print('inserting observer of input', observed_input.target)
                         insert_observer_call(node, activation_post_process_name_map[observed_input.name])
                 elif isinstance(obj, CopyNode):
                     assert node.op in [

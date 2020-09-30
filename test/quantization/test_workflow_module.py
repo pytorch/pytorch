@@ -462,7 +462,7 @@ class TestObserver(QuantizationTestCase):
         in a quantized model.
         """
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
-                    MinMaxDynamicQuantObserver, PerChannelMinMaxObserver,
+                    PerChannelMinMaxObserver,
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver]
 
         for obs in obs_list:
@@ -996,7 +996,7 @@ class TestFakeQuantize(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
            )
-    def test_fq_module(self, device, X):
+    def test_fq_module_per_tensor(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
@@ -1032,7 +1032,7 @@ class TestFakeQuantize(TestCase):
         self.assertEqual(fixed_scale, fq_module.scale)
         self.assertEqual(fixed_zero_point, fq_module.zero_point)
 
-    def test_fq_serializable(self):
+    def test_fq_serializable_per_tensor(self):
         observer = default_observer
         quant_min = 0
         quant_max = 255
@@ -1381,7 +1381,7 @@ class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
-    def test_fq_module(self, device, X):
+    def test_fq_module_per_channel(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
@@ -1404,7 +1404,7 @@ class TestFakeQuantize(TestCase):
                                                               fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    def test_fq_serializable(self):
+    def test_fq_serializable_per_channel(self):
         observer = default_per_channel_weight_observer
         quant_min = -128
         quant_max = 127

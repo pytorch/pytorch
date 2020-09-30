@@ -31,7 +31,7 @@ from quantization.test_fusion_passes import TestFusionPasses  # noqa: F401
 # Module
 # TODO: some of the tests are actually operator tests, e.g. test_forward_per_tensor, and
 # should be moved to test_quantized_op
-from quantization.test_workflow_module import TestFakeQuantize
+from quantization.test_workflow_module import TestFakeQuantize  # noqa: F401
 from quantization.test_workflow_module import TestObserver  # noqa: F401
 # TODO: merge with TestObserver
 # TODO: some tests belong to test_quantize.py, e.g. test_record_observer

@@ -202,7 +202,7 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
         self.dtype = dtype
         self.qscheme = qscheme
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
-        ' FixedQParamsFakeQuantize module, got qscheme:' + str(self.qscheme)
+            ' FixedQParamsFakeQuantize module, got qscheme:' + str(self.qscheme)
 
     def forward(self, X):
         if self.fake_quant_enabled[0] == 1:
