@@ -871,13 +871,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([-0.5, 0.0, 0.5, 2], dtype=torch.float32)
         self.run_test(FloorModule(), x)
 
-    # NOTE: floor division tests currently restrict themselves to only
-    #   test positive division. PyTorch's floor division was previously
-    #   implemented incorrectly and would truncate, not floor, the result
-    #   of the division. For example, -5 // 3 = -2, but, historically,
-    #   torch.floor_divide(-5, 3) = -1.
-    # This behavior has been fixed in PyTorch but the update has not been
-    #   applied to ONNX export yet. See https://github.com/pytorch/pytorch/issues/44692.
+    # NOTE: Starting from 1.7, PyTorch performs floor divide with floor instead of truncation.
     def test_floor_div(self):
         class FloorDivModule(torch.nn.Module):
             def forward(self, x_f32, x_f64, x_i64, y_f32, y_f64, y_i64):
