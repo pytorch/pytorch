@@ -735,7 +735,7 @@ class FunctionEvent(FormattedTimesMixin):
             is_remote=True, sequence_nr=-1):
         self.id: int = id
         self.node_id: int = node_id
-        self.name: str = name
+        self.name: str= name
         self.cpu_interval: Interval = Interval(cpu_start, cpu_end)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
@@ -1117,7 +1117,8 @@ def parse_nvprof_trace(path):
     for row in conn.execute(marker_query):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
-                            node_id=row['node_id'],
+                            node_id=0,  # missing a node_id when calling FunctionEvent. This is just to ensure
+                                        # that pytorch doesn't crash when creating a FunctionEvent() object
                             name=strings[row['name']],
                             cpu_start=row['start_time'],
                             cpu_end=row['end_time'],
@@ -1236,7 +1237,7 @@ def build_table(
     line_length_lst = [-SPACING_SIZE]
     MAX_STACK_ENTRY = 5
 
-    def add_column(padding):
+    def add_column(padding, text_dir='>'):
         row_format_lst[0] += '{: ' + text_dir + str(padding) + '}' + (' ' * SPACING_SIZE)
         header_sep_lst[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length_lst[0] += padding + SPACING_SIZE
