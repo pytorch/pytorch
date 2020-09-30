@@ -60,7 +60,7 @@ void logit_backward_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void tanh_backward_kernel_cuda(TensorIterator& iter) {
-  if(iter.dtype().is_complex()) {
+  if(isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_complex_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * std::conj(scalar_t{1.} - b * b);
