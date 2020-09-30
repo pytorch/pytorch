@@ -79,6 +79,7 @@ class WithInsertPoint:
 class Graph:
     def __init__(self):
         self._inputs : List[Node] = []
+        self._output : Optional[Node] = None
         self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert_point : Node = self._nodes[-1]
@@ -200,6 +201,17 @@ class Graph:
     def inputs(self):
         return tuple(self._inputs)
 
+    def set_output(self, val : Argument) -> Node:
+        self._output = Node(graph=self, name=self._name('output'), op='output', target='output',
+                            args=(val,), kwargs={})
+        return self._output
+
+    @property
+    def output(self):
+        if self._output is None:
+            raise RuntimeError('Tried to access Graph output, but output has not been set!')
+        return self._output.args[0]
+
     # sugar for create_node when you know the op
     def get_attr(self, name: str) -> Node:
         return self.create_node('get_attr', name)
@@ -250,10 +262,6 @@ class Graph:
                     pass
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name)
-
-    def output(self, result: Argument):
-        self.result = result
-        self._mark_uses(result)
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -333,7 +341,10 @@ class Graph:
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         src = ''.join(body)
-        return src, str(self.result), free_vars
+        if not self._output:
+            raise RuntimeError('Graph has no output value!')
+        assert len(self._output.args) == 1
+        return src, str(self._output.args[0]), free_vars
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []

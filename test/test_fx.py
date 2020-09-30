@@ -181,7 +181,7 @@ class TestFX(JitTestCase):
         new_g.graph_copy(g)
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
-        new_g.output((t + t).node)
+        new_g.set_output((t + t).node)
         gm = GraphModule(m, new_g)
         gm.graph.lint(gm)
         self.assertEqual(gm(3, 4), 14)
@@ -196,7 +196,7 @@ class TestFX(JitTestCase):
         new_g.graph_copy(g)
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
-        new_g.output((t + t).node)
+        new_g.set_output((t + t).node)
         gm = GraphModule(m, new_g)
         seen_names : Set[str] = set()
         for node in gm.graph.nodes:
@@ -209,7 +209,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,), name='foo_1_1')
         c : torch.fx.Node = graph.create_node('get_attr', 'y_attr', name='foo_1')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
-        graph.output(d)
+        graph.set_output(d)
         graph2 = torch.fx.Graph()
         graph2.graph_copy(graph)
         seen_names : Set[str] = set()
@@ -347,7 +347,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            interpreter.set_output_name(mod.graph.result.name)
+            assert isinstance(mod.graph.output, torch.fx.Node)
+            interpreter.set_output_name(mod.graph.output.name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -380,7 +381,7 @@ class TestFX(JitTestCase):
                 op='call_method', target='__call__', args=(interpreter_node, placeholder_nodes))
 
             # Register output
-            graph.output(output_node)
+            graph.set_output(output_node)
 
             graph.lint(wrapper)
 
@@ -517,7 +518,7 @@ class TestFX(JitTestCase):
             new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
                 op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
-            new_graph.output(relu_out)
+            new_graph.set_output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
         transformed.graph.lint(transformed)
@@ -624,7 +625,7 @@ class TestFX(JitTestCase):
         c = g.get_attr('bias')
         d = g.call_method('add', (b, c))
         e = g.call_function(torch.sin, (d,))
-        g.output(e)
+        g.set_output(e)
         mod = torch.nn.Module()
         mod.linear = torch.nn.Linear(3, 4)
         mod.bias = torch.rand(4)
@@ -641,7 +642,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
         c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
-        graph.output(d)
+        graph.set_output(d)
 
         linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
         add_param : torch.Tensor = torch.rand(3, 4)
@@ -678,7 +679,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
         c : torch.fx.Node = graph.create_node('get_attr', 'y_attr')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
-        graph.output(d)
+        graph.set_output(d)
         linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
         add_param : torch.Tensor = torch.rand(3, 4)
         gm : torch.fx.GraphModule = torch.fx.GraphModule(
@@ -707,7 +708,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
         c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
-        graph.output(d)
+        graph.set_output(d)
         nodes = graph._nodes
         nodes[1], nodes[2] = nodes[2], nodes[1]
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):

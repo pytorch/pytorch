@@ -25,7 +25,7 @@ class Node:
                  args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
-        assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr']
+        assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
         if op in ['call_method', 'call_module']:
             assert isinstance(target, str)
