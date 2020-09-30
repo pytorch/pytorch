@@ -274,13 +274,13 @@ as an alternative to specifying ``init_method``.)
 .. autoclass:: FileStore
 .. autoclass:: PrefixStore
 
-.. autofunction:: Store.set
-.. autofunction:: Store.get
-.. autofunction:: Store.add
-.. autofunction:: Store.wait
-.. autofunction:: Store.wait
-.. autofunction:: Store.num_keys
-.. autofunction:: Store.set_timeout
+.. autofunction:: torch.distributed.Store.set
+.. autofunction:: torch.distributed.Store.get
+.. autofunction:: torch.distributed.Store.add
+.. autofunction:: torch.distributed.Store.wait
+.. autofunction:: torch.distributed.Store.wait
+.. autofunction:: torch.distributed.Store.num_keys
+.. autofunction:: torch.distributed.Store.set_timeout
 
 Groups
 ------
