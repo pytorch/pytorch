@@ -1341,8 +1341,9 @@ bool Reducer::rebuild_buckets() {
       replicas_[0].size() == rebuilt_param_indices_.size(),
       c10::str(
           "rebuilt parameter indices size is not same as original model parameters size.",
+          "Original model param size is: ",
           replicas_[0].size(),
-          " versus ",
+          " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
