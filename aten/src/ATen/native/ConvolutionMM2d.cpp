@@ -433,9 +433,14 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
 
   const int64_t batch_size = input.size(0);
 
-  finput.resize_({batch_size,
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+      finput = input.view({batch_size, n_input_plane, output_height * output_width}).requires_grad_(false);
+  } else {
+     finput.resize_({batch_size,
                   n_input_plane * kernel_height * kernel_width,
                   output_height * output_width});
+  }
   output.resize_({batch_size, n_output_plane, output_height, output_width});
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
