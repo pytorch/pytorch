@@ -46,7 +46,49 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
   return true;
 }
 
+template <>
+bool SparseNormalizeOp<c10::Half, CPUContext>::RunOnDevice() {
+  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+      this, Input(INDICES));
+}
+
+template <>
+template <typename SIndex>
+bool SparseNormalizeOp<c10::Half, CPUContext>::DoRunWithType() {
+  const auto* indices = Input(INDICES).template data<SIndex>();
+  const auto* paramIn = Input(PARAM).template data<c10::Half>();
+  auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<c10::Half>();
+  const float kEps = 1e-12f;
+
+  // n: number of sparse embeddings to be normalized
+  auto n = Input(INDICES).numel();
+  if (n == 0) {
+    return true;
+  }
+
+  // embedding length, e.g. 32, 64, 128
+  auto block_size = Input(PARAM).size_from_dim(1);
+  for (int i = 0; i < n; ++i) {
+    auto idx = indices[i];
+    auto offsetIdx = idx * block_size;
+    ConstEigenVectorMap<c10::Half> xVec(paramIn + offsetIdx, block_size);
+    float norm = xVec.template lpNorm<2>();
+
+    if (use_max_norm_ && norm <= norm_) {
+      continue;
+    }
+
+    auto Y = paramOut + offsetIdx;
+    EigenVectorArrayMap<c10::Half>(Y, block_size) *=
+        static_cast<float>(norm_ / (norm + kEps));
+  }
+  return true;
+}
+
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    Float16SparseNormalize,
+    SparseNormalizeOp<c10::Half, CPUContext>);
 OPERATOR_SCHEMA(SparseNormalize)
     .NumInputs(2, 3)
     .NumOutputs(1)
