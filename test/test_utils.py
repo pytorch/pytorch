@@ -15,7 +15,7 @@ import torch.utils.benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
 from urllib.error import URLError
 import numpy as np
 
@@ -767,16 +767,6 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(measurement.median, median)
             self.assertEqual(len(measurement.times), repeats)
             self.assertEqual(measurement.number_per_run, number_per_run)
-
-    @slowTest
-    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
-    def test_collect_callgrind(self):
-        timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
-
-        # Don't collect baseline to speed up unit test by ~30 seconds.
-        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
-
-        self.assertEqual(stats.counts(include_lookdict_unicode=False), 38803198, atol=0, rtol=0.0001)
 
     def test_compare(self):
         # Simulate several approaches.
