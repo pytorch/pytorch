@@ -441,7 +441,7 @@ void broadcast(
         count_max,
         ")");
     ncclComm_t comm = comms[i];
-    std::cout << "issue input: " << i << std::endl;
+    std::cout << "issue input: " << i << "num_tensors:" << num_tensors <<  std::endl;
     NCCL_CHECK(from_nccl_result(ncclBcast(
         tensors[i].data_ptr(), numel, data_type, 0, *(to_nccl_comm(&comm)), stream)));
   }
