@@ -52,9 +52,9 @@ function get_exit_code() {
 function file_diff_from_base() {
   # The fetch may fail on Docker hosts, but it's not always necessary.
   set +e
-  git fetch origin master --quiet
+  git fetch origin release/1.7 --quiet
   set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
+  git diff --name-only "$(git merge-base origin/release/1.7 HEAD)" > "$1"
 }
 
 function get_bazel() {
