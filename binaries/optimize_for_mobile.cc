@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
   CAFFE_ENFORCE(FLAGS_model != "", c10::UsageMessage());
 
   std::string output_model_name =
-    FLAGS_model.substr(0, FLAGS_model.find(".")) + "_optimized.bc";
+    FLAGS_model.substr(0, FLAGS_model.find(".")) + "_optimized.ptl";
 
   if (FLAGS_output != "") {
     output_model_name = FLAGS_output;
