@@ -758,7 +758,7 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below 1 and an L1 term otherwise.
+    element-wise error falls below beta and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
     Also known as the Huber loss:
@@ -771,12 +771,17 @@ class SmoothL1Loss(_Loss):
     .. math::
         z_{i} =
         \begin{cases}
-        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
-        |x_i - y_i| - 0.5, & \text{otherwise }
+        0.5 (x_i - y_i)^2 / beta, & \text{if } |x_i - y_i| < beta \\
+        |x_i - y_i| - 0.5 * beta, & \text{otherwise }
         \end{cases}
 
     :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
     the sum operation still operates over all the elements, and divides by :math:`n`.
+
+    beta is an optional parameter that defaults to 1.
+
+    Note: When beta is set to 0, this is equivalent to we call out directly to :class:`L1Loss`.
+    Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -796,6 +801,8 @@ class SmoothL1Loss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        beta (float, optional): Specifies the threshold at which to change between L1 and L2 loss.
+            This value defaults to 1.0.
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means, any number of additional
@@ -807,11 +814,12 @@ class SmoothL1Loss(_Loss):
     """
     __constants__ = ['reduction']
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
+    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', beta: float = 1.0) -> None:
         super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
+        self.beta = beta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.smooth_l1_loss(input, target, reduction=self.reduction)
+        return F.smooth_l1_loss(input, target, reduction=self.reduction, beta=self.beta)
 
 
 class SoftMarginLoss(_Loss):

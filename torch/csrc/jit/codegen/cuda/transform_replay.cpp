@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -128,6 +129,8 @@ class ReplaySelf : public ReplayTransformations {
 TensorDomain* TransformReplay::fullSelfReplay(
     const TensorDomain* new_self_root,
     const TensorDomain* self) {
+  FUSER_PERF_SCOPE("fullSelfReplay");
+
   TORCH_INTERNAL_ASSERT(
       new_self_root->nDims() == self->getRootDomain().size(),
       "Invalid number of IterDomains provided.");
@@ -181,6 +184,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     const TensorDomain* producer,
     const TensorDomain* consumer,
     int consumer_compute_at_axis) {
+  FUSER_PERF_SCOPE("replayPasC");
+
   if (consumer_compute_at_axis < 0)
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
@@ -353,6 +358,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     const TensorDomain* consumer,
     const TensorDomain* producer,
     int producer_compute_at_axis) {
+  FUSER_PERF_SCOPE("replayCasP");
+
   if (producer_compute_at_axis < 0)
     producer_compute_at_axis += (int)producer->nDims() + 1;
 

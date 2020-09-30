@@ -684,6 +684,26 @@ class TestTEFuser(JitTestCase):
         # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_remove_output_used_only_in_size(self):
+        def test_fuse(a, b):
+            c = a + b
+            d = c + b
+            return d
+
+        scripted_f = torch.jit.script(test_fuse)
+        x = torch.ones(1, requires_grad=True, device='cuda')
+        y = torch.ones(1, requires_grad=True, device='cuda')
+        warmup_forward(scripted_f, x, y)
+        g = torch.jit.last_executed_optimized_graph()
+        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        self.assertEqual(len(diff_nodes), 1)
+        g = diff_nodes[0].g('Subgraph')
+        if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
+        self.assertEqual(len(if_nodes), 1)
+        # the if node and the fusion group inside it should only have one output
+        self.assertEqual(len(list(if_nodes[0].outputs())), 1)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_invariant_cuda(self):
         # Invariant: the output of prim::FusedConcat may
         # not be an input to any node inside the FusionGroup.
@@ -1268,7 +1288,7 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
