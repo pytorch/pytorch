@@ -292,8 +292,7 @@ Note that you need to maintain the states of a functional optimizer by yourself.
 In particular, tensor states will be updated inplace inside the functional API, but
 you need to update some part of your non-tensor states before or after the call to
 this API (for instance, `state_steps` for each parameter need to be updated before
-call to :func:`torch.optim.functional.adagrad`). tensor states
-
+call to :func:`torch.optim.functional.adagrad`).
 
 .. warning::
     The functional optimizer API is still experimental and subject to change. We are
