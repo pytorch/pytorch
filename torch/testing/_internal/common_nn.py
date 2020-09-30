@@ -2175,6 +2175,17 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv3d',
+        constructor_args=(2, 3, (1, 1, 1), 1, 0, 1, 1, False),
+        cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
+                                .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
+        input_size=(1, 2, 3, 4, 5),
+        cudnn=True,
+        desc='1x1x1_no_bias',
+        check_with_long_tensor=False,
+        with_tf32=False,
+    ),
+    dict(
+        module_name='Conv3d',
         constructor_args=(3, 4, 2, 2),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
