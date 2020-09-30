@@ -769,7 +769,7 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(measurement.number_per_run, number_per_run)
 
     @slowTest
-    @unittest.skipIf(not torch._C.valgrind_supported_platform(), "Unsupported platform.")
+    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     def test_collect_callgrind(self):
         timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
 
