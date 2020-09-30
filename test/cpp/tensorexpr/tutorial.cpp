@@ -148,6 +148,13 @@ int main(int argc, char* argv[]) {
     // Finally, we pass all these pieces together to Function constructor:
     Function* func =
         new Function({"X", "Y"}, dims, args, {func_body1, func_body2});
+    // Under the hood function constructor would create separate `Buf`
+    // expressions for each computation (which can be accessed via
+    // `func->func_var(idx)`) with the names specified by the first parameter of
+    // the constructor call. In our example two `Buf` variables will be created
+    // with names 'X' and 'Y', each of them would signify a domain of 64x32.
+
+    // We can now print out our function:
     std::cout << "Tensor function: " << *func << std::endl;
     // Prints:
     // Tensor function: Function F(i[64], j[32]) {
@@ -186,11 +193,24 @@ int main(int argc, char* argv[]) {
     // Prints: Tensor computation: Tensor R(i[64], j[32]) = Z(i, j) * P[i, j]
 
     // Placeholders could be thought of as external tensors, i.e. tensors for
-    // which we don't have the element expression.
+    // which we don't have the element expression. In other words, for `Tensor`
+    // we know an expression specifying how its elements can be computed (a
+    // mathematical formula). For external tensors, or placeholders, we don't
+    // have such an expression. They need to be considered as coming to us as
+    // inputs from outside - we can only load data from them.
+    //
     // Also note that we use 'call' to construct an access to an element of a
     // Tensor and we use 'load' for accessing elements of an external tensor
     // through its Placeholder. This is an implementation detail and could be
     // changed in future.
+    //
+    // Why do we have Functions and Tensors and what is the relationship between
+    // them? Functions are used to represent several computations performed over
+    // the same domain. Tensors refer to individual computations of a Function.
+    //
+    // Also note that currently a lot of code only supports single-output
+    // Functions, in which case they become almost identical to Tensors. This
+    // probably will be changed in future.
 
     // TODO: Show how reductions are represented and constructed
   }
@@ -288,9 +308,10 @@ int main(int argc, char* argv[]) {
     For* j_outer;
     For* j_inner;
     For* j_tail;
+    int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
-        9,
+        split_factor,
         &j_outer, // These are handles that we would be using for
         &j_inner, // further transformations
         &j_tail);
