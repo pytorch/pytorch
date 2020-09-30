@@ -318,7 +318,9 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         if target is Target.DECLARATION:
             if signature_group.gathered_signature is None:
                 # There's no TensorOptions
-                return f"CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=True)});"
+                return f"""
+CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=True)});
+"""
             else:
                 # There's TensorOptions in the API. Create 2 APIs - one taking the TensorOptions object ("gathered_signature"),
                 # and one taking a scattered signature with ScalarType, Layout, Device separately ("signature").

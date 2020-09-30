@@ -4,7 +4,6 @@ import tools.codegen.local as local
 from tools.codegen.api import dispatcher
 from typing import Optional, Sequence, Union, Callable, List
 import copy
-import dataclasses
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.

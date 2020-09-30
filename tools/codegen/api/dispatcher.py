@@ -81,7 +81,11 @@ ProcessTensoroptions = Enum('ProcessTensoroptions', ('GATHER', 'SCATTER', 'PASS_
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API
-def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], process_tensoroptions: ProcessTensoroptions = ProcessTensoroptions.PASS_THROUGH) -> Sequence[DispatcherExpr]:
+def cppargument_exprs(a: CppArgument,
+                      *,
+                      tensor_options: Optional[CppArgument],
+                      process_tensoroptions: ProcessTensoroptions = ProcessTensoroptions.PASS_THROUGH
+                      ) -> Sequence[DispatcherExpr]:
     if isinstance(a.argument, TensorOptionsArguments):
         if process_tensoroptions == ProcessTensoroptions.SCATTER:
             ta = a.argument
@@ -92,9 +96,10 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], 
                 DispatcherExpr(type=argument_type(ta.pin_memory), expr=f'{a.name}.pinned_memory_opt()'),  # weird discrep
             ]
         elif process_tensoroptions == ProcessTensoroptions.GATHER:
-            return [DispatcherExpr(
-                        type='const TensorOptions &',
-                        expr="TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)")]
+            return [
+                DispatcherExpr(
+                    type='const TensorOptions &',
+                    expr="TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)")]
         else:
             assert process_tensoroptions == ProcessTensoroptions.PASS_THROUGH
             return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
@@ -113,7 +118,9 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], 
 
 def cpparguments_exprs(args: Sequence[CppArgument], process_tensoroptions: ProcessTensoroptions) -> Sequence[DispatcherExpr]:
     tensor_options = next((a for a in args if isinstance(a.argument, TensorOptionsArguments)), None)
-    return [r for a in args for r in cppargument_exprs(a, tensor_options=tensor_options, process_tensoroptions=process_tensoroptions)]
+    return [r for a in args for r in cppargument_exprs(a,
+                                                       tensor_options=tensor_options,
+                                                       process_tensoroptions=process_tensoroptions)]
 
 # I don't think this is entirely sound, but it should be reasonably
 # close
