@@ -1005,7 +1005,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 }
 
 std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cpu(const Tensor& self, bool full_matrices, bool compute_uv) {
-  bool some = not full_matrices;
+  bool some = !full_matrices;
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
