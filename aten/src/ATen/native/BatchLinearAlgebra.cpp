@@ -1049,6 +1049,8 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
   return at::_linalg_svd_helper(self, full_matrices, compute_uv);
 }
 
+// Question for reviewers: should this function even exist? Do we want to
+// support out versions of torch.linalg.*?
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
@@ -1076,16 +1078,18 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
     bool full_matrices = !some;
     Tensor U, S, VT;
     std::tie(U, S, VT) = at::linalg_svd(self, full_matrices, compute_uv);
-    VT.transpose_(-2, -1);
-    return std::make_tuple(U, S, VT);
+    Tensor V = VT.transpose(-2, -1);
+    return std::make_tuple(U, S, V);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
-    bool full_matrices = !some;
-    auto result = at::linalg_svd_out(U, S, VT, self, full_matrices, compute_uv);
-    VT.transpose_(-2, -1);
-    return result;
+  Tensor U_tmp, S_tmp, V_tmp;
+  std::tie(U_tmp, S_tmp, V_tmp) = at::svd(self, some, compute_uv);
+  U.resize_as_(U_tmp).copy_(U_tmp);
+  S.resize_as_(S_tmp).copy_(S_tmp);
+  V.resize_as_(V_tmp).copy_(V_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
