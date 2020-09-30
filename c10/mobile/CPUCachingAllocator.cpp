@@ -1,4 +1,4 @@
-#include <c10/core/CPUCachingAllocator.h>
+#include <c10/mobile/CPUCachingAllocator.h>
 
 namespace c10 {
 

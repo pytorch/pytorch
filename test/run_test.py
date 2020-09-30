@@ -110,7 +110,6 @@ ROCM_BLOCKLIST = [
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
-    'test_tensorexpr',
     'test_type_hints',
     'test_openmp',
 ]

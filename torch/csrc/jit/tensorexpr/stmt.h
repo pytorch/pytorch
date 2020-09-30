@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Buffer;
+class Placeholder;
 
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
@@ -272,7 +272,7 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   static Store* make(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
       const ExprHandle& mask);
@@ -290,7 +290,7 @@ class TORCH_API Store : public StmtNode<Store> {
 
   // TODO: merge this with Load.
   Store(
-      const Buffer& buffer,
+      const Placeholder& buffer,
       const std::vector<const Expr*>& indices,
       const Expr* value,
       const Expr* mask);
