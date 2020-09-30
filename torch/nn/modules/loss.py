@@ -758,7 +758,7 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below beta and an L1 term otherwise.
+    element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
     Also known as the Huber loss:
@@ -779,9 +779,6 @@ class SmoothL1Loss(_Loss):
     the sum operation still operates over all the elements, and divides by :math:`n`.
 
     beta is an optional parameter that defaults to 1.
-
-    Note: When beta is set to 0, this is equivalent to we call out directly to :class:`L1Loss`.
-    Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -1276,7 +1273,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
     quantifying the closeness of two tensors, referred to as the :attr:`distance_function`;
-    and :math:`margin` is a non-negative margin representing the minimum difference
+    and :math:`margin` is a nonnegative margin representing the minimum difference
     between the positive and negative distances that is required for the loss to
     be 0.  The input tensors have :math:`N` elements each and can be of any shape
     that the distance function can handle.
@@ -1298,7 +1295,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         distance_function (callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
-        margin (float, optional): A non-negative margin representing the minimum difference
+        margin (float, optional): A nonnegative margin representing the minimum difference
             between the positive and negative distances required for the loss to be 0. Larger
             margins penalize cases where the negative examples are not distant enough from the
             anchors, relative to the positives. Default: :math:`1`.

@@ -291,7 +291,7 @@ void ROIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 
