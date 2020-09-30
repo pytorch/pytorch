@@ -9,12 +9,13 @@ import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic.qat as nniqat
 
-from .quantization_mappings import (get_dynamic_quant_module_mappings,
-                                    get_static_quant_module_mappings,
-                                    get_qat_module_mappings,
-                                    get_qconfig_propagation_list,
-                                    has_special_act_post_process,
-                                    get_special_act_post_process,
+from .quantization_mappings import (
+    get_dynamic_quant_module_mappings,
+    get_static_quant_module_mappings,
+    get_qat_module_mappings,
+    get_qconfig_propagation_list,
+    has_special_act_post_process,
+    get_special_act_post_process,
 )
 
 from .custom_module_class_mappings import (

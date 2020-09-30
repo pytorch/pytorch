@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.qat as nnqat
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq

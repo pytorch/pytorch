@@ -15,7 +15,6 @@ from torch.quantization import (
     propagate_qconfig_,
     convert,
 )
-
 from ..quantization_mappings import (
     get_qat_module_mappings,
 )

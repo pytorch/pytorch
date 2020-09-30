@@ -149,11 +149,11 @@ class FakeQuantize(Module):
     @torch.jit.export
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={}, ' \
-            'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, '\
-            'scale={}, zero_point={}'.format(
-            self.fake_quant_enabled, self.observer_enabled,
-            self.quant_min, self.quant_max,
-            self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
+               'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, ' \
+               'scale={}, zero_point={}'.format(
+                   self.fake_quant_enabled, self.observer_enabled,
+                   self.quant_min, self.quant_max,
+                   self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
@@ -218,10 +218,10 @@ class FixedQParamFakeQuantize(FakeQuantizeBase):
     @torch.jit.export
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, ' \
-            'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
-            self.fake_quant_enabled, self.observer_enabled,
-            self.scale, self.zero_point, self.dtype,
-            self.quant_min, self.quant_max, self.qscheme)
+               'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
+                   self.fake_quant_enabled, self.observer_enabled,
+                   self.scale, self.zero_point, self.dtype,
+                   self.quant_min, self.quant_max, self.qscheme)
 
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
