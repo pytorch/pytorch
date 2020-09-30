@@ -49,7 +49,7 @@ void testBoundsInference_1() {
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -74,7 +74,7 @@ void testBoundsInference_2() {
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -98,8 +98,9 @@ void testBoundsInference_3() {
   KernelScope kernel_scope;
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n + 10}, kFloat));
-  Tensor* b = Compute(
-      "b", {{n, "i"}}, [&](const VarHandle& i) { return a(i) * a(i + 10); });
+  Tensor* b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
+    return a.load(i) * a.load(i + 10);
+  });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -133,7 +134,7 @@ void testBoundsInference_4() {
       });
   Tensor* c = Compute(
       "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y, x) * b->call(y, x);
+        return a.load(y, x) * b->call(y, x);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -207,7 +208,7 @@ void testBoundsInference_5() {
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   For* outer;
@@ -265,7 +266,7 @@ void testBoundsInference_6() {
       });
   Tensor* c = Compute(
       "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y + 100, x + 100) * b->call(y * 2, x * 5);
+        return a.load(y + 100, x + 100) * b->call(y * 2, x * 5);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -328,9 +329,9 @@ void testBoundsInferenceNonOverlapping() {
   ExprHandle H(3);
   Placeholder a(BufHandle("a", {10}, kFloat));
   Tensor* b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a(x); });
+      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor* c = Compute(
-      "c", {{H, "x"}}, [&](const VarHandle& x) { return a(x + H + 1); });
+      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H + 1); });
   LoopNest l({b, c});
   std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
 
@@ -389,9 +390,9 @@ void testBoundsInferenceAdjacent() {
   ExprHandle H(6);
   Placeholder a(BufHandle("a", {20}, kFloat));
   Tensor* b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a(x); });
-  Tensor* c =
-      Compute("c", {{H, "x"}}, [&](const VarHandle& x) { return a(x + H); });
+      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor* c = Compute(
+      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
   std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
 
