@@ -238,9 +238,9 @@ static void logical_not_kernel(TensorIterator& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(1), "logical_not_cpu", [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(0), "logical_not_cpu", [&]() {
       cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
     });
   });
@@ -682,7 +682,7 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, i0)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
