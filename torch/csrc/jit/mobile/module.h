@@ -43,7 +43,7 @@ class TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
-  std::string name() {
+  const std::string name() const {
     return object_->name();
   }
   const std::vector<at::IValue>& slots() const {

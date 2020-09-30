@@ -16,6 +16,7 @@ from torch.quantization import (
     default_per_channel_weight_observer,
     get_observer_dict,
     prepare,
+    QConfig,
 )
 
 from torch.quantization._learnable_fake_quantize import (
@@ -44,6 +45,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
+    SingleLayerLinearModel,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -472,6 +474,32 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(obs2.min_val.shape, torch.Size([]))
         self.assertEqual(obs2.max_val.shape, torch.Size([]))
 
+
+    def test_save_load_state_dict_script(self):
+        """
+        Tests that we can save and load state_dict for observers that are scripted
+        in a quantized model.
+        """
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
+                    MinMaxDynamicQuantObserver, PerChannelMinMaxObserver,
+                    MovingAveragePerChannelMinMaxObserver, HistogramObserver]
+
+        for obs in obs_list:
+            model = SingleLayerLinearModel().eval()
+            qconfig = QConfig(activation=default_observer, weight=obs)
+            qconfig_dict = {'' : qconfig}
+            scripted = torch.jit.script(model)
+            scripted = torch.quantization.prepare_jit(scripted, qconfig_dict)
+            x = torch.rand(5, 5)
+            scripted(x)
+            obs_dict = torch.quantization.get_observer_state_dict(scripted)
+
+            # Load stats
+            scripted_2 = torch.jit.script(model)
+            scripted_2 = torch.quantization.prepare_jit(scripted_2, qconfig_dict)
+            torch.quantization.load_observer_state_dict(scripted_2, obs_dict)
+            # Verify that state_dict matches exactly with original one.
+            self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -1535,6 +1563,21 @@ class TestDistributed(QuantizationTestCase):
             self.assertTrue(
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
+
+    def test_syncbn_preserves_qconfig(self):
+        """
+        Makes sure that if a BatchNorm is not fused and a qconfig exists,
+        convering the module to SyncBatchNorm preserves the qconfig.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.BatchNorm2d(1),
+        )
+        m[1].qconfig = torch.quantization.default_qconfig
+        m = torch.nn.SyncBatchNorm.convert_sync_batchnorm(m)
+        self.assertTrue(
+            hasattr(m[1], "qconfig"),
+            "missing qconfig after SyncBatchNorm conversion")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")

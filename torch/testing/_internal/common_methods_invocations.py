@@ -7,12 +7,12 @@ import numpy as np
 from torch._six import inf, istuple
 from torch.autograd import Variable
 
+from typing import List, Tuple, Dict, Any
+
 from torch.testing import \
-    (make_non_contiguous,
-     _dispatch_dtypes,
-     floating_types, floating_types_and, floating_types_and_half,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and)
+    (make_non_contiguous, _dispatch_dtypes,
+     floating_types, floating_types_and, floating_and_complex_types,
+     floating_and_complex_types_and, all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -63,8 +63,10 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -85,6 +87,7 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.supports_tensor_out = supports_tensor_out
 
         self.skips = skips
         self.decorators = decorators
@@ -229,7 +232,8 @@ op_db = [
                    ref=np.arccosh,
                    domain=(1, float('inf')),
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
@@ -246,7 +250,8 @@ op_db = [
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
@@ -262,7 +267,8 @@ op_db = [
                    ref=np.arctanh,
                    domain=(-1, 1),
                    dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -289,6 +295,8 @@ op_db = [
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
@@ -301,7 +309,8 @@ op_db = [
     UnaryUfuncInfo('log10',
                    ref=np.log10,
                    domain=(0, float('inf')),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -313,11 +322,13 @@ op_db = [
                    ref=np.log1p,
                    domain=(-1, float('inf')),
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and_half(),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),)),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, float('inf')),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
@@ -328,7 +339,7 @@ op_db = [
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
@@ -366,6 +377,7 @@ op_db = [
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -689,6 +701,8 @@ def method_tests():
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
         ('sign', (), NO_ARGS, 'scalar'),
+        ('sgn', (S, S, S), NO_ARGS),
+        ('sgn', (), NO_ARGS, 'scalar'),
         ('trunc', (S, S, S), NO_ARGS, '', (True,)),
         ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('floor', (S, S, S), NO_ARGS, '', (True,)),
@@ -868,6 +882,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S,), (0, ), 'zero_dim'),
+        ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
@@ -945,6 +961,7 @@ def method_tests():
         ('addr', (S, M), ((S,), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
+        ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
@@ -1531,7 +1548,7 @@ tri_tests_args = [
     (2028, 1, -1)
 ]
 
-tri_large_tests_args = [
+tri_large_tests_args: List[Tuple[int, ...]] = [
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
@@ -1593,9 +1610,9 @@ EXCLUDE_FUNCTIONAL = {
     'reshape',
     'where'  # argument order
 }
-EXCLUDE_GRADCHECK = {
+EXCLUDE_GRADCHECK: Dict[str, Any] = {
 }
-EXCLUDE_GRADGRADCHECK = {
+EXCLUDE_GRADGRADCHECK: Dict[str, Any] = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,

@@ -9,7 +9,6 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-import warnings
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -399,9 +398,14 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
+    .. warning::
+        Setting :attr:`return_complex` explicitly will be required in a future
+        PyTorch release. Set it to False to preserve the current behavior or
+        True to return a complex output.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after librosa_.
+    time. The interface of this function is modeled after the librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -456,10 +460,6 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       return is a ``input.dim() + 1`` dimensional complex tensor. If ``False``,
       the output is a ``input.dim() + 2`` dimensional real tensor where the last
       dimension represents the real and imaginary components.
-
-      .. warning::
-         From pytorch 1.8.0, :attr:`return_complex` will default to ``True``
-         for all input types.
 
     Returns either a complex tensor of size :math:`(* \times N \times T)` if
     :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
@@ -1214,7 +1214,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
-        Use :func:`torch.linalg.norm` instead.
+        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
+        has a different signature and slightly different behavior that is
+        more consistent with NumPy's numpy.linalg.norm.
 
     Args:
         input (Tensor): the input tensor
@@ -1273,9 +1275,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-    warnings.warn((
-        "torch.norm is deprecated and may be removed in a future PyTorch release. "
-        "Use torch.linalg.norm instead."))
 
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
