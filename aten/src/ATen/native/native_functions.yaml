@@ -2250,6 +2250,11 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool3d
 
+- func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    QuantizedCPU: quantized_max_pool1d
+
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
@@ -4432,7 +4437,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (float, float)
+- func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
 
