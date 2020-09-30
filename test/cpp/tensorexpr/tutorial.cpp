@@ -1,33 +1,34 @@
 // *** Tensor Expressions ***
 //
 // This tutorial covers basics of NNC's tensor expressions, shows basic APIs to
-// work with them and outlines how they are used in the overall TorchScript
-// compilation pipeline. This doc is permanently "work in progress" since NNC is
-// under active development and things might change fast.
+// work with them, and outlines how they are used in the overall TorchScript
+// compilation pipeline. This doc is permanently a "work in progress" since NNC
+// is under active development and things change fast.
 //
-// Tutorial's code is compiled in the standard pytorch build, and the executable
-// can be found in `build/bin/tutorial_tensorexpr`.
+// This Tutorial's code is compiled in the standard pytorch build, and the
+// executable can be found in `build/bin/tutorial_tensorexpr`.
 //
 // *** What is NNC ***
 //
 // NNC stands for Neural Net Compiler. It is a component of TorchScript JIT
-// responsible for on-the-fly code generation for kernels, which are often a
+// and it performs on-the-fly code generation for kernels, which are often a
 // combination of multiple aten (torch) operators.
 //
-// When JIT interpreter executes a torchscript model, it automatically extracts
-// subgraphs for which a specialized code can be JIT generated. This usually
-// improves performance as the 'combined' kernel for the subgraph could avoid
-// unnecessary memory traffic that's unavoidable when the subgraph is
-// interpreted as-is, operator by operator. This optimization is often referred
-// to as 'fusion'. Relatedly, the process of finding and extracting subgraphs
-// suitable for NNC code generation is done by a JIT pass called 'fuser'.
+// When the JIT interpreter executes a torchscript model, it automatically
+// extracts subgraphs from the torchscript IR graph for which specialized code
+// can be JIT generated. This usually improves performance as the 'combined'
+// kernel created from the subgraph could avoid unnecessary memory traffic that
+// is unavoidable when the subgraph is interpreted as-is, operator by operator.
+// This optimization is often referred to as 'fusion'. Relatedly, the process of
+// finding and extracting subgraphs suitable for NNC code generation is done by
+// a JIT pass called 'fuser'.
 //
 // *** What is TE ***
 //
 // TE stands for Tensor Expressions. TE is a commonly used approach for
 // compiling kernels performing tensor (~matrix) computation. The idea behind it
 // is that operators are represented as a mathematical formula describing what
-// computation they do and then the TE engine can perform mathematical
+// computation they do (as TEs) and then the TE engine can perform mathematical
 // simplification and other optimizations using those formulas and eventually
 // generate executable code that would produce the same results as the original
 // sequence of operators, but more efficiently.
