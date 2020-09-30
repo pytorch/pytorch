@@ -2367,7 +2367,7 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
-        print(f"HEY _run_autocast_outofplace top op {op}")
+        print(f"HEY _run_autocast_outofplace top op {op}", file=sys.stderr)
         # helper to cast args
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
@@ -2389,9 +2389,9 @@ t2.start()
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
-                print(f"HEY module {module}")
+                print(f"HEY module {module}", file=sys.stderr)
                 output = getattr(module, op)(*args, **add_kwargs)
-                print(f"HEY done module {module}")
+                print(f"HEY done module {module}", file=sys.stderr)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
                                     "autocast for torch.{} produced {}, should produce {}"
@@ -2399,9 +2399,9 @@ t2.start()
 
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
-                print(f"HEY Tensor")
+                print(f"HEY Tensor", file=sys.stderr)
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
-                print(f"HEY done Tensor")
+                print(f"HEY done Tensor", file=sys.stderr)
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(out_type == output_method.dtype,
                                     "autocast for torch.{} produced {}, should produce torch.{}"
@@ -2434,19 +2434,19 @@ t2.start()
                 self.assertFalse(torch.is_autocast_enabled())
 
                 if module is not None and hasattr(module, op):
-                    print(f"HEY control module")
+                    print(f"HEY control module", file=sys.stderr)
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
-                    print(f"HEY done control module")
+                    print(f"HEY done control module", file=sys.stderr)
                 else:
-                    print(f"HEY control Tensor")
+                    print(f"HEY control Tensor", file=sys.stderr)
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
-                    print(f"HEY done control Tensor")
+                    print(f"HEY done control Tensor", file=sys.stderr)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
-        print(f"HEY _run_autocast_outofplace done op {op}")
+        print(f"HEY _run_autocast_outofplace done op {op}", file=sys.stderr)
 
     def args_maybe_kwargs(self, op_with_args):
         if len(op_with_args) == 2:
