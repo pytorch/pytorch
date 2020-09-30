@@ -75,11 +75,9 @@ def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
             for la in legacy_dispatcher.arguments(func)
         ]
 
-class ProcessTensoroptions(Enum):
-    # TODO GATHER is only needed for non-c10-full ops, remove later.
-    GATHER = 0
-    SCATTER = 1
-    PASS_THROUGH = 2
+# TODO GATHER is only needed for non-c10-full ops, remove later.
+ProcessTensoroptions = Enum('ProcessTensoroptions', ('GATHER', 'SCATTER', 'PASS_THROUGH'))
+
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API

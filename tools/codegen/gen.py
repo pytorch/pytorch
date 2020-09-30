@@ -311,33 +311,38 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         if Variant.function not in f.variants:
             return None
 
-        name = cpp.name(f.func)
         cpp_returns_type = cpp.returns_type(f.func.returns)
-        cpp_binding = cpp.binding(f.func)
+        cpp_name = cpp.name(f.func)
+        signature_group = cpp.signature_group(f.func, method=False)
 
         if target is Target.DECLARATION:
-            if cpp_binding.gathered_signature is None:
+            if signature_group.gathered_signature is None:
                 # There's no TensorOptions
-                result = f"CAFFE2_API {cpp_returns_type} {name}({cpp_binding.signature.cpp_arguments_str()});"
+                return f"CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=True)});"
             else:
-                result = f"CAFFE2_API {cpp_returns_type} {name}({cpp_binding.gathered_signature.cpp_arguments_str()});\n"
-                result += f"CAFFE2_API {cpp_returns_type} {name}({cpp_binding.signature.no_defaults().cpp_arguments_str()});"
-
-            return result
+                # There's TensorOptions in the API. Create 2 APIs - one taking the TensorOptions object ("gathered_signature"),
+                # and one taking a scattered signature with ScalarType, Layout, Device separately ("signature").
+                # The gathered_signature already exists in several older PyTorch versions and had default arguments.
+                # For backward compatibility, we left it unchanged and added the scattered API on top of it.
+                # Note that the scattered API cannot have default arguments or calls will be ambigious.
+                return f"""
+CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=True)});
+CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)});
+"""
 
         assert target is Target.DEFINITION
 
         dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
 
-        if cpp_binding.gathered_signature is None:
+        if signature_group.gathered_signature is None:
             # There's no TensorOptions
             return f"""
 // aten::{f.func}
-{cpp_returns_type} {name}({cpp_binding.signature.no_defaults().cpp_arguments_str()}) {{
+{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.signature.types_str()})>();
-    return op.call({cpp_binding.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
+    return op.call({signature_group.signature.exprs_str()});
 }}
 """
         elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
@@ -345,14 +350,14 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             # calling into the scattered version
             return f"""
 // aten::{f.func}
-{cpp_returns_type} {name}({cpp_binding.signature.no_defaults().cpp_arguments_str()}) {{
+{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.signature.types_str()})>();
-    return op.call({cpp_binding.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
+    return op.call({signature_group.signature.exprs_str()});
 }}
-{cpp_returns_type} {name}({cpp_binding.gathered_signature.no_defaults().cpp_arguments_str()}) {{
-    return {name}({cpp_binding.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.SCATTER)});
+{cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) {{
+    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.SCATTER)});
 }}
 """
         else:
@@ -360,14 +365,14 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             # calling into the gathered version
             return f"""
 // aten::{f.func}
-{cpp_returns_type} {name}({cpp_binding.gathered_signature.no_defaults().cpp_arguments_str()}) {{
+{cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.gathered_signature.types_str()})>();
-    return op.call({cpp_binding.gathered_signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.gathered_signature.types_str()})>();
+    return op.call({signature_group.gathered_signature.exprs_str()});
 }}
-{cpp_returns_type} {name}({cpp_binding.signature.no_defaults().cpp_arguments_str()}) {{
-    return {name}({cpp_binding.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.GATHER)});
+{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
+    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.GATHER)});
 }}
 """
 
@@ -386,37 +391,48 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         assert len(f.func.arguments) > 0
         assert sum(a.name == 'self' for a in f.func.arguments) == 1
 
-        name = cpp.name(f.func)
+        cpp_name = cpp.name(f.func)
         cpp_returns_type = cpp.returns_type(f.func.returns)
-        cpp_binding = cpp.binding(f.func, method=True)
+        signature_group = cpp.signature_group(f.func, method=True)
 
         if target is Target.DECLARATION:
-            if cpp_binding.gathered_signature is None:
-                # There's no TensorOptions
-                result = f"""
-{cpp_returns_type} {name}({cpp_binding.signature.exclude_this().cpp_arguments_str()}) const;
-"""
+            if signature_group.gathered_signature is None:
+                # There's no TensorOptions. Just create the API without concern for TensorOptions.
+                return f"{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=True)}) const;"
             else:
-                result = f"""
-{cpp_returns_type} {name}({cpp_binding.gathered_signature.exclude_this().cpp_arguments_str()}) const;
-{cpp_returns_type} {name}({cpp_binding.signature.exclude_this().no_defaults().cpp_arguments_str()}) const;
+                # There's TensorOptions in the API. Create 2 APIs - one taking the TensorOptions object ("gathered_signature"),
+                # and one taking a scattered signature with ScalarType, Layout, Device separately ("signature").
+                # The gathered_signature already exists in several older PyTorch versions and had default arguments.
+                # For backward compatibility, we left it unchanged and added the scattered API on top of it.
+                # Note that the scattered API cannot have default arguments or calls will be ambigious.
+                return f"""
+{cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=True)}) const;
+{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const;
 """
-
-            return result
 
         assert target is Target.DEFINITION
 
         dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
 
-        if cpp_binding.gathered_signature is None:
+        result = f"""
+// aten::{f.func}
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
+    return op.call({signature_group.signature.exprs_str()});
+}}
+"""
+
+        if signature_group.gathered_signature is None:
             # There's no TensorOptions
             return f"""
 // aten::{f.func}
-{cpp_returns_type} Tensor::{name}({cpp_binding.signature.exclude_this().no_defaults().cpp_arguments_str()}) const {{
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.signature.types_str()})>();
-    return op.call({cpp_binding.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
+    return op.call({signature_group.signature.exprs_str()});
 }}
 """
         elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
@@ -424,14 +440,14 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
             # calling into the scattered version
             return f"""
 // aten::{f.func}
-{cpp_returns_type} Tensor::{name}({cpp_binding.signature.exclude_this().no_defaults().cpp_arguments_str()}) const {{
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.signature.types_str()})>();
-    return op.call({cpp_binding.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
+    return op.call({signature_group.signature.exprs_str()});
 }}
-{cpp_returns_type} Tensor::{name}({cpp_binding.gathered_signature.exclude_this().no_defaults().cpp_arguments_str()}) const {{
-    return {name}({cpp_binding.gathered_signature.exclude_this().exprs_str(dispatcher.ProcessTensoroptions.SCATTER)});
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) const {{
+    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.SCATTER, exclude_this=True)});
 }}
 """
         else:
@@ -439,14 +455,14 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
             # calling into the gathered version
             return f"""
 // aten::{f.func}
-{cpp_returns_type} Tensor::{name}({cpp_binding.gathered_signature.exclude_this().no_defaults().cpp_arguments_str()}) const {{
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({cpp_binding.gathered_signature.types_str()})>();
-    return op.call({cpp_binding.gathered_signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({signature_group.gathered_signature.types_str()})>();
+    return op.call({signature_group.gathered_signature.exprs_str()});
 }}
-{cpp_returns_type} Tensor::{name}({cpp_binding.signature.exclude_this().no_defaults().cpp_arguments_str()}) const {{
-    return {name}({cpp_binding.gathered_signature.exclude_this().exprs_str(dispatcher.ProcessTensoroptions.GATHER)});
+{cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
+    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.GATHER, exclude_this=True)});
 }}
 """
 
@@ -769,8 +785,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
-    cpp_binding = cpp.binding(f.func)
-    cpp_args = cpp_binding.signature_prefer_gathered().cpp_arguments()
+    signature_group = cpp.signature_group(f.func)
+    cpp_args = signature_group.signature_prefer_gathered().cpp_arguments()
     arguments = [
         compute_cpp_argument_yaml(
             cpp_a, schema_order=False,
