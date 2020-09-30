@@ -529,6 +529,85 @@ inline Tensor triplet_margin_loss(
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
+inline Tensor triplet_margin_with_distance_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    c10::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t> distance_function,
+    double margin,
+    bool swap,
+    TripletMarginWithDistanceLossFuncOptions::reduction_t reduction) {
+  Tensor dist_pos, dist_neg;
+  if (distance_function.has_value()) {
+    auto distance_function_impl = distance_function.value();
+    dist_pos = distance_function_impl(anchor, positive);
+    dist_neg = distance_function_impl(anchor, negative);
+  } else {
+    dist_pos = pairwise_distance(anchor, positive);
+    dist_neg = pairwise_distance(anchor, negative);
+  }
+
+  if (swap) {
+    Tensor dist_swap;
+    if (distance_function.has_value()) {
+      dist_swap = distance_function.value()(positive, negative);
+    } else {
+      dist_swap = pairwise_distance(positive, negative);
+    }
+    dist_neg = torch::min(dist_neg, dist_swap);
+  }
+
+  auto loss = torch::clamp_min(dist_pos - dist_neg + margin, 0);
+
+  Tensor ret;
+  if (c10::get_if<enumtype::kNone>(&reduction)) {
+    ret = loss;
+  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
+    ret = loss.mean();
+  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
+    ret = loss.sum();
+  } else {
+    ret = anchor;
+    TORCH_INTERNAL_ASSERT(
+      false,
+      enumtype::get_enum_name(reduction),
+      " is not valid");
+  }
+  return ret;
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.triplet_margin_with_distance_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::TripletMarginWithDistanceLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_with_distance_loss(anchor, positive, negative, F::TripletMarginWithDistanceLossFuncOptions().margin(1.0));
+/// ```
+inline Tensor triplet_margin_with_distance_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    const TripletMarginWithDistanceLossFuncOptions& options = {}) {
+  return detail::triplet_margin_with_distance_loss(
+    anchor,
+    positive,
+    negative,
+    options.distance_function(),
+    options.margin(),
+    options.swap(),
+    options.reduction());
+}
+
+// ============================================================================
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
 inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
                        const Tensor& input_lengths,
