@@ -331,7 +331,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
-TEST_WITH_ROCM = (torch.version.hip is not None) and torch.cuda.is_available()
+TEST_WITH_ROCM = torch.version.hip and torch.cuda.is_available()
 
 TEST_DILL = _check_module_exists('dill')
 
