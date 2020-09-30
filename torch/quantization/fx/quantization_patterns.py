@@ -5,8 +5,8 @@ from torch.fx.graph import (
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import (
-    default_symmetric_fixed_qparams_fake_quant,
-    default_affine_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparam_fake_quant,
+    default_affine_fixed_qparam_fake_quant,
 )
 
 from ..quantization_mappings import (
@@ -486,23 +486,13 @@ class InheritInputQParamOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparam_fake_quant)
+@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparam_fake_quant)
+@register_quant_pattern('sigmoid', default_affine_fixed_qparam_fake_quant)
+@register_quant_pattern('sigmoid_', default_affine_fixed_qparam_fake_quant)
 class FixedQParamOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
-
-# class FixedQParamsOpQuantizeHandler(QuantizeHandler):
-#     def convert(self, quantizer, node, load_arg, debug=False):
-#         if node.op == 'call_module':
-#             module = quantizer.modules[node.target]
-#             qcls = get_static_quant_module_class(type(module))
-#             quantized = qcls.from_float(module)
-#             parent_name, name = _parent_name(node.target)
-#             setattr(quantizer.modules[parent_name], name, quantized)
-#         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.Dropout)

@@ -13,7 +13,7 @@ from torch.quantization import (
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
-    default_affine_fixed_qparams_fake_quant,
+    default_affine_fixed_qparam_fake_quant,
     get_observer_dict,
     prepare,
     QConfig,
@@ -1023,7 +1023,7 @@ class TestFakeQuantize(TestCase):
     def test_fixed_qparams_fq_module(self, device, X):
         X, (scale, zero_point, torch_type) = X
         X = to_tensor(X, device)
-        fq_module = default_affine_fixed_qparams_fake_quant()
+        fq_module = default_affine_fixed_qparam_fake_quant()
         fixed_scale = fq_module.scale.clone()
         fixed_zero_point = fq_module.zero_point.clone()
         # run fq module and make sure the quantization parameters does not change

@@ -11,7 +11,7 @@ import torch.nn.qat as nnqat
 
 from .stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
-    default_affine_fixed_qparams_fake_quant,
+    default_affine_fixed_qparam_fake_quant,
 )
 
 # Map for swapping float module to quantized ones
@@ -94,7 +94,7 @@ FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
 # mapping from module to output activation post process class
 # TODO: add registration function later if needed
 MODULE_TO_ACT_POST_PROCESS = {
-    nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Sigmoid: default_affine_fixed_qparam_fake_quant,
 }
 
 def register_static_quant_module_mapping(
@@ -202,7 +202,7 @@ def get_special_act_post_process(module_cls):
     higher priority than the activation post process in `qconfig`
     e.g.
     input: torch.nn.Sigmoid
-    output: default_affine_fixed_qparams_fake_quant
+    output: default_affine_fixed_qparam_fake_quant
     """
     return MODULE_TO_ACT_POST_PROCESS.get(module_cls, None)
 

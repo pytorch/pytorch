@@ -953,6 +953,6 @@ class Quantizer:
                     if not isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
                         # passing in matched_pattern here so that we can customize
                         # activation_post_process constructor for output based on the pattern, e.g.
-                        # for sigmoid op we'll use default_affine_fixed_qparams_fake_quant
+                        # for sigmoid op we'll use default_affine_fixed_qparam_fake_quant
                         map_arg(matched_nodes[0], visit(None, matched_pattern, qconfig))
         return quants

@@ -16,7 +16,7 @@ def get_fusion_patterns():
 QUANTIZATION_PATTERNS = OrderedDict()
 # a map from pattern to activation_post_process(observer/fake_quant) consstructor for output activation
 # e.g. pattern: torch.sigmoid,
-#      output_activation_post_process: default_affine_fixed_qparams_fake_quant
+#      output_activation_post_process: default_affine_fixed_qparam_fake_quant
 OUTPUT_ACTIVATION_POST_PROCESS_MAP = dict()
 
 # Register pattern for both static quantization and qat
@@ -34,7 +34,7 @@ def get_quant_patterns():
     return QUANTIZATION_PATTERNS
 
 # a map from pattern to output activation post process constructor
-# e.g. torch.sigmoid -> default_affine_fixed_qparams_fake_quant
+# e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
 def get_output_activation_post_process_map():
     return OUTPUT_ACTIVATION_POST_PROCESS_MAP
 
