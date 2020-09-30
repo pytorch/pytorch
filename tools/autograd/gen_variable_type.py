@@ -160,7 +160,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot'
+    'dot', 'vdot', 'cholesky'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
