@@ -654,6 +654,13 @@ class AbstractTestCases:
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
 
+            # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
+            x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
+            y = torch.empty(100, 100, dtype=torch.cfloat)
+            y.copy_(x)
+            self.assertEqual(y[:, 0], range(100))
+            self.assertEqual(y[:, 40], range(4000, 4100))
+
         def test_device(self):
             cpu = torch.device('cpu')
             self.assertEqual('cpu', str(cpu))
@@ -4689,6 +4696,22 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    @onlyCPU
+    def test_set_deterministic_beta_warning(self, device):
+        det = torch.is_deterministic()
+        try:
+            # Ensures setting to false does not throw a warning
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                torch.set_deterministic(False)
+                self.assertEqual(len(w), 0)
+
+            # Setting set_deterministic(True) throws a warning once per process
+            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is in beta"):
+                torch.set_deterministic(True)
+        finally:
+            torch.set_deterministic(det)
 
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
@@ -10779,15 +10802,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @onlyOnCPUAndCUDA
-    def test_nonzero_deprecated(self, device):
-        x = torch.randn((2, 3), device=device)
-        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
-            x.nonzero()
-
-        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
-            torch.nonzero(x)
-
     # TODO: add torch.complex64, torch.complex128
     @dtypes(torch.float, torch.double)
     def test_normal(self, device, dtype):
@@ -13054,10 +13068,6 @@ class TestTorchDeviceType(TestCase):
             dst2 = tensor.nonzero(as_tuple=False)
             dst3 = torch.empty([], dtype=torch.long, device=device)
             torch.nonzero(tensor, out=dst3)
-            self.assertRaisesRegex(
-                TypeError,
-                "received an invalid combination of arguments",
-                lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
             if self.device_type != 'xla':
                 # xla does not raise runtime error
                 self.assertRaisesRegex(
@@ -13082,6 +13092,37 @@ class TestTorchDeviceType(TestCase):
             tup2 = torch.stack(tup2).t().cpu()
             self.assertEqual(tup1, np_result, atol=0, rtol=0)
             self.assertEqual(tup2, np_result, atol=0, rtol=0)
+
+    def test_nonzero_astuple_out(self, device):
+        t = torch.randn((3, 3, 3), device=device)
+        out = torch.empty_like(t, dtype=torch.long)
+
+        with self.assertRaises(RuntimeError):
+            torch.nonzero(t, as_tuple=True, out=out)
+
+        self.assertEqual(torch.nonzero(t, as_tuple=False, out=out), torch.nonzero(t, out=out))
+
+        # Verifies that JIT script cannot handle the as_tuple kwarg
+        # See Issue https://github.com/pytorch/pytorch/issues/45499.
+        def _foo(t):
+            tuple_result = torch.nonzero(t, as_tuple=True)
+            nontuple_result = torch.nonzero(t, as_tuple=False)
+            out = torch.empty_like(nontuple_result)
+            torch.nonzero(t, as_tuple=False, out=out)
+            return tuple_result, nontuple_result, out
+
+        with self.assertRaises(RuntimeError):
+            scripted_foo = torch.jit.script(_foo)
+
+        # Verifies that JIT tracing works fine
+        traced_foo = torch.jit.trace(_foo, t)
+        traced_tuple, traced_nontuple, traced_out = traced_foo(t)
+        expected_tuple = torch.nonzero(t, as_tuple=True)
+        expected_nontuple = torch.nonzero(t)
+
+        self.assertEqual(traced_tuple, expected_tuple)
+        self.assertEqual(traced_nontuple, expected_nontuple)
+        self.assertEqual(traced_out, expected_nontuple)
 
     @onlyOnCPUAndCUDA
     def test_nonzero_discontiguous(self, device):

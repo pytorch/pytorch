@@ -9,7 +9,7 @@ import time
 
 import torch
 
-import torch.utils._benchmark as benchmark_utils
+import torch.utils.benchmark as benchmark_utils
 
 
 class FauxTorch(object):
