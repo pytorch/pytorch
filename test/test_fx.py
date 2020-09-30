@@ -178,8 +178,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -193,8 +194,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -211,7 +213,8 @@ class TestFX(JitTestCase):
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         graph2 = torch.fx.Graph()
-        graph2.graph_copy(graph)
+        val_map : Dict[Node, Node] = {}
+        graph2.graph_copy(graph, val_map)
         seen_names : Set[str] = set()
         for node in graph2.nodes:
             assert node.name not in seen_names
@@ -337,7 +340,9 @@ class TestFX(JitTestCase):
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
                 elif n.op == 'output':
-                    continue
+                    if output_node is not None:
+                        raise RuntimeError('Multiple output nodes!')
+                    output_node = n
                 else:
                     raise RuntimeError('Unsupported opcode ' + n.op)
 
@@ -350,8 +355,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            assert isinstance(mod.graph.result, torch.fx.Node)
-            interpreter.set_output_name(mod.graph.result.name)
+            assert isinstance(output_node.args[0], torch.fx.Node)
+            interpreter.set_output_name(output_node.args[0].name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -518,9 +523,10 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = torch.fx.Graph()
-            new_graph.graph_copy(traced.graph)
+            val_map : Dict[Node, Node] = {}
+            output_value = new_graph.graph_copy(traced.graph, val_map)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
+                op='call_method', target='neg', args=(output_value,), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)

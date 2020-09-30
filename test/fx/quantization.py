@@ -219,6 +219,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
+        output_node : Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
@@ -232,6 +233,11 @@ class Quantizer:
                 result = getattr(self_obj, node.target)(*args, **kwargs)
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+            elif node.op == 'output':
+                if output_node is not None:
+                    raise RuntimeError('Multiple output values in Graph!')
+                output_node = node
+                result = None
 
             env[node.name] = result
             root_node, obj = self.matches.get(node.name, (None, None))
@@ -240,7 +246,9 @@ class Quantizer:
             if node.name in self.quants:
                 self.quants[node.name].observe(node, env)
 
-        return load_arg(self.graph.result)
+        if output_node is None:
+            raise RuntimeError('Graph had no output node!')
+        return load_arg(output_node.args[0])
 
     def quantize(self):
         self.quantized_graph = Graph()

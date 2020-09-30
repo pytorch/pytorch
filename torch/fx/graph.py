@@ -74,15 +74,18 @@ class Graph:
     def nodes(self):
         return tuple(self._nodes)
 
-    def graph_copy(self, g : 'Graph'):
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Node:
         """
-        Append all nodes from graph `g` to this graph
+        Append all nodes from graph `g` to this graph. `val_map` should be a dictionary
+        that maps nodes in `g` to nodes in `self. `val_map` will be populated with more
+        items by this function. Returns the equivalent output value of `g` with
+        Nodes switched to refer to nodes in `self`.
         """
-        val_map : Dict[Node, Node] = {}
         for node in g._nodes:
             if node.op == 'output':
-                continue
+                return map_arg(node.args[0], lambda n: val_map[n])
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
+        return None
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -162,18 +165,6 @@ class Graph:
         self._mark_uses(result)
         return self.create_node(op='output', target='output', args=(result,))
 
-    @property
-    def result(self) -> Argument:
-        output_node : Optional[Node] = None
-        for node in self._nodes:
-            if node.op == 'output':
-                if output_node is not None:
-                    raise RuntimeError('Found multiple output nodes in graph!')
-                output_node = node
-        if output_node is None:
-            raise RuntimeError('Result value requested but the Graph had no output node!')
-        return output_node.args[0]
-
     def _name(self, target: Target) -> str:
         if callable(target):
             op = target.__name__
@@ -208,7 +199,7 @@ class Graph:
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
 
-    def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
+    def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
         body: List[str] = []
         result_value : Optional[Argument] = None
@@ -259,10 +250,14 @@ class Graph:
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        src = ''.join(body)
-        if result_value is None:
-            raise RuntimeError('Graph did not have an output node!')
-        return src, str(result_value), free_vars
+        body = ''.join(body)
+        body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
+        fn_code = f"""\
+def forward(self, {', '.join(free_vars)}):
+{body}
+    return {str(result_value)}
+"""
+        return fn_code
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
