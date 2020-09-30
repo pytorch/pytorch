@@ -2670,8 +2670,10 @@ void quantize_tensor_per_channel_float_qparams_cpu(
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
+        std::cout << "batches " << batches << std::endl;
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
+        std::cout << "elements per channel " << elements_per_channel << std::endl;
         int64_t channel = rtensor.size(axis);
         auto scales_data = scales.data_ptr<float>();
         auto zero_points_data = zero_points.data_ptr<float>();

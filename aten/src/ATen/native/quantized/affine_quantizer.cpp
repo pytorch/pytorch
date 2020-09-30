@@ -174,7 +174,7 @@ Tensor quantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
 
