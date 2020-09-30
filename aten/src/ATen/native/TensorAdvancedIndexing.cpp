@@ -152,7 +152,7 @@ static inline int64_t wrapLinearIndex(int64_t linearIndex, int64_t numel) {
 }
 
 static inline void checkLinearIndex(int64_t linearIndex, int64_t numel) {
-  TORCH_CHECK(linearIndex < numel && linearIndex >= -numel, "out of range: %d out of %d", (int)linearIndex, (int)numel);
+  TORCH_CHECK(linearIndex < numel && linearIndex >= -numel, "out of range: ", linearIndex, " out of ", numel);
 }
 
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
@@ -840,15 +840,19 @@ void take_out_cpu_template(
     Tensor const& input,
     Tensor const& index)
 {
-    TORCH_CHECK(output.device().type() == at::kCPU, "device type of output (", output.device().type(), ") is not on the CPU");
-    TORCH_CHECK(input.device().type() == at::kCPU, "device type of input (", input.device().type(), ") is not on the CPU");
-    TORCH_CHECK(index.device().type() == at::kCPU, "device type of index (", index.device().type(), ") is not on the CPU");
+    TORCH_CHECK(output.device().type() == at::kCPU, "device type of output (", output.device().type(), ") is not CPU");
+    TORCH_CHECK(input.device().type() == at::kCPU, "device type of input (", input.device().type(), ") is not CPU");
+    TORCH_CHECK(index.device().type() == at::kCPU, "device type of index (", index.device().type(), ") is not CPU");
 
-    TORCH_CHECK(output.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", output.layout(), " on output tensor");
-    TORCH_CHECK(input.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", input.layout(), " on input tensor");
-    TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", index.layout(), " on index tensor");
+    TORCH_CHECK(output.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            output.layout(), " on output tensor");
+    TORCH_CHECK(input.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            input.layout(), " on input tensor");
+    TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            index.layout(), " on index tensor");
 
-    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match. but got different types: ", output.scalar_type(), " and ", input.scalar_type());
+    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match.
+            But got different types: ", output.scalar_type(), " and ", input.scalar_type());
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
 
     output.resize_(index.sizes());
