@@ -11,11 +11,11 @@ import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils._benchmark as benchmark_utils
+import torch.utils.benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, slowTest
 from urllib.error import URLError
 import numpy as np
 
@@ -680,7 +680,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("pass").blocked_autorange(min_run_time=10),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             pass
               Median: 7.98 ns
               IQR:    0.52 ns (7.74 to 8.26)
@@ -690,7 +690,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("pass").adaptive_autorange(),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             pass
               Median: 7.86 ns
               IQR:    0.71 ns (7.63 to 8.34)
@@ -700,7 +700,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("cheap_fn()").blocked_autorange(min_run_time=10),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             cheap_fn()
               Median: 3.98 us
               IQR:    0.27 us (3.85 to 4.12)
@@ -710,7 +710,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("cheap_fn()").adaptive_autorange(),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             cheap_fn()
               Median: 4.16 us
               IQR:    0.22 us (4.04 to 4.26)
@@ -720,7 +720,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("expensive_fn()").blocked_autorange(min_run_time=10),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             expensive_fn()
               Median: 19.97 us
               IQR:    1.35 us (19.31 to 20.65)
@@ -730,7 +730,7 @@ class TestBenchmarkUtils(TestCase):
         assert_reprs_match(
             MockTimer("expensive_fn()").adaptive_autorange(),
             """
-            <torch.utils._benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
             expensive_fn()
               Median: 20.79 us
               IQR:    1.09 us (20.20 to 21.29)
@@ -767,6 +767,16 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(measurement.median, median)
             self.assertEqual(len(measurement.times), repeats)
             self.assertEqual(measurement.number_per_run, number_per_run)
+
+    @slowTest
+    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
+    def test_collect_callgrind(self):
+        timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
+
+        # Don't collect baseline to speed up unit test by ~30 seconds.
+        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
+
+        self.assertEqual(stats.counts(include_lookdict_unicode=False), 38803198, atol=0, rtol=0.0001)
 
     def test_compare(self):
         # Simulate several approaches.
