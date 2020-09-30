@@ -3137,6 +3137,31 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = 1
+                mask[mask == some_const] = 0
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedFillModel(), (mask, constant))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_select(self):
+        class MaskedSelectModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = torch.ones(8)
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedSelectModel(), (mask, constant))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
