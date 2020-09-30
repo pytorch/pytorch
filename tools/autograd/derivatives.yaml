@@ -404,12 +404,12 @@
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
-  self: grad * tensor
-  tensor: grad * self
+  self: handle_r_to_c(self.scalar_type(), grad * tensor.conj())
+  tensor: handle_r_to_c(tensor.scalar_type(), grad * self.conj())
 
 - name: vdot(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("vdot: self")'
-  other: 'not_implemented("vdot: other")'
+  self: handle_r_to_c(self.scalar_type(), grad.conj() * other)
+  other: handle_r_to_c(other.scalar_type(), grad * self)
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
