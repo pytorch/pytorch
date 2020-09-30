@@ -13,7 +13,7 @@ using namespace torch::jit::tensorexpr;
 // Can replace a simple scalar access with a local variable.
 void testRegisterizerSimple() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt =
       Block::make({Store::make(a, {0}, 0, 1),
@@ -58,7 +58,7 @@ void testRegisterizerSimple() {
 // Won't do replacement of a loop access.
 void testRegisterizerLoop() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {10}, kInt));
+  Placeholder a(BufHandle("A", {10}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt =
       Block::make({Store::make(a, {0}, 0, 1),
@@ -105,7 +105,7 @@ void testRegisterizerLoop() {
 // invalidate it.
 void testRegisterizerLoopFixedLoad() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt =
       Block::make({Store::make(a, {0}, 0, 1),
@@ -151,7 +151,7 @@ void testRegisterizerLoopFixedLoad() {
 // Will registerize multiple accesses of different items of the same buffer.
 void testRegisterizerMultiVar() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {2}, kInt));
+  Placeholder a(BufHandle("A", {2}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
       Store::make(a, {0}, 0, 1),
@@ -207,8 +207,8 @@ void testRegisterizerMultiVar() {
 // Will registerize the valid accesses while skipping invalid replacements.
 void testRegisterizerVariableLoad() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {10}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {10}, kInt));
   VarHandle x("x", kInt);
   VarHandle x2("x", kInt);
   Stmt* stmt = Block::make(
@@ -268,7 +268,7 @@ void testRegisterizerSymbolicIndices() {
   KernelScope kernel_scope;
   VarHandle i("i", kInt);
   VarHandle N("N", kInt);
-  Buffer a(BufHandle("A", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt =
       Block::make({Store::make(a, {i}, 0, 1),
@@ -317,7 +317,7 @@ void testRegisterizerSymbolicIndices() {
 // yet. Will have to fix soon though.
 void testRegisterizerEarlyStop() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Store::make(a, {0}, 0, 1),
@@ -344,7 +344,7 @@ void testRegisterizerEarlyStop() {
 // Can registerize accesses dependent on multiple loop vars.
 void testRegisterizerMultiLoop() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   Stmt* stmt = Block::make(
@@ -402,7 +402,7 @@ void testRegisterizerMultiLoop() {
 // Can registerize correctly if scalars already exist in the program.
 void testRegisterizerRepeated() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {2}, kInt));
+  Placeholder a(BufHandle("A", {2}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
       Store::make(a, {0}, 0, 1),
@@ -458,7 +458,7 @@ void testRegisterizerRepeated() {
 // Can registerize rthe load of A.
 void testRegisterizerNoLoads() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
       {Store::make(a, {0}, 0, 1),
@@ -499,8 +499,8 @@ void testRegisterizerNoLoads() {
 // Can registerize the load of A but not the store of B.
 void testRegisterizerNoRepeatedStores() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {10}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {10}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt =
       Block::make({Store::make(a, {0}, 0, 1),
@@ -548,7 +548,7 @@ void testRegisterizerNoRepeatedStores() {
 // Won't registerize if there are multiple accesses which may overlap.
 void testRegisterizerMultiVarOverlap() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {2}, kInt));
+  Placeholder a(BufHandle("A", {2}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({
       Store::make(a, {0}, 0, 1),
@@ -578,9 +578,9 @@ void testRegisterizerMultiVarOverlap() {
 void testRegisterizerAllocs() {
   KernelScope kernel_scope;
 
-  Buffer a(BufHandle("A", {2}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
-  Buffer c(BufHandle("C", {1}, kInt));
+  Placeholder a(BufHandle("A", {2}, kInt));
+  Placeholder b(BufHandle("B", {1}, kInt));
+  Placeholder c(BufHandle("C", {1}, kInt));
   VarHandle x("x", kInt);
 
   VarHandle b_(b.data()->base_handle());
@@ -646,7 +646,7 @@ void testRegisterizerAllocs() {
 
 void testRegisterizerNoInitializer() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
@@ -687,8 +687,8 @@ void testRegisterizerNoInitializer() {
 
 void testRegisterizerLoadThenStore() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
+  Placeholder b(BufHandle("B", {1}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
@@ -737,7 +737,7 @@ void testRegisterizerLoadThenStore() {
 
 void testRegisterizerParallelized() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {1}, kInt));
+  Placeholder a(BufHandle("A", {1}, kInt));
   VarHandle x("x", kInt);
   LoopOptions loopOpts;
   loopOpts.set_gpu_block_index(0);
@@ -765,7 +765,7 @@ void testRegisterizerParallelized() {
 
 void testRegisterizerConditions() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {5}, kInt));
+  Placeholder a(BufHandle("A", {5}, kInt));
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make({For::make(
       x,
