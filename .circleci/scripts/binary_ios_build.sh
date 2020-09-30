@@ -16,7 +16,6 @@ source ~/anaconda/bin/activate
 
 # Install dependencies
 conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
-conda install -c conda-forge valgrind
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 # sync submodules
