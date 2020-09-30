@@ -827,6 +827,38 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     return tuple(o for o in n.outputs())
 
 
+def _block_op(b, opname, *args, **kwargs):
+    if "::" in opname:
+        aten = False
+        ns_opname = opname
+    else:
+        aten = kwargs.pop("aten", False)
+        ns = "aten" if aten else "onnx"
+        ns_opname = ns + "::" + opname
+    n = b.addNode(ns_opname, list(args))
+    for k, v in sorted(kwargs.items()):
+        # TODO: enable inplace in aten exporting mode.
+        if k == "inplace":
+            continue
+        _add_attribute(n, k, v, aten=aten)
+    if len(list(n.outputs())) == 1:
+        return n.output()
+    return tuple(o for o in n.outputs())
+
+
+def _add_block(node):
+    return node.addBlock()
+
+
+def _add_input_to_block(block):
+    return block.addInputToBlock()
+
+
+def _add_output_to_block(block, value):
+    new_output = block.registerOutput(value)
+    return new_output
+
+
 # Note [Export inplace]
 # ~~~~~~~~~~~~~~~~~~~~~
 # In abstract, it would be better for us to export inplace annotations,
@@ -1080,13 +1112,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
 
-def _add_block(node, input_node, op_name, **kwargs):
-    new_block = node.addBlock()
-    new_node = new_block.addNode(input_node, op_name)
-    for k, v in kwargs.items():
-        _add_attribute(new_node, k, v, False)
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at
+torch._C.Block.op = _block_op
 torch._C.Graph.constant = _graph_constant
 torch._C.Node.__getitem__ = _node_getitem
