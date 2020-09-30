@@ -5,8 +5,8 @@ from typing import Callable, List, NoReturn, Optional
 
 import numpy as np
 import torch
-from torch.utils._benchmark.utils import common
-from torch.utils._benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
+from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
 __all__ = ["Timer", "timer"]

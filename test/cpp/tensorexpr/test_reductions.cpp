@@ -284,7 +284,7 @@ void testReduceMinCustomInitializer() {
       "min",
       {},
       Minimum(ExprHandle(minInit)),
-      [&](ParameterList& v) { return in_.call(v); },
+      [&](ParameterList& v) { return in_.load(v); },
       {{10, "m"}});
 
   LoopNest loop({min});
@@ -321,7 +321,7 @@ void testReduceAnyAll() {
       {{4, "i"}},
       anyEqSV,
       [&](const auto& i, const auto& j) {
-        return CompareSelect::make(b(i, j), searchValue, kEQ);
+        return CompareSelect::make(b.load(i, j), searchValue, kEQ);
       },
       {{10, "j"}});
 
@@ -364,7 +364,7 @@ void testReduceAnyAll() {
       {{4, "i"}},
       allGTSV,
       [&](const auto& i, const auto& j) {
-        return CompareSelect::make(b(i, j), searchValue, kGT);
+        return CompareSelect::make(b.load(i, j), searchValue, kGT);
       },
       {{10, "j"}});
 
@@ -414,7 +414,7 @@ void testReduceMatmul2D() {
       {{3, "m"}, {3, "n"}},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
-        return tA(m, k) * tB(k, n);
+        return tA.load(m, k) * tB.load(k, n);
       },
       {{2, "k"}});
 
@@ -475,7 +475,7 @@ void testReduceAsProducer() {
       "scale",
       {{2, "l2"}, {3, "n1"}},
       [&](const VarHandle& l, const VarHandle& n) {
-        return c->call(l, n) * a(l, n);
+        return c->call(l, n) * a.load(l, n);
       });
   LoopNest loop({d});
   loop.prepareForCodegen();
@@ -518,7 +518,7 @@ void testReduceAsConsumer() {
       "scale",
       {{2, "l2"}, {3, "n1"}, {m, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
-        return b(l, n, m) * a(l, n, m);
+        return b.load(l, n, m) * a.load(l, n, m);
       });
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
   LoopNest loop({d});
@@ -1317,7 +1317,7 @@ void testReduceInlineReduction() {
 
   Tensor* x = Reduce("x", {{M, "m1"}}, Sum(), b_buf, {{N, "n1"}, {K, "k1"}});
   Tensor* y = Compute("y", {{M, "m2"}}, [&](const VarHandle& m) {
-    return a_buf(m) + x->call(m);
+    return a_buf.load(m) + x->call(m);
   });
 
   PaddedBuffer<float> a_v(M);
@@ -1352,7 +1352,7 @@ void testReduceInlineConsumer() {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n, k) + b_buf(m, n, k);
+        return a_buf.load(m, n, k) + b_buf.load(m, n, k);
       });
   Tensor* y = Reduce("y", {{M, "m2"}}, Sum(), x, {{N, "n2"}, {K, "k2"}});
 
@@ -1406,7 +1406,7 @@ void testReduceInlineReducerInternal() {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n, k) + b_buf(m, n, k);
+        return a_buf.load(m, n, k) + b_buf.load(m, n, k);
       });
 
   Reducer minimum(ExprHandle(0.f), [&](ExprHandle a, ExprHandle b) {
