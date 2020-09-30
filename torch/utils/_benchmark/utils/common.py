@@ -2,8 +2,8 @@
 
 import collections
 import contextlib
-import logging
-from typing import Any, Dict, List, Optional
+import dataclasses
+from typing import DefaultDict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -22,6 +22,19 @@ _IQR_WARN_THRESHOLD = 0.1
 _IQR_GROSS_WARN_THRESHOLD = 0.25
 
 
+@dataclasses.dataclass(init=True, repr=False, eq=True, frozen=True)
+class TaskSpec:
+    """Container for information used to define a Timer. (except globals)"""
+    stmt: str
+    setup: str
+    label: Optional[str]
+    sub_label: Optional[str]
+    description: Optional[str]
+    env: Optional[str]
+    num_threads: int
+_TASKSPEC_FIELDS = tuple(i.name for i in dataclasses.fields(TaskSpec))
+
+@dataclasses.dataclass(init=True, repr=False)
 class Measurement:
     """The result of a Timer measurement.
 
@@ -29,74 +42,52 @@ class Measurement:
     serializable and provides several convenience methods
     (including a detailed __repr__) for downstream consumers.
     """
-    def __init__(
-        self,
-        number_per_run: int,
-        times: List[float],
-        num_threads: int,
-        label: Optional[str],
-        sub_label: Optional[str],
-        description: Optional[str],
-        env: Optional[str],
-        stmt: Optional[str],
-        metadata: Optional[dict] = None,
-    ):
-        self.number_per_run = number_per_run
-        self.times = times
-        self.label = label
-        self.sub_label = sub_label
-        self.description = description
-        self._env = env
-        self.num_threads = num_threads
-        self.stmt = stmt
-        self.metadata = metadata
+    number_per_run: int
+    raw_times: List[float]
+    task_spec: TaskSpec
+    metadata: Optional[dict] = None
 
-        # Derived attributes
-        self._sorted_times = sorted([t / number_per_run for t in times])
-        self._median = np.median(self._sorted_times)
-        self._bottom_quartile = np.percentile(self._sorted_times, 25)
-        self._top_quartile = np.percentile(self._sorted_times, 75)
-        self._iqr = self._top_quartile - self._bottom_quartile
-        self._warnings = self._populate_warnings()
+    def __post_init__(self):
+        self._sorted_times: Tuple[float, ...] = ()
+        self._warnings: Tuple[str, ...] = ()
+        self._median: float = -1.0
+        self._mean: float = -1.0
+        self._p25: float = -1.0
+        self._p75: float = -1.0
 
-    # Pickle support.
-    def __getstate__(self):
-        return {
-            "label": self.label,
-            "sub_label": self.sub_label,
-            "description": self.description,
-            "env": self._env,
-            "num_threads": self.num_threads,
-            "number_per_run": self.number_per_run,
-            "times": self.times,
-            "stmt": self.stmt,
-            "metadata": self.metadata,
-        }
+    def __getattr__(self, name):
+        # Forward TaskSpec fields for convenience.
+        if name in _TASKSPEC_FIELDS:
+            return getattr(self.task_spec, name)
+        return super().__getattribute__(name)
 
-    def __setstate__(self, state: Dict[str, Any]):
-        self.__init__(**state)  # type: ignore
-
-    def meets_confidence(self, threshold=_IQR_WARN_THRESHOLD):
-        return self._iqr / self._median < threshold
-
-    def _populate_warnings(self):
-        warnings, rel_iqr = [], self._iqr / self._median * 100
-
-        def add_warning(msg):
-            warnings.append(
-                f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
-                f"of the median measurement.\n           {msg}"
-            )
-
-        if self._iqr / self._median > _IQR_GROSS_WARN_THRESHOLD:
-            add_warning("This suggests significant environmental influence.")
-        elif not self.meets_confidence():
-            add_warning("This could indicate system fluctuation.")
-        return warnings
+    # =========================================================================
+    # == Convenience methods for statistics ===================================
+    # =========================================================================
+    #
+    # These methods use raw time divided by number_per_run; this is an
+    # extrapolation and hides the fact that different number_per_run will
+    # result in different amortization of overheads, however if Timer has
+    # selected an appropriate number_per_run then this is a non-issue, and
+    # forcing users to handle that division would result in a poor experience.
+    @property
+    def times(self) -> List[float]:
+        return [t / self.number_per_run for t in self.raw_times]
 
     @property
     def median(self) -> float:
+        self._lazy_init()
         return self._median
+
+    @property
+    def mean(self) -> float:
+        self._lazy_init()
+        return self._mean
+
+    @property
+    def iqr(self) -> float:
+        self._lazy_init()
+        return self._p75 - self._p25
 
     @property
     def significant_figures(self) -> int:
@@ -113,10 +104,11 @@ class Measurement:
         summary. __repr__ does not use this method; it simply displays raw
         values. Significant figure estimation is intended for `Compare`.
         """
+        self._lazy_init()
         n_total = len(self._sorted_times)
         lower_bound = int(n_total // 4)
         upper_bound = int(np.ceil(3 * n_total / 4))
-        interquartile_points = self._sorted_times[lower_bound:upper_bound]
+        interquartile_points: Tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
         std = np.std(interquartile_points)
         sqrt_n = np.sqrt(len(interquartile_points))
 
@@ -125,6 +117,35 @@ class Measurement:
         relative_ci = np.log10(self._median / confidence_interval)
         num_significant_figures = int(np.floor(relative_ci))
         return min(max(num_significant_figures, 1), _MAX_SIGNIFICANT_FIGURES)
+
+    @property
+    def has_warnings(self) -> bool:
+        self._lazy_init()
+        return bool(self._warnings)
+
+    def _lazy_init(self):
+        if self.raw_times and not self._sorted_times:
+            self._sorted_times = tuple(sorted(self.times))
+            self._median = np.median(self._sorted_times)
+            self._mean = np.mean(self._sorted_times)
+            self._p25 = np.percentile(self._sorted_times, 25)
+            self._p75 = np.percentile(self._sorted_times, 75)
+
+            def add_warning(msg):
+                rel_iqr = self.iqr / self.median * 100
+                self._warnings += (
+                    f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
+                    f"of the median measurement.\n           {msg}",
+                )
+
+            if not self.meets_confidence(_IQR_GROSS_WARN_THRESHOLD):
+                add_warning("This suggests significant environmental influence.")
+            elif not self.meets_confidence(_IQR_WARN_THRESHOLD):
+                add_warning("This could indicate system fluctuation.")
+
+
+    def meets_confidence(self, threshold=_IQR_WARN_THRESHOLD) -> bool:
+        return self.iqr / self.median < threshold
 
     @property
     def title(self) -> str:
@@ -140,15 +161,11 @@ class Measurement:
 
     @property
     def env(self) -> str:
-        return "Unspecified env" if self._env is None else self._env
+        return "Unspecified env" if self.taskspec.env is None else self.taskspec.env
 
     @property
     def as_row_name(self) -> str:
         return self.sub_label or self.stmt or "[Unknown]"
-
-    @property
-    def has_warnings(self):
-        return bool(self._warnings)
 
     def __repr__(self):
         """
@@ -161,34 +178,48 @@ class Measurement:
               WARNING: Interquartile range is 39.4% of the median measurement.
                        This suggests significant environmental influence.
         """
-        repr = [super().__repr__(), "\n", self.title, "\n"]
-        if self.description:
-            repr.extend([self.description, "\n"])
+        self._lazy_init()
+        skip_line, newline = "MEASUREMENT_REPR_SKIP_LINE", "\n"
         n = len(self._sorted_times)
+        time_unit, time_scale = select_unit(self._median)
+        iqr_filter = '' if n >= 4 else skip_line
 
-        time_unit, time_scale = select_unit(self.median)
-        repr.extend([
-            f"  {'Median: ' if n > 1 else ''}"
-            f"{self._median / time_scale:.2f} {time_unit}\n"
-        ])
-        if n >= 4:
-            repr.extend(
-                [
-                    f"  IQR:    {self._iqr / time_scale:.2f} {time_unit} "
-                    f"({self._bottom_quartile / time_scale:.2f} to "
-                    f"{self._top_quartile / time_scale:.2f})\n",
-                ]
+        repr_str = f"""
+{super().__repr__()}
+{self.title}
+  {self.description or skip_line}
+  {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
+  {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
+  {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
+{newline.join(self._warnings)}""".strip() # noqa
+
+        return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
+
+    @staticmethod
+    def merge(measurements):
+        """Convenience method for merging replicates.
+        NB: merge will extrapolate times to `number_per_run=1` and will not
+            transfer any metadata (since it might differ between replicates)
+        """
+        grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
+        for m in measurements:
+            grouped_measurements[m.task_spec].append(m)
+
+        def merge_group(task_spec, group):
+            times: List[float] = []
+            for m in group:
+                # Different measurements could have different `number_per_run`,
+                # so we call `.times` which normalizes the results.
+                times.extend(m.times)
+
+            return Measurement(
+                number_per_run=1,
+                raw_times=times,
+                task_spec=task_spec,
+                metadata=None,
             )
-        repr.extend(
-            [
-                f"  {len(self.times)} measurement{'s' if n > 1 else ''}, "
-                f"{self.number_per_run} runs {'per measurement,' if n > 1 else ','} "
-                f"{self.num_threads} thread{'s' if self.num_threads > 1 else ''}\n"
-            ]
-        )
-        repr.extend(self._warnings)
 
-        return "".join(repr).strip()
+        return [merge_group(t, g) for t, g in grouped_measurements.items()]
 
 
 def select_unit(t: float):
@@ -220,42 +251,6 @@ def trim_sigfig(x: float, n: int) -> float:
 
 def ordered_unique(elements):
     return list(collections.OrderedDict({i: None for i in elements}).keys())
-
-
-def merge_measurements(measurements: List[Measurement]):
-    grouped_measurements = collections.defaultdict(list)
-    for m in measurements:
-        key = (m.label, m.sub_label, m.description, m.env, m.num_threads)
-        grouped_measurements[key].append(m)
-
-    def merge_group(label, sub_label, description, env, num_threads, group):
-        times = []
-        for m in group:
-            # Different measurements could have different `number_per_run`.
-            times.extend([t / m.number_per_run for t in m.times])
-        unique_stmts = {m.stmt for m in group}
-        if len(unique_stmts) != 1:
-            logging.warning(
-                "Merged Examples with identical `label`, `sub_label`,\n"
-                "`description`, `env`, and `num_threads`, but different"
-                "`stmt`s:\n  " + "\n  ".join(unique_stmts)
-            )
-        return Measurement(
-            number_per_run=1,
-            times=times,
-            num_threads=num_threads,
-            label=label,
-            sub_label=sub_label,
-            description=description,
-            env=env,
-            stmt=unique_stmts.pop(),
-            metadata=None,
-        )
-
-    return [
-        merge_group(*(key + (group,)))
-        for key, group in grouped_measurements.items()
-    ]
 
 
 @contextlib.contextmanager

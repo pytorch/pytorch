@@ -53,6 +53,7 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
+from torch.types import _TensorOrTensors
 
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
@@ -316,15 +317,19 @@ class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def _forward(self, module, input):
+    def _forward(self, module, input: _TensorOrTensors):
         with freeze_rng_state():
-            return module(input)
+            if isinstance(input, tuple):
+                return module(*input)
+            else:
+                return module(input)
 
-    def _backward(self, module, input, output, grad_output, create_graph=False):
+    def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
         output.backward(grad_output, retain_graph=True, create_graph=create_graph)
-        if input.grad is None:
-            return None
-        return input.grad.data
+        if isinstance(input, tuple):
+            return tuple(map(lambda i: i.grad.data if i.grad is not None else None, input))
+        else:
+            return input.grad.data if input.grad is not None else None
 
     def _forward_criterion(self, criterion, input, target, extra_args=None):
         if extra_args is None:
