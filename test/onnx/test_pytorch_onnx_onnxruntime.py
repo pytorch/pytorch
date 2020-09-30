@@ -4520,6 +4520,41 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    def test_batchnorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3, affine=True)
+
+            def forward(self, x):
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+        out = model(x)
+
+        # state after 1 train epoch
+        running_mean = model.bn.running_mean
+        running_var = model.bn.running_var
+        saved_mean = x.mean((0, 2, 3))
+        saved_var = x.var((0, 2, 3))
+
+        pytorch_out = [out.detach().numpy(),
+                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
+                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
+
+        model_export = MyModule()
+        f = io.BytesIO()
+
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs = run_ort(ort_sess, input=(x,))
+
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
