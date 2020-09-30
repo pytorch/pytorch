@@ -274,13 +274,13 @@ as an alternative to specifying ``init_method``.)
 .. autoclass:: FileStore
 .. autoclass:: PrefixStore
 
-.. autofunction:: set
-.. autofunction:: get
-.. autofunction:: add
-.. autofunction:: wait
-.. autofunction:: wait
-.. autofunction:: num_keys
-.. autofunction:: set_timeout
+.. autofunction:: Store.set
+.. autofunction:: Store.get
+.. autofunction:: Store.add
+.. autofunction:: Store.wait
+.. autofunction:: Store.wait
+.. autofunction:: Store.num_keys
+.. autofunction:: Store.set_timeout
 
 Groups
 ------
