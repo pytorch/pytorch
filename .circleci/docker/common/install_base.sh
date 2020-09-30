@@ -47,6 +47,7 @@ install_ubuntu() {
     software-properties-common \
     sudo \
     wget \
+    valgrind \
     vim
 
   # TODO: THIS IS A HACK!!!
@@ -92,6 +93,7 @@ install_centos() {
     opencv-devel \
     sudo \
     wget \
+    valgrind \
     vim
 
   # Cleanup
@@ -118,7 +120,7 @@ esac
 
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
-VALGRIND_VERSION=3.15.0
+VALGRIND_VERSION=3.16.1
 if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
 then
   wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
@@ -131,4 +133,3 @@ sudo make install
 cd ../../
 rm -rf valgrind_build
 alias valgrind="/usr/local/bin/valgrind"
-

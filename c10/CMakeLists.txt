@@ -32,6 +32,7 @@ file(GLOB C10_SRCS
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
+        mobile/*.cpp
         macros/*.cpp
         util/*.cpp
         )

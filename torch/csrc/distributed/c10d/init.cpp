@@ -1,7 +1,11 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
+#ifndef _WIN32
 #include <c10d/HashStore.hpp>
+#include <c10d/TCPStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
+#endif
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -17,8 +21,6 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
-#include <c10d/TCPStore.hpp>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -92,6 +94,14 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
+  int64_t getNumKeys() override {
+    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
+  }
+
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+  }
+
   bool check(const std::vector<std::string>& keys) override {
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
@@ -159,6 +169,7 @@ PyObject* c10d_init(PyObject* _unused) {
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
+              bool,
               bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
@@ -166,6 +177,7 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
+          py::arg("gradient_as_bucket_view") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
@@ -300,6 +312,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "delete_key",
+              &::c10d::Store::deleteKey,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "num_keys",
+              &::c10d::Store::getNumKeys,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "set_timeout",
               &::c10d::Store::setTimeout,
               py::call_guard<py::gil_scoped_release>())
@@ -321,6 +341,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&, int>());
 
+#ifndef _WIN32
   shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
       .def(py::init<>());
 
@@ -338,6 +359,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+#endif
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
@@ -605,6 +627,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
 
+#ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
       [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
@@ -618,6 +641,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::arg("process_groups"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -653,7 +677,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupGloo::Options>())
+           ::c10d::ProcessGroupGloo::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -684,7 +709,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -694,7 +720,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
            const std::shared_ptr<::c10d::Store>&,
            int,
            int,
-           ::c10d::ProcessGroupNCCL::Options>())
+           ::c10d::ProcessGroupNCCL::Options>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -710,7 +737,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+          py::call_guard<py::gil_scoped_release>());
 
   py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
       .def(py::init<>())
@@ -725,9 +753,12 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
-    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-  });
+  processGroupMPI.def_static(
+    "create",
+    [](std::vector<int> ranks) {
+      return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+    },
+    py::call_guard<py::gil_scoped_release>());
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

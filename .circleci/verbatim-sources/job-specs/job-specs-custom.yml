@@ -43,10 +43,13 @@
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          tag=${CIRCLE_TAG:1:5}
+          target=${tag:-master}
+          echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/master master site") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/'$target' master site") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -85,10 +88,13 @@
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          tag=${CIRCLE_TAG:1:5}
+          target=${tag:-master}
+          echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/cpp_doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" master") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -109,7 +115,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.4.1"
+      xcode: "11.2.1"
     steps:
       - checkout
       - run_brew_for_macos_build
@@ -143,7 +149,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.4.1"
+      xcode: "11.2.1"
     steps:
       - checkout
       - attach_workspace:
