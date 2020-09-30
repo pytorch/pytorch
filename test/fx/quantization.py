@@ -243,7 +243,7 @@ class Quantizer:
             if node.name in self.quants:
                 self.quants[node.name].observe(node, env)
 
-        return load_arg(self.graph.result)
+        return load_arg(self.graph.output)
 
     def quantize(self):
         self.quantized_graph = Graph()
@@ -286,7 +286,7 @@ class Quantizer:
                 else:
                     quant_env[node.name] = r
 
-        self.quantized_graph.output(load_arg(self.graph.result, quantized=False))
+        self.quantized_graph.set_output(load_arg(self.graph.output, quantized=False))
         return GraphModule(self.root, self.quantized_graph)
 
     def _find_matches(self, patterns):
