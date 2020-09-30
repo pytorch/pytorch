@@ -4,10 +4,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
 #include <THC/THCTensorInfo.cuh>
 
@@ -21,8 +21,7 @@ template <int Dims, typename T, typename IndexType>
 __device__ __forceinline__ IndexType indexToOffset(
     const cuda::detail::TensorInfo<T, IndexType>& info,
     int64_t index,
-    IndexType size)
-{
+    IndexType size) {
   IndexType linearIndex = static_cast<IndexType>(index);
   CUDA_KERNEL_ASSERT(linearIndex < size && linearIndex >= -size);
   if (linearIndex < 0) {
@@ -206,29 +205,28 @@ Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tens
   return masked_select_out_cuda_impl(result, self, mask);
 }
 
-void take_out_cuda_template(
-  Tensor& output,
-  Tensor const& input,
-  Tensor const& index)
-{
-  TORCH_CHECK(output.device().type() == at::kCUDA, "device type of output (", output.device().type(), ") is not on the GPU");
-  TORCH_CHECK(input.device().type() == at::kCUDA, "device type of input (", input.device().type(), ") is not on the GPU");
-  TORCH_CHECK(index.device().type() == at::kCUDA, "device type of index (", index.device().type(), ") is not on the GPUA");
+void take_out_cuda_template(Tensor& output, const Tensor& input, const Tensor& index) {
+  TORCH_CHECK(output.device().type() == at::kCUDA, "device type of output (", output.device().type(), ") is not GPU");
+  TORCH_CHECK(input.device().type() == at::kCUDA, "device type of input (", input.device().type(), ") is not GPU");
+  TORCH_CHECK(index.device().type() == at::kCUDA, "device type of index (", index.device().type(), ") is not GPU");
 
   TORCH_CHECK(output.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", output.layout(), " on output tensor");
   TORCH_CHECK(input.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", input.layout(), " on input tensor");
   TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ", index.layout(), " on index tensor");
 
-  TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match. but got different types: ", output.scalar_type(), " and ", input.scalar_type());
+  TORCH_CHECK(output.scalar_type() == input.scalar_type(),
+          "output and input scalar type must match. but got different types: ", output.scalar_type(), " and ", input.scalar_type());
   TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
 
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input, "input", 2 };
   TensorArg index_arg{ index, "index", 3 };
-  checkAllSameGPU("take", {output_arg, input_arg});
+  checkAllSameGPU("take", {output_arg, input_arg, index_arg});
 
-  // TODO: the calls to checkGPU() also assert that all tensors are on CURRENT device, not just the same device as each other (using cudaGetDevice())
-  /*THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));*/
+  // additionally check that the above 3 tensors are on the current GPU
+  auto curr_device = at::cuda::current_device();
+  TORCH_CHECK(input_arg->get_device() == at::cuda::current_device(),
+          "input is not on the current GPU. input GPU = ", input->get_device(), ", current GPU = ", curr_device);
 
   TORCH_CHECK(input.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(output.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);

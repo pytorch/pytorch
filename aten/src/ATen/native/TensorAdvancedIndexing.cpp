@@ -857,7 +857,7 @@ void take_out_cpu_template(
     bool is_contiguous = input.is_contiguous();
     auto input_size = input.numel();
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, input.scalar_type(), "take_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cpu", [&] {
         auto output_data = output_contiguous.data_ptr<scalar_t>();
         auto input_data = input.data_ptr<scalar_t>();
         auto index_data = index.data_ptr<int64_t>();
