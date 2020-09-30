@@ -260,6 +260,28 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
+Distributed Key-Value Store
+---------------------------
+
+The distributed package comes with a distributed key-value store, which can be
+used to share information between processes in the group as well as to
+initialize the distributed pacakge in
+:func:`torch.distributed.init_process_group` (by explicitly creating the store
+as an alternative to specifying ``init_method``.)
+
+.. autoclass:: TCPStore
+.. autoclass:: HashStore
+.. autoclass:: FileStore
+.. autoclass:: PrefixStore
+
+.. autofunction:: set
+.. autofunction:: get
+.. autofunction:: add
+.. autofunction:: wait
+.. autofunction:: wait
+.. autofunction:: num_keys
+.. autofunction:: set_timeout
+
 Groups
 ------
 
