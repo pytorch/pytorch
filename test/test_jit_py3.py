@@ -458,6 +458,17 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
             torch.jit.script(annotated_fn)
 
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
     def test_subexpression_List_Future(self):
 
         @torch.jit.script
@@ -610,7 +621,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_module_properties(self):
         class ModuleWithProperties(torch.nn.Module):
-            __ignored_properties__ = ["ignored_attr"]
+            __jit_unused_properties__ = ["ignored_attr"]
 
             def __init__(self, a: int):
                 super().__init__()
@@ -627,6 +638,15 @@ class TestScriptPy3(JitTestCase):
             @property
             def ignored_attr(self):
                 return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
 
             @attr.setter
             def attr(self, a: int):
