@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class vTensor final {
+class C10_EXPORT vTensor final {
  public:
   vTensor() = default;
   vTensor(
@@ -221,6 +221,7 @@ class vTensor final {
       typedef uint8_t Flags;
 
       enum Type : Flags {
+        Unknown = 0u << 0u,
         Buffer = 1u << 0u,
         Image = 1u << 1u,
         Staging = 1u << 2u,
@@ -230,6 +231,49 @@ class vTensor final {
     struct Active final {
       Component::Type component;
       Access::Flags access;
+
+      friend std::ostream& operator<<(
+          std::ostream& stream,
+          const Active view) {
+        stream << "Component: [";
+        switch (view.component) {
+          case Component::Unknown:
+            stream << "Unknown";
+            break;
+
+          case Component::Buffer:
+            stream << "Buffer";
+            break;
+
+          case Component::Image:
+            stream << "Image";
+            break;
+
+          case Component::Staging:
+            stream << "Staging";
+            break;
+
+          default:
+            stream << "Unknown";
+        }
+
+        stream << "], Access: [";
+
+        if (Access::Read == (view.access & Access::Read)) {
+          stream << "Read";
+        }
+        else if (Access::Write == (view.access & Access::Write)) {
+          stream << "Write";
+        }
+        else if (view.access) {
+          stream << "Read | Write";
+        }
+        else {
+          stream << "Unknown";
+        }
+
+        return stream << "]";
+      }
     };
 
     Buffer& buffer() const;
@@ -309,10 +353,12 @@ vTensor::Future<Type, kAccess>::operator=(
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
   // Sync eagerly in an effort to hide latency.
-  tensor_->view_.transition({
-    View::Component::Image,
-    kAccess,
-  });
+  if (Access::Write & kAccess) {
+    tensor_->view_.transition({
+      View::Component::Image,
+      vTensor::Access::Read,
+    });
+  }
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>

@@ -159,7 +159,7 @@ vTensor::vTensor(
 const vTensor* vTensor::host() const {
   view_.transition({
     View::Component::Staging,
-    Memory::Access::Read,
+    Access::Read,
   });
 
   return this;
@@ -183,7 +183,7 @@ vTensor::Memory& vTensor::wait() {
 vTensor::Buffer::Object vTensor::buffer() const & {
   view_.transition({
     View::Component::Buffer,
-    Memory::Access::Read,
+    Access::Read,
   });
 
   return view_.buffer().object;
@@ -201,7 +201,7 @@ vTensor::Buffer::Object vTensor::buffer(const Access::Flags access) & {
 vTensor::Image::Object vTensor::image() const & {
   view_.transition({
     View::Component::Image,
-    Memory::Access::Read,
+    Access::Read,
   });
 
   return view_.image().object;
@@ -298,69 +298,226 @@ vTensor::Fence& vTensor::View::fence() const {
 }
 
 // Any state in column T can transition to any state in column T + 1.  That
-// leaves us with 6 x 6 = 36 possible transitions.  In each scenario,
+// leaves us with 7 x 6 = 42 possible transitions.  In each scenario,
 // synchronization must be handled appropriately.
 //
 //      T              T + 1
-// Read  Staging |  Read  Staging
-// Write Staging |  Write Staging
-// Read   Buffer |  Read  Buffer
-// Write  Buffer |  Write Buffer
-// Read    Image |  Read  Image
-// Write   Image |  Write Image
+//       Unknown |
+// Read  Staging | Read  Staging
+// Write Staging | Write Staging
+// Read  Buffer  | Read  Buffer
+// Write Buffer  | Write Buffer
+// Read  Image   | Read  Image
+// Write Image   | Write Image
 //
 
-void vTensor::View::transition(const Active view) const {
+void vTensor::View::transition(Active view) const {
   verify();
 
-  // Always make sure to update the active view regardless of codepath taken.
+  // If the target view is an image, either:
+  //   1) Make sure image memory is allocated if the tensor can be represented
+  //      as an image, or
+  //   2) Adjust the target view to a buffer if the tensor cannot be represented
+  //      as an image.
 
-  struct Update final {
-    const Active& src;
-    Active& dst;
-
-    inline ~Update() {
-      dst = src;
+  if (Component::Image == view.component) {
+    if (required_ & Component::Image) {
+      // Force a laze allocation.
+      image();
     }
-  } update {
-      view,
-      active_,
+    else {
+      // Adjust target view to buffer.
+      view.component = Component::Buffer;
+    }
+  }
+
+  // Always make sure to update the active view and image layout, if necessary,
+  // regardless of the codepath taken.  Keep in mind that we are simply updating
+  // the state machine here and not issuing any synchronization commands which
+  // is what the rest of the logic in this function takes care of if need be.
+
+  struct State final {
+    struct {
+      Active& view;
+      Image::Object& image;
+
+      VkAccessFlags access() const {
+        return State::access(view);
+      }
+
+      inline VkImageLayout layout() const {
+        return image.layout;
+      }
+
+      inline void layout(const VkImageLayout layout) {
+        image.layout = layout;
+      }
+
+      inline VkPipelineStageFlags stage() const {
+        return State::stage(view);
+      }
+    } current;
+
+    const struct {
+      Active view;
+
+      VkAccessFlags access() const {
+        return State::access(view);
+      }
+
+      inline VkImageLayout layout() const {
+        return State::layout(view);
+      }
+
+      inline VkPipelineStageFlags stage() const {
+        return State::stage(view);
+      }
+    } next;
+
+    inline ~State() {
+      current.view = next.view;
+
+      if (Component::Image == next.view.component) {
+        current.layout(next.layout());
+      }
+    }
+
+    bool requires_image_layout_transition() const {
+      return (Component::Image == next.view.component) &&
+             (next.layout() != current.layout());
+    }
+
+    static VkAccessFlags access(const Active view) {
+      VkAccessFlags access = 0u;
+
+      switch (stage(view)) {
+        case VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT:
+          if (view.access & Access::Read) {
+            access |= VK_ACCESS_SHADER_READ_BIT;
+          }
+
+          if (view.access & Access::Write) {
+            access |= VK_ACCESS_SHADER_WRITE_BIT;
+          }
+
+          break;
+
+        case VK_PIPELINE_STAGE_TRANSFER_BIT:
+          if (view.access & Access::Read) {
+            access |= VK_ACCESS_HOST_READ_BIT;
+          }
+
+          if (view.access & Access::Write) {
+            access |= VK_ACCESS_HOST_WRITE_BIT;
+          }
+
+          break;
+
+        default:
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Invalid Vulkan tensor view state!");
+      }
+
+      return access;
+    }
+
+    static VkImageLayout layout(const Active view) {
+      TORCH_INTERNAL_ASSERT(
+          Component::Image == view.component,
+          "The active view on the requested Vulkan tensor is not an image!");
+
+      if (view.access & Access::Write) {
+        return VK_IMAGE_LAYOUT_GENERAL;
+      }
+
+      if (Access::Read == (view.access & Access::Read)) {
+        return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      }
+
+      return VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+
+    static VkPipelineStageFlags stage(const Active view) {
+      switch (view.component) {
+        case Component::Buffer:
+        case Component::Image:
+          return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+        case Component::Staging:
+          return VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+        default:
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Invalid Vulkan tensor view state!");
+      }
+    }
+  } state {
+      // Current
+      {
+        active_,
+        // Not using the accessor to prevent an unnecessary lazy memory
+        // allocation in cases where either
+        //   1) The tensor cannot be represented as an image, or
+        //   2) The requested target view is not an image.
+        image_.object,
+      },
+      // Next
+      {
+        view,
+      },
   };
+
+  std::cout << "--------------------\n";
+  std::cout << "Current - " << state.current.view << std::endl;
+  std::cout << "Next - " << state.next.view << std::endl;
+  std::cout << "--------------------\n\n";
+
+  // If dealing with a transition from an initial Unknown state, update the
+  // active view and return.  No synchronization is reuiqred in such scenarios.
+  // This takes care of 6 states originating from an Unknown state leaving us
+  // with 42 - 6 = 36 remaining transitions.
+
+  if (Component::Unknown == state.current.view.component) {
+    return;
+  }
 
   // Memory availability and visibility operations on host is handled through
   // map() and unmap() if not dealing with coherent host memory.  Other than
   // that, host to host dependencies require no device-side synchronization.
   // This is regardless of whether we are dealing with UMA or discrete systems.
-  // This section handle the following 4 transitions, and and leaves us with
-  // 36 - 4 = 32 possible remaining transitions.
+  // This section handles the following 4 transitions which leaves us with
+  // 36 - 4 = 32 possible transitions remaining.
 
   // Read  Staging -> Read  Staging
   // Read  Staging -> Write Staging
   // Write Staging -> Read  Staging
   // Write Staging -> Write Staging
 
-  if ((Component::Staging == active_.component) &&
-      (Component::Staging == view.component)) {
+  if ((Component::Staging == state.current.view.component) &&
+      (Component::Staging == state.next.view.component)) {
     return;
   }
 
-  // RAR (Read after Read) is not a hazard; no synchronization is required
-  // unless we are dealing with an image layout transition which this section
-  // does not handle in favor of deferring to the the rest of this function.
-  // Follwing 8 transitions are handled here leaving us with/ 32 - 8 = 24
+  // RAR (Read after Read) is not a hazard so no synchronization is required
+  // unless we are dealing with an image layout transition in which case we
+  // need an image memory barrier to signal the layout transition. This
+  // section handles the follwing 8 transitions leaving us with 32 - 8 = 24
   // possibilities remaining.
 
   // Read Staging -> Read Buffer
-  // Read Staging -> Read Image   (no layout transition)
+  // Read Staging -> Read Image   (if no layout transition required)
   // Read Buffer  -> Read Staging
   // Read Buffer  -> Read Buffer
-  // Read Buffer  -> Read Image   (no layout transition)
+  // Read Buffer  -> Read Image   (if no layout transition required)
   // Read Image   -> Read Staging
   // Read Image   -> Read Buffer
-  // Read Image   -> Read Image   (no layout transition)
+  // Read Image   -> Read Image   (if no layout transition required)
 
-  if ((0u == (active_.access & Memory::Access::Read)) &&
-      (0u == (view.access & Memory::Access::Read))) {
+  if ((Access::Read == (state.current.view.access & Access::Read)) &&
+      (Access::Read == (state.next.view.access & Access::Read)) &&
+      !state.requires_image_layout_transition()) {
     return;
   }
 
@@ -370,54 +527,86 @@ void vTensor::View::transition(const Active view) const {
   api::Command::Buffer command_buffer = context_->command().pool.allocate();
   command_buffer.begin();
 
-  const auto stage = [](const Active view) -> VkPipelineStageFlags {
-    switch(view.component) {
-      case Component::Buffer:
-      case Component::Image:
-        return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-
-      case Component::Staging:
-        return VK_PIPELINE_STAGE_TRANSFER_BIT;
-    }
-  };
-
   // WAR (Write after Read) hazards do not need a memory barrier. Execution
-  // barriers are sufficient.  That is unless we are dealing with image
-  // layout transitions which do require an image memory barrier. This section
-  // handles the following 8 WAR transitions, leaving us with 24 - 8 = 16
-  // transitions remaining.
+  // barriers are sufficient, unless we are dealing with image layout
+  // transitions which do require an image memory barrier to signal the layout
+  // transition.  This section handles the following 8 WAR transitions, leaving
+  // us with 24 - 8 = 16 remaining possibilities.
 
   // Read Staging -> Write Buffer
-  // Read Staging -> Write Image
+  // Read Staging -> Write Image   (if no layout transition required)
   // Read Buffer  -> Write Staging
   // Read Buffer  -> Write Buffer
-  // Read Buffer  -> Write Image
+  // Read Buffer  -> Write Image   (if no layout transition required)
   // Read Image   -> Write Staging
   // Read Image   -> Write Buffer
-  // Read Image   -> Write Image
+  // Read Image   -> Write Image   (if no layout transition required)
 
-  if ((0u == (active_.access & Memory::Access::Read)) &&
+  if ((Access::Read == (state.current.view.access & Access::Read)) &&
       // Notice how we include Read-Writes, in addition to Writes, as a
       // Write operation in the condition below as well, as we should.
-      (active_.access & Memory::Access::Write)) {
-    command_buffer.barrier();
+      (state.next.view.access & Access::Write) &&
+      !state.requires_image_layout_transition()) {
+    command_buffer.barrier({
+      {
+        state.current.stage(),
+        state.next.stage(),
+      },
+    });
   }
 
-  // Handle the remaining 16 RAW or WAW hazards.  Additionally, if transitioning
-  // to an Image, handle the layout transition accordingly as well.
+  // Handle any of the previous 6 RAR or WAR transitions that required a change
+  // in image layout, if any.
 
-  // Write Staging -> Read  Buffer
-  // Write Staging -> Read  Image
-  // Write Staging -> Write Buffer
-  // Write Staging -> Write Image
-  // ---
+  // Read Staging -> Read  Image  (if layout transition required)
+  // Read Buffer  -> Read  Image  (if layout transition required)
+  // Read Image   -> Read  Image  (if layout transition required)
+  // Read Staging -> Write Image  (if layout transition required)
+  // Read Buffer  -> Write Image  (if layout transition required)
+  // Read Image   -> Write Image  (if layout transition required)
+
+  else if (Access::Read == (state.current.view.access & Access::Read)) {
+    TORCH_INTERNAL_ASSERT(
+        Component::Image == state.next.view.component,
+        "Invalid state!  "
+        "All RAR or RAW transitions to a non-image must have been handled by now.");
+
+    command_buffer.barrier({
+      {
+        state.current.stage(),
+        state.next.stage(),
+      },
+      api::Resource::Image::Barrier{
+        image().object.handle,
+        {
+          // Filter out host read and writes.  The spec guarantees a memory dependency
+          // and writes
+          // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+          state.current.access() & ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT),
+          state.next.access(),
+        },
+        {
+          state.current.layout(),
+          state.next.layout(),
+        },
+      },
+    });
+  }
+
+  // Or the remaining 16 RAW or WAW hazards.
+
+  // Write Staging -> Read  Buffer   copy +
+  // Write Staging -> Read  Image    image memory barrier
+  // Write Staging -> Write Buffer   memory barrier
+  // Write Staging -> Write Image    memory barrier
+  //
   // Write Buffer  -> Read  Staging
   // Write Buffer  -> Write Staging
   // Write Buffer  -> Read  Buffer
   // Write Buffer  -> Read  Image
   // Write Buffer  -> Write Buffer
   // Write Buffer  -> Write Image
-  // ---
+  //
   // Write Image   -> Read  Staging
   // Write Image   -> Write Staging
   // Write Image   -> Read  Buffer
@@ -426,6 +615,10 @@ void vTensor::View::transition(const Active view) const {
   // Write Image   -> Write Image
 
   else {
+    TORCH_INTERNAL_ASSERT(
+        (state.current.view.access & Access::Write),
+        "Invalid state!  "
+        "Only RAW or WAW transitions were expected at this point.");
 
   }
 
@@ -436,27 +629,6 @@ void vTensor::View::transition(const Active view) const {
 void vTensor::View::verify() const {
   TORCH_INTERNAL_ASSERT(!image_ || (required_ & Component::Image));
   TORCH_INTERNAL_ASSERT(!staging_ || (required_ & Component::Staging));
-
-  // TORCH_INTERNAL_ASSERT(
-  //     buffer ||
-  //     !dirty(View::Resource::Buffer));
-
-  // TORCH_INTERNAL_ASSERT(
-  //     data_.image ||
-  //     !data_.dirty(View::Resource::Image));
-
-  // TORCH_INTERNAL_ASSERT(
-  //     data_.staging ||
-  //     !data_.dirty(View::Resource::Staging));
-
-  // TORCH_INTERNAL_ASSERT(
-  //     !data_.dirty(
-  //         View::Resource::Buffer |
-  //         View::Resource::Image |
-  //         View::Resource::Staging) ||
-  //     ((data_.dirty(View::Resource::Buffer) !=
-  //       data_.dirty(View::Resource::Image)) !=
-  //       data_.dirty(View::Resource::Staging)));
 }
 
 void verify(const TensorOptions& options) {
