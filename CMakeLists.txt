@@ -246,6 +246,8 @@ if(WIN32)
       set(USE_GLOO OFF)
       message(
         WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+    else()
+      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
     endif()
   endif()
 endif()
@@ -308,12 +310,6 @@ set(OP_DEPENDENCY "" CACHE STRING
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
-endif()
-
-if(WIN32 AND USE_DISTRIBUTED)
-  if(NOT DEFINED ENV{libuv_ROOT})
-    set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
-  endif()
 endif()
 
 if(MSVC)
