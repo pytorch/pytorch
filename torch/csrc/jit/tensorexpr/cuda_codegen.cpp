@@ -865,18 +865,30 @@ static std::ostream& operator<<(
   return out;
 }
 
-static const char* resource_string = R"(
+#ifdef USE_ROCM
+static const char* device_resource_string = R"(
+#include <hip/hip_runtime.h>
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
+)";
+#else
+static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
+)";
+#endif
+
+static const char* shared_resource_string = R"(
 template<typename T>
-T maximum(T a, T b) {
+__device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
 }
 
 template<typename T>
-T minimum(T a, T b) {
+__device__ T minimum(T a, T b) {
   return isnan(a) ? a : (a < b ? a : b);
 }
 
@@ -898,7 +910,7 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  os() << resource_string;
+  os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
@@ -914,7 +926,19 @@ void CudaCodeGen::Initialize() {
   }
 
   std::string func_name = GetUniqueFuncName("func");
-  os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
+  os() << "extern \"C\" __global__" << std::endl;
+#ifdef USE_ROCM
+  // CUDA has a default limit of threads per block (=flat work group size)
+  // of 1024, but ROCm uses 256 by default. At the time of writing
+  // (#45506), I am unaware of a stricter limit that TensorExpr imposes
+  // (maybe for perf),so I use 1024 as maximum flat work group size.
+  // We put a minimum value of 1, this is also used by hip (ROCm 3.8) in
+  // the __launch_bound__ implementation. The arguments for the attribute
+  // are (min, max), for details see the documentation at
+  // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
+  os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
+#endif
+  os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
