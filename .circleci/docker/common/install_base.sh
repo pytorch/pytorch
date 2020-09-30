@@ -47,7 +47,6 @@ install_ubuntu() {
     software-properties-common \
     sudo \
     wget \
-    valgrind \
     vim
 
   # TODO: THIS IS A HACK!!!
@@ -93,7 +92,6 @@ install_centos() {
     opencv-devel \
     sudo \
     wget \
-    valgrind \
     vim
 
   # Cleanup
@@ -133,3 +131,4 @@ sudo make install
 cd ../../
 rm -rf valgrind_build
 alias valgrind="/usr/local/bin/valgrind"
+
