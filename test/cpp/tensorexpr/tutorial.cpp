@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 
+#include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -25,7 +26,7 @@ int main(int argc, char* argv[]) {
   // the entire tutorial.
   KernelScope kernel_scope;
 
-  // *** Structure of tensor expressions ***
+  std::cout << "*** Structure of tensor expressions ***" << std::endl;
   {
     // A tensor expression is a tree of expressions. Each expression has a type,
     // and that type defines what sub-expressions it the current expression has.
@@ -79,7 +80,7 @@ int main(int argc, char* argv[]) {
     // Prints: Tensor expression: A[i, j]
   }
 
-  // *** Tensors, Functions, and Placeholders ***
+  std::cout << "*** Tensors, Functions, and Placeholders ***" << std::endl;
   {
     // A tensor computation is represented by objects of Tensor class and
     // consists of the following pieces:
@@ -148,7 +149,7 @@ int main(int argc, char* argv[]) {
     // TODO: Show how reductions are represented and constructed
   }
 
-  // *** Loopnests and Statements ***
+  std::cout << "*** Loopnests and Statements ***" << std::endl;
   {
     // Creating a tensor expression is the first step to generate an executable
     // code for it. A next step is to represent it as a loop nest and apply
@@ -253,13 +254,11 @@ int main(int argc, char* argv[]) {
     //   for (int i = 0; i < 64; i++) {
     //     for (int j_outer = 0; j_outer < (32 - 0) / 9; j_outer++) {
     //       for (int j_inner = 0; j_inner < 9; j_inner++) {
-    //         Y[i, j_outer * 9 + j_inner] = sigmoid((A[i, j_outer * 9 +
-    //         j_inner]) + (B[i, j_outer * 9 + j_inner]));
+    //         Y[i, j_outer * 9 + j_inner] = sigmoid((A[i, j_outer * 9 + ...
     //       }
     //     }
     //     for (int j_tail = 0; j_tail < (32 - 0) % 9; j_tail++) {
-    //       Y[i, j_tail + ((32 - 0) / 9) * 9] = sigmoid((A[i, j_tail + ((32 -
-    //       0) / 9) * 9]) + (B[i, j_tail + ((32 - 0) / 9) * 9]));
+    //       Y[i, j_tail + ((32 - 0) / 9) * 9] = sigmoid((A[i, j_tail + ...
     //     }
     //   }
     // }
@@ -268,7 +267,92 @@ int main(int argc, char* argv[]) {
     // TODO: Show how statements can be constructed manually
   }
 
-  // TODO: Describe codegen
+  std::cout << "*** Codegen ***" << std::endl;
+  {
+    // An ultimate goal of tensor expressions is to be provide a mechanism to
+    // execute a given computation in the fastest possible way. So far we've
+    // looked at how we could describe what computation we're interested in, but
+    // we haven't looked at how to actually execute it. So far all we've been
+    // dealing with was just symbols with no actual data associated, in this
+    // section we would look at how we can bridge that gap.
+
+    // Let's start by constructing a simple computation for us to work with:
+    Placeholder A("A", kInt, {64, 32});
+    Placeholder B("B", kInt, {64, 32});
+    Tensor* X = Compute(
+        "X",
+        {{64, "i"}, {32, "j"}},
+        [&](const VarHandle& i, const VarHandle& j) {
+          return A.load(i, j) + B.load(i, j);
+        });
+
+    // And let's lower it to a loop nest, as we did in the previous section:
+    LoopNest loopnest({X});
+    std::cout << *loopnest.root_stmt() << std::endl;
+    // Prints:
+    // {
+    //   for (int i = 0; i < 64; i++) {
+    //     for (int j = 0; j < 32; j++) {
+    //       X[i, j] = (A[i, j]) + (B[i, j]);
+    //     }
+    //   }
+
+    // Now imagine that we have two actual tensors 64x32 that we want sum
+    // together, how do we pass those tensors to the computation and how do we
+    // carry it out?
+    //
+    // Codegen object is aimed at providing exactly that functionality. Codegen
+    // is an abstract class and concrete codegens are derived from it.
+    // Currently, we have three codegens:
+    //  1) Simple Evaluator,
+    //  2) LLVM Codegen for CPU,
+    //  3) CUDA Codegen.
+    // In this example we will be using Simple Evaluator, since it's available
+    // everywhere.
+
+    // To create a codegen, we need to provide the statement - it specifies the
+    // computation we want to perform - and a list of placeholders and tensors
+    // used in the computation. The latter part is crucial since that's the only
+    // way the codegen could use to correlate symbols in the statement to actual
+    // data arrays that we will be passing when we will actually be performing the
+    // computation.
+    //
+    // Let's create a Simple IR Evaluator codegen for our computation:
+    SimpleIREvaluator ir_eval(loopnest.root_stmt(), {A, B, X});
+
+    // We are using the simplest codegen and in it almost no work is done at the
+    // construction step. Real codegens such as CUDA and LLVM perform
+    // compilation during that stage so that when we're about to run the
+    // computation everything is ready.
+
+    // Let's now create some inputs and run our computation with them:
+    std::vector<int> data_A(64 * 32, 3); // This will be the input A
+    std::vector<int> data_B(64 * 32, 5); // This will be the input B
+    std::vector<int> data_X(64 * 32, 0); // This will be used for the result
+
+    // Now let's invoke our codegen to perform the computation on our data. We
+    // need to provide as many arguments as how many placeholders and tensors we
+    // passed at the codegen construction time. A position in these lists would
+    // define how real data arrays from the latter call (these arguments are
+    // referred to as 'CallArg's in our codebase) correspond to symbols
+    // (placeholders and tensors) used in the tensor expressions we constructed
+    // (these are referred to as 'BufferArg').
+    // Thus, we will provide three arguments: data_A, data_B, and data_X. data_A
+    // contains data for the placeholder A, data_B - for the placeholder B, and
+    // data_X would be used for contents of tensor X.
+    ir_eval(data_A, data_B, data_X);
+
+    // Let's print one of the elements from each array to verify that the
+    // computation did happen:
+    std::cout << "A[10] = " << data_A[10] << std::endl
+              << "B[10] = " << data_B[10] << std::endl
+              << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
+    // Prints:
+    // A[10] = 3
+    // B[10] = 5
+    // X[10] = A[10] + B[10] = 8
+  }
+
   // TODO: Show how TorchScript IR is translated to TE
   return 0;
 }
