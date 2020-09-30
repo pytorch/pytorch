@@ -654,6 +654,13 @@ class AbstractTestCases:
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
 
+            # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
+            x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
+            y = torch.empty(100, 100, dtype=torch.cfloat)
+            y.copy_(x)
+            self.assertEqual(y[:, 0], range(100))
+            self.assertEqual(y[:, 40], range(4000, 4100))
+
         def test_device(self):
             cpu = torch.device('cpu')
             self.assertEqual('cpu', str(cpu))
