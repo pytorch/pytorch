@@ -7,6 +7,7 @@ import copy
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
+from torch.fx.experimental import shape_prop
 
 from torch.fx.proxy import TraceError
 
@@ -732,6 +733,32 @@ class TestFX(JitTestCase):
         nodes[2], nodes[3] = nodes[3], nodes[2]
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
+
+    def test_example_shape_prop(self):
+        class TestCase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.randn(3, 4)
+                self.submod = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.neg(self.submod(x.relu() + self.attr))
+        tc = TestCase()
+        tc_traced = symbolic_trace(tc)
+        ref_out = tc_traced(torch.rand(3, 4))
+
+        # Make sure we're testing all opcodes
+        opcodes = set()
+        for node in tc_traced.graph.nodes:
+            opcodes.add(node.op)
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+
+        # Test shape propogation and make sure results match actual
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+
+
+
 
 if __name__ == '__main__':
     run_tests()

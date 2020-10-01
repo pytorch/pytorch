@@ -42,8 +42,8 @@ class L1Loss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -130,9 +130,9 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = \begin{cases}
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &
-            \text{if reduction} = \text{'mean';}\\
+            \text{if reduction} = \text{`mean';}\\
             \sum_{n=1}^N l_n,  &
-            \text{if reduction} = \text{'sum'.}
+            \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
@@ -322,8 +322,8 @@ class KLDivLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';} \\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     In default :attr:`reduction` mode ``'mean'``, the losses are averaged for each minibatch over observations
@@ -396,8 +396,8 @@ class MSELoss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), &  \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  &  \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), &  \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  &  \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -461,8 +461,8 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -548,8 +548,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -651,8 +651,8 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
@@ -1273,7 +1273,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
     quantifying the closeness of two tensors, referred to as the :attr:`distance_function`;
-    and :math:`margin` is a non-negative margin representing the minimum difference
+    and :math:`margin` is a nonnegative margin representing the minimum difference
     between the positive and negative distances that is required for the loss to
     be 0.  The input tensors have :math:`N` elements each and can be of any shape
     that the distance function can handle.
@@ -1295,7 +1295,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         distance_function (callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
-        margin (float, optional): A non-negative margin representing the minimum difference
+        margin (float, optional): A nonnegative margin representing the minimum difference
             between the positive and negative distances required for the loss to be 0. Larger
             margins penalize cases where the negative examples are not distant enough from the
             anchors, relative to the positives. Default: :math:`1`.
