@@ -48,14 +48,12 @@ run_tests() {
             $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
             $SCRIPT_HELPERS_DIR/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
-              $SCRIPT_HELPERS_DIR/test_python_jit_profiling.bat "$DETERMINE_FROM"
+              $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
             fi
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
             $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
-        elif [[ "${JOB_BASE_NAME}" == *-jit-legacy-executor ]]; then
-            $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
         fi
     fi
 }

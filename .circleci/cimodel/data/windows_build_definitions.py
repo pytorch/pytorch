@@ -140,7 +140,6 @@ WORKFLOW_DATA = [
     WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
-    WindowsJob("-jit-legacy-executor", VcSpec(2019), CudaVersion(10, 1), master_only_pred=FalsePred),
 ]
 
 
