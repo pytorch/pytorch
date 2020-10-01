@@ -1,11 +1,9 @@
 from torch.fx import (
-    GraphModule
+    GraphModule,
+    map_arg
 )
 
-from torch.fx.graph import (
-    Graph,
-    map_arg,
-)
+from torch.fx.graph import Graph
 
 from .pattern_utils import (
     is_match,
@@ -32,9 +30,6 @@ class Fuser:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        for inp in input_graph.inputs:
-            env[inp.name] = self.fused_graph.placeholder(inp.target)
-
         for node in input_graph.nodes:
             root_node, obj = fusion_pairs.get(node.name, (None, None))
             if root_node is node:
@@ -43,7 +38,6 @@ class Fuser:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
-        self.fused_graph.set_output(load_arg(input_graph.output))
         model = GraphModule(input_root, self.fused_graph)
         return model
 
