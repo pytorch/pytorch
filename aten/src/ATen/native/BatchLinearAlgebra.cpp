@@ -265,11 +265,13 @@ template<> void lapackSymeig<c10::complex<float>, float>(char jobz, char uplo, i
   cheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, info);
 }
 
-template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double* /*rwork*/, int *info) {
+template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double* rwork, int *info) {
+  (void)rwork;  // unused
   dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
-template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float* /*rwork*/, int *info) {
+template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float* rwork, int *info) {
+  (void)rwork;  // unused
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 

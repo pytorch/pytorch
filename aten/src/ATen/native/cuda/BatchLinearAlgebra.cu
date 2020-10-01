@@ -488,8 +488,10 @@ void magmaOrgqr<float>(
 template<>
 void magmaSymeig<double>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, double* dA, magma_int_t ldda,
-    double* w, double* wA, magma_int_t ldwa, double* work, magma_int_t lwork, double* /*rwork*/,
-    magma_int_t /*lrwork*/, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+    double* w, double* wA, magma_int_t ldwa, double* work, magma_int_t lwork, double* rwork,
+    magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
   MagmaStreamSyncGuard guard;
   magma_dsyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
@@ -498,8 +500,10 @@ void magmaSymeig<double>(
 template<>
 void magmaSymeig<float>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, float* dA, magma_int_t ldda,
-    float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork, float* /*rwork*/,
-    magma_int_t /*lrwork*/, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+    float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork, float* rwork,
+    magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
   MagmaStreamSyncGuard guard;
   magma_ssyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
