@@ -640,6 +640,20 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
+    def test_conv_shape_inference(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+
+            def forward(self, input):
+                return self.conv2(input) + 2
+
+        x = torch.randn(20, 16, 50, 100)
+        self.run_test(Model(), x, atol=10e-5,
+                      input_names=['x'],
+                      dynamic_axes={'x': [0]})
+
     def test_conv_transpose(self):
         class TraceModel(torch.nn.Module):
             def __init__(self):
