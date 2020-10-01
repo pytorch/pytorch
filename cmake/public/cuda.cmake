@@ -478,7 +478,7 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
 endforeach()
 
 # Set C++14 support
-set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
+set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
@@ -490,7 +490,7 @@ endif()
 # OpenMP flags for NVCC with Clang-cl
 if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
   AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Xclang" "-fopenmp")
+  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Xclang" "-fopenmp")
   if(MSVC_TOOLSET_VERSION LESS 142)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp")
   else()
