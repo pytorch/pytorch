@@ -206,7 +206,7 @@ __global__ void LayerNormBackwardCUDAKenrel(
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormOp<CUDAContext>::ComputeSigmaAndFusedParams(
+C10_EXPORT void LayerNormOp<CUDAContext>::ComputeSigmaAndFusedParams(
     const int N,
     const float eps,
     const T* mean,
@@ -224,7 +224,7 @@ CAFFE2_API void LayerNormOp<CUDAContext>::ComputeSigmaAndFusedParams(
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormOp<CUDAContext>::LayerNormForward(
+C10_EXPORT void LayerNormOp<CUDAContext>::LayerNormForward(
     const int M,
     const int N,
     const T* X,
@@ -253,7 +253,7 @@ REGISTER_CUDA_OPERATOR(LayerNorm, LayerNormOp<CUDAContext>);
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
+C10_EXPORT void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
     const int M,
     const int N,
     const T* dY,
@@ -276,7 +276,7 @@ CAFFE2_API void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormGradientOp<CUDAContext>::ComputeFusedParams(
+C10_EXPORT void LayerNormGradientOp<CUDAContext>::ComputeFusedParams(
     const int M,
     const int N,
     const T* mean,
@@ -297,7 +297,7 @@ CAFFE2_API void LayerNormGradientOp<CUDAContext>::ComputeFusedParams(
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
+C10_EXPORT void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
     const int M,
     const int N,
     const T* dY,
@@ -323,7 +323,7 @@ CAFFE2_API void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
 
 template <>
 template <typename T>
-CAFFE2_API void LayerNormGradientOp<CUDAContext>::GammaBetaBackward(
+C10_EXPORT void LayerNormGradientOp<CUDAContext>::GammaBetaBackward(
     const int M,
     const int N,
     const T* dYxX,

@@ -84,7 +84,7 @@ std::vector<BilinearInterpolationParam<T>> MakeBilinearInterpolationParams(
 } // namespace
 
 template <>
-CAFFE2_API bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
+C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
     int64_t N,
     int64_t C,
     int64_t H,
@@ -170,7 +170,7 @@ CAFFE2_API bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
 }
 
 template <>
-CAFFE2_API bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
+C10_EXPORT bool RoIAlignOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
     int64_t N,
     int64_t C,
     int64_t H,

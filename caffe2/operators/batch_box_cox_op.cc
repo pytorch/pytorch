@@ -301,7 +301,7 @@ void BatchBoxCoxOp<CPUContext>::BoxCoxMixedLambda(
 #define DEFINE_CACHED_BUFFERS(T, tag)                                         \
   template <>                                                                 \
   template <>                                                                 \
-  CAFFE2_API BatchBoxCoxOp<CPUContext>::TypedCachedBuffers<T>&                           \
+  C10_EXPORT BatchBoxCoxOp<CPUContext>::TypedCachedBuffers<T>&                           \
   BatchBoxCoxOp<CPUContext>::GetBuffers<T>() {                                \
     if (!buffers_ || buffers_->type_ != tag) {                                \
       buffers_.reset(new BatchBoxCoxOp<CPUContext>::TypedCachedBuffers<T>()); \
