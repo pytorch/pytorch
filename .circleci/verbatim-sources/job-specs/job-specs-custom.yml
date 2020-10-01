@@ -115,7 +115,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run_brew_for_macos_build
@@ -149,7 +149,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - attach_workspace:
@@ -377,7 +377,7 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run_brew_for_ios_build
