@@ -35,6 +35,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::add_out(out_t, in0_t, in1_t, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::mul")) {
@@ -48,6 +49,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::mul_out(out_t, in0_t, in1_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::addmm")) {
@@ -67,6 +69,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::addmm_cpu_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::clamp")) {
@@ -82,6 +85,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::bmm")) {
@@ -95,6 +99,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::bmm_out_cpu(out_t, in0_t, in1_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::cat")) {
@@ -108,6 +113,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_tl[0]));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::sigmoid")) {
@@ -119,6 +125,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_t));
       }
       auto out_t = ws.at(out).toTensor();
+      out_t.resize_(0);
       at::native::sigmoid_out(out_t, in0_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
