@@ -281,7 +281,10 @@ as an alternative to specifying ``init_method``.) There are 3 choices for
 Key-Value Stores: :class:`~torch.distributed.TCPStore`,
 :class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`.
 
-.. autoclass:: Store
+.. automodule:: Store
+    :members: torch.distributed.Store.set, torch.distributed.Store.get,
+    torch.distributed.Store.add, torch.distributed.Store.wait,
+    torch.distributed.Store.num_keys, torch.distributed.Store.delete_key, torch.distributed.Store.set_timeout
 .. autoclass:: TCPStore
 .. autoclass:: HashStore
 .. autoclass:: FileStore
