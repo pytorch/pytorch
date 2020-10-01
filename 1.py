@@ -1,19 +1,10 @@
 import torch
-import time
-import torch.optim as optim
-from torch.autograd import Variable
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau, StepLR
-import torch.nn as nn
-import time
-import torchvision
-import torch.utils._benchmark as benchmark_utils
 
-
-device = 'cpu'
-a = torch.tensor([1, 2, 3, 4], device=device)
-b = torch.tensor([1, 1, 5, 4], device=device)
-c = torch.tensor([11, 2, 34, 4], device=device)
-d = torch.tensor([1, 12, 5, 4], device=device)
+device = 'cuda'
+a = torch.tensor([1, 1, 3, 1], device=device, dtype=torch.float)
+b = torch.tensor([10, 2, 12, 4], device=device, dtype=torch.float)
+c = torch.tensor([1, 2, 1, 4], device=device, dtype=torch.float)
+d = torch.tensor([1, 11, 5, 13], device=device, dtype=torch.float)
 
 res = torch._foreach_max([a, b], [c, d])
 print(res)

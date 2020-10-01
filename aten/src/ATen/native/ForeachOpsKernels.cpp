@@ -148,10 +148,6 @@ FOREACH_UNARY_OP(exp);
 FOREACH_POINTWISE_OP(addcdiv);
 FOREACH_POINTWISE_OP(addcmul);
 
-template<typename scalar_t> struct get_opmath_t { using opmath_t = scalar_t; };
-template<> struct get_opmath_t<at::Half> { using opmath_t = float; };
-template<> struct get_opmath_t<at::BFloat16> { using opmath_t = float; };
-
 
 std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors1, TensorList tensors2) {
   check_foreach_api_restrictions(tensors1, tensors2);
@@ -161,11 +157,6 @@ std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors1, TensorList tens
   for (int i = 0; i < tensors1.size(); i++) {
     result.emplace_back(at::max(tensors1[i], tensors2[i]));
   }
-
-  AT_DISPATCH_ALL_TYPES(tensors1[0].scalar_type(), "foreach_pointwise_op_cpp", [&]() {
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        auto res = std::max<opmath_t>(2, 3);
-    });
 
   return result;
 }
