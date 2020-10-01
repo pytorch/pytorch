@@ -98,6 +98,88 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::cpu(Tensor(a) self) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.cpu());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         prim::tolist,
+         // This operator has to be unschematized because the return type
+         // depends on the type hint and input. The implementation of this
+         // operator below is intended to be as close to the Python
+         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
+         [](const Node * /*node*/) -> Operation {
+           return [](Stack* stack) {
+             int elem_ty_val;
+             int dim_val;
+             at::Tensor t;
+
+             pop(stack, elem_ty_val);
+             pop(stack, dim_val);
+             pop(stack, t);
+
+             // If the Tensor is not on the CPU, transfer it.
+             if (!t.device().is_cpu()) {
+               t = t.cpu();
+             }
+
+             // Rebuild the output type using elem_ty_val and dim_val. Start
+             // with the element type corresponding to elem_ty_val.
+             TypePtr out_ty;
+             if (elem_ty_val == 0) {
+               out_ty = IntType::get();
+             } else if (elem_ty_val == 1) {
+               out_ty = FloatType::get();
+             } else if (elem_ty_val == 2) {
+               out_ty = BoolType::get();
+             } else {
+               TORCH_CHECK(
+                   false,
+                   "Unsupported element type for tolist; only int, float and bool are supported");
+             }
+
+             // Check that type of the Tensor matches that of the annotation.
+             // Make an exception for the case in which the annotated type is
+             // float and the Tensor data type is also float; the elements will
+             // be casted to double later.
+             TORCH_CHECK(
+                 (out_ty == FloatType::get() && t.is_floating_point()) ||
+                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                 "Output annotation element type and runtime tensor element type must match for tolist()");
+
+             // Check that the dimension of the Tensor matches that of the
+             // annotation.
+             TORCH_CHECK(
+                 dim_val == t.dim(),
+                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
+
+             // Wrap out_ty in a ListType dim times.
+             for (int i = 0; i < dim_val; ++i) {
+               out_ty = ListType::create(out_ty);
+             }
+
+             int64_t dim = t.dim();
+             auto sizes = t.sizes();
+             auto strides = t.strides();
+             size_t element_size = t.element_size();
+             char* data = static_cast<char*>(t.data_ptr());
+             auto result = tensorToListRecursive(
+                 data,
+                 0,
+                 dim,
+                 out_ty,
+                 t.scalar_type(),
+                 sizes,
+                 strides,
+                 element_size);
+             push(stack, std::move(result));
+           };
+         },
+         aliasAnalysisSpecialCase()),
      // only used internally in range() translation
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
@@ -186,6 +268,59 @@ RegisterOperators reg(
            double d;
            pop(stack, d);
            push(stack, (bool)d);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.Tensor(Tensor a) -> int"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.bool(bool a) -> int"),
+         [](Stack* stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, static_cast<int64_t>(b));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.float(float a) -> int"),
+         [](Stack* stack) {
+           double d;
+           pop(stack, d);
+           push(stack, static_cast<int64_t>(d));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.Scalar(Scalar a) -> int"),
+         [](Stack* stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isInt()) {
+             push(stack, std::move(scalar));
+           } else {
+             // toScalar() needed to avoid strict type check in IValue::toInt.
+             push(stack, static_cast<int64_t>(scalar.toScalar().toInt()));
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Int.str(str a) -> int"),
+         [](Stack* stack) {
+           auto s = pop(stack).toString();
+           std::string::size_type sz;
+           int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+           if (sz == s->string().size()) {
+             push(stack, val);
+           } else {
+             std::stringstream error_str;
+             error_str << "invalid literal for int() "
+                       << "with base 10: '" << s->string() << "'";
+             throw std::runtime_error(error_str.str());
+           }
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -549,6 +684,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
+     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),

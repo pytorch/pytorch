@@ -277,6 +277,12 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                             : "quantized::conv";
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(
+    !transpose(),
+    "FBGEMM currently does NOT support transposed convolution. ",
+    "Meanwhile you have multiple options: 1) Replace the ConvTranspose with ",
+    "the 'dequant->conv_tranpose->quant'; 2) Change the current qengine to "
+    "QNNPACK using 'torch.backends.quantized.engine = \"qnnpack\"'.");
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -850,30 +856,30 @@ class QConvInt8ForBC final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("conv1d",          QConv1dInt8<false>::run);
-  m.impl("conv1d_relu",     QConv1dInt8<true>::run);
-  m.impl("conv2d.new",      QConvInt8<2, false>::run);
-  m.impl("conv2d_relu.new", QConvInt8<2, true>::run);
-  m.impl("conv3d.new",      QConvInt8<3, false>::run);
-  m.impl("conv3d_relu.new", QConvInt8<3, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"),          QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"),     QConv1dInt8<true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d.new"),      QConvInt8<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu.new"), QConvInt8<3, true>::run);
   // for backward compatibility
-  m.impl("conv2d", QConvInt8ForBC<2, false>::run);
-  m.impl("conv2d_relu", QConvInt8ForBC<2, true>::run);
-  m.impl("conv3d", QConvInt8ForBC<3, false>::run);
-  m.impl("conv3d_relu", QConvInt8ForBC<3, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d"), QConvInt8ForBC<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu"), QConvInt8ForBC<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d"), QConvInt8ForBC<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu"), QConvInt8ForBC<3, true>::run);
 
   // transpose
-  m.impl("conv_transpose1d",  QConv1dInt8<false>::run);
-  m.impl("conv_transpose2d",  QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("conv2d",      QConvInt8<2, false>::run);
-  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_relu"), QConvInt8<2, true>::run);
 
   // transpose
-  m.impl("conv_transpose1d",  QConv1dInt8<false>::run);
-  m.impl("conv_transpose2d",  QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
 } // namespace

@@ -203,19 +203,129 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
   return out;
 }
 
+// Dimensions to transform, and the signal shape in those dimensions
+struct ShapeAndDims {
+  DimVector shape, dim;
+};
+
+// Pre-process n-dimensional fft's `s` and `dim` arguments.
+// Wraps dimensions and applies defaulting behavior.
+// Also checks transform dims are unique and transform shape is non-empty.
+ShapeAndDims canonicalize_fft_shape_and_dim_args(
+    Tensor input, c10::optional<IntArrayRef> shape, c10::optional<IntArrayRef> dim) {
+  const int64_t input_dim = input.dim();
+  const IntArrayRef input_sizes = input.sizes();
+  ShapeAndDims ret;
+
+  if (dim) {
+    ret.dim.resize(dim->size());
+    std::copy(dim->begin(), dim->end(), ret.dim.begin());
+    maybe_wrap_dims(ret.dim, input_dim);
+
+    // Check dims are unique
+    DimVector copy = ret.dim;
+    std::sort(copy.begin(), copy.end());
+    auto duplicate = std::adjacent_find(copy.begin(), copy.end());
+    TORCH_CHECK(duplicate == copy.end(), "FFT dims must be unique");
+  }
+
+  if (shape) {
+    // Has shape, may have dim
+    TORCH_CHECK(!dim || dim->size() == shape->size(),
+                "When given, dim and shape arguments must have the same length");
+    TORCH_CHECK(shape->size() <= input_dim,
+                "Got shape with ", shape->size(), " values but input tensor "
+                "only has ", input_dim, " dimensions.");
+    const int64_t transform_ndim = shape->size();
+    // If shape is given, dims defaults to the last shape.size() dimensions
+    if (!dim) {
+      ret.dim.resize(transform_ndim);
+      std::iota(ret.dim.begin(), ret.dim.end(), input_dim - transform_ndim);
+    }
+
+    // Translate shape of -1 to the default length
+    ret.shape.resize(transform_ndim);
+    for (int64_t i = 0; i < transform_ndim; ++i) {
+      const auto n = (*shape)[i];
+      ret.shape[i] = n == -1 ? input_sizes[ret.dim[i]] : n;
+    }
+  } else if (!dim) {
+    // No shape, no dim
+    ret.dim.resize(input_dim);
+    std::iota(ret.dim.begin(), ret.dim.end(), int64_t{0});
+    ret.shape.resize(input_dim);
+    std::copy(input_sizes.begin(), input_sizes.end(), ret.shape.begin());
+  } else {
+    // No shape, has dim
+    ret.shape.resize(ret.dim.size());
+    for (int64_t i = 0; i < ret.dim.size(); ++i) {
+      ret.shape[i] = input_sizes[ret.dim[i]];
+    }
+  }
+
+  for (int64_t i = 0; i < ret.shape.size(); ++i) {
+    TORCH_CHECK(ret.shape[i] > 0,
+                "Invalid number of data points (", ret.shape[i], ") specified");
+  }
+
+  return ret;
+}
+
+// Complex to complex n-dimensional fft
+Tensor fftn_c2c(
+    const Tensor& input, IntArrayRef shape, IntArrayRef dim,
+    c10::optional<std::string> norm_str, bool forward) {
+  TORCH_CHECK(input.is_complex(), "Expected a complex input tensor to FFT");
+  const auto input_dim = input.dim();
+
+  Tensor x = resize_fft_input(input, dim, shape);
+  x = at::view_as_real(x);
+
+  const int64_t transform_ndim = dim.size();
+  const auto norm = norm_from_string(norm_str, forward);
+  // _fft_with_size only supports 3 dimensions being transformed at a time.
+  // This limit is inherited from cuFFT.
+  constexpr int64_t max_signal_ndim = 3;
+
+  // Transform n dimensions, up to 3 at a time
+  // TODO: rewrite _fft_with_size to transform more than 3 dimensions at once.
+  for (int64_t i = 0; i < transform_ndim; i += max_signal_ndim) {
+    const int64_t signal_ndim = std::min(transform_ndim - i, max_signal_ndim);
+    DimVector source_dim(signal_ndim);
+    DimVector dest_dim(signal_ndim);
+
+    for (int64_t j = 0; j < signal_ndim; ++j) {
+      source_dim[j] = dim[i + j];
+      dest_dim[j] = j + (input_dim - signal_ndim);
+    }
+
+    // _fft operates on up-to the last 3 dims, so move selected dims to the end
+    x = at::movedim(x, source_dim, dest_dim);
+
+    x = _fft(x, signal_ndim, /*complex_input=*/true, /*complex_output=*/true,
+             /*inverse=*/!forward, /*signal_sizes=*/{}, /*normalization=*/norm,
+             /*onesided=*/false);
+
+    // Move transform dims back to their original order
+    x = at::movedim(x, dest_dim, source_dim);
+  }
+
+  return at::view_as_complex(x);
+}
+
 }
 
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
 Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/true) :
     fft_r2c(self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
 }
 
 Tensor fft_ifft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/false) :
     fft_r2c(self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
 }
@@ -240,6 +350,64 @@ Tensor fft_ihfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
   return fft_r2c(self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
 }
 
+Tensor fft_fftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
+                c10::optional<std::string> norm) {
+  auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
+  // TODO: For real input, perform rfftn then mirror with conjugate symmetry
+  Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
+  return fftn_c2c(input, desc.shape, desc.dim, norm, /*forward=*/true);
+}
+
+Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
+                c10::optional<std::string> norm) {
+  auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
+  Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
+  return fftn_c2c(input, desc.shape, desc.dim, norm, /*forward=*/false);
+}
+
+Tensor fft_rfftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
+                c10::optional<std::string> norm) {
+  auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
+  TORCH_CHECK(desc.shape.size() > 0, "rfftn must transform at least one axis");
+
+  const auto last_dim = desc.dim.back();
+  const auto last_shape = desc.shape.back();
+  desc.shape.pop_back();
+  desc.dim.pop_back();
+
+  // rfft on last dim to get hermitian complex shape
+  auto x = native::fft_rfft(self, last_shape, last_dim, norm);
+  // Normal fft on remaining dims
+  return fftn_c2c(x, desc.shape, desc.dim, norm, /*forward=*/true);
+}
+
+Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
+                c10::optional<IntArrayRef> dim,
+                c10::optional<std::string> norm) {
+  auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
+  TORCH_CHECK(desc.shape.size() > 0, "irfftn must transform at least one axis");
+
+  const auto last_dim = desc.dim.back();
+  const auto last_shape = [&]() -> c10::optional<int64_t> {
+    // If shape is defaulted in the last dimension,
+    // pass nullopt to irfft and let it calculate the default size
+    if (!s.has_value() || (s->back() == -1)) {
+      return c10::nullopt;
+    }
+    return desc.shape.back();
+  }();
+  desc.shape.pop_back();
+  desc.dim.pop_back();
+
+  // Normal ifft for all but last dim
+  Tensor x = promote_tensor_fft(self, /*require_complex=*/true);
+   x = fftn_c2c(x, desc.shape, desc.dim, norm, /*forward=*/false);
+  // Then 1d irfft on last dim to get real output
+  return native::fft_irfft(x, last_shape, last_dim, norm);
+}
 
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
@@ -393,6 +561,10 @@ void _cufft_clear_plan_cache(int64_t device_index) {
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+  TORCH_WARN_ONCE(
+    "The function torch.fft is deprecated and will be removed in PyTorch 1.8. "
+    "Use the new torch.fft module functions, instead, by importing torch.fft "
+    "and calling torch.fft.fft or torch.fft.fftn.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ false, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none,
@@ -400,6 +572,10 @@ Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized)
 }
 
 Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
+  TORCH_WARN_ONCE(
+    "The function torch.ifft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.ifft or torch.fft.ifftn.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ true, /* inverse */ true, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n,
@@ -408,6 +584,10 @@ Tensor ifft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 
 Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
             const bool onesided) {
+  TORCH_WARN_ONCE(
+    "The function torch.rfft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.fft or torch.fft.rfft.");
   return _fft(self, signal_ndim, /* complex_input */ false,
               /* complex_output */ true, /* inverse */ false, {},
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none,
@@ -416,6 +596,10 @@ Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 
 Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
              const bool onesided,  IntArrayRef signal_sizes) {
+  TORCH_WARN_ONCE(
+    "The function torch.irfft is deprecated and will be removed in a future "
+    "PyTorch release. Use the new torch.fft module functions, instead, by "
+    "importing torch.fft and calling torch.fft.ifft or torch.fft.irfft.");
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n,
@@ -463,8 +647,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complexOpt && !return_complex) {
-    TORCH_WARN("stft will return complex tensors by default in future, use"
-               " return_complex=False to preserve the current output format.");
+    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
+                    " specified in a future PyTorch release. Use return_complex=False "
+                    " to preserve the current behavior or return_complex=True to return "
+                    " a complex output.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {

@@ -157,10 +157,9 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
 }
 
 bool OperatorEntry::hasKernelForDispatchKeySet(DispatchKeySet ks) const {
-  for (auto k : ks) {
-    if (kernels_.find(k) != kernels_.end()) {
-      return true;
-    }
+  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
+  for (auto& kv : kernels_) {
+    if (ks.has(kv.first)) return true;
   }
   return false;
 }
@@ -196,6 +195,9 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
   //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
   //          with catchAll as well.
+  //    The implementation of (2.1) & (2.3) relies on the invariant that for a given backend,
+  //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
+  //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
   //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
@@ -272,7 +274,8 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
-  // Registering to backend key might affect computed entry at its Autograd backend key due to 2.2.
+  // Note [Refresh Runtime Autograd entries in dispatchTable_]
+  // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
   DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
   updateDispatchTableEntry_(dispatcher, autograd_key);
 }
