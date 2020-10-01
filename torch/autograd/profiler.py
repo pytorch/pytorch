@@ -105,6 +105,35 @@ class EventList(list):
 
         self._cpu_children_populated = True
 
+    def set_backward_stacktraces(self):
+        self.populate_cpu_children()
+
+        def bw_parent(evt):
+            if evt is None:
+                return None
+            elif evt.scope == 1:
+                return evt
+            else:
+                return bw_parent(evt.cpu_parent)
+
+        fwd_stacks = {}
+        for evt in self:
+            if bw_parent(evt) is None:
+                t = (evt.sequence_nr, evt.thread)
+                if t not in fwd_stacks:
+                    fwd_stacks[t] = evt.stack
+
+        for evt in self:
+            p = bw_parent(evt)
+            if p is not None:
+                assert p.fwd_thread is not None
+                t = (p.sequence_nr, p.fwd_thread)
+                if t in fwd_stacks:
+                    evt.stack = fwd_stacks[t]
+                else:
+                    evt.stack = []
+
+
     @property
     def self_cpu_time_total(self):
         return sum([event.self_cpu_time_total for event in self])
@@ -208,14 +237,17 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
-    def key_averages(self, group_by_input_shapes=False):
+    def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
-        @param group_by_input_shapes The key would become
-        (event name, input dimensions) rather than just event name.
-        This is useful to see which dimensionality contributes to the runtime
-        the most and may help with dimension specific optimizations or
-        choosing best candidates for quantization (aka fitting a roof line)
+        Arguments:
+            group_by_input_shapes: group entries by
+            (event name, input shapes) rather than just event name.
+            This is useful to see which input shapes contribute to the runtime
+            the most and may help with size-specific optimizations or
+            choosing the best candidates for quantization (aka fitting a roof line)
+
+            group_by_stack_n: group by top n stack trace entries
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -223,15 +255,22 @@ class EventList(list):
         self.populate_cpu_children()
         stats = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes):
-            if not group_by_input_shapes:
-                return (event.key, event.node_id)
-            return (event.key, str(event.input_shapes), event.node_id)
+        def get_key(event, group_by_input_shapes, group_by_stack_n):
+            key = [str(event.key), str(event.node_id)]
+            if group_by_input_shapes:
+                key.append(str(event.input_shapes))
+            if group_by_stack_n > 0:
+                key += event.stack[:group_by_stack_n]
+            return tuple(key)
         for evt in self:
-            stats[get_key(evt, group_by_input_shapes)].add(
-                evt, group_by_input_shapes)
+            stats[get_key(evt, group_by_input_shapes, group_by_stack_n)].add(evt)
 
-        return EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
+        avg_list = EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
+        for evt in avg_list:
+            evt.stack = evt.stack[:group_by_stack_n]
+            if not group_by_input_shapes:
+                evt.input_shapes = ""
+        return avg_list
 
     def total_average(self):
         """Averages all events.
@@ -275,8 +314,11 @@ class profile(object):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
+        with_stack (bool, optional): record source information (file and line number) for the ops
+
     .. warning:
-        Enabling memory profiling incurs additional profiler overhead
+        Enabling memory profiling or source attribution incurs additional profiler
+        overhead
 
     .. warning:
         This context managers should not be called recursively, i.e. no nested
@@ -312,7 +354,8 @@ class profile(object):
             enabled=True,
             use_cuda=False,
             record_shapes=False,
-            profile_memory=False):
+            profile_memory=False,
+            with_stack=False):
         self.enabled = enabled
         self.use_cuda = use_cuda
         self.function_events = None
@@ -321,6 +364,7 @@ class profile(object):
         self.entered = False
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
+        self.with_stack = with_stack
 
     def __enter__(self):
         if not self.enabled:
@@ -331,7 +375,11 @@ class profile(object):
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
 
-        config = torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes, self.profile_memory)
+        config = torch.autograd.ProfilerConfig(
+            profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            self.with_stack)
         torch.autograd._enable_profiler(config)
         return self
 
@@ -340,9 +388,11 @@ class profile(object):
             return
         records = torch.autograd._disable_profiler()
         self.function_events = EventList(
-            parse_cpu_trace(records),
+            parse_event_records(records),
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
+        if self.with_stack:
+            self.function_events.set_backward_stacktraces()
         return False
 
     def __repr__(self):
@@ -374,9 +424,9 @@ class profile(object):
         return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self, group_by_input_shape=False):
+    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        return self.function_events.key_averages(group_by_input_shape)
+        return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
@@ -569,8 +619,8 @@ class emit_nvtx(object):
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
                 self.record_shapes,
-                False
-            )
+                False,
+                False)
         )
         return self
 
@@ -666,19 +716,22 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
-            sequence_nr=-1):
+            self, id, node_id, name, thread, cpu_start, cpu_end, fwd_thread=None, input_shapes=None,
+            stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
+            is_remote=True, sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
         self.thread = thread
+        self.fwd_thread = fwd_thread
         self.kernels = []
         self.count = 1
         self.cpu_children = []
         self.cpu_parent = None
         self.input_shapes = input_shapes
+        self.stack = stack
+        self.scope = scope
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
@@ -787,6 +840,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_cpu_time_total = 0
         self.self_cuda_time_total = 0
         self.input_shapes = None
+        self.stack = None
+        self.scope = None
         self.cpu_memory_usage = 0
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
@@ -794,7 +849,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_children = None
         self.cpu_parent = None
 
-    def add(self, other, group_by_input_shapes=False):
+    def add(self, other):
         if self.key is None:
             # First function being recorded as part of FunctionEventAvg, propagate
             # fields.
@@ -804,13 +859,11 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.is_remote = other.is_remote
             self.cpu_parent = other.cpu_parent
             self.cpu_children = other.cpu_children
-            if group_by_input_shapes:
-                self.input_shapes = other.input_shapes
 
-        assert (
-            not group_by_input_shapes or
-            other.input_shapes == self.input_shapes
-        )
+            self.input_shapes = other.input_shapes
+            self.stack = other.stack
+            self.scope = other.scope
+
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
         self.cpu_time_total += other.cpu_time_total
@@ -830,8 +883,8 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            ' self_cuda_time={} cuda_time={} input_shapes={}> '
-            'cpu_memory_usage={} cuda_memory_usage={}'.format(
+            ' self_cuda_time={} cuda_time={} input_shapes={} '
+            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
@@ -855,14 +908,10 @@ class StringTable(defaultdict):
         self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
-
-################################################################################
-# CPU checkpoints
-
-def parse_cpu_trace(thread_records):
+def parse_event_records(thread_records):
     def get_record_key(record):
         """
-        Returns a tuple to be used by parse_cpu_trace for correlating start and
+        Returns a tuple to be used by parse_event_records for correlating start and
         end records.
         """
         return (record.handle(), record.node_id())
@@ -882,6 +931,17 @@ def parse_cpu_trace(thread_records):
         "aten::output_nr",
         "aten::_version",
     ]
+
+    def filter_stack_entry(entry):
+        filtered_entries = [
+            ("autograd/__init__", "_make_grads"),
+            ("autograd/__init__", "backward"),
+            ("torch/tensor", "backward"),
+            ("_internal/common_utils", "prof_callable"),
+            ("_internal/common_utils", "prof_func_call"),
+            ("_internal/common_utils", "prof_meth_call"),
+        ]
+        return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
@@ -961,7 +1021,10 @@ def parse_cpu_trace(thread_records):
                     thread=start.thread_id(),
                     cpu_start=start_record.cpu_elapsed_us(start),
                     cpu_end=start_record.cpu_elapsed_us(record),
+                    fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
+                    stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
+                    scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
@@ -1098,10 +1161,24 @@ def build_table(
         ), use_cuda=use_cuda, profile_memory=profile_memory)
 
     has_input_shapes = any(
-        [event.input_shapes is not None for event in events])
+        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
+
     name_column_width = max([len(evt.key) for evt in events]) + 4
+
     DEFAULT_COLUMN_WIDTH = 12
-    SHAPES_COLUMN_WIDTH = 45
+
+    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    shapes_column_width = min(shapes_column_width, 45)
+
+    src_column_width = None
+    stacks = []
+    for evt in events:
+        if evt.stack is not None and len(evt.stack) > 0:
+            stacks.append(evt.stack)
+    has_stack = len(stacks) > 0
+    if has_stack:
+        src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+        src_column_width = min(src_column_width, 75)
 
     headers = [
         'Name',
@@ -1141,10 +1218,11 @@ def build_table(
     row_format = [""]
     header_sep = [""]
     line_length = [-SPACING_SIZE]
+    MAX_STACK_ENTRY = 5
 
-    def add_column(padding):
-        row_format[0] += '{: >' + str(padding) + '}  '
-        header_sep[0] += '-' * padding + '  '
+    def add_column(padding, text_dir='>'):
+        row_format[0] += '{: ' + text_dir + str(padding) + '}' + (' ' * SPACING_SIZE)
+        header_sep[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length[0] += padding + SPACING_SIZE
 
     add_column(name_column_width)
@@ -1153,7 +1231,11 @@ def build_table(
 
     if has_input_shapes:
         headers.append('Input Shapes')
-        add_column(SHAPES_COLUMN_WIDTH)
+        add_column(shapes_column_width)
+
+    if has_stack:
+        headers.append('Source Location')
+        add_column(src_column_width, text_dir='<')
 
     row_format = row_format[0]
     header_sep = header_sep[0]
@@ -1229,8 +1311,20 @@ def build_table(
         if append_node_id:
             row_values.append(evt.node_id)
         if has_input_shapes:
-            row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
+            row_values.append(str(evt.input_shapes)[:shapes_column_width])
+        if has_stack:
+            src_field = ""
+            if len(evt.stack) > 0:
+                src_field = evt.stack[0][:src_column_width]
+            row_values.append(src_field)
         append(row_format.format(*row_values))
+
+        if has_stack:
+            empty_headers = [""] * (len(headers) - 1)
+            for entry in evt.stack[1:MAX_STACK_ENTRY]:
+                append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
+            empty_headers.append("")
+            append(row_format.format(*empty_headers))
 
     append(header_sep)
     append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))

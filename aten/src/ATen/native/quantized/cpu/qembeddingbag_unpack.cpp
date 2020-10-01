@@ -171,15 +171,15 @@ class QEmbeddingUnpackWeights final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("embedding_bag_byte_unpack", qembeddingbag_byte_unpack);
-  m.impl("embedding_bag_4bit_unpack", qembeddingbag_4bit_unpack);
-  m.impl("embedding_bag_2bit_unpack", qembeddingbag_2bit_unpack);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_unpack"), qembeddingbag_byte_unpack);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_unpack"), qembeddingbag_4bit_unpack);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_2bit_unpack"), qembeddingbag_2bit_unpack);
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // Unpack the packed embedding_bag weights using TorchBind custom class.
   // TODO extend to support 4-bit qtensor.
-  m.impl("embedding_bag_unpack", TORCH_FN(QEmbeddingUnpackWeights::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_unpack"), TORCH_FN(QEmbeddingUnpackWeights::run));
 }
 
 } // namespace
