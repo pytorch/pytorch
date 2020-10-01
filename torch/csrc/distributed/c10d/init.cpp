@@ -284,7 +284,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
-          module, "Store")
+          module, "Store",
+          R"(
+Base class for the 3 store implementations: (:class:`~torch.distributed.TCPStore`,
+:class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`).
+)")
           // Default constructor.
           .def(py::init<>())
           // Convert from std::string to std::vector<uint8>.
@@ -356,6 +360,9 @@ add(key: str, amount: int) -> None
 The first call to add for a given ``key`` creates a counter associated
 with ``key`` in the store, initialized to ``amount``. Subsequent calls to add
 with the same ``key`` increment the counter by the specified ``amount``.
+Calling :meth:`~torch.distributed.store.add` with a key that has already
+been set in the store by :meth:`~torch.distributed.store.set` will result
+in an exception.
 
 Arguments:
     key (str): The key in the store whose counter will be incremented.
@@ -407,7 +414,7 @@ Example::
 num_keys() -> int
 
 Returns the number of keys set in the store. Note that this number will typically
-be one greater than the number of keys added by :meth:`~torch.distributed.store.get`
+be one greater than the number of keys added by :meth:`~torch.distributed.store.set`
 and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
@@ -517,7 +524,8 @@ Example::
 #ifndef _WIN32
   shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store,
       R"(
-A thread-safe store implementation based on an underlying hashmap (C++ std::unordered_map).
+A thread-safe store implementation based on an underlying hashmap. This store can be used
+within the same process (for example, by other threads), but cannot be used across processes.
 
 Example::
     >>> import torch.distributed as dist
