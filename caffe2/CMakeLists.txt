@@ -6,7 +6,7 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification 
+# ---[ MSVC OpenMP modification
 if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()

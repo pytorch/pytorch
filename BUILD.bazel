@@ -55,6 +55,7 @@ cc_library(
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
+        "c10/mobile/*.h",
         "c10/util/*.h",
         "c10/util/*.hpp",
     ]),
@@ -71,6 +72,7 @@ cc_library(
     srcs = glob([
         "c10/core/*.cpp",
         "c10/core/impl/*.cpp",
+        "c10/mobile/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
         glob([
