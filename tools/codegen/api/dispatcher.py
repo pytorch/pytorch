@@ -63,6 +63,9 @@ def argument(a: Argument) -> DispatcherArgument:
             argument=la.argument,
         )
 
+def name(func: FunctionSchema) -> str:
+    return cpp.name(func)
+
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
     if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))

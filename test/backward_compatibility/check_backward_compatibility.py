@@ -27,6 +27,8 @@ from torch._C import parse_schema
 # NB: function name DOES NOT include overload name!
 allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
+    # Internal
+    ("static", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -106,6 +108,8 @@ allow_list = [
     ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
     ("aten::_foreach_div", datetime.date(2020, 10, 1)),
     ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
+    ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
+    ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
 ]
 
 

@@ -67,6 +67,19 @@ inline void throw_error_out_requires_grad(const char* name) {
       "but one of the arguments requires grad.");
 }
 
+inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
+  if (tensor.requires_grad()) {
+    TORCH_CHECK(!tensor.is_complex(), name,
+                " does not support automatic differentiation for outputs with complex dtype.");
+  }
+}
+
+inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
+  for (auto tensor: tensorlist) {
+    throw_error_for_complex_autograd(tensor, name);
+  }
+}
+
 // TODO: Blegh, bare references
 
 inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
