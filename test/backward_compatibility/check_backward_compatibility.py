@@ -108,6 +108,8 @@ allow_list = [
     ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
     ("aten::_foreach_div", datetime.date(2020, 10, 1)),
     ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_mul_scalar_list", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_mul_scalar_list_", datetime.date(2020, 10, 1)),
     ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
     ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
     ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
