@@ -6,6 +6,7 @@ from typing import Callable, List, NoReturn, Optional
 import numpy as np
 import torch
 from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
 __all__ = ["Timer", "timer"]
@@ -42,6 +43,7 @@ class Timer(object):
         # specified as a convenience feature.
         globals = dict(globals or {})
         globals.setdefault("torch", torch)
+        self._globals = globals
 
         self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
         self._task_spec = common.TaskSpec(
@@ -159,3 +161,28 @@ class Timer(object):
             raw_times=times,
             task_spec=self._task_spec
         )
+
+    def collect_callgrind(self, number=100, collect_baseline=True):
+        if not isinstance(self._task_spec.stmt, str):
+            raise ValueError("`collect_callgrind` currently only supports string `stmt`")
+
+        # __init__ adds torch, and Timer adds __builtins__
+        allowed_keys = {"torch", "__builtins__"}
+        if any(k not in allowed_keys for k in self._globals.keys()):
+            raise ValueError(
+                "`collect_callgrind` does not currently support passing globals. "
+                "Please define a `setup` str instead.")
+
+        if self._globals.get("torch", torch) is not torch:
+            raise ValueError("`collect_callgrind` does not support mocking out `torch`.")
+
+        # Check that the statement is valid. It doesn't guarantee success, but it's much
+        # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
+        # the parent process rather than the valgrind subprocess.
+        self._timer.timeit(1)
+        return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
+            stmt=self._task_spec.stmt,
+            setup=self._task_spec.setup,
+            number=number,
+            num_threads=self._task_spec.num_threads,
+            collect_baseline=collect_baseline)
