@@ -129,3 +129,25 @@ class SelectiveBuilder:
             return False
         base_op: SelectiveBuildOperator = self.operators[name]
         return base_op.include_all_overloads and base_op.is_root_operator
+
+    def to_dict(self) -> Dict[str, object]:
+        ret = {
+            'include_all_operators': self.include_all_operators,
+            'operators': {},
+        }
+        for (op_name, op) in self.operators.items():
+            ret['operators'][op_name] = op.to_dict()
+
+        if self.models is not None:
+            ret['models'] = list(map(
+                lambda m: m.to_dict(),
+                self.models,
+            ))
+        return ret
+
+
+def combine_selective_builders(lhs: SelectiveBuilder, rhs: SelectiveBuilder) -> SelectiveBuilder:
+    include_all_operators = lhs.include_all_operators or rhs.include_all_operators
+    models = merge_model_lists(lhs.models, rhs.models)
+    operators = merge_operator_dicts(lhs.operators, rhs.operators)
+    return SelectiveBuilder(include_all_operators, models, operators)

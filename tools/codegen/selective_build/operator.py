@@ -7,17 +7,40 @@ from dataclasses import dataclass
 @dataclass
 class PyTorchModelMetadata:
     name: str
-    version: str
+    version: Optional[str]
 
     @staticmethod
     def from_yaml(data: Dict[str, object]) -> 'PyTorchModelMetadata':
         name = data['name']
         assert isinstance(name, str)
 
-        version = data['version']
-        assert isinstance(version, str)
+        version: Optional[str] = None
+        if 'version' in data:
+            ver = data['version']
+            assert isinstance(ver, str)
+            version = ver
 
         return PyTorchModelMetadata(name, version)
+
+    def __str__(self: 'PyTorchModelMetadata') -> str:
+        if self.version is None:
+            return self.name
+        else:
+            return "{}@{}".format(self.name, self.version)
+        # end if
+
+    def to_dict(self) -> Dict[str, object]:
+        if self.version is None:
+            return {
+                'name': self.name,
+            }
+        else:
+            return {
+                'name': self.name,
+                'version': self.version,
+            }
+        # end if
+
 
 
 @dataclass(frozen=True)
@@ -86,6 +109,37 @@ class SelectiveBuildOperator():
             None,
         )
 
+    def to_dict(self) -> Dict[str, object]:
+        ret: Dict[str, object] = {
+            'is_root_operator': self.is_root_operator,
+            'is_used_for_training': self.is_used_for_training,
+            'include_all_overloads': self.include_all_overloads,
+        }
+        if self.models is not None:
+            models = list(map(lambda m: m.to_dict(), self.models))
+            ret['models'] = models
+        # end if
+        return ret
+
+
+def merge_model_lists(
+        lhs: Optional[List[PyTorchModelMetadata]],
+        rhs: Optional[List[PyTorchModelMetadata]],
+) -> Optional[List[PyTorchModelMetadata]]:
+    # Ensure that when merging, each model shows up just once.
+    mdict = {}
+    for model in (lhs or []) + (rhs or []):
+        mdict[str(model)] = model
+    # end for
+
+    models = None
+    if len(mdict) > 0:
+        models = list(mdict.values())
+    # end if
+
+    return models
+
+
 def combine_operators(
         lhs: 'SelectiveBuildOperator',
         rhs: 'SelectiveBuildOperator') -> 'SelectiveBuildOperator':
@@ -97,21 +151,28 @@ def combine_operators(
             )
         )
 
-    models = None
-    if lhs.models is not None and rhs.models is not None:
-        models = lhs.models[:] + rhs.models[:]
-    elif lhs.models is not None:
-        models = lhs.models[:]
-    elif rhs.models is not None:
-        models = rhs.models[:]
-
     return SelectiveBuildOperator(
         lhs.name,
         lhs.is_root_operator or rhs.is_root_operator,
         lhs.is_used_for_training or rhs.is_used_for_training,
         lhs.include_all_overloads or rhs.include_all_overloads,
-        models,
+        merge_model_lists(lhs.models, rhs.models),
     )
+
+def merge_operator_dicts(
+        lhs: Dict[str, SelectiveBuildOperator],
+        rhs: Dict[str, SelectiveBuildOperator],
+) -> Dict[str, SelectiveBuildOperator]:
+    operators: Dict[str, SelectiveBuildOperator] = {}
+    for (op_name, op) in list(lhs.items()) + list(rhs.items()):
+        new_op = op
+        if op_name in operators:
+            new_op = combine_operators(operators[op_name], op)
+
+        operators[op_name] = new_op
+
+    return operators
+
 
 def strip_operator_overload_name(op_name: str) -> str:
     return op_name.split(".")[0]

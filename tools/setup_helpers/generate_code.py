@@ -77,15 +77,13 @@ def generate_code(ninja_global=None,
             python_install_dir,
             autograd_dir)
 
-def get_selector(selected_op_list, selected_op_list_path):
-    # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
+def get_selector_from_legacy_operator_selection_list(
+        selected_op_list_path: str,
+):
     from tools.autograd.utils import load_op_list_and_strip_overload
-    from tools.codegen.selective_build.selector import SelectiveBuilder
 
     selected_op_list = load_op_list_and_strip_overload(
-        selected_op_list,
+        None,
         selected_op_list_path,
     )
 
@@ -127,6 +125,8 @@ def get_selector(selected_op_list, selected_op_list_path):
             is_root_operator = True
             is_used_for_training = True
 
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
     selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
     if selected_op_list is not None:
         selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
@@ -136,6 +136,25 @@ def get_selector(selected_op_list, selected_op_list_path):
         )
 
     return selector
+
+
+def get_selector(selected_op_list_path, operators_yaml_path):
+    # cwrap depends on pyyaml, so we can't import it earlier
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, root)
+    from tools.codegen.selective_build.selector import SelectiveBuilder
+
+    assert not (selected_op_list_path is not None and
+            operators_yaml_path is not None), \
+        ("Expected at most one of selected_op_list_path and " +
+         "operators_yaml_path to be set.")
+
+    if selected_op_list_path is None and operators_yaml_path is None:
+        return SelectiveBuilder.get_nop_selector()
+    elif selected_op_list_path is not None:
+        return get_selector_from_legacy_operator_selection_list(selected_op_list_path)
+    else:
+        return SelectiveBuilder.from_yaml_path(operators_yaml_path)
 
 
 def main():
@@ -158,13 +177,10 @@ def main():
         '--selected-op-list-path',
         help='Path to the yaml file that contains the list of operators to include for custom build.',
     )
-    # parser.add_argument(
-    #     '--selected-op-list',
-    #     nargs="*",
-    #     type=str,
-    #     help="""List of operator names to include for custom build, in addition to those in selected-op-list-path.
-    #     For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
-    # )
+    parser.add_argument(
+        '--operators_yaml_path',
+        help='Path to the model YAML file that contains the list of operators to include for custom build.',
+    )
     parser.add_argument(
         '--force_schema_registration',
         action='store_true',
@@ -182,7 +198,7 @@ def main():
         options.disable_autograd,
         options.force_schema_registration,
         # options.selected_op_list
-        operator_selector=get_selector(None, options.selected_op_list_path),
+        operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
     )
 
 
