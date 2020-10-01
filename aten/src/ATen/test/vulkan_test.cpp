@@ -377,7 +377,7 @@ class Conv2d : public BaseOp {
   };
 
   at::Tensor run(at::Tensor& t) override {
-    return at::conv2d(t, w, b, {stride}, {padding}, {1}, groups);
+    return at::conv2d(t, w, b, stride, padding, 1, groups);
   }
   std::string toString() override {
     return "conv2d";
