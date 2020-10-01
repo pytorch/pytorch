@@ -528,7 +528,7 @@ void populateRemoteProfiledEvents(
       profilerStart = &e;
       foundCpuStart = true;
     } else if (cudaProfilingEnabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
-      e.setCudaUs(e.cpu_us());
+      e.setCudaUs(e.cpuUs());
       auto device = e.device();
       TORCH_CHECK(
           device != -1,
@@ -561,7 +561,7 @@ void populateRemoteProfiledEvents(
     // launched/ended, since deserialized event will not have a
     // corresponding CUDA event.
     for (auto& e : profiledEvents) {
-      if (e.has_cuda()) {
+      if (e.hasCuda()) {
         auto cudaDevice = e.device();
         TORCH_CHECK(
             cudaDevice != -1,
@@ -572,8 +572,8 @@ void populateRemoteProfiledEvents(
             c10::str(
                 "Failed to find __cuda_start_event for device ", cudaDevice));
         auto cudaProfilerStartEvent = it->second;
-        double cudaElapsedUs = cudaProfilerStartEvent->cuda_elapsed_us(e);
-        int64_t cudaUs = cudaElapsedUs + cudaProfilerStartEvent->cpu_us();
+        double cudaElapsedUs = cudaProfilerStartEvent->cudaElapsedUs(e);
+        int64_t cudaUs = cudaElapsedUs + cudaProfilerStartEvent->cpuUs();
         e.setCudaUs(cudaUs);
       }
     }

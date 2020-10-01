@@ -349,7 +349,7 @@ def compute_functions(native_functions: List[NativeFunction], *, target: Target)
         if target is Target.DECLARATION:
             use_defaults = unambiguous_defaults(name, cpp_args, seen_functions)
             cpp_args_str = ', '.join(str(arg) if use_def else arg.str_no_default()
-                                    for use_def, arg in zip(use_defaults, cpp_args))
+                                     for use_def, arg in zip(use_defaults, cpp_args))
 
             return f"CAFFE2_API {cpp_returns_type} {name}({cpp_args_str});"
 

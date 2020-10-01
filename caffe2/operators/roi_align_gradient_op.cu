@@ -190,7 +190,7 @@ __global__ void RoIAlignBackwardFeature(
 } // namespace
 
 template <>
-bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
