@@ -1,7 +1,7 @@
 from unittest import main, skipIf
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter
+from torch._package import PackageExporter, PackageImporter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
