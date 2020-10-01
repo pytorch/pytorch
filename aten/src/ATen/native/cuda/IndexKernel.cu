@@ -223,11 +223,6 @@ void take_out_cuda_template(Tensor& output, const Tensor& input, const Tensor& i
   TensorArg index_arg{ index, "index", 3 };
   checkAllSameGPU("take", {output_arg, input_arg, index_arg});
 
-  // additionally check that the above 3 tensors are on the current GPU
-  auto curr_device = at::cuda::current_device();
-  TORCH_CHECK(input_arg->get_device() == at::cuda::current_device(),
-          "input is not on the current GPU. input GPU = ", input_arg->get_device(), ", current GPU = ", curr_device);
-
   TORCH_CHECK(input.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(output.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(index.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
