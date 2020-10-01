@@ -14,7 +14,6 @@ from torch.fx.symbolic_trace import Tracer
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
-    fuse_fx,
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
