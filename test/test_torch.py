@@ -6021,8 +6021,8 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @precisionOverride({torch.float32: 1e-3, torch.float64: 1e-8,
-                        torch.complex64: 1e-3, torch.complex128: 1e-8})
+    @precisionOverride({torch.float32: 2e-3, torch.float64: 1e-8,
+                        torch.complex64: 2e-3, torch.complex128: 1e-8})
     @skipCUDAIf(
         _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
         "On cuda 9.2, torch.inverse relies on magma"
