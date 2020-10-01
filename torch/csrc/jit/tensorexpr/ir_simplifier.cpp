@@ -1503,9 +1503,23 @@ const Expr* TermExpander::mutate(const Term* v) {
     if (lastNode) {
       // We want to avoid a leaving a CastNode on the scalar, so handle that
       // now.
-      if (v->scalar()->dtype() != lastNode->dtype()) {
-        lastNode = new Mul(
-            evaluateOp(new Cast(lastNode->dtype(), v->scalar())), lastNode);
+      auto termDtype = v->scalar()->dtype();
+      auto lastNodeDtype = lastNode->dtype();
+      if (termDtype != lastNodeDtype) {
+        const Expr* castV = v->scalar();
+        // Take care of lane mismatch first.
+        if (termDtype.lanes() != lastNodeDtype.lanes()) {
+          castV = new Broadcast(v->scalar(), lastNodeDtype.lanes());
+        }
+        // Now take care of scalar type as well.
+        if (termDtype.scalar_type() != lastNodeDtype.scalar_type()) {
+          castV = new Cast(lastNode->dtype(), castV);
+          // For scalars, we can simplify the cast further.
+          if (lastNodeDtype.lanes() == 1) {
+            castV = evaluateOp(castV);
+          }
+        }
+        lastNode = new Mul(castV, lastNode);
       } else {
         lastNode = new Mul(v->scalar(), lastNode);
       }

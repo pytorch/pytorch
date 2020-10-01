@@ -182,20 +182,6 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
-def view(g, self, size):
-    size = sym_help._maybe_get_const(size, 'is')
-    if sym_help._is_value(size):
-        shape = size
-    else:
-        if self.isCompleteTensor():
-            self_sizes = self.type().sizes()
-            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-                old_type, self = _try_cast_integer_to_float(g, self)
-                return _cast_to_type(g, g.op("Flatten", self, axis_i=1), old_type)
-        shape = g.op("Constant", value_t=torch.LongTensor(size))
-    return g.op("Reshape", self, shape)
-
-
 def flatten(g, input, start_dim, end_dim):
     start_dim_i = sym_help._get_const(start_dim, 'i', 'start_dim')
     end_dim_i = sym_help._get_const(end_dim, 'i', 'end_dim')
@@ -290,5 +276,5 @@ def repeat(g, self, repeats):
         sizes = self.type().sizes()
         diff_dims = repeat_size_len - len(sizes)
         if diff_dims > 0:
-            self = sym_opset9.view(g, self, [1] * diff_dims + sizes)
+            self = sym_opset9.view(g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes)))
     return g.op("Tile", self, repeats)

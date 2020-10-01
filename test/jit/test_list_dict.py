@@ -409,9 +409,6 @@ class TestList(JitTestCase):
         self.checkScript(test_backward_slice, ())
 
     def test_slice_index(self):
-        def test_func(fn, inputs):
-            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
-
         a = torch.tensor(
             [
                 [[1, 11], [2, 22]],
@@ -432,9 +429,21 @@ class TestList(JitTestCase):
             x = x[[0, 1], :, [1]]
             return x
 
-        test_func(test_index_slice1, (a,))
-        test_func(test_index_slice2, (a,))
-        test_func(test_index_slice3, (a,))
+        def test_index_slice4(x):
+            x = x[[4], :, :]
+            return x
+        
+        def test_index_slice5(x):
+            x = x[[], :, :]
+            return x
+
+        self.checkScript(test_index_slice1, (a,))
+        self.checkScript(test_index_slice2, (a,))
+        self.checkScript(test_index_slice3, (a,))
+        # self.checkScript(test_index_slice5, (a,))
+
+        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+            self.checkScript(test_index_slice4, (a,))
 
     def test_mutable_list_append(self):
         def test_append():
