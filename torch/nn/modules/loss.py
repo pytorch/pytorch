@@ -42,8 +42,8 @@ class L1Loss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -130,9 +130,9 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = \begin{cases}
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &
-            \text{if reduction} = \text{'mean';}\\
+            \text{if reduction} = \text{`mean';}\\
             \sum_{n=1}^N l_n,  &
-            \text{if reduction} = \text{'sum'.}
+            \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
@@ -322,8 +322,8 @@ class KLDivLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';} \\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     In default :attr:`reduction` mode ``'mean'``, the losses are averaged for each minibatch over observations
@@ -396,8 +396,8 @@ class MSELoss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), &  \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  &  \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), &  \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  &  \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -461,8 +461,8 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -548,8 +548,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -651,8 +651,8 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
