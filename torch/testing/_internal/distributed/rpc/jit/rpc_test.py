@@ -1040,10 +1040,11 @@ class JitRpcTest(
 
     @dist_init
     def test_add_done_callback(self):
-        callback_called = False
+        callback_called = None
 
-        def callback():
-            callback_called = True
+        def callback(_fut):
+            nonlocal callback_called
+            callback_called = fut.wait() * 2
 
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
@@ -1052,7 +1053,7 @@ class JitRpcTest(
         ).add_done_callback(callback)
         self.assertFalse(callback_called)
         self.assertEqual(future.wait(), torch.ones(2) * 2)
-        self.assertTrue(callback_called)
+        self.assertEqual(callback_called, torch.ones(2) * 4)
 
     @dist_init
     def test_async_script_throw(self):

@@ -3164,7 +3164,8 @@ class RpcTest(RpcAgentTestFixture):
         set_by_cb = Fakse
         n = self.rank + 1
 
-        def callback():
+        def callback(fut):
+            fut.wait()
             set_by_cb = True
 
         fut = rpc.rpc_async(

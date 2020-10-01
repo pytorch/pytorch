@@ -144,8 +144,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
-  void add_done_callback(const std::function<void(void)>& cb) {
-    fut->addCallback(cb);
+  void add_done_callback(py::function cb) {
+    auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    fut->addCallback(std::bind(
+        [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
+          pybind11::gil_scoped_acquire ag;
+          pf->func_(pyFut);
+        },
+        std::move(pf)));
   }
 
   void markCompleted(const py::object& pyValue) {

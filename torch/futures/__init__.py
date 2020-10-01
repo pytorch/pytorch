@@ -87,7 +87,6 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         Multiple callbacks can be added to the same ``Future``, and all
         added callbacks will be executed once the future completes.
         If the future has already completed, the callback will be executed immediately.
-        The callback
 
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
