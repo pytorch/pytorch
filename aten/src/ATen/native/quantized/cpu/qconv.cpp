@@ -38,7 +38,7 @@ at::Tensor convolution_fallback_slow(
                       packed_params->output_padding().vec(),
                       packed_params->groups());
   if (kReluFused) {
-    x = at::relu(x);
+    at::relu_(x);
   }
   return at::quantize_per_tensor(x, output_scale, output_zero_point,
                                  at::kQUInt8);

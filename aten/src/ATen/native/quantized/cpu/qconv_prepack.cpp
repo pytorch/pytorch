@@ -109,13 +109,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
   // include the sum of columns as well as the scalar term weight_zero_point *
   // KDim
-  int input_channels_per_group = input_channels;
-  int output_channels_per_group = output_channels;
-  if (transpose) {
-    output_channels_per_group /= groups;
-  } else {
-    input_channels_per_group /= groups;
-  }
+  int input_channels_per_group = input_channels / groups;
+  int output_channels_per_group = output_channels / groups;
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
   for (int g = 0; g < groups; ++g) {
