@@ -302,8 +302,6 @@ Base class for the 3 store implementations: (:class:`~torch.distributed.TCPStore
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-set(key: str, value: str) -> None
-
 Inserts the key-value pair into the store based on the supplied ``key`` and
 ``value``. If ``key`` already exists in the store, it will overwrite the old
 value with the new supplied ``value``.
@@ -328,9 +326,8 @@ Example::
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
+              py::call_guard<py::gil_scoped_release>(),
               R"(
-get(key: str) -> str
-
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
 when initializing the store, before throwing an exception.
@@ -347,16 +344,12 @@ Example::
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
-)",
-              py::arg("key"),
-              py::call_guard<py::gil_scoped_release>())
+)")
           .def(
               "add",
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-add(key: str, amount: int) -> None
-
 The first call to add for a given ``key`` creates a counter associated
 with ``key`` in the store, initialized to ``amount``. Subsequent calls to add
 with the same ``key`` increment the counter by the specified ``amount``.
@@ -382,8 +375,6 @@ Example::
               &::c10d::Store::deleteKey,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-delete_key(key: str) -> bool
-
 Deletes the key-value pair associated with ``key`` from the store. Returns
 `true` if the key was successfully deleted, and `false` if it was not.
 
@@ -411,8 +402,6 @@ Example::
               &::c10d::Store::getNumKeys,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-num_keys() -> int
-
 Returns the number of keys set in the store. Note that this number will typically
 be one greater than the number of keys added by :meth:`~torch.distributed.store.set`
 and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
@@ -437,8 +426,6 @@ Example::
               &::c10d::Store::setTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-set_timeout(timeout: timedelta) -> None
-
 Sets the store's default timeout. This timeout is used during initialization and in
 :meth:`~torch.distributed.store.wait` and :meth:`~torch.distributed.store.get`.
 
@@ -460,8 +447,6 @@ Example::
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-wait(keys: List[str]) -> None
-
 Waits for each key in ``keys`` to be added to the store. If not all keys are
 set before the ``timeout`` (set during store initialization), then ``wait``
 will throw an exception.
@@ -485,8 +470,6 @@ Example::
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-wait(keys: List[str], timeout: timedelta) -> None
-
 Waits for each key in ``keys`` to be added to the store, and throws an exception
 if the keys have not been set by the supplied ``timeout``.
 
