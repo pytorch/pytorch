@@ -6,9 +6,9 @@ $ python -m examples.op_benchmark
 import numpy as np
 import torch
 
-from torch.utils._benchmark import Timer
-from torch.utils._benchmark.op_fuzzers.binary import BinaryOpFuzzer
-from torch.utils._benchmark.op_fuzzers.unary import UnaryOpFuzzer
+from torch.utils.benchmark import Timer
+from torch.utils.benchmark.op_fuzzers.binary import BinaryOpFuzzer
+from torch.utils.benchmark.op_fuzzers.unary import UnaryOpFuzzer
 
 
 _MEASURE_TIME = 1.0

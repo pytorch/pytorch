@@ -81,7 +81,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             be constructed directly, rather, an instance can be retrieved
             through :meth:`~torch.distributed.rpc.get_worker_info` and the
             result can be passed in to functions such as
-            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.rpc_sync`, :meth:`~torch.distributed.rpc.rpc_async`,
             :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
             every invocation.)")
           .def(
