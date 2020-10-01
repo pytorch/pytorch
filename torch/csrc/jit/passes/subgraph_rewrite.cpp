@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 namespace torch {
 namespace jit {
@@ -26,7 +26,7 @@ void SubgraphRewriter::RegisterRewritePattern(
   patterns_.push_back(d);
 }
 
-script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
+Module SubgraphRewriter::runOnModule(const Module& module) {
   nodes_to_delete_.clear();
   for (const auto& m : module.get_methods()) {
     auto g = m.function().graph();
@@ -37,33 +37,31 @@ script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
 
 void SubgraphRewriter::runOnGraph(
     std::shared_ptr<Graph>& graph,
-    const std::function<
-        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+    const std::vector<MatchFilter>& filters) {
   for (const RewritePatternDescr& pattern : patterns_) {
-    rewriteSinglePatternOnGraph(graph, pattern, filter);
+    rewriteSinglePatternOnGraph(graph, pattern, filters);
   }
 }
 
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
     const RewritePatternDescr& pattern,
-    const std::function<
-        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+    const std::vector<MatchFilter>& filters) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern.pattern, &pattern_graph, vmap);
+  parseIR(pattern.pattern, &pattern_graph, vmap);
 
   Graph replacement_graph;
-  script::parseIR(pattern.replacement, &replacement_graph);
+  parseIR(pattern.replacement, &replacement_graph);
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
-    if (!filter(match, vmap)) {
+    if (!std::all_of(filters.begin(), filters.end(), [&](const MatchFilter& f) {
+          return f(match, vmap);
+        })) {
       continue;
     }
     // Matches might overlap with each other, in that case some of the nodes in
@@ -120,6 +118,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   for (auto n : nodes_to_delete_) {
     n->destroy();
   }
+  nodes_to_delete_.clear();
 }
 
 bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
@@ -131,7 +130,7 @@ bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   return false;
 }
 
-script::Module PatternBasedRewrite(const script::Module& module) {
+Module PatternBasedRewrite(const Module& module) {
   // TODO: Deep-copy the module
   SubgraphRewriter subgraph_rewriter;
   subgraph_rewriter.RegisterDefaultPatterns();

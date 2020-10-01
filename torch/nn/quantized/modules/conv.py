@@ -1,10 +1,7 @@
 # coding=utf-8
 r"""Quantized convolution modules."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from typing import Optional, List
 
 import torch
 import torch.nn as nn
@@ -12,13 +9,17 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True,
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation,
+                 transposed, output_padding,
+                 groups, bias,
                  padding_mode='zeros'):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
@@ -34,13 +35,17 @@ class _ConvNd(nn.Module):
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
-        self.transposed = False
-        self.output_padding = 0
+        self.transposed = transposed
+        self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
+        if self.transposed:
+            weight_shape = [in_channels, out_channels // self.groups]
+        else:
+            weight_shape = [out_channels, in_channels // self.groups]
         qweight = torch._empty_affine_quantized(
-            [out_channels, in_channels // self.groups] + list(kernel_size),
+            weight_shape + list(kernel_size),
             scale=1, zero_point=0, dtype=torch.qint8)
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float) if bias else None)
@@ -56,6 +61,8 @@ class _ConvNd(nn.Module):
             s += ', padding={padding}'
         if self.dilation != (1,) * len(self.dilation):
             s += ', dilation={dilation}'
+        if self.output_padding != (0,) * len(self.output_padding):
+            s += ', output_padding={output_padding}'
         if self.groups != 1:
             s += ', groups={groups}'
         if self.bias() is None:
@@ -67,21 +74,23 @@ class _ConvNd(nn.Module):
     # their regular QTensor form for serialization. Packed weights should not
     # live outside the process in which they were created, rather they should be
     # derived from the QTensor weight.
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # TODO: maybe change to this when https://github.com/pytorch/pytorch/pull/32958 is landed
+    #   self
+    #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
+        destination[prefix + 'bias'] = b
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        destination[prefix + 'bias'] = b
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError(
-                'torch.save() is not currently supported for quantized modules.'
-                ' See https://github.com/pytorch/pytorch/issues/24045.'
-                ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_channels,
@@ -135,6 +144,118 @@ class _ConvNd(nn.Module):
         self.zero_point = state[13]
         self.training = state[14]
 
+    @classmethod
+    def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
+        r"""Creates a qconv object and returns it.
+        """
+        if weight_post_process is None:
+            weight_post_process = mod.qconfig.weight()
+        weight_post_process(mod.weight)
+        act_scale, act_zp = activation_post_process.calculate_qparams()
+        assert weight_post_process.dtype == torch.qint8, \
+            'Weight observer must have a dtype of qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                    mod.stride, mod.padding, mod.dilation, mod.groups,
+                    mod.bias is not None, mod.padding_mode)
+        qconv.set_weight_bias(qweight, mod.bias)
+        qconv.scale = float(act_scale)
+        qconv.zero_point = int(act_zp)
+        return qconv
+
+
+class Conv1d(_ConvNd):
+    r"""Applies a 1D convolution over a quantized input signal composed of
+    several quantized input planes.
+
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.Conv1d`.
+
+    .. note::
+        Only `zeros` is supported for the :attr:`padding_mode` argument.
+
+    .. note::
+        Only `torch.quint8` is supported for the input data type.
+
+
+    Attributes:
+        weight (Tensor):     packed tensor derived from the learnable weight
+                             parameter.
+        scale (Tensor):      scalar for the output scale
+        zero_point (Tensor): scalar for the output zero point
+
+    See :class:`~torch.nn.Conv1d` for other attributes.
+
+    Examples::
+
+        >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
+        >>> input = torch.randn(20, 16, 100)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
+                                                dtype=torch.quint8)
+        >>> output = m(q_input)
+
+    """
+
+    _FLOAT_MODULE = nn.Conv1d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
+        kernel_size = _pair_from_first(kernel_size)
+        stride = _pair_from_first(stride)
+        padding = _pair_from_first(padding)
+        dilation = _pair_from_first(dilation)
+
+        super(Conv1d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _single(0), groups, bias, padding_mode)
+
+    def _get_name(self):
+        return 'QuantizedConv1d'
+
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv1d_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
+
+    def _weight_bias(self):
+        w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
+        return w, b
+
+    def weight(self):
+        return self._weight_bias()[0]
+
+    def bias(self):
+        return self._weight_bias()[1]
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 3:
+            raise ValueError("Input shape must be `(N, C, L)`!")
+        return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_float(cls, mod):
+        r"""Creates a quantized module from a float module or qparams_dict.
+
+        Args:
+            mod (Module): a float module, either produced by torch.quantization
+              utilities or provided by the user
+        """
+        assert type(mod) == cls._FLOAT_MODULE, \
+            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
+        assert hasattr(mod, 'qconfig'), \
+            'Input float module must have qconfig defined.'
+        if type(mod) == nni.ConvReLU1d:
+            activation_post_process = mod[1].activation_post_process
+            mod = mod[0]
+        else:
+            activation_post_process = mod.activation_post_process
+        return cls.get_qconv(mod, activation_post_process)
+
 
 class Conv2d(_ConvNd):
     r"""Applies a 2D convolution over a quantized input signal composed of
@@ -167,12 +288,11 @@ class Conv2d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE = nn.Conv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -184,7 +304,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            False, _pair(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv2d'
@@ -195,15 +315,13 @@ class Conv2d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return w
+        return self._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return b
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -211,8 +329,7 @@ class Conv2d(_ConvNd):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv2d(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
@@ -227,8 +344,8 @@ class Conv2d(_ConvNd):
             # '.from_float only works for ' + cls.__QAT_MODULE.__name__
             if type(mod) == nniqat.ConvBn2d:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
-                    mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                    mod.eps, mod.gamma, mod.beta)
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
             assert hasattr(mod, 'activation_post_process'), \
                 'Input QAT module must have observer attached'
             weight_post_process = mod.weight_fake_quant
@@ -247,19 +364,8 @@ class Conv2d(_ConvNd):
             else:
                 activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
-            weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
-        assert weight_post_process.dtype == torch.qint8, \
-            'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
 
-        return qconv
+        return cls.get_qconv(mod, activation_post_process, weight_post_process)
 
 
 class Conv3d(_ConvNd):
@@ -293,12 +399,11 @@ class Conv3d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv3d(16, 33, (3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2), dilation=(1, 2, 2))
         >>> input = torch.randn(20, 16, 56, 56, 56)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE = nn.Conv3d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -310,7 +415,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            False, _triple(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv3d'
@@ -321,15 +426,13 @@ class Conv3d(_ConvNd):
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv3d_unpack(self._packed_params)
+        return self._packed_params.unpack()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return w
+        return self._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return b
+        return self._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -337,8 +440,7 @@ class Conv3d(_ConvNd):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
         return ops.quantized.conv3d(
-            input, self._packed_params, self.stride, self.padding,
-            self.dilation, self.groups, self.scale, self.zero_point)
+            input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
@@ -360,17 +462,225 @@ class Conv3d(_ConvNd):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
+        return cls.get_qconv(mod, activation_post_process)
+
+# === Transposed Convolutions ===
+
+class _ConvTransposeNd(_ConvNd):
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups, bias, padding_mode):
+        if padding_mode != 'zeros':
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+
+        super(_ConvTransposeNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride,
+            padding, dilation, transposed, output_padding,
+            groups, bias, padding_mode)
+
+    def _input_padding(self, kernel_size, dilation, padding):
+        # type: (List[int], List[int], List[int]) -> List[int]
+        res = torch.jit.annotate(List[int], [])
+        for kdx in range(len(kernel_size)):
+            pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
+            res.append(pad)
+        return res
+
+    @classmethod
+    def from_float(cls, mod):
+        r"""Creates a quantized module from a float module or qparams_dict.
+        Args:
+            mod (Module): a float module, either produced by torch.quantization
+              utilities or provided by the user
+        """
+        assert type(mod) == cls._FLOAT_MODULE, \
+            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
+        assert hasattr(mod, 'qconfig'), \
+            'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
+        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
+                    mod.stride, mod.padding, mod.output_padding, mod.groups,
+                    mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 
         return qconv
+
+
+class ConvTranspose1d(_ConvTransposeNd):
+    r"""Applies a 1D transposed convolution operator over an input image
+    composed of several input planes.
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.ConvTranspose1d`.
+
+    .. note:: Currently only the QNNPACK engine is implemented.
+        Please, set the `torch.backends.quantized.engine = 'qnnpack'`
+
+    For special notes, please, see :class:`~torch.nn.quantized.Conv1d`
+
+    Attributes:
+        weight (Tensor):     packed tensor derived from the learnable weight
+                             parameter.
+        scale (Tensor):      scalar for the output scale
+        zero_point (Tensor): scalar for the output zero point
+    See :class:`~torch.nn.ConvTranspose2d` for other attributes.
+
+    Examples::
+
+        >>> torch.backends.quantized.engine = 'qnnpack'
+        >>> # With square kernels and equal stride
+        >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
+        >>> # non-square kernels and unequal stride and with padding
+        >>> m = nnq.ConvTranspose1d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> input = torch.randn(20, 16, 50)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
+        >>> # exact output size can be also specified as an argument
+        >>> input = torch.randn(1, 16, 12)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> downsample = nnq.Conv1d(16, 16, 3, stride=2, padding=1)
+        >>> upsample = nnq.ConvTranspose1d(16, 16, 3, stride=2, padding=1)
+        >>> h = downsample(q_input)
+        >>> h.size()
+        torch.Size([1, 16, 6])
+        >>> output = upsample(h, output_size=input.size())
+        >>> output.size()
+        torch.Size([1, 16, 12])
+    """
+
+    _FLOAT_MODULE = nn.ConvTranspose1d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, output_padding=0, groups=1, bias=True,
+                 dilation=1, padding_mode='zeros'):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        output_padding = _pair(output_padding)
+
+        super(ConvTranspose1d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            True, output_padding, groups, bias, padding_mode)
+
+    def _get_name(self):
+        return 'QuantizedConvTranpose1d'
+
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
+            w, b, self.stride, self.padding, self.output_padding, self.dilation,
+            self.groups)
+
+    def _weight_bias(self):
+        w, b = torch.ops.quantized.conv_transpose1d_unpack(self._packed_params)
+        return w, b
+
+    def weight(self):
+        (w, _) = self._weight_bias()
+        return w
+
+    def bias(self):
+        (_, b) = self._weight_bias()
+        return b
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 3:
+            raise ValueError("Input shape must be `(N, C, L)`!")
+        return torch.ops.quantized.conv_transpose1d(
+            input, self._packed_params, self.scale, self.zero_point)
+
+
+class ConvTranspose2d(_ConvTransposeNd):
+    r"""Applies a 2D transposed convolution operator over an input image
+    composed of several input planes.
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.ConvTranspose2d`.
+
+    .. note:: Currently only the QNNPACK engine is implemented.
+        Please, set the `torch.backends.quantized.engine = 'qnnpack'`
+
+    For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
+
+    Attributes:
+        weight (Tensor):     packed tensor derived from the learnable weight
+                             parameter.
+        scale (Tensor):      scalar for the output scale
+        zero_point (Tensor): scalar for the output zero point
+    See :class:`~torch.nn.ConvTranspose2d` for other attributes.
+
+    Examples::
+
+        >>> torch.backends.quantized.engine = 'qnnpack'
+        >>> # With square kernels and equal stride
+        >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
+        >>> # non-square kernels and unequal stride and with padding
+        >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
+        >>> input = torch.randn(20, 16, 50, 100)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
+        >>> # exact output size can be also specified as an argument
+        >>> input = torch.randn(1, 16, 12, 12)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> downsample = nnq.Conv2d(16, 16, 3, stride=2, padding=1)
+        >>> upsample = nnq.ConvTranspose2d(16, 16, 3, stride=2, padding=1)
+        >>> h = downsample(q_input)
+        >>> h.size()
+        torch.Size([1, 16, 6, 6])
+        >>> output = upsample(h, output_size=input.size())
+        >>> output.size()
+        torch.Size([1, 16, 12, 12])
+    """
+
+    _FLOAT_MODULE = nn.ConvTranspose2d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, output_padding=0, groups=1, bias=True,
+                 dilation=1, padding_mode='zeros'):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        output_padding = _pair(output_padding)
+
+        super(ConvTranspose2d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            True, output_padding, groups, bias, padding_mode)
+
+    def _get_name(self):
+        return 'QuantizedConvTranpose2d'
+
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
+            w, b, self.stride, self.padding, self.output_padding, self.dilation,
+            self.groups)
+
+    def _weight_bias(self):
+        w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
+        return w, b
+
+    def weight(self):
+        (w, _) = self._weight_bias()
+        return w
+
+    def bias(self):
+        (_, b) = self._weight_bias()
+        return b
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 4:
+            raise ValueError("Input shape must be `(N, C, H, W)`!")
+        return ops.quantized.conv_transpose2d(
+            input, self._packed_params, self.scale, self.zero_point)

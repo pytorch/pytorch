@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {
 namespace distributed {
@@ -14,7 +14,7 @@ class TORCH_API ScriptResp final : public RpcCommandBase {
   explicit ScriptResp(at::IValue&& values);
 
   const at::IValue& value();
-  Message toMessage() && override;
+  Message toMessageImpl() && override;
   static std::unique_ptr<ScriptResp> fromMessage(const Message& message);
 
  private:

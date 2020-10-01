@@ -14,7 +14,8 @@ def register_quantized_ops(domain, version):
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
             aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize',
-                          'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'reshape', 'slice', 'cat']
+                          'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d',
+                          'reshape', 'slice', 'cat', 'max_pool2d', 'sigmoid']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -154,6 +155,24 @@ def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None,
     output = nhwc2nchw(g, output)
     sym_help._quantized_ops.add(output)
     return output
+@parse_args('v', 'is', 'is', 'is', 'is', 'i')
+def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import max_pool2d
+        return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
+    kwargs = {
+        "strides_i": stride,
+        "pads_i": padding + padding,
+        "kernel_i": kernel_size[0],
+        "order_s": "NHWC",
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    input = nchw2nhwc(g, input)
+    output = g.op("_caffe2::Int8MaxPool", input, **kwargs)
+    output = nhwc2nchw(g, output)
+    sym_help._quantized_ops.add(output)
+    return output
 
 @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
@@ -223,5 +242,22 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
         "Y_zero_point_i": tensors[0].node()["Y_zero_point"],
     }
     output = g.op("_caffe2::Int8Concat", *tensors, axis_i=dim, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v')
+def sigmoid(g, input):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import sigmoid
+        return sigmoid(g, input)
+    # Caffe2 expects the output scale to be 1/2^8
+    # and output zero_point to be 0 (quint8 type)
+    out_scale = 1.0 / 256
+    zero_point = 0
+    kwargs = {
+        "Y_scale_f": out_scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8Sigmoid", input, **kwargs)
     sym_help._quantized_ops.add(output)
     return output

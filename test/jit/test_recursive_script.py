@@ -1,11 +1,12 @@
 import unittest
 import os
 import sys
+import typing
+import typing_extensions
 from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
 from torch.testing import FileCheck
 from collections import OrderedDict
@@ -65,7 +66,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return self.fn(x)
 
-        mod = M(F.sigmoid)
+        mod = M(torch.sigmoid)
 
         self.checkModule(mod, (torch.randn(2, 2),))
 
@@ -158,28 +159,44 @@ class TestRecursiveScript(JitTestCase):
             # Make sure that no entries are left over from the previous failure
             FileCheck().check_count("is being compiled", 2).run(str(e))
 
-    @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
+    @unittest.skipIf(sys.version_info[:2] < (3, 7), "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
-        class M(torch.nn.Module):
-            # TODO: Use this (see below)
-            # x : torch.jit.Final[int]
+        class M1(torch.nn.Module):
+            x : torch.jit.Final[int]
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = 2
 
             def forward(self, t):
                 return t + self.x
 
+        self.checkModule(M1(), (torch.randn(2, 2),))
 
-        # TODO: Fix this test so that we can actually define the class like
-        #   class M(torch.nn.Module):
-        #       x : torch.jit.Final[int]
-        M.__annotations__ = {'x': torch.jit.Final[int]}
+        class M2(torch.nn.Module):
+            x : typing_extensions.Final[int]
 
-        m = M()
+            def __init__(self):
+                super().__init__()
+                self.x = 2
 
-        self.checkModule(M(), (torch.randn(2, 2),))
+            def forward(self, t):
+                return t + self.x
+
+        self.checkModule(M2(), (torch.randn(2, 2),))
+
+        if sys.version_info[:2] >= (3, 8):
+            class M3(torch.nn.Module):
+                x : typing.Final[int]
+
+                def __init__(self):
+                    super().__init__()
+                    self.x = 2
+
+                def forward(self, t):
+                    return t + self.x
+
+            self.checkModule(M3(), (torch.randn(2, 2),))
 
     def test_ignore_class(self):
         @torch.jit.ignore
@@ -374,7 +391,7 @@ class TestRecursiveScript(JitTestCase):
             def bad_fn(self):
                 import pdb  # noqa
 
-        def fn(x):
+        def fn(x) -> X:
             return X(10)
 
         try:
@@ -383,6 +400,23 @@ class TestRecursiveScript(JitTestCase):
             checker = FileCheck()
             checker.check("import statements")
             checker.check("is being compiled since it was called from")
+            checker.run(str(e))
+
+    def test_error_stack_annotation(self):
+        class X(object):
+            def bad_fn(self):
+                import pdb  # noqa
+
+        def fn(x) -> X:
+            return X(10)
+
+        try:
+            torch.jit.script(fn)
+        except Exception as e:
+            checker = FileCheck()
+            checker.check("import statements")
+            checker.check("is being compiled since it was called from")
+            checker.check("-> X")
             checker.run(str(e))
 
     def test_module_basic(self):
@@ -590,24 +624,6 @@ class TestRecursiveScript(JitTestCase):
 
         m = M()
         self.checkModule(m, (torch.randn(5, 5), ))
-
-    def test_property(self):
-        class M(nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.x = 0
-
-            @property
-            def x_and_1(self):
-                return self.x + 1
-
-            def forward(self, new_x):
-                # type: (int) -> int
-                self.x = new_x
-                return self.x_and_1
-
-        with self.assertRaisesRegex(RuntimeError, "property"):
-            torch.jit.script(M())
 
     def test_inner_traced_module(self):
         class Dummy(nn.Module):

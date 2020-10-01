@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -36,54 +37,64 @@ using IndexRange = std::pair<size_t, size_t>;
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
 
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-///                               Node
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// A `Node` is an abstract class that represents an operation taking zero
-/// or more input `Variable`s and producing zero or more output `Variable`s. All
-/// functions in PyTorch's autograd machinery derive from this class and
-/// override its `apply` method. Instances of such subclasses will then be
-/// invokeable via the call operator.
-///
-///                    Nodes in the Autograd Graph
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// When viewing the autograd system as a graph, `Node`s are the vertices or
-/// nodes, connected to each other via (directed) `Edge`s, which themselves are
-/// represented via (`Node`, input_nr) pairs. `Variable`s are the outputs to
-/// and inputs of `Node`s, and travel between these edges during execution
-/// of the graph. When two or more `Edge`s (from different sources) point at the
-/// same input to a `Node`, the values produced along all of these edges are
-/// implicitly summed prior to being forwarded to the target `Node`.
-///
-///                              Hierarchy
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// Subclasses usually represent differentiable functions as well as their
-/// gradient operators. Note, however, that due to the very general definition
-/// of a `Node` taking *zero* or more inputs and producing *zero* or more
-/// outputs, uses of `Node`s are flexible and extend beyond purely
-/// mathematical operations. For example, the `AccumulateGrad` function is a
-/// *sink*: it takes one input, but produces no outputs, instead accumulating
-/// the input as a side effect. At the other extreme, the `GraphRoot` function
-/// receives no inputs from other functions, but produces multiple outputs.
-///
-///                              Interface
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// The most important method on `Node` is the call operator, which takes in
-/// a list of variables and produces a list of variables. The precise size of
-/// these lists can be determined with `num_inputs()` and `num_outputs()`.
-/// `Node`s are stitched together via their `next_edge` interface, which let
-/// you manipulate the set of outgoing edges of a `Node`. You can add an
-/// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
-/// iterate over them via the `next_edges()` method. Other methods exist for
-/// integration with the JIT and other parts of PyTorch. Every `Node` has a
-/// *sequence number* that increases monotonically in the order of `Node`
-/// construction. It can be retrieved via the `sequence_nr()` method. Note that
-/// this sequence number is *thread local*. This means that when `Node`s
-/// `A`, `B` and `C` are created consecutively in the same thread, their
-/// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
-/// are created in one thread and `C` is created in a new thread, there are *no
-/// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Guard that sets and restores the evaluating node
+class NodeGuard {
+ public:
+  explicit NodeGuard(std::shared_ptr<Node> node);
+  ~NodeGuard();
+
+ private:
+  std::shared_ptr<Node> last_evaluating_node_;
+};
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//                               Node
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A `Node` is an abstract class that represents an operation taking zero
+// or more input `Variable`s and producing zero or more output `Variable`s. All
+// functions in PyTorch's autograd machinery derive from this class and
+// override its `apply` method. Instances of such subclasses will then be
+// invokeable via the call operator.
+//
+//                    Nodes in the Autograd Graph
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// When viewing the autograd system as a graph, `Node`s are the vertices or
+// nodes, connected to each other via (directed) `Edge`s, which themselves are
+// represented via (`Node`, input_nr) pairs. `Variable`s are the outputs to
+// and inputs of `Node`s, and travel between these edges during execution
+// of the graph. When two or more `Edge`s (from different sources) point at the
+// same input to a `Node`, the values produced along all of these edges are
+// implicitly summed prior to being forwarded to the target `Node`.
+//
+//                              Hierarchy
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Subclasses usually represent differentiable functions as well as their
+// gradient operators. Note, however, that due to the very general definition
+// of a `Node` taking *zero* or more inputs and producing *zero* or more
+// outputs, uses of `Node`s are flexible and extend beyond purely
+// mathematical operations. For example, the `AccumulateGrad` function is a
+// *sink*: it takes one input, but produces no outputs, instead accumulating
+// the input as a side effect. At the other extreme, the `GraphRoot` function
+// receives no inputs from other functions, but produces multiple outputs.
+//
+//                              Interface
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The most important method on `Node` is the call operator, which takes in
+// a list of variables and produces a list of variables. The precise size of
+// these lists can be determined with `num_inputs()` and `num_outputs()`.
+// `Node`s are stitched together via their `next_edge` interface, which let
+// you manipulate the set of outgoing edges of a `Node`. You can add an
+// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
+// iterate over them via the `next_edges()` method. Other methods exist for
+// integration with the JIT and other parts of PyTorch. Every `Node` has a
+// *sequence number* that increases monotonically in the order of `Node`
+// construction. It can be retrieved via the `sequence_nr()` method. Note that
+// this sequence number is *thread local*. This means that when `Node`s
+// `A`, `B` and `C` are created consecutively in the same thread, their
+// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
+// are created in one thread and `C` is created in a new thread, there are *no
+// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`. `sequence_nr` is
@@ -96,11 +107,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
+
+      // If anomaly mode is enabled and graph is constructed, then assign the
+      // currently evaluating node as the parent of this node.
+      // A parent is a Node where this Node is created.
+      // We are tracking the parents to track multiple backward operations.
+      assign_parent();
+    }
+
+    if (profiler::profilerEnabled()) {
+      thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
+      : Node(at::sequence_number::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -112,9 +133,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    RECORD_FUNCTION(
-        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
-
+    // Using RecordFunction to trogger observers in the backward pass
+    at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION);
+    if (guard.active) {
+      // Using sequence number and thread id to correlate with
+      // the forward pass function
+      guard.setForwardThreadId(thread_id_);
+      if (guard.needs_inputs) {
+        guard.before(
+          name(),
+          std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+          sequence_nr());
+      } else {
+        guard.before(name(), sequence_nr());
+      }
+    }
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
@@ -220,6 +253,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// The sequence number of this `Node`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  // assigning a node as a parent to this node
+  void assign_parent();
+
+  /// Id of the thread that created Node
+  uint64_t thread_id() const noexcept {
+    return thread_id_;
   }
 
   /// Returns the name of the dynamic type of the function, for debugging.
@@ -332,11 +373,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  static uint64_t peek_at_next_sequence_nr();
-
  protected:
-  static uint64_t& get_next_sequence_nr();
-
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 
@@ -346,6 +383,47 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
+
+  // Id of the thread that created the instance
+  uint64_t thread_id_ = 0;
+
+  // Note [Thread Safety on Autograd Node]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Autograd Engine let the owning thread which calls Engine::execute to drive the
+  // GraphTask execution, there might be cases that part of the GraphTask is shared
+  // across different `backward()` or `grad()` calls, i.e. fork new threads in the
+  // middle of the forward and call `backward()` separately from different threads.
+  // We need to protect the thread safety on NodeTask to prevent data racing on
+  // shared variables read/write.
+  //
+  // NB: This is only needed for Autograd Nodes that runs on CPU, technically "CUDA",
+  // "XLA" nodes don't need locking because device threads are always single threaded.
+  //
+  // Here we add a thread mutex to help protect the Node's thread safety, so that
+  // different threads cannot race the shared data when executing the same NodeTask
+  // from multiple CPU threads. It IS the user/developer responsibility to take
+  // advantage of this mutex to protect the thread safety of their autograd Node.
+  // The general strategy of thread safety on autograd Node:
+  //
+  // 1. User should lock the mutex during Node::release_variables() if the Node needs
+  //    to release the variables on the fly, this serve the purpose that when we release
+  //    saved_variables from one thread, no other threads can release the saved variables
+  //    concurrently. call
+  //    the Node::apply(),
+  // 2. User should lock the mutex during Node::apply(), this is to ensure Node that
+  //    writing to the shared variable are not racing across threads (i.e. AccumulateGrad
+  //    and custom C++ Autograd Node if writing to shared variables )
+  // 3. item 2 and item 3 should work together so that when we release saved variables
+  //    from one thread, no other threads can call Node::apply(), this ensures the variable
+  //    references from other threads aren't dangling.
+  // 4. if the Node don't release any variables and no shared data read/write in the Node
+  //    i.e. purely functional, user don't need to lock the mutex
+  //
+  // This way we could protect the thread safety on Autograd Node, but we could still
+  // not protect the thread safety on Node pre/post C++ hooks (python hooks are
+  // automatically thread safe), we rely on the user to write thread safe C++ hooks
+  // if they want the hook to be correctly applied in multithreading environment.
+  std::mutex mutex_;
 
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
@@ -375,6 +453,13 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable& variable) {
     if (variable.defined()) {
       next_edges.push_back(impl::gradient_edge(variable));
+    } else {
+      next_edges.emplace_back();
+    }
+  }
+  void operator()(const c10::optional<Variable>& variable) {
+    if (variable.has_value() && variable->defined()) {
+      next_edges.push_back(impl::gradient_edge(*variable));
     } else {
       next_edges.emplace_back();
     }

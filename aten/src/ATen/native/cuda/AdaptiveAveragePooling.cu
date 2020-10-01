@@ -1,13 +1,13 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/Exception.h>
 #include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
-#include "THC/THCNumerics.cuh"
+#include <THC/THCNumerics.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
@@ -510,7 +510,7 @@ namespace {
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
               size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
               AT_ASSERT(shmem_size <= sharedMemPerBlock);
@@ -520,7 +520,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 istrideB, istrideC, istrideH, istrideW);
-              }
+            }
           );
         break;
       }
@@ -547,7 +547,7 @@ namespace {
         } else {
            output.resize_({sizeD, osizeH, osizeW});
         }
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
               scalar_t *input_data = input_.data_ptr<scalar_t>();
               scalar_t *output_data = output.data_ptr<scalar_t>();
@@ -562,7 +562,7 @@ namespace {
                 input_data, output_data,
                 isizeH, isizeW, osizeH, osizeW,
                 istrideD, istrideH, istrideW);
-              }
+            }
           );
         break;
       }
@@ -571,7 +571,7 @@ namespace {
           false,
           "Unsupported memory format. Supports only ChannelsLast, Contiguous");
     }
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 
   void adaptive_avg_pool2d_backward_out_cuda_template(
@@ -639,7 +639,7 @@ namespace {
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
         int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
-        
+
         // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
         // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
@@ -655,7 +655,7 @@ namespace {
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
               size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);
               AT_ASSERT(shmem_size <= sharedMemPerBlock);
@@ -665,7 +665,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 ostrideB, ostrideC, ostrideH, ostrideW);
-              }
+            }
           );
         break;
       }
@@ -685,7 +685,7 @@ namespace {
         if (input.ndimension() == 4) grid_x *= input.size(-4);
 
           //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
               scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
               scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -719,7 +719,7 @@ namespace {
           "Unsupported memory format. Supports only ChannelsLast, Contiguous");
 
     }
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 
 } // namespace
@@ -749,6 +749,9 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_out_cuda");
     gradInput.resize_as_(input);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
@@ -759,6 +762,9 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_cuda");
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);

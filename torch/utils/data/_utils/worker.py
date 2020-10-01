@@ -10,6 +10,7 @@ import os
 from collections import namedtuple
 from torch._six import queue
 from torch._utils import ExceptionWrapper
+from typing import Union
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
 
 if IS_WINDOWS:
@@ -23,7 +24,8 @@ if IS_WINDOWS:
         def __init__(self):
             self.manager_pid = os.getppid()
 
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            # mypy cannot detect this code is windows only
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore
             self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
             self.kernel32.OpenProcess.restype = HANDLE
             self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
@@ -34,7 +36,7 @@ if IS_WINDOWS:
             self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore
 
             self.manager_dead = False
 
@@ -44,7 +46,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):
+    class ManagerWatchdog(object):  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -63,12 +65,19 @@ class WorkerInfo(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+        self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super(WorkerInfo, self).__setattr__(key, val)
+
+    def __repr__(self):
+        items = []
+        for k in self.__keys:
+            items.append('{}={}'.format(k, getattr(self, k)))
+        return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
 def get_worker_info():
@@ -103,10 +112,12 @@ def get_worker_info():
 r"""Dummy class used to signal the end of an IterableDataset"""
 _IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
 
+r"""Dummy class used to resume the fetching when worker reuse is enabled"""
+_ResumeIteration = namedtuple('_ResumeIteration', [])
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
-                 num_workers):
+                 num_workers, persistent_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -160,7 +171,15 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
-            if r is None:
+            if isinstance(r, _ResumeIteration):
+                # Acknowledge the main process
+                data_queue.put(r)
+                iteration_end = False
+                # Recreate the fetcher for worker-reuse policy
+                fetcher = _DatasetKind.create_fetcher(
+                    dataset_kind, dataset, auto_collation, collate_fn, drop_last)
+                continue
+            elif r is None:
                 # Received the final signal
                 assert done_event.is_set() or iteration_end
                 break
@@ -170,6 +189,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 # processing steps.
                 continue
             idx, index = r
+            data: Union[_IterableDatasetStopIteration, ExceptionWrapper]
             if init_exception is not None:
                 data = init_exception
                 init_exception = None

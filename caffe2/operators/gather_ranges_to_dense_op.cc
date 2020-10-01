@@ -76,6 +76,10 @@ are sorted by the corresponding KEY.
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
+    .Arg(
+        "max_empty_ratio",
+        "An error is raised when ratio of empty ranges exceeds this (default is"
+        " 1, which means by default no error will be triggered).")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
@@ -100,3 +104,11 @@ NO_GRADIENT(GatherRangesToDense);
 
 } // namespace
 } // namespace caffe2
+
+using GatherRangesToDenseCPUOp =
+    caffe2::GatherRangesToDenseOp<caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRangesToDense,
+    "_caffe2::GatherRangesToDense(Tensor data, Tensor ranges, Tensor? key, int[] lengths, int min_observation, float max_mismatched_ratio, float max_empty_ratio) -> Tensor[] outputs",
+    GatherRangesToDenseCPUOp);

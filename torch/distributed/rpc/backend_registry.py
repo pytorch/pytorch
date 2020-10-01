@@ -1,11 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
-import datetime
+from datetime import timedelta
 import enum
 
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as dc10d
 
 from . import constants as rpc_constants
 
@@ -19,9 +17,30 @@ def _backend_type_repr(self):
     return "BackendType." + self.name
 
 
+_backend_type_doc = """
+    An enum class of available backends.
+
+    PyTorch ships with two builtin backends: ``BackendType.TENSORPIPE`` and
+    ``BackendType.PROCESS_GROUP``. Additional ones can be registered using the
+    :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
+"""
+
 # Create an enum type, `BackendType`, with empty members.
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
+BackendType.__doc__ = _backend_type_doc
+
+def backend_registered(backend_name):
+    """
+    Checks if backend_name is registered as an RPC backend.
+
+    Arguments:
+        backend_name (str): string to identify the RPC backend.
+    Returns:
+        True if the backend has been registered with ``register_backend``, else
+        False.
+    """
+    return backend_name in BackendType.__members__.keys()
 
 
 def register_backend(
@@ -39,7 +58,7 @@ def register_backend(
              This returns the agent.
     """
     global BackendType
-    if backend_name in BackendType.__members__.keys():
+    if backend_registered(backend_name):
         raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
@@ -54,17 +73,16 @@ def register_backend(
     )
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
     BackendType.__repr__ = _backend_type_repr
+    BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
 
 def construct_rpc_backend_options(
     backend,
-    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT,
+    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC,
     init_method=rpc_constants.DEFAULT_INIT_METHOD,
     **kwargs
 ):
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError("`rpc_timeout` must be a `datetime.timedelta`.")
 
     return backend.value.construct_rpc_backend_options_handler(
         rpc_timeout, init_method, **kwargs
@@ -83,56 +101,118 @@ def _process_group_construct_rpc_backend_options_handler(
 ):
     from . import ProcessGroupRpcBackendOptions
 
-    rpc_backend_options = ProcessGroupRpcBackendOptions()
-    rpc_backend_options.rpc_timeout = rpc_timeout
-    rpc_backend_options.init_method = init_method
-    rpc_backend_options.num_send_recv_threads = num_send_recv_threads
-    return rpc_backend_options
+    return ProcessGroupRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_send_recv_threads=num_send_recv_threads
+    )
 
+def _init_process_group(store, rank, world_size):
+    # Initialize ProcessGroup.
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+
+    # We're using a bunch of private APIs here since `new_group` requires the
+    # default group to be initialized.
+    group = dist.ProcessGroupGloo(store, rank, world_size, process_group_timeout)
+
+    assert group is not None, "Failed to initialize default ProcessGroup."
+
+    if (rank != -1) and (rank != group.rank()):
+        raise RuntimeError(
+            "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
+        )
+    if (world_size != -1) and (world_size != group.size()):
+        raise RuntimeError(
+            "world_size argument {} doesn't match pg size {}".format(
+                world_size, group.size()
+            )
+        )
+    return group
 
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
+    from . import ProcessGroupRpcBackendOptions
     from . import ProcessGroupAgent
 
-    # Initialize ProcessGroup.
-    if dist.is_initialized():
-        raise RuntimeError(
-            "Default process group must not be initialized before init_rpc."
+    if not isinstance(store, dist.Store):
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, ProcessGroupRpcBackendOptions
+    ):
+        raise TypeError(
+            "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
         )
 
-    dist.init_process_group(
-        backend="gloo", store=store, rank=rank, world_size=world_size
+    group = _init_process_group(store, rank, world_size)
+
+    # TODO: add try-except and destroy _agent in all processes if any fails.
+    return ProcessGroupAgent(
+        name,
+        group,
+        rpc_backend_options.num_send_recv_threads,
+        timedelta(seconds=rpc_backend_options.rpc_timeout),
     )
-
-    try:
-        group = dc10d._get_default_group()
-        assert group is not None, "Failed to initialize default ProcessGroup."
-
-        if (rank != -1) and (rank != group.rank()):
-            raise RuntimeError(
-                "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
-            )
-        if (world_size != -1) and (world_size != group.size()):
-            raise RuntimeError(
-                "world_size argument {} doesn't match pg size {}".format(
-                    world_size, group.size()
-                )
-            )
-        # TODO: add try-except and destroy _agent in all processes if any fails.
-        return ProcessGroupAgent(
-            name,
-            group,
-            rpc_backend_options.num_send_recv_threads,
-            rpc_backend_options.rpc_timeout,
-        )
-    except Exception as ex:
-        dist.destroy_process_group()
-        raise ex
 
 
 register_backend(
     "PROCESS_GROUP",
     _process_group_construct_rpc_backend_options_handler,
     _process_group_init_backend_handler,
+)
+
+def _tensorpipe_construct_rpc_backend_options_handler(
+    rpc_timeout,
+    init_method,
+    num_worker_threads=rpc_constants.DEFAULT_NUM_WORKER_THREADS,
+    _transports=None,
+    _channels=None,
+    **kwargs
+):
+    from . import TensorPipeRpcBackendOptions
+
+    return TensorPipeRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_worker_threads=num_worker_threads,
+        _transports=_transports,
+        _channels=_channels,
+    )
+
+
+def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
+    from . import TensorPipeRpcBackendOptions
+    from . import TensorPipeAgent
+
+    if not isinstance(store, dist.Store):
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, TensorPipeRpcBackendOptions
+    ):
+        raise TypeError(
+            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
+
+    # The agent's join method is required to behave like a barrier and perform
+    # collective operations, for which it relies on a process group, instead of
+    # re-implementing this on top of RPCs.
+
+    group = _init_process_group(store, rank, world_size)
+
+    # TODO: add try-except and destroy _agent in all processes if any fails.
+    return TensorPipeAgent(
+        store, name, rank, world_size, group, rpc_backend_options
+    )
+
+
+register_backend(
+    "TENSORPIPE",
+    _tensorpipe_construct_rpc_backend_options_handler,
+    _tensorpipe_init_backend_handler,
 )

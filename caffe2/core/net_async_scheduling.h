@@ -14,7 +14,7 @@ class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
 
   void Wait() override;
 
-  void Cancel();
+  void Cancel() override;
 
  protected:
   bool RunAsync() override;

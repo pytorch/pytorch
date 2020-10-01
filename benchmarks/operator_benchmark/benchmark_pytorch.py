@@ -1,12 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import time
 import json
 import torch
-import cpp_extension # noqa
+import torch.utils.cpp_extension as cpp_extension # noqa
 
 
 """PyTorch performance microbenchmarks.

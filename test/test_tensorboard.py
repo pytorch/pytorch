@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import io
 import numpy as np
 import os
@@ -178,7 +173,7 @@ class TestTensorBoardUtils(BaseTestCase):
         tensor = make_np(test_image)
         tensor = convert_to_HWC(tensor, 'NCHW')
         scale_factor = summary._calc_scale_factor(tensor)
-        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+        self.assertEqual(scale_factor, 1, msg='Values are already in [0, 255], scale factor should be 1')
 
 
     def test_prepare_video(self):
@@ -283,11 +278,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
         self.assertTrue(passed)
 
     def test_pathlib(self):
-        import sys
-        if sys.version_info.major == 2:
-            import pathlib2 as pathlib
-        else:
-            import pathlib
+        import pathlib
         p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)
@@ -341,7 +332,7 @@ class TestTensorBoardSummary(BaseTestCase):
         '''
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         scale_factor = summary._calc_scale_factor(test_image)
-        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+        self.assertEqual(scale_factor, 1, msg='Values are already in [0, 255], scale factor should be 1')
 
     def test_float32_image(self):
         '''
@@ -350,7 +341,7 @@ class TestTensorBoardSummary(BaseTestCase):
         '''
         test_image = np.random.rand(3, 32, 32).astype(np.float32)
         scale_factor = summary._calc_scale_factor(test_image)
-        self.assertEqual(scale_factor, 255, 'Values are in [0, 1], scale factor should be 255')
+        self.assertEqual(scale_factor, 255, msg='Values are in [0, 1], scale factor should be 255')
 
     def test_list_input(self):
         with self.assertRaises(Exception) as e_info:
@@ -367,28 +358,32 @@ class TestTensorBoardSummary(BaseTestCase):
                                             self))
 
     def test_image_with_one_channel(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(1, 8, 8)),
-                                                    dataformats='CHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(1, 8, 8)),
+                          dataformats='CHW'),
+                          self))  # noqa E127
 
     def test_image_with_one_channel_batched(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(2, 1, 8, 8)),
-                                                    dataformats='NCHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(2, 1, 8, 8)),
+                          dataformats='NCHW'),
+                          self))  # noqa E127
 
     def test_image_with_3_channel_batched(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(2, 3, 8, 8)),
-                                                    dataformats='NCHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(2, 3, 8, 8)),
+                          dataformats='NCHW'),
+                          self))  # noqa E127
 
     def test_image_without_channel(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(8, 8)),
-                                                    dataformats='HW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(8, 8)),
+                          dataformats='HW'),
+                          self))  # noqa E127
 
     def test_video(self):
         try:
@@ -449,6 +444,37 @@ class TestTensorBoardSummary(BaseTestCase):
         with self.assertRaises(NotImplementedError):
             with self.createSummaryWriter() as writer:
                 writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
+
+    def test_hparams_number(self):
+        hp = {'lr': 0.1}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_bool(self):
+        hp = {'bool_var': True}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_string(self):
+        hp = {'string_var': "hi"}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_domain_discrete(self):
+        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
+        mt = {"accuracy": 0.1}
+        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
+
+        # hparam_domain_discrete keys needs to be subset of hparam_dict keys
+        with self.assertRaises(TypeError):
+            summary.hparams(hp, mt, hparam_domain_discrete={"wrong_key": []})
+
+        # hparam_domain_discrete values needs to be same type as hparam_dict values
+        with self.assertRaises(TypeError):
+            summary.hparams(hp, mt, hparam_domain_discrete={"lr": [True]})
+
+        # only smoke test. Because protobuf map serialization is nondeterministic.
+        summary.hparams(hp, mt, hparam_domain_discrete=hp_domain)
 
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
@@ -608,7 +634,10 @@ class TestTensorBoardFigure(BaseTestCase):
         self.assertTrue(plt.fignum_exists(figure.number))
 
         writer.add_figure("add_figure/figure", figure, 1)
-        self.assertFalse(plt.fignum_exists(figure.number))
+        if matplotlib.__version__ != '3.3.0':
+            self.assertFalse(plt.fignum_exists(figure.number))
+        else:
+            print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 
         writer.close()
 
@@ -630,7 +659,10 @@ class TestTensorBoardFigure(BaseTestCase):
         self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+        if matplotlib.__version__ != '3.3.0':
+            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+        else:
+            print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 
         writer.close()
 

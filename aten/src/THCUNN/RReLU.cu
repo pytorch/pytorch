@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <utility>
+
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
@@ -7,12 +10,12 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
-#include <utility>
 
 // copied from cutorch/lib/THC/THCTensorRandom.cu
 #define MAX_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
-#define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+#define NUM_BLOCKS(n) \
+  (std::min((int)THCCeilDiv(n, (ptrdiff_t)BLOCK_SIZE), MAX_NUM_BLOCKS))
 
 template<typename T>
 inline T __device__ curand_uniform_type(curandStatePhilox4_32_10_t *state);

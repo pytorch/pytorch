@@ -4,7 +4,6 @@ from torch import ops
 import torch.jit as jit
 import glob
 import os
-import sys
 
 def get_custom_class_library_path():
     library_filename = glob.glob("build/*custom_class*")
@@ -20,34 +19,24 @@ def test_equality(f, cmp_key):
     return (cmp_key(obj1), cmp_key(obj2))
 
 class TestCustomOperators(unittest.TestCase):
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
-
     def setUp(self):
         ops.load_library(get_custom_class_library_path())
 
     def test_no_return_class(self):
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             return val.info()
         self.assertEqual(*test_equality(f, lambda x: x))
 
     def test_constructor_with_args(self):
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             return val
         self.assertEqual(*test_equality(f, lambda x: x.info()))
 
     def test_function_call_with_args(self):
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
             return val
 
@@ -55,7 +44,7 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_function_method_wrong_type(self):
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment("asdf")
             return val
 
@@ -65,8 +54,8 @@ class TestCustomOperators(unittest.TestCase):
     @unittest.skip("We currently don't support passing custom classes to custom methods.")
     def test_input_class_type(self):
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(1, 2)
-            val2 = torch.classes._TorchScriptTesting_Foo(2, 3)
+            val = torch.classes._TorchScriptTesting._Foo(1, 2)
+            val2 = torch.classes._TorchScriptTesting._Foo(2, 3)
             val.combine(val2)
             return val
 
@@ -74,14 +63,14 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_stack_string(self):
         def f():
-            val = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            val = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
             return val.pop()
         self.assertEqual(*test_equality(f, lambda x: x))
 
     def test_stack_push_pop(self):
         def f():
-            val = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
-            val2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
+            val = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
+            val2 = torch.classes._TorchScriptTesting._StackString(["111", "222"])
             val.push(val2.pop())
             return val.pop() + val2.pop()
         self.assertEqual(*test_equality(f, lambda x: x))

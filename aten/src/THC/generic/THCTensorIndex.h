@@ -8,8 +8,4 @@ THC_API void THCTensor_(indexSelect)(THCState *state, THCTensor *tensor, THCTens
 THC_API void THCTensor_(take)(THCState *state, THCTensor *res_, THCTensor *src, THCudaLongTensor *index);
 THC_API void THCTensor_(put)(THCState *state, THCTensor *res_, THCudaLongTensor *indices, THCTensor *src, int accumulate);
 
-#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
-THC_API void THCTensor_(indexAdd)(THCState *state, THCTensor *res_, int dim, THCudaLongTensor *indices, THCTensor *src);
-#endif
-
 #endif

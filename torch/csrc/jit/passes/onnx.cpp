@@ -3,9 +3,11 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
+#include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
@@ -55,7 +57,8 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
       AT_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
-      const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+      const auto& elem_type =
+          reinterpret_cast<ListType*>(type.get())->getElementType();
       if (elem_type->isSubtypeOf(TensorType::get())) {
         AT_ASSERTM(
             !has_tensor_list,
@@ -113,39 +116,43 @@ void preprocessCaffe2Ops(Block* block) {
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
-          AT_ASSERT(list_node->kind() == prim::ListConstruct);
-          const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+          const auto& elem_type = type->cast<ListType>()->getElementType();
+          AT_ASSERT(
+              list_node->kind() == prim::ListConstruct ||
+              list_node->kind() == prim::Constant);
           if (elem_type->isSubtypeOf(TensorType::get())) {
+            AT_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
             }
-          } else if (
-              elem_type->kind() == TypeKind::IntType ||
-              elem_type->kind() == TypeKind::BoolType) {
-            // TODO support list of ints and bools, needs c10 op for testing
-            throw std::runtime_error("List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
             std::vector<double> values;
-            for (const auto* elem_input : list_node->inputs()) {
-              const auto* constant_node = elem_input->node();
-              AT_ASSERT(constant_node->kind() == prim::Constant);
-              values.push_back(constant_node->f(attr::value));
+            if (list_node->kind() == prim::ListConstruct) {
+              for (const auto* elem_input : list_node->inputs()) {
+                const auto* constant_node = elem_input->node();
+                AT_ASSERT(constant_node->kind() == prim::Constant);
+                values.push_back(constant_node->f(attr::value));
+              }
+            } else { // is a constant list
+              values = list_node->fs(attr::value);
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
+            throw std::runtime_error(
+                "Unhandled scalar arg: " + arg.name() +
                 ", type: " + c10::typeKindToString(elem_type->kind()));
           }
         } else {
-          throw std::runtime_error("Unsupported input type of arg " +
-              arg.name() + " in Caffe2 operator: " +
-              c10::typeKindToString(type->kind()));
+          throw std::runtime_error(
+              "Unsupported input type of arg " + arg.name() +
+              " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
         }
       }
     }
   }
-  EliminateDeadCode(block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  EliminateDeadCode(
+      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
@@ -181,11 +188,16 @@ void BlockToONNX(
     return it->second;
   };
 
+  GRAPH_DEBUG(
+      "BlockToONNX: graph of old block: ",
+      old_block->owningGraph()->toString());
+
   // Initialize context and environment
   for (auto input : old_block->inputs()) {
     auto n = ctx.block->addInput()->copyMetadata(input);
     env[input] = n;
   }
+
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
@@ -208,11 +220,10 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        auto old_tensor_type = old->type()->cast<TensorType>();
-        if (old_tensor_type == nullptr || old_tensor_type->scalarType().has_value()) {
-          // Check if Tensor has scalartype when overwriting output type
-          outputs[i]->setType(old->type());
-        }
+        //
+        // If onnx shape inference is turned on, the new outputs will have
+        // types inferred, and they will be merged with the old types.
+        outputs[i]->setType(MergeInferredType(old->type(), outputs[i]->type()));
 
         // Copy over source location and scope information to all nodes
         // created by the symbolic
@@ -291,6 +302,7 @@ void BlockToONNX(
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
+    GRAPH_DUMP("after process output:", ctx.block->owningGraph());
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
@@ -336,7 +348,8 @@ void BlockToONNX(
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
     py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", opset_version);
+    onnx_registry.attr("register_op")(
+        op->name(), pyobj.attr("symbolic"), "", opset_version);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 
@@ -356,9 +369,11 @@ void BlockToONNX(
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
-    env.at(output)->setType(output->type());
   }
-  EliminateDeadCode(ctx.block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  EliminateDeadCode(
+      ctx.block,
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

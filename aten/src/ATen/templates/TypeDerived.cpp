@@ -1,7 +1,9 @@
 // required for old g++ to compile PRId64 macros, see
 // https://github.com/pytorch/pytorch/issues/3571
 // for context
+#ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
+#endif
 
 #include <ATen/${Type}.h>
 
@@ -27,7 +29,8 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
+#include <torch/library.h>
 $extra_cuda_headers
 $legacy_th_headers
 
@@ -46,11 +49,8 @@ ${type_derived_method_definitions}
 
 }  // namespace ${Type}
 
-#ifndef USE_STATIC_DISPATCH
-namespace {
-auto registerer = torch::RegisterOperators()
-  ${function_registrations};
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
+  ${function_registrations}
 }
-#endif
 
-}
+} // namespace at

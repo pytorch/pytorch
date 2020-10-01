@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
 import random
@@ -7,7 +6,7 @@ import sys
 import time
 import unittest
 
-from torch.testing._internal.common_utils import (PY3, TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
+from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
 
@@ -186,8 +185,8 @@ class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
 @unittest.skipIf(
-    IS_WINDOWS or not PY3,
-    "Fork is only available on Unix, get_context is only available in PY3",
+    IS_WINDOWS,
+    "Fork is only available on Unix",
 )
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'

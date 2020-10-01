@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -8,7 +8,7 @@ import torch
 import unittest
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 from scipy.stats import norm
 
 
@@ -785,6 +785,235 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(x_gpu, x_gpu_ref)
         x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
         torch.testing.assert_allclose(x_cpu, x_cpu_ref)
+
+    def test_index_hash_op(self):
+        data = np.random.randint(low=0, high=1000, size=(4, 4, 4))
+
+        def _index_hash_ref(X):
+            ref_op = core.CreateOperator(
+                "IndexHash", ["X"], ["Y"], seed=0, modulo=100
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _index_hash_ref(data)
+        actual_output = torch.ops._caffe2.IndexHash(
+            torch.tensor(data), seed=0, modulo=100
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_bucketize_op(self):
+        data = np.random.rand(8, 10).astype(np.float32) * 1000
+        boundaries = np.array([1, 10, 100, 1000, 100000]).astype(np.float32)
+
+        def _bucketize_ref(X):
+            ref_op = core.CreateOperator(
+                "Bucketize", ["X"], ["Y"], boundaries=boundaries
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _bucketize_ref(data)
+        actual_output = torch.ops._caffe2.Bucketize(
+            torch.tensor(data), boundaries
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    @given(X=hu.tensor(),
+           eps=st.floats(min_value=1e-4, max_value=1e-2),
+           )
+    def test_logit(self, X, eps):
+        def ref(X, eps):
+            ref_op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+        expected_output = ref(X, eps)
+        actual_output = torch.ops._caffe2.Logit(
+            torch.tensor(X), eps
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_percentile(self):
+        original_values = np.array([[3., 5., 3], [5., 1., 6.]]).astype(np.float32)
+        value_to_pct = np.array([[3, 0.2], [5, 0.5], [1, 0.3], [3, 0.6]]).astype(np.float32)
+        lengths = np.array([2, 1, 1]).astype(np.int32)
+
+        def _percentile_ref(original_values, value_to_pct, lengths):
+            ref_op = core.CreateOperator('Percentile', ["original_values", "value_to_pct", "lengths"], ["Y"])
+            workspace.FeedBlob("original_values", original_values)
+            workspace.FeedBlob("value_to_pct", value_to_pct)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _percentile_ref(original_values, value_to_pct, lengths)
+        actual_output = torch.ops._caffe2.Percentile(
+            torch.tensor(original_values), torch.Tensor(value_to_pct), torch.Tensor(lengths).int()
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_batch_bucket_one_hot_op(self):
+        data = np.array([[2, 3], [4, 1], [2, 5]]).astype(np.float32)
+        lengths = np.array([2, 3]).astype(np.int32)
+        boundaries = np.array([0.1, 2.5, 1, 3.1, 4.5]).astype(np.float32)
+
+        def _batch_bucket_one_hot_ref(data, lengths, boundaries):
+            ref_op = core.CreateOperator('BatchBucketOneHot', ["data", "lengths", "boundaries"], ["Y"])
+            workspace.FeedBlob("data", data)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.FeedBlob("boundaries", boundaries)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _batch_bucket_one_hot_ref(data, lengths, boundaries)
+        actual_output = torch.ops._caffe2.BatchBucketOneHot(
+            torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_gather_ranges_to_dense_op(self):
+        data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
+        ranges = np.array([[[2, 4]], [[0, 0]]])
+        key = np.array([0, 1, 3, 2, 1, 0, 1, 0])
+        lengths = np.array([4])
+        min_observation = 2
+        max_mismatched_ratio = 0.5
+        max_empty_ratio = 1.0
+
+        outputs_name = ["X_{}".format(i) for i in range(len(lengths))]
+        ref_op = core.CreateOperator(
+            "GatherRangesToDense",
+            ["data", "ranges", "key"],
+            outputs_name,
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+        workspace.FeedBlob("data", data)
+        workspace.FeedBlob("ranges", ranges)
+        workspace.FeedBlob("key", key)
+        workspace.RunOperatorOnce(ref_op)
+        ref_outputs = []
+        for output_name in outputs_name:
+            ref_outputs.append(workspace.FetchBlob(output_name))
+
+        outputs = torch.ops._caffe2.GatherRangesToDense(
+            torch.from_numpy(data),
+            torch.from_numpy(ranges),
+            torch.from_numpy(key),
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+
+        self.assertEqual(len(ref_outputs), len(outputs))
+        for i in range(0, len(ref_outputs)):
+            np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
+
+    @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
+    @settings(deadline=1000)
+    def test_merge_id_lists(self, lengths_0, lengths_1):
+        def _merge_id_lists(lengths, values):
+            ref_op = core.CreateOperator(
+                'MergeIdLists',
+                ["lengths_0", "values_0", "lengths_1", "values_1"],
+                ["merged_lengths", "merged_values"]
+            )
+            workspace.FeedBlob("lengths_0", lengths[0])
+            workspace.FeedBlob("values_0", values[0])
+            workspace.FeedBlob("lengths_1", lengths[1])
+            workspace.FeedBlob("values_1", values[1])
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("merged_lengths"), workspace.FetchBlob("merged_values")
+
+        lengths = [np.array([lengths_0]).astype(np.int32), np.array([lengths_1]).astype(np.int32)]
+        values = [
+            np.random.choice(np.arange(0, 10), size=lengths_0, replace=False).astype(np.int32),
+            np.random.choice(np.arange(10, 20), size=lengths_1, replace=False).astype(np.int32)
+        ]
+
+        expected_merged_lengths, expected_merged_values = _merge_id_lists(lengths, values)
+        output_merged_lengths, output_merged_values = torch.ops._caffe2.MergeIdLists(
+            [torch.tensor(lengths[0]), torch.tensor(values[0]), torch.tensor(lengths[1]), torch.tensor(values[1])]
+        )
+        torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
+        torch.testing.assert_allclose(expected_merged_values, output_merged_values)
+
+    def test_learning_rate(self):
+        base_lr = 0.05
+        no_iter = torch.tensor([0])
+        one_iter = torch.tensor([1])
+        two_iter = torch.tensor([2])
+
+        # Fixed policy
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter, base_lr=base_lr, policy="fixed"
+            ),
+        )
+
+        # Step policy
+        gamma = 0.99
+        stepsize = 1
+
+        self.assertEqual(
+            base_lr,
+            torch.ops._caffe2.LearningRate(
+                iterations=no_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (1.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=one_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+        self.assertAlmostEqual(
+            base_lr * (gamma ** (2.0 / stepsize)),
+            torch.ops._caffe2.LearningRate(
+                iterations=two_iter,
+                base_lr=base_lr,
+                policy="step",
+                stepsize=stepsize,
+                gamma=gamma,
+            ),
+        )
+
+    def test_pack_segments(self):
+        s = torch.rand(3, 3, 3)
+        lengths = torch.tensor([2, 1])
+        packed_tensor, _ = torch.ops._caffe2.PackSegments(
+            lengths,
+            s,
+        )
+        self.assertEqual(packed_tensor.numpy().shape, (2, 2, 3, 3))
+        unpacked_tensor = torch.ops._caffe2.UnpackSegments(
+            lengths,
+            packed_tensor,
+        )
+        torch.testing.assert_allclose(s, unpacked_tensor)
+
 
 
 if __name__ == '__main__':

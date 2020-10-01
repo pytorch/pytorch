@@ -35,6 +35,13 @@ __MATH_FUNCTIONS_DECL__ double exp(double x) {
   return ::exp(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float ceil(float x) {
+  return ::ceilf(x);
+}
+__MATH_FUNCTIONS_DECL__ double ceil(double x) {
+  return ::ceil(x);
+}
+
 __MATH_FUNCTIONS_DECL__ float floor(float x) {
   return ::floorf(x);
 }
@@ -49,11 +56,26 @@ __MATH_FUNCTIONS_DECL__ double log(double x) {
   return ::log(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float log1p(float x) {
+  return ::log1pf(x);
+}
+
+__MATH_FUNCTIONS_DECL__ double log1p(double x) {
+  return ::log1p(x);
+}
+
 __MATH_FUNCTIONS_DECL__ float max(float x, float y) {
   return ::fmaxf(x, y);
 }
 __MATH_FUNCTIONS_DECL__ double max(double x, double y) {
   return ::fmax(x, y);
+}
+
+__MATH_FUNCTIONS_DECL__ float min(float x, float y) {
+  return ::fminf(x, y);
+}
+__MATH_FUNCTIONS_DECL__ double min(double x, double y) {
+  return ::fmin(x, y);
 }
 
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {

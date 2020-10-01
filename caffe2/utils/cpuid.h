@@ -18,6 +18,9 @@ CAFFE2_API const CpuId& GetCpuId();
 // Implementation of CpuId that is borrowed from folly.
 ///////////////////////////////////////////////////////////////////////////////
 
+// TODO: It might be good to use cpuinfo third-party dependency instead for
+// consistency sake.
+
 /**
  * Identification of an Intel CPU.
  * Supports CPUID feature flags (EAX=1) and extended features (EAX=7, ECX=0).

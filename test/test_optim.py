@@ -6,6 +6,7 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
+import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -13,6 +14,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
+from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -32,6 +34,8 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
+    exact_dtype = True
+
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
         if scheduler_constructors is None:
@@ -157,6 +161,12 @@ class TestOptim(TestCase):
             self.assertEqual(bias, bias_c)
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+        # Make sure state dict is deterministic with equal but not identical parameters
+        self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
+        # Make sure repeated parameters have identical representation in state dict
+        optimizer_c.param_groups.extend(optimizer_c.param_groups)
+        self.assertEqual(optimizer.state_dict()['param_groups'][-1],
+                         optimizer_c.state_dict()['param_groups'][-1])
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
@@ -240,99 +250,199 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD(
-                self._build_params_dict_single(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD(
-                self._build_params_dict_single(weight, bias, lr=1e-2))
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
-             lambda opt: ExponentialLR(opt, gamma=0.99),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
-            optim.SGD(None, lr=1e-2, momentum=-0.5)
+        for optimizer in [optim.SGD, optim_mt.SGD]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict_single(weight, bias, lr=1e-2))
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+                 lambda opt: ExponentialLR(opt, gamma=0.99),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+                optimizer(None, lr=1e-2, momentum=-0.5)
 
     def test_sgd_sparse(self):
-        self._test_rosenbrock_sparse(
-            lambda params: optim.SGD(params, lr=5e-3)
-        )
-        self._test_rosenbrock_sparse(
-            lambda params: optim.SGD(params, lr=0.005),
-            [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
-        )
+        for optimizer in [optim.SGD, optim_mt.SGD]:
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=5e-3)
+            )
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=0.005),
+                [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
+            )
+
+    @skipIfRocm
+    def test_multi_tensor_optimizers(self):
+        if not torch.cuda.is_available():
+            return
+
+        optimizer_pairs_with_flags = [
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
+            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
+            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
+            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
+            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
+            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
+            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
+            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
+            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
+            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
+        ]
+
+        kIterations = 1001
+        device = 'cuda'
+
+        for optimizers, params in optimizer_pairs_with_flags:
+            res = []
+            for opt in optimizers:
+                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
+                                      dtype=torch.float64, device=device, requires_grad=True)
+                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
+                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
+                                       dtype=torch.float64, device=device, requires_grad=True)
+                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
+                input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
+
+                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
+                                            torch.nn.Sigmoid(),
+                                            torch.nn.Linear(3, 1),
+                                            torch.nn.Sigmoid())
+                model.to(torch.float64).to(device)
+
+                pretrained_dict = model.state_dict()
+                pretrained_dict['0.weight'] = weight
+                pretrained_dict['0.bias'] = bias
+                pretrained_dict['2.weight'] = weight2
+                pretrained_dict['2.bias'] = bias2
+                model.load_state_dict(pretrained_dict)
+
+                optimizer = opt(model.parameters(), **params)
+
+                for _ in range(kIterations): 
+                    optimizer.zero_grad()
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
+
+                    if iter == 0:
+                        model.parameters().__next__().grad = None
+
+                    optimizer.step()
+
+                res.append(model.parameters())
+
+            for p1, p2 in zip(res[0], res[1]):
+                self.assertEqual(p1, p2)
+
 
     def test_adam(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
-                                            amsgrad=True)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3, amsgrad=True)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
-                                            amsgrad=True),
-            [lambda opt: ExponentialLR(opt, gamma=0.9),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3, amsgrad=True),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
+        for optimizer in [optim.Adam, optim_mt.Adam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_adamw(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.AdamW(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
+        for optimizer in [optim.AdamW, optim_mt.AdamW]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -342,25 +452,33 @@ class TestOptim(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([torch.zeros(3, layout=torch.sparse_coo)])
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
     def test_adadelta(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adadelta([weight, bias])
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adadelta(
-                self._build_params_dict(weight, bias, rho=0.95))
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adadelta(
-                self._build_params_dict(weight, bias, rho=0.95)),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-             lambda opt: ReduceLROnPlateau(opt)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
-            optim.Adadelta(None, lr=1e-2, rho=1.1)
+        for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias])
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95))
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95)),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
+                optimizer(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
         self._test_basic_cases(
@@ -402,52 +520,84 @@ class TestOptim(TestCase):
         )
 
     def test_adamax(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adamax(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1)
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
-            optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
+        for optimizer in [optim.Adamax, optim_mt.Adamax]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
+                optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_rmsprop(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.RMSprop(
-                self._build_params_dict(weight, bias, lr=1e-3),
-                lr=1e-2)
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
-            optim.RMSprop(None, lr=1e-2, momentum=-1.0)
+        for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-2)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, centered=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, centered=True, momentum=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, momentum=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, momentum=0.1, weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
+                optimizer(None, lr=1e-2, momentum=-1.0)
 
     def test_asgd(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.ASGD(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3, t0=100)
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
-            optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
+        for optimizer in [optim.ASGD, optim_mt.ASGD]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, t0=100)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-3),
+                    lr=1e-2, weight_decay=1)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
+                optimizer(None, lr=1e-2, weight_decay=-0.5)
 
     def test_rprop(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Rprop(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
-            optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
+        for optimizer in [optim.Rprop, optim_mt.Rprop]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
+                optimizer(None, lr=1e-2, etas=(1.0, 0.5))
 
     def test_lbfgs(self):
         self._test_basic_cases(
@@ -476,6 +626,14 @@ class TestOptim(TestCase):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
 
+    def test_duplicate_params_in_param_group(self):
+        param = Variable(torch.randn(5, 5))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            optim.SGD([param, param], lr=0.1)
+            self.assertEqual(len(w), 1)
+            self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
@@ -502,12 +660,32 @@ class LambdaLRTestObject:
 
 
 class TestLRScheduler(TestCase):
+    exact_dtype = True
+
     def setUp(self):
         super(TestLRScheduler, self).setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+
+    def test_error_when_getlr_has_epoch(self):
+        class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
+            def __init__(self, optimizer, gamma, milestones, last_epoch=-1):
+                self.init_lr = [group['lr'] for group in optimizer.param_groups]
+                self.gamma = gamma
+                self.milestones = milestones
+                super().__init__(optimizer, last_epoch)
+
+            def get_lr(self, step):
+                global_step = self.last_epoch
+                gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m])[-1]
+                return [init_lr * (self.gamma ** gamma_power) for init_lr in self.init_lr]
+
+        optimizer = torch.optim.SGD([torch.rand(1)], lr=1)
+
+        with self.assertRaises(TypeError):
+            scheduler = MultiStepLR(optimizer, gamma=1, milestones=[10, 20])
 
     def test_no_cyclic_references(self):
         import gc
@@ -533,7 +711,7 @@ class TestLRScheduler(TestCase):
         gc.collect()
         del optim
         self.assertEqual(
-            gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
+            gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
 
     def test_old_pattern_warning(self):
         epochs = 35
@@ -547,7 +725,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern)
 
     def test_old_pattern_warning_with_arg(self):
         epochs = 35
@@ -561,7 +739,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
@@ -578,7 +756,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern)
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
@@ -595,7 +773,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
@@ -623,7 +801,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+        self.assertWarnsRegex(UserWarning, r'how-to-adjust-learning-rate', old_pattern2)
 
     def test_new_pattern_no_warning(self):
         epochs = 35
@@ -676,7 +854,7 @@ class TestLRScheduler(TestCase):
                 self.opt.step()
                 scheduler.step()
 
-        self.assertWarnsRegex(new_pattern, r'`optimizer.step\(\)` has been overridden')
+        self.assertWarnsRegex(UserWarning, r'`optimizer.step\(\)` has been overridden', new_pattern)
 
     def _test_lr_is_constant_for_constant_epoch(self, scheduler):
         l = []
@@ -684,7 +862,7 @@ class TestLRScheduler(TestCase):
         for _ in range(10):
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
-        self.assertAlmostEqual(min(l), max(l))
+        self.assertEqual(min(l), max(l))
 
     def test_step_lr_is_constant_for_constant_epoch(self):
         scheduler = StepLR(self.opt, 2)
@@ -733,6 +911,17 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
+
+    def test_multi_step_lr_with_epoch(self):
+        # lr = 0.05     if epoch < 2
+        # lr = 0.005    if 2 <= epoch < 5
+        # lr = 0.0005   if epoch < 9
+        # lr = 0.00005   if epoch >= 9
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test_with_epoch(scheduler, targets, epochs)
 
     def test_exp_lr(self):
         epochs = 10
@@ -1305,6 +1494,80 @@ class TestLRScheduler(TestCase):
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
 
+    def test_swalr_no_anneal(self):
+        epochs, swa_start, swa_lr = 10, 5, 0.01
+        initial_lrs = [group['lr'] for group in self.opt.param_groups]
+        targets = [[lr] * (swa_start + 1) + [swa_lr] * (epochs - swa_start - 1)
+                   for lr in initial_lrs]
+        swa_scheduler = SWALR(self.opt, anneal_epochs=1, swa_lr=swa_lr)
+        self._test_swalr(swa_scheduler, None, targets, swa_start, epochs)
+
+    def test_swalr_cosine_anneal_after_multiplicative(self):
+        # same swa_lr for different param_groups
+        epochs, swa_start, swa_lr, anneal_epochs = 15, 5, 0.01, 5
+        mult_factor = 0.9
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
+        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs, swa_lr=swa_lr)
+
+        def anneal_coef(t):
+            if t + 1 >= anneal_epochs:
+                return 0.
+            return (1 + math.cos(math.pi * (t + 1) / anneal_epochs)) / 2
+
+        initial_lrs = [group['lr'] for group in self.opt.param_groups]
+        targets_before_swa = [[lr * mult_factor**i for i in range(swa_start + 1)]
+                              for lr in initial_lrs]
+        swa_epochs = epochs - swa_start - 1
+        targets = [lrs + [lrs[-1] * anneal_coef(t) + swa_lr * (1 - anneal_coef(t)) for t in range(swa_epochs)]
+                   for lrs in targets_before_swa]
+
+        self._test_swalr(swa_scheduler, scheduler, targets, swa_start, epochs)
+
+    def test_swalr_linear_anneal_after_multiplicative(self):
+        # separate swa_lr for different param_groups
+        epochs, swa_start, swa_lrs, anneal_epochs = 15, 5, [0.01, 0.02], 4
+        mult_factor = 0.9
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
+        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs,
+                              anneal_strategy="linear", swa_lr=swa_lrs)
+
+        def anneal_coef(t):
+            if t + 1 >= anneal_epochs:
+                return 0.
+            return 1 - (t + 1) / anneal_epochs
+
+        initial_lrs = [group['lr'] for group in self.opt.param_groups]
+        targets_before_swa = [[lr * mult_factor**i for i in range(swa_start + 1)]
+                              for lr in initial_lrs]
+        swa_epochs = epochs - swa_start - 1
+        targets = [lrs + [lrs[-1] * anneal_coef(t) + swa_lr * (1 - anneal_coef(t)) for t in range(swa_epochs)]
+                   for lrs, swa_lr in zip(targets_before_swa, swa_lrs)]
+
+        self._test_swalr(swa_scheduler, scheduler, targets, swa_start, epochs)
+
+    def _test_swalr(self, swa_scheduler, scheduler, targets, swa_start, epochs):
+        for epoch in range(epochs):
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
+            if epoch >= swa_start:
+                swa_scheduler.step()
+            elif scheduler is not None:
+                scheduler.step()
+
+    def test_swalr_hypers(self):
+        # Test that SWALR raises errors for incorrect hyper-parameters
+        with self.assertRaisesRegex(ValueError, "anneal_strategy must"):
+            swa_scheduler = SWALR(self.opt, anneal_strategy="exponential", swa_lr=1.)
+
+        with self.assertRaisesRegex(ValueError, "anneal_epochs must"):
+            swa_scheduler = SWALR(self.opt, anneal_epochs=-1, swa_lr=1.)
+        with self.assertRaisesRegex(ValueError, "anneal_epochs must"):
+            swa_scheduler = SWALR(self.opt, anneal_epochs=1.7, swa_lr=1.)
+        with self.assertRaisesRegex(ValueError, "swa_lr must"):
+            swa_scheduler = SWALR(self.opt, swa_lr=[1., 0.1, 0.01])
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1336,7 +1599,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_fn(self):
         scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
@@ -1347,7 +1610,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'lr_lambdas'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_obj(self):
         scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
@@ -1358,12 +1621,17 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
             lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+
+    def test_swa_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: SWALR(self.opt, anneal_epochs=3, swa_lr=0.5),
+            lambda: SWALR(self.opt, anneal_epochs=10, anneal_strategy="linear", swa_lr=5.))
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
@@ -1373,8 +1641,8 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key != 'optimizer':
-                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
-        self.assertAlmostEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+        self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
 
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
@@ -1383,20 +1651,29 @@ class TestLRScheduler(TestCase):
             result = [scheduler.get_last_lr() for scheduler in schedulers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
-            # print(target)
             for t, r in zip(target, result):
-                self.assertAlmostEqual(target, result,
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, t, r), delta=1e-5)
+                self.assertEqual(target, result,
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, t, r), atol=1e-5, rtol=0)
+
+    def _test_with_epoch(self, schedulers, targets, epochs=10):
+        if isinstance(schedulers, _LRScheduler):
+            schedulers = [schedulers]
+        for epoch in range(epochs):
+            [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             [scheduler.step() for scheduler in schedulers]
 
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
@@ -1404,17 +1681,17 @@ class TestLRScheduler(TestCase):
             epoch = round(epoch.item(), 1)
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[index], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[index], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[index], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[index], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
         for index, epoch in enumerate(epochs):
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[index], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[index], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[index], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[index], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_against_closed_form(self, scheduler, closed_form_scheduler, epochs=10):
         self.setUp()
@@ -1426,9 +1703,9 @@ class TestLRScheduler(TestCase):
         for epoch in range(epochs):
             scheduler.step()
             for i, param_group in enumerate(self.opt.param_groups):
-                self.assertAlmostEqual(targets[epoch][i], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, targets[epoch][i], param_group['lr']), delta=1e-5)
+                self.assertEqual(targets[epoch][i], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, targets[epoch][i], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_reduce_lr_on_plateau(self, schedulers, targets, metrics, epochs=10, verbose=False):
         if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
@@ -1442,9 +1719,9 @@ class TestLRScheduler(TestCase):
             if verbose:
                 print('epoch{}:\tlr={}'.format(epoch, self.opt.param_groups[0]['lr']))
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False, use_beta1=False):
         for batch_num in range(batch_iterations):
@@ -1459,21 +1736,21 @@ class TestLRScheduler(TestCase):
                     print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
 
             for param_group, lr_target, momentum_target in zip(self.opt.param_groups, lr_targets, momentum_targets):
-                self.assertAlmostEqual(
+                self.assertEqual(
                     lr_target[batch_num], param_group['lr'],
                     msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
-                        batch_num, lr_target[batch_num], param_group['lr']), delta=1e-5)
+                        batch_num, lr_target[batch_num], param_group['lr']), atol=1e-5, rtol=0)
 
                 if use_beta1 and 'betas' in param_group.keys():
-                    self.assertAlmostEqual(
+                    self.assertEqual(
                         momentum_target[batch_num], param_group['betas'][0],
                         msg='Beta1 is wrong in batch_num {}: expected {}, got {}'.format(
-                            batch_num, momentum_target[batch_num], param_group['betas'][0]), delta=1e-5)
+                            batch_num, momentum_target[batch_num], param_group['betas'][0]), atol=1e-5, rtol=0)
                 elif 'momentum' in param_group.keys():
-                    self.assertAlmostEqual(
+                    self.assertEqual(
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
-                            batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+                            batch_num, momentum_target[batch_num], param_group['momentum']), atol=1e-5, rtol=0)
             scheduler.step()
 
     def test_cosine_then_cyclic(self):
@@ -1498,6 +1775,249 @@ class TestLRScheduler(TestCase):
             last_lr = optimizer.param_groups[0]["lr"]
 
         self.assertLessEqual(last_lr, max_lr)
+
+
+class SWATestDNN(torch.nn.Module):
+    def __init__(self, input_features):
+        super(SWATestDNN, self).__init__()
+        self.n_features = 100
+        self.fc1 = torch.nn.Linear(input_features, self.n_features)
+        self.bn = torch.nn.BatchNorm1d(self.n_features)
+
+    def compute_preactivation(self, x):
+        return self.fc1(x)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.bn(x)
+        return x
+
+
+class SWATestCNN(torch.nn.Module):
+    def __init__(self, input_channels):
+        super(SWATestCNN, self).__init__()
+        self.n_features = 10
+        self.conv1 = torch.nn.Conv2d(input_channels, self.n_features, kernel_size=3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)
+
+    def compute_preactivation(self, x):
+        return self.conv1(x)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn(x)
+        return x
+
+
+class TestSWAUtils(TestCase):
+
+    def _test_averaged_model(self, net_device, swa_device):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=2),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
+            torch.nn.Conv2d(5, 2, kernel_size=3),
+            torch.nn.ReLU(),
+            torch.nn.Linear(5, 5),
+            torch.nn.ReLU(),
+            torch.nn.Linear(5, 10)
+        ).to(net_device)
+
+        averaged_dnn = AveragedModel(dnn, device=swa_device)
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+        n_updates = 10
+        for i in range(n_updates):
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.detach().add_(torch.randn_like(p))
+                p_avg += p.detach() / n_updates
+            averaged_dnn.update_parameters(dnn)
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+            # Check that AveragedModel is on the correct device
+            self.assertTrue(p_swa.device == swa_device)
+            self.assertTrue(p.device == net_device)
+        self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
+
+    def test_averaged_model_all_devices(self):
+        cpu = torch.device("cpu")
+        self._test_averaged_model(cpu, cpu)
+        if torch.cuda.is_available():
+            cuda = torch.device(0)
+            self._test_averaged_model(cuda, cpu)
+            self._test_averaged_model(cpu, cuda)
+            self._test_averaged_model(cuda, cuda)
+
+    def test_averaged_model_mixed_device(self):
+        if not torch.cuda.is_available():
+            return
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.Linear(5, 10)
+        )
+        dnn[0].cuda()
+        dnn[1].cpu()
+        averaged_dnn = AveragedModel(dnn)
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+        n_updates = 10
+        for i in range(n_updates):
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.detach().add_(torch.randn_like(p))
+                p_avg += p.detach() / n_updates
+            averaged_dnn.update_parameters(dnn)
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+            # Check that AveragedModel is on the correct device
+            self.assertTrue(p_avg.device == p_swa.device)
+
+    def test_averaged_model_state_dict(self):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.Linear(5, 10)
+        )
+        averaged_dnn = AveragedModel(dnn)
+        averaged_dnn2 = AveragedModel(dnn)
+        n_updates = 10
+        for i in range(n_updates):
+            for p in dnn.parameters():
+                p.detach().add_(torch.randn_like(p))
+            averaged_dnn.update_parameters(dnn)
+        averaged_dnn2.load_state_dict(averaged_dnn.state_dict())
+        for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
+            self.assertEqual(p_swa, p_swa2)
+        self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
+
+    def test_averaged_model_exponential(self):
+        # Test AveragedModel with EMA as avg_fn
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.Linear(5, 10)
+        )
+        alpha = 0.9
+
+        def avg_fn(p_avg, p, n_avg):
+            return alpha * p_avg + (1 - alpha) * p
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn)
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+        n_updates = 10
+        for i in range(n_updates):
+            updated_averaged_params = []
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.detach().add_(torch.randn_like(p))
+                if i == 0:
+                    updated_averaged_params.append(p.clone())
+                else:
+                    updated_averaged_params.append((p_avg * alpha +
+                                                   p * (1 - alpha)).clone())
+            averaged_dnn.update_parameters(dnn)
+            averaged_params = updated_averaged_params
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+
+    def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
+
+        preactivation_sum = torch.zeros(dnn.n_features)
+        preactivation_squared_sum = torch.zeros(dnn.n_features)
+        if cuda:
+            preactivation_sum = preactivation_sum.cuda()
+            preactivation_squared_sum = preactivation_squared_sum.cuda()
+        total_num = 0
+        for x in dl_x:
+            x = x[0]
+            if cuda:
+                x = x.cuda()
+
+            dnn.forward(x)
+            preactivations = dnn.compute_preactivation(x)
+            if len(preactivations.shape) == 4:
+                preactivations = preactivations.transpose(1, 3)
+            preactivations = preactivations.contiguous().view(-1, dnn.n_features)
+            total_num += preactivations.shape[0]
+
+            preactivation_sum += torch.sum(preactivations, dim=0)
+            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)
+
+        preactivation_mean = preactivation_sum / total_num
+        preactivation_var = preactivation_squared_sum / total_num
+        preactivation_var = preactivation_var - preactivation_mean**2
+
+        update_bn(dl_xy, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
+
+        def _reset_bn(module):
+            if issubclass(module.__class__,
+                          torch.nn.modules.batchnorm._BatchNorm):
+                module.running_mean = torch.zeros_like(module.running_mean)
+                module.running_var = torch.ones_like(module.running_var)
+        # reset batch norm and run update_bn again
+        dnn.apply(_reset_bn)
+        update_bn(dl_xy, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
+        # using the dl_x loader instead of dl_xy
+        dnn.apply(_reset_bn)
+        update_bn(dl_x, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, atol=1e-1, rtol=0)
+
+    def test_update_bn_dnn(self):
+        # Test update_bn for a fully-connected network with BatchNorm1d
+        objects, input_features = 100, 5
+        x = torch.rand(objects, input_features)
+        y = torch.rand(objects)
+        ds_x = torch.utils.data.TensorDataset(x)
+        ds_xy = torch.utils.data.TensorDataset(x, y)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
+        dnn = SWATestDNN(input_features=input_features)
+        dnn.train()
+        self._test_update_bn(dnn, dl_x, dl_xy, False)
+        if torch.cuda.is_available():
+            dnn = SWATestDNN(input_features=input_features)
+            dnn.train()
+            self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(dnn.training)
+
+    def test_update_bn_cnn(self):
+        # Test update_bn for convolutional network and BatchNorm2d
+        objects = 100
+        input_channels = 3
+        height, width = 5, 5
+        x = torch.rand(objects, input_channels, height, width)
+        y = torch.rand(objects)
+        ds_x = torch.utils.data.TensorDataset(x)
+        ds_xy = torch.utils.data.TensorDataset(x, y)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
+        dnn = SWATestCNN(input_channels=input_channels)
+        dnn.train()
+        self._test_update_bn(dnn, dl_x, dl_xy, False)
+        if torch.cuda.is_available():
+            dnn = SWATestCNN(input_channels=input_channels)
+            dnn.train()
+            self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(dnn.training)
+
+    def test_bn_update_eval_momentum(self):
+        # check that update_bn preserves eval mode
+        objects = 100
+        input_channels = 3
+        height, width = 5, 5
+        x = torch.rand(objects, input_channels, height, width)
+        ds_x = torch.utils.data.TensorDataset(x)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dnn = SWATestCNN(input_channels=input_channels)
+        dnn.eval()
+        update_bn(dl_x, dnn)
+        self.assertFalse(dnn.training)
+
+        # check that momentum is preserved
+        self.assertEqual(dnn.bn.momentum, 0.3)
+
 
 if __name__ == '__main__':
     run_tests()

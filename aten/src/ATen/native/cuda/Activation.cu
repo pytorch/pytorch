@@ -2,19 +2,23 @@
 
 #include <ATen/native/Activation.h>
 
-#include <math.h>
+#include <cmath>
+
+#include <thrust/tuple.h>
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
-
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // -----------------------------------
 // prelu forward
@@ -23,16 +27,14 @@ template <typename scalar_t>
 void prelu_cuda_kernel_share_weights(
   const Tensor& input,
   Tensor& result,
-  const scalar_t* weight_data) {
+  const scalar_t* weight_data)
+{
+  auto iter = TensorIterator::unary_op(result, input);
 
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-    input,
-    result,
-    [=] __device__ (
-      const scalar_t& input_val,
-      scalar_t& result_val) {
-        result_val = (input_val > 0) ? input_val : *weight_data * input_val;
-  });
+  at::native::gpu_kernel(iter,
+    [weight_data] GPU_LAMBDA (scalar_t input_val) {
+        return (input_val > 0) ? input_val : *weight_data * input_val;
+    });
 }
 
 template <typename scalar_t>
@@ -69,7 +71,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
 
   // case1: shared weight for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_cuda", [&] {
       prelu_cuda_kernel_share_weights<scalar_t>(
         input,
         result,
@@ -101,7 +103,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_cuda", [&] {
       prelu_cuda_kernel_multi_weights<scalar_t>
       <<<grid, block, 0, stream>>>(
         result.data_ptr<scalar_t>(),
@@ -125,19 +127,18 @@ void prelu_cuda_backward_kernel_share_weights(
   Tensor& input_grad,
   Tensor& weight_grad_collector,
   const scalar_t* weight_data) {
+  at::TensorIterator iter = TensorIteratorConfig()
+      .add_output(input_grad)
+      .add_output(weight_grad_collector)
+      .add_input(input)
+      .add_input(grad_out)
+      .build();
 
-  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
-    input,
-    grad_out,
-    input_grad,
-    weight_grad_collector,
-    [=] __device__ (
-      const scalar_t& input_val,
-      const scalar_t& grad_out_val,
-      scalar_t& input_grad_val,
-      scalar_t& weight_grad_collector_val) {
-        input_grad_val = (input_val > 0) ? grad_out_val : *weight_data * grad_out_val;
-        weight_grad_collector_val = (input_val > 0) ? scalar_t(0) : input_val * grad_out_val;
+  // N.B. `std::tuple` does not support `::operator=` on device code.
+  gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t input, scalar_t grad_out) -> thrust::tuple<scalar_t, scalar_t> {
+    scalar_t input_grad = input > 0 ? grad_out : (*weight_data) * grad_out;
+    scalar_t weight_grad_collector = input > 0 ? scalar_t(0) : input * grad_out;
+    return {input_grad, weight_grad_collector};
   });
 }
 
@@ -182,7 +183,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
   Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // case1: shared parameter for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_backward_cuda", [&] {
       prelu_cuda_backward_kernel_share_weights<scalar_t>(
         input,
         grad_out,
@@ -217,7 +218,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_backward_cuda", [&] {
       prelu_cuda_backward_kernel_multi_weights<scalar_t>
       <<<grid, block, 0, stream>>>(
         input.data_ptr<scalar_t>(),
@@ -244,7 +245,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // hardshrink
 // -----------------------------------
 void hardshrink_kernel(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardshrink_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
       return (a >= -lambd && a <= lambd) ? scalar_t(0) : a;
@@ -253,7 +254,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar value) {
 }
 
 void softshrink_kernel(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softshrink_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
       return a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0));
@@ -262,7 +263,7 @@ void softshrink_kernel(TensorIterator& iter, Scalar value) {
 }
 
 void shrink_backward_kernel(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "shrink_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "shrink_backward_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
       return (self_val >= -lambd && self_val <= lambd) ? scalar_t(0) : grad_val;
@@ -271,7 +272,7 @@ void shrink_backward_kernel(TensorIterator& iter, Scalar value) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardtanh_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "hardtanh_backward_cuda", [&]() {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     gpu_kernel(iter, [min_val, max_val]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -281,7 +282,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
 }
 
 void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -291,7 +292,7 @@ void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
 }
 
 void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_backward_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
     gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -309,38 +310,24 @@ void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t va
 }
 
 static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "threshold_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "threshold_cuda", [&] {
     threshold_kernel_impl<scalar_t>(iter, threshold.to<scalar_t>(), value.to<scalar_t>());
   });
 }
 
 void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
     gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // WARNING (@zasdfgbnm, 2020-01-16): This is very fragile!
-      //
-      // The code below does not look like a great implementation because both positive
-      // and negative case are computed regardless of the condition, and you might want
-      // to optimize this. But this implementation is due to a compiler bug in handling
-      // branch. If we implement it in a correct way, the generated code will produce
-      // wrong result. This bug should be fixed in future CUDA, but we will need this
-      // workaround for maybe years until all the current CUDAs become obsolete.
-      //
-      // TODO: this workaround might become no longer necessary if the implementation of
-      // GPU loop in `Loops.cuh` is changed. We should make this great again once that
-      // change happens.
-      scalar_t positive_case = a * poscoef;
-      scalar_t negative_case = (static_cast<scalar_t>(std::exp(a * negiptcoef)) - scalar_t(1.)) * negcoef;
-      return a > scalar_t(0) ? positive_case : negative_case;
+      return a > scalar_t(0) ? a * poscoef : (static_cast<scalar_t>(std::exp(a * negiptcoef)) - scalar_t(1.)) * negcoef;
     });
   });
 }
 
 void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_backward_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
@@ -353,33 +340,37 @@ void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scala
 namespace {
 
 void GeluCUDAKernelImpl(TensorIterator& it) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(it.dtype(), "GeluCUDAKernelImpl", [&]() {
-    using T_ACC = acc_type<scalar_t, true>;
-    gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-      return static_cast<T_ACC>(x) *
-          c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "GeluCUDAKernelImpl", [&] {
+      using T_ACC = acc_type<scalar_t, true>;
+      gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+        return static_cast<T_ACC>(x) *
+            c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+      });
     });
   });
 }
 
 void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
-        using T_ACC = acc_type<scalar_t, true>;
-        gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
-          constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
-          const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
-          const T_ACC pdf =
-              c10::cuda::compat::exp(
-                  T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
-              kBeta;
-          return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "GeluBackwardCUDAKernelImpl", [&] {
+          using T_ACC = acc_type<scalar_t, true>;
+          gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+            constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
+            const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+            const T_ACC pdf =
+                c10::cuda::compat::exp(
+                    T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
+                kBeta;
+            return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
+          });
         });
       });
 }
 
 void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_cuda", [&]() {
     auto negval = negval_.to<scalar_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a) -> scalar_t {
       return a > scalar_t(0) ? a : a * negval;
@@ -388,12 +379,117 @@ void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
 }
 
 void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_backward_cuda", [&]() {
     auto negval = negval_.to<scalar_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a > scalar_t(0) ? b : b * negval;
     });
   });
+}
+
+void hardswish_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardswish_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      const scalar_t three(3.0f);
+      const scalar_t six(6.0f);
+      gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
+        return self_val * std::min(std::max(self_val + three, zero), six) * one_sixth;
+      });
+    });
+  });
+}
+
+void hardswish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardswish_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t three(3.0f);
+      const scalar_t neg_three(-3.0f);
+      const scalar_t one_half(0.5f);
+      gpu_kernel(
+        iter, 
+        [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+          if (self_val < neg_three) {
+            return zero;
+          } else if (self_val <= three) {
+            return grad_val * ((self_val / three) + one_half);
+          } else {
+            return grad_val;
+          }
+      });
+    });
+  });
+}
+
+void hardsigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      const scalar_t three(3.0f);
+      const scalar_t six(6.0f);
+      gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
+        return std::min(std::max(self_val + three, zero), six) * one_sixth;
+      });
+    });
+  });
+}
+
+void hardsigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardsigmoid_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t three(3.0f);
+      const scalar_t neg_three(-3.0f);
+      const scalar_t one_sixth(1.0f / 6.0f);
+      gpu_kernel(
+        iter, 
+        [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+          return (self_val >= neg_three && self_val <= three)
+            ? grad_val * one_sixth
+            : zero;
+      });
+    });
+  });
+}
+
+void silu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "silu_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+              using T_ACC = acc_type<scalar_t, true>;
+              const T_ACC x_acc = static_cast<T_ACC>(x);
+              return x_acc / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+            });
+      });
+}
+
+void silu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "silu_backward_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+              using T_ACC = acc_type<scalar_t, true>;
+              const T_ACC dy_acc = static_cast<T_ACC>(dy);
+              const T_ACC x_acc = static_cast<T_ACC>(x);
+              const T_ACC s_acc =
+                  T_ACC(1) / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+              return dy_acc * s_acc * (T_ACC(1) + x_acc * (T_ACC(1) - s_acc));
+            });
+      });
 }
 
 } // namespace
@@ -421,7 +517,16 @@ static Tensor threshold_out_cuda(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   threshold_kernel(iter, threshold, value);
   return iter.output();
 }
@@ -452,7 +557,14 @@ REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
+REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel);
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

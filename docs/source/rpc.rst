@@ -8,10 +8,13 @@ training through a set of primitives to allow for remote communication, and a
 higher-level API to automatically differentiate models split across several
 machines.
 
-.. warning::
-  The RPC API is experimental and subject to change.
+.. warning ::
+     APIs in the RPC package are stable. There are multiple ongoing work items
+     to improve performance and error handling, which will ship in future releases.
 
-
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
 
 Basics
 ------
@@ -62,11 +65,11 @@ across RPC boundaries. These features can be categorized into four sets of APIs.
    :meth:`~torch.optim.Optimizer` (e.g., :meth:`~torch.optim.SGD`,
    :meth:`~torch.optim.Adagrad`, etc.) and a list of parameter RRefs, creates an
    :meth:`~torch.optim.Optimizer` instance on each distinct RRef owner, and
-   updates parameters accordingly when running `step()`. When you have
+   updates parameters accordingly when running ``step()``. When you have
    distributed forward and backward passes, parameters and gradients will be
    scattered across multiple workers, and hence it requires an optimizer on each
    of the involved workers. Distributed Optimizer wraps all those local
-   optimizers into one, and provides a concise constructor and `step()` API.
+   optimizers into one, and provides a concise constructor and ``step()`` API.
 
 
 .. _rpc:
@@ -77,22 +80,26 @@ RPC
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
 :meth:`~torch.distributed.rpc.init_rpc` which would initialize the RPC
-framework, RRef framework and distributed autograd. By default, this will also
-initialize the `ProcessGroup` (:meth:`~torch.distributed.init_process_group`)
-backend for RPC communication. The `ProcessGroup` backend internally uses gloo
-for communication.
-
+framework, RRef framework and distributed autograd.
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
 
 The following APIs allow users to remotely execute functions as well as create
 references (RRefs) to remote data objects. In these APIs, when passing a
-`Tensor` as an argument or a return value, the destination worker will try to
-create a `Tensor` with the same meta (i.e., device, stride, etc.), which might
-crash if the device lists on source and destination workers are different. In
-such cases, applications can always feed in CPU tensors and manually move it
-to appropriate devices if necessary.
+``Tensor`` as an argument or a return value, the destination worker will try to
+create a ``Tensor`` with the same meta (i.e., shape, stride, etc.). We
+intentionally disallow transmitting CUDA tensors because it might crash if the
+device lists on source and destination workers do not match. In such cases,
+applications can always explicitly move the input tensors to CPU on the caller
+and move it to the desired devices on the callee if necessary.
+
+.. warning::
+  TorchScript support in RPC is a prototype feature and subject to change. Since
+  v1.5.0, ``torch.distributed.rpc`` supports calling TorchScript functions as
+  RPC target functions, and this will help improve parallelism on the callee
+  side as executing TorchScript functions does not require GIL.
+
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -101,8 +108,126 @@ to appropriate devices if necessary.
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
+
+
+The RPC package also provides decorators which allow applications to specify
+how a given function should be treated on the callee side.
+
+
+.. autofunction:: torch.distributed.rpc.functions.async_execution
+
+
+.. _rpc-backends:
+
+Backends
+^^^^^^^^
+
+The RPC module can leverage different backends to perform the communication
+between the nodes. The backend to be used can be specified in the
+:func:`~torch.distributed.rpc.init_rpc` function, by passing a certain value of
+the :class:`~torch.distributed.rpc.BackendType` enum. Regardless of what backend
+is used, the rest of the RPC API won't change. Each backend also defines its own
+subclass of the :class:`~torch.distributed.rpc.RpcBackendOptions` class, an
+instance of which can also be passed to :func:`~torch.distributed.rpc.init_rpc`
+to configure the backend's behavior.
+
+.. autoclass:: BackendType
+
 .. autoclass:: RpcBackendOptions
     :members:
+
+
+TensorPipe Backend
+""""""""""""""""""
+
+The TensorPipe agent, which is the default, leverages `the TensorPipe library
+<https://github.com/pytorch/tensorpipe>`_, which provides a natively
+point-to-point communication primitive specifically suited for machine learning
+that fundamentally addresses some of the limitations of Gloo. Compared to Gloo,
+it has the advantage of being asynchronous, which allows a large number of
+transfers to occur simultaneously, each at their own speed, without blocking
+each other. It will only open pipes between pairs of nodes when needed, on
+demand, and when one node fails only its incident pipes will be closed, while
+all other ones will keep working as normal. In addition, it is able to support
+multiple different transports (TCP, of course, but also shared memory, NVLink,
+InfiniBand, ...) and can automatically detect their availability and negotiate
+the best transport to use for each pipe.
+
+The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
+developed. At the moment, it only supports CPU tensors, with GPU support coming
+soon. It comes with a TCP-based transport, just like Gloo. It is also able to
+automatically chunk and multiplex large tensors over multiple sockets and
+threads in order to achieve very high bandwidths. The agent will be able to pick
+the best transport on its own, with no intervention required.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+    >>>         num_worker_threads=8,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+.. autoclass:: TensorPipeRpcBackendOptions
+    :members:
+    :inherited-members:
+
+
+Process Group Backend
+"""""""""""""""""""""
+
+.. warning ::
+     The Process Group Backend will be deprecated soon, we recommend using the
+     TensorPipe Backend instead.
+
+The Process Group agent instantiates a process group from
+the :mod:`~torch.distributed` module and utilizes its point-to-point
+communication capabilities to send RPC messages. Internally, the process
+group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
+
+Gloo has been hardened by years of extensive use in PyTorch and is thus very
+reliable. However, as it was designed to perform collective communication, it
+may not always be the best fit for RPC. For example, each networking operation
+is synchronous and blocking, which means that it cannot be run in parallel with
+others. Moreover, it opens a connection between all pairs of nodes, and brings
+down all of them when one fails, thus reducing the resiliency and the elasticity
+of the system.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     backend=rpc.BackendType.PROCESS_GROUP,
+    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+    >>>         num_send_recv_threads=16,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+
+.. autoclass:: ProcessGroupRpcBackendOptions
+    :members:
+    :inherited-members:
 
 
 .. _rref:
@@ -110,8 +235,8 @@ to appropriate devices if necessary.
 RRef
 ----
 
-An `RRef` (Remote REFerence) is a reference to a value of some type `T`
-(e.g. `Tensor`) on a remote worker. This handle keeps the referenced remote
+An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
+(e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
 value alive on the owner, but there is no implication that the value will be
 transferred to the local worker in the future. RRefs can be used in
 multi-machine training by holding references to `nn.Modules
@@ -122,6 +247,12 @@ details.
 
 .. autoclass:: RRef
     :members:
+
+
+.. toctree::
+    :caption: More Information about RRef
+
+    rpc/rref
 
 
 Distributed Autograd Framework
@@ -137,8 +268,37 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 .. automodule:: torch.distributed.autograd
     :members: context, backward, get_gradients
 
+.. toctree::
+    :caption: More Information about RPC Autograd
+
+    rpc/distributed_autograd
+
+
 Distributed Optimizer
 ---------------------
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
+
+Design Notes
+------------
+The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
+
+-  :ref:`distributed-autograd-design`
+
+The RRef design note covers the design of the :ref:`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
+
+-  :ref:`remote-reference-protocol`
+
+Tutorials
+---------
+The RPC tutorials introduce users to the RPC framework, provide several example applications
+using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
+to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__ to profile RPC-based workloads.
+
+-  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
+-  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
+-  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
+-  `Implementing batch RPC processing <https://pytorch.org/tutorials/intermediate/rpc_async_execution.html>`__
+-  `Distributed Pipeline Parallel <https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html>`__

@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -236,7 +236,7 @@ void checkAliasAnnotation(
   const auto inputsDeepCopy = deepCopy(stack);
 
   // Run the op
-  getOperation(node)(stack);
+  node->getOperation()(&stack);
 
   const auto outputs = std::move(stack);
 

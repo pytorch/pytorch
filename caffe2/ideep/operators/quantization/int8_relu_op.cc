@@ -31,7 +31,6 @@ class IDEEPInt8ReluOp final : public IDEEPOperator {
   }
 
  private:
-  ikey op_key_;
   float alpha_;
 
   INPUT_TAGS(INPUT);

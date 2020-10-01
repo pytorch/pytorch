@@ -59,10 +59,7 @@ Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_see
 
 #else // AT_CUDNN_ENABLED()
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-#include <ATen/cudnn/Descriptors.h>
-#include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
+#include <ATen/native/cudnn/RNNUtils.h>
 
 namespace at { namespace native {
 
@@ -150,7 +147,7 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
-      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo);
+      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
       return rnn_desc;
     }
 
@@ -406,7 +403,8 @@ namespace {
       const RNNDescriptor& rnn_desc,
       const TensorDescriptor& x_desc,
       const FilterDescriptor& w_desc,
-      const Tensor& weight_buf
+      const Tensor& weight_buf,
+      bool include_bias=true
   ) {
     auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
     std::vector<Tensor> params;
@@ -462,13 +460,19 @@ namespace {
           // might as well merge the CUDNN ones into a single tensor as well
           int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-            std::initializer_list<int64_t> size = {
-              mat_numel * num_linear_layers / 2, 1};
-            // Generate a new parameter tensor which is a view into the
-            // weight_buf.
-            Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
-            params.emplace_back(std::move(param));
-            layer_params_count++;
+            // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
+            // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict
+            // and informative check that all params are laid out the way we think they are.  If include_bias is false,
+            // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
+            // cudnnGetRNNLinLayerBiasParams iteration.
+            if (include_bias || cudnn_method != cudnnGetRNNLinLayerBiasParams) {
+              // Generate a new parameter tensor which is a view into the weight_buf.
+              std::initializer_list<int64_t> size = {
+                mat_numel * num_linear_layers / 2, 1};
+              Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+              params.emplace_back(std::move(param));
+              layer_params_count++;
+            }
           } else {
             AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
           }
@@ -526,7 +530,8 @@ namespace {
     return data_ptrs;
   }
 
-  void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
+  void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
+                         bool copy, bool allow_type_change=false) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
@@ -538,7 +543,12 @@ namespace {
            a != layer_params_from.end() && b != layer_params_to.end();
            ++a, ++b) {
         auto param_from = *a, param_to = *b;
-        AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
+        // if copying, allow_type_change may be true or false.
+        // if viewing, allow_type_change must be false.
+        TORCH_INTERNAL_ASSERT(copy || !allow_type_change,
+                              "if viewing, type change is not allowed.");
+        TORCH_INTERNAL_ASSERT(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
+                              "parameter types mismatch");
         if (copy) {
             param_to.copy_(param_from.view_as(param_to));
         } else {
@@ -577,43 +587,144 @@ namespace {
     }
   }
 
-  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
-#if CUDNN_VERSION < 7200 || CUDA_VERSION < 9010
-      return CUDNN_RNN_ALGO_STANDARD;
-#else
-      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-      const int64_t bsize = tensors.mini_batch;
-      //excluding Turing from using persistent rnn.
-      if (prop->major == 7 && prop->minor != 5 && getCudnnDataType(input) == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
-                  rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
-              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
-              //weed them out
-              if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
-                  if ((tensors.seq_length >=40 && bsize <=128) ||
-                     (tensors.seq_length >=20 && bsize <=96) ||
-                     (tensors.seq_length >=10 && bsize <=32)) {
-                     return CUDNN_RNN_ALGO_PERSIST_STATIC;
-                  }
-              }
-          }
+  inline bool use_persist_common_heuristics(const RNNDescriptorParams& rnn,
+                                            const TensorDescriptorListParams& tensors) {
+    return rnn.num_layers == 1 &&
+           rnn.hidden_size <= 1024 &&
+           rnn.num_directions() == 1 &&
+           rnn.hidden_size % 128 == 0 &&
+           tensors.input_size % 128 == 0;
+  }
+
+  inline bool use_persist_device_heuristics(const RNNDescriptorParams& rnn,
+                                            const TensorDescriptorListParams& tensors) {
+    auto bsize = tensors.mini_batch;
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major == 7) {
+      if (prop->minor == 5) {
+        // Excludes Turing from using persistent rnn.
+        return false;
+      } else {
+        // technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
+        // weed them out
+        return ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8) &&
+               ((tensors.seq_length >=40 && bsize <=128) ||
+                (tensors.seq_length >=20 && bsize <=96) ||
+                (tensors.seq_length >=10 && bsize <=32));
       }
-      return CUDNN_RNN_ALGO_STANDARD;
-#endif
+    } else if (prop->major >= 8) {
+      // Based on tests by Vasily Volkov and xwang233.  Vasily only tried bsize <= 128,
+      // so conservatively enable persistence for bsize <= 128 only.
+      // TODO:  Run more tests for bsize > 128.
+      if (rnn.mode == CUDNN_GRU) {
+        // Persistent GRU performance is flakier than other RNN types.  Exclude them for now.
+        // TODO:  Write a more refined GRU heuristic.
+        return false;
+      } else if (rnn.mode == CUDNN_LSTM) {
+        // Persistent LSTMs are comparable to or better than non-persistent for bsize <= 128.
+        return bsize <= 128;
+      } else {
+        // Persistent RNN_RELU and TANH show poor performance when bsize >= 96 AND hidden size >= 896.
+        return (bsize <= 128) && (bsize < 96 || rnn.hidden_size < 896);
+      }
+    } else {
+      return false;
+    }
+  }
+
+  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input) {
+    if (getCudnnDataType(input) == CUDNN_DATA_HALF &&
+        !tensors.is_input_packed()) {
+      if (use_persist_common_heuristics(rnn, tensors) &&
+          use_persist_device_heuristics(rnn, tensors)) {
+        return CUDNN_RNN_ALGO_PERSIST_STATIC;
+      }
+    }
+    return CUDNN_RNN_ALGO_STANDARD;
   }
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-#if CUDNN_VERSION != 7103
-// CUDNN 7.1.3 enforces RNN descriptor type to be identical to input/weight. This check throws an error for type
-// promotion. The check has since been removed.
     if (dtype == CUDNN_DATA_HALF) {
       return CUDNN_DATA_FLOAT;
     }
-#endif
     return dtype;
   }
 
 } // anonymous namespace
+
+// Utilities exposed in RNNUtils.h
+namespace cudnn_rnn {
+
+  TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
+      TensorList weight_arr,
+      int64_t weight_stride0,
+      int64_t input_size,
+      int64_t mode,
+      int64_t hidden_size,
+      int64_t num_layers,
+      bool batch_first,
+      bool bidirectional,
+      const cudnnDataType_t flat_buf_datatype,
+      const TensorOptions& flat_buf_options,
+      bool set_orig_weights_to_flat_buf,
+      bool allow_type_change/*=false*/,
+      bool include_bias/*=true*/) {
+    // flat_buf_datatype is accepted as a separate argument (rather than extracted from flat_buf_options)
+    // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
+    // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
+    // typeMetaToScalarType is a surprisingly nontrivial function.  We should avoid it if we can.
+
+    TORCH_CHECK(weight_arr.size() > 0,
+                "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
+
+    RNNDescriptorParams rnn;
+    rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(flat_buf_datatype), flat_buf_datatype);
+
+    auto handle = getCudnnHandle();
+    RNNDescriptor rnn_desc = rnn.descriptor(handle);
+
+    TensorGeometry x_geom({1, input_size});
+    TensorDescriptor x_desc;
+    // Why do we pad to 5 dims here (and elsewhere)?
+    // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
+    // expects descriptors padded to 3 dimensions.
+    x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
+
+    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
+    auto weight_buf = at::zeros(num_weights, flat_buf_options);
+
+    FilterDescriptor w_desc;
+    w_desc.set(weight_buf, 3);
+
+    // Slice off views into weight_buf
+    std::vector<Tensor> params_arr;
+    size_t params_stride0;
+    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
+
+    MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
+                      params{params_arr, params_stride0};
+
+    // Copy weights
+    _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
+
+    if (set_orig_weights_to_flat_buf) {
+      // Update the storage
+      for (size_t i = 0; i < weight.size(0); i++) {
+        for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
+             orig_param_it != weight[i].end() && new_param_it != params[i].end();
+             orig_param_it++, new_param_it++) {
+          auto orig_param = *orig_param_it, new_param = *new_param_it;
+          orig_param.set_(new_param.view_as(orig_param));
+        }
+      }
+    }
+
+    return std::make_tuple(weight_buf, params_arr);
+  }
+
+} // namespace cudnn_rnn
+
+using namespace cudnn_rnn;
 
 // NB: does inplace update into TensorList
 // It would be a relatively simple matter to refactor this into multiple
@@ -626,52 +737,25 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
-
-  TORCH_CHECK(weight_arr.size() > 0,
-           "_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
-
-  auto any_param = weight_arr[0];
-  auto datatype = getCudnnDataType(any_param);
-
-  RNNDescriptorParams rnn;
-  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
-
-  auto handle = getCudnnHandle();
-  RNNDescriptor rnn_desc = rnn.descriptor(handle);
-
-  TensorGeometry x_geom({1, input_size});
-  TensorDescriptor x_desc;
-  x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
-
-  auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
-  auto weight_buf = at::zeros(num_weights, any_param.options());
-
-  FilterDescriptor w_desc;
-  w_desc.set(weight_buf, 3);
-
-  // Slice off views into weight_buf
-  std::vector<Tensor> params_arr;
-  size_t params_stride0;
-  std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
-
-  MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
-                    params{params_arr, params_stride0};
-
-  // Copy weights
-  _copyParams(weight, params);
-
-  // Update the storage
-  for (size_t i = 0; i < weight.size(0); i++) {
-    for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
-         orig_param_it != weight[i].end() && new_param_it != params[i].end();
-         orig_param_it++, new_param_it++) {
-      auto orig_param = *orig_param_it, new_param = *new_param_it;
-      orig_param.set_(new_param.view_as(orig_param));
-    }
-  }
-
-  return weight_buf;
+  // returns flat weight_buf
+  return std::get<0>(copy_weights_to_flat_buf_views(
+      weight_arr,
+      weight_stride0,
+      input_size,
+      fn_mode,
+      fn_hidden_size,
+      fn_num_layers,
+      batch_first,
+      fn_bidirectional,
+      /*flat_buf_datatype=*/getCudnnDataType(weight_arr[0]),
+      /*flat_buf_options=*/weight_arr[0].options(),
+      /*set_orig_weights_to_flat_buf=*/true));
 }
+
+const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
+                                  "chunk of memory. This means they need to be compacted "
+                                  "at every call, possibly greatly increasing memory usage. "
+                                  "To compact weights again call flatten_parameters().";
 
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -684,9 +768,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& fn_dropout_state
     ) {
 
-  check_device(input_r, weight, {hx, cx});
+  check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
+  if (!weight_buf.defined()) {
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
+  }
   if (fn_dropout_state.defined()) {
       auto input_arg = TensorArg(input, "input", 1);
       auto dropout_state_arg = TensorArg(fn_dropout_state, "dropout_states", 15);
@@ -1059,6 +1146,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
+  }
 
   auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -1076,6 +1166,13 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
+//
+// NB: You can have any color you like, as long as it's a CUDA byte
+// tensor.  Why does this function take a TensorOptions at all in that case?
+// This is a factory function: it produces tensors but takes no tensors
+// as input.  The codegen currently assumes that ALL factory functions
+// take TensorOptions, so it's just a lot easier for this function to
+// be bound if it also does it.
 Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
@@ -1170,9 +1267,11 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
       cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
+
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
-  auto datatype = getCudnnDataType(input);
+  auto & any_param = parameters.at(0);
+  auto datatype = getCudnnDataType(any_param);
 
   RNNDescriptorParams rnn;
   rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
@@ -1180,12 +1279,14 @@ Tensor try_get_weight_buf(
 
   TensorGeometry x_geom ({1, input.size(-1)});
   TensorDescriptor x_desc;
+  // datatype for x_desc comes from any_param, not input.
+  // try_get_weight_buf's job is to check "is the weight buffer correctly laid out
+  // for us to run it with input of the same datatype?"
   x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_params = get_num_weights(handle, rnn_desc, x_desc, datatype);
 
   // Try to get parameter storage
-  auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
   auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage);
   if (weight_buf.size(0) < num_params) {
@@ -1212,11 +1313,6 @@ Tensor try_get_weight_buf(
   return weight_buf;
 }
 
-const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
-                                  "chunk of memory. This means they need to be compacted "
-                                  "at every call, possibly greatly increasing memory usage. "
-                                  "To compact weights again call flatten_parameters().";
-
 template<typename hidden_type>
 std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
@@ -1226,11 +1322,11 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
+  // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
+  // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
+  // instead of a defined or undefined Tensor?
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
-  if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
-  }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
@@ -1258,9 +1354,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
-  if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
-  }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };

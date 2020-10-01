@@ -1,16 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import json
 import logging
 import numpy as np
 import os
-import re as _re
+from typing import Optional
 
 # pylint: disable=unused-import
 from six.moves import range
 
+from google.protobuf import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -23,30 +20,9 @@ from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
 
-_INVALID_TAG_CHARACTERS = _re.compile(r'[^-/\w\.]')
-
-
 def _calc_scale_factor(tensor):
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
-
-
-def _clean_tag(name):
-    # In the past, the first argument to summary ops was a tag, which allowed
-    # arbitrary characters. Now we are changing the first argument to be the node
-    # name. This has a number of advantages (users of summary ops now can
-    # take advantage of the tf name scope system) but risks breaking existing
-    # usage, because a much smaller set of characters are allowed in node names.
-    # This function replaces all illegal characters with _s, and logs a warning.
-    # It also strips leading slashes from the name.
-    if name is not None:
-        new_name = _INVALID_TAG_CHARACTERS.sub('_', name)
-        new_name = new_name.lstrip('/')  # Remove leading slashes
-        if new_name != name:
-            logging.info(
-                'Summary name %s is illegal; using %s instead.' % (name, new_name))
-            name = new_name
-    return name
 
 
 def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', color_text='black', thickness=2):
@@ -72,7 +48,7 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
     return image
 
 
-def hparams(hparam_dict=None, metric_dict=None):
+def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     """Outputs three `Summary` protocol buffers needed by hparams plugin.
     `Experiment` keeps the metadata of an experiment, such as the name of the
       hyperparameters and the name of the metrics.
@@ -84,6 +60,8 @@ def hparams(hparam_dict=None, metric_dict=None):
         and their values.
       metric_dict: A dictionary that contains names of the metrics
         and their values.
+      hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
+        contains names of the hyperparameters and all discrete values they can hold
 
     Returns:
       The `Summary` protobufs for Experiment, SessionStartInfo and
@@ -92,7 +70,7 @@ def hparams(hparam_dict=None, metric_dict=None):
     import torch
     from six import string_types
     from tensorboard.plugins.hparams.api_pb2 import (
-        Experiment, HParamInfo, MetricInfo, MetricName, Status
+        Experiment, HParamInfo, MetricInfo, MetricName, Status, DataType
     )
     from tensorboard.plugins.hparams.metadata import (
         PLUGIN_NAME,
@@ -121,37 +99,98 @@ def hparams(hparam_dict=None, metric_dict=None):
         logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
-    hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
-
-    exp = Experiment(hparam_infos=hps, metric_infos=mts)
-
-    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
-    smd = SummaryMetadata(
-        plugin_data=SummaryMetadata.PluginData(
-            plugin_name=PLUGIN_NAME,
-            content=content.SerializeToString()
+    hparam_domain_discrete = hparam_domain_discrete or {}
+    if not isinstance(hparam_domain_discrete, dict):
+        raise TypeError(
+            "parameter: hparam_domain_discrete should be a dictionary, nothing logged."
         )
-    )
-    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
+    for k, v in hparam_domain_discrete.items():
+        if (
+            k not in hparam_dict
+            or not isinstance(v, list)
+            or not all(isinstance(d, type(hparam_dict[k])) for d in v)
+        ):
+            raise TypeError(
+                "parameter: hparam_domain_discrete[{}] should be a list of same type as "
+                "hparam_dict[{}].".format(k, k)
+            )
+    hps = []
+
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        if v is None:
+            continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
+
+            if k in hparam_domain_discrete:
+                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(number_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_FLOAT64"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
+
+            if k in hparam_domain_discrete:
+                domain_discrete = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(string_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_STRING"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, bool):
             ssi.hparams[k].bool_value = v
+
+            if k in hparam_domain_discrete:
+                domain_discrete = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(bool_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_BOOL"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, torch.Tensor):
             v = make_np(v)[0]
             ssi.hparams[k].number_value = v
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
         raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
 
@@ -164,6 +203,19 @@ def hparams(hparam_dict=None, metric_dict=None):
         )
     )
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
+
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+
+    exp = Experiment(hparam_infos=hps, metric_infos=mts)
+
+    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
+    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
     sei = SessionEndInfo(status=Status.Value('STATUS_SUCCESS'))
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
@@ -192,7 +244,6 @@ def scalar(name, scalar, collections=None):
     Raises:
       ValueError: If tensor has the wrong shape or type.
     """
-    name = _clean_tag(name)
     scalar = make_np(scalar)
     assert(scalar.squeeze().ndim == 0), 'scalar should be 0D'
     scalar = float(scalar)
@@ -245,7 +296,6 @@ def histogram(name, values, bins, max_bins=None):
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
       buffer.
     """
-    name = _clean_tag(name)
     values = make_np(values)
     hist = make_histogram(values.astype(float), bins, max_bins)
     return Summary(value=[Summary.Value(tag=name, histo=hist)])
@@ -322,7 +372,6 @@ def image(tag, tensor, rescale=1, dataformats='NCHW'):
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
       buffer.
     """
-    tag = _clean_tag(tag)
     tensor = make_np(tensor)
     tensor = convert_to_HWC(tensor, dataformats)
     # Do not assume that user passes in values in [0, 255], use data type to detect
@@ -333,7 +382,7 @@ def image(tag, tensor, rescale=1, dataformats='NCHW'):
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
+def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW', labels=None):
     '''Outputs a `Summary` protocol buffer with images.'''
     tensor_image = make_np(tensor_image)
     tensor_image = convert_to_HWC(tensor_image, dataformats)
@@ -342,11 +391,12 @@ def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
         np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(tensor_image.astype(np.uint8),
                        rescale=rescale,
-                       rois=tensor_boxes)
+                       rois=tensor_boxes,
+                       labels=labels)
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def draw_boxes(disp_image, boxes):
+def draw_boxes(disp_image, boxes, labels=None):
     # xyxy format
     num_boxes = boxes.shape[0]
     list_gt = range(num_boxes)
@@ -356,12 +406,12 @@ def draw_boxes(disp_image, boxes):
                                       boxes[i, 1],
                                       boxes[i, 2],
                                       boxes[i, 3],
-                                      display_str=None,
+                                      display_str=None if labels is None else labels[i],
                                       color='Red')
     return disp_image
 
 
-def make_image(tensor, rescale=1, rois=None):
+def make_image(tensor, rescale=1, rois=None, labels=None):
     """Convert a numpy representation of an image to Image protobuf"""
     from PIL import Image
     height, width, channel = tensor.shape
@@ -369,7 +419,7 @@ def make_image(tensor, rescale=1, rois=None):
     scaled_width = int(width * rescale)
     image = Image.fromarray(tensor)
     if rois is not None:
-        image = draw_boxes(image, rois)
+        image = draw_boxes(image, rois, labels=labels)
     image = image.resize((scaled_width, scaled_height), Image.ANTIALIAS)
     import io
     output = io.BytesIO()
@@ -383,7 +433,6 @@ def make_image(tensor, rescale=1, rois=None):
 
 
 def video(tag, tensor, fps=4):
-    tag = _clean_tag(tag)
     tensor = make_np(tensor)
     tensor = _prepare_video(tensor)
     # If user passes in uint8, then we don't need to rescale by 255
@@ -440,27 +489,22 @@ def audio(tag, tensor, sample_rate=44100):
         print('warning: audio amplitude out of range, auto clipped.')
         tensor = tensor.clip(-1, 1)
     assert(tensor.ndim == 1), 'input tensor should be 1 dimensional.'
+    tensor = (tensor * np.iinfo(np.int16).max).astype('<i2')
 
-    tensor_list = [int(32767.0 * x) for x in tensor]
     import io
     import wave
-    import struct
     fio = io.BytesIO()
     wave_write = wave.open(fio, 'wb')
     wave_write.setnchannels(1)
     wave_write.setsampwidth(2)
     wave_write.setframerate(sample_rate)
-    tensor_enc = b''
-    for v in tensor_list:
-        tensor_enc += struct.pack('<h', v)
-
-    wave_write.writeframes(tensor_enc)
+    wave_write.writeframes(tensor.data)
     wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(sample_rate=sample_rate,
                           num_channels=1,
-                          length_frames=len(tensor_list),
+                          length_frames=tensor.shape[-1],
                           encoded_audio_string=audio_string,
                           content_type='audio/wav')
     return Summary(value=[Summary.Value(tag=tag, audio=audio)])

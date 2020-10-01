@@ -28,9 +28,9 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "    with torch.no_grad():\n"
     "        x.set_(y)";
 
-at::Tensor& TensorImpl::grad() {
+at::Tensor& TensorImpl::mutable_grad() {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
-  return autograd_meta_->grad();
+  return autograd_meta_->mutable_grad();
 }
 
 const at::Tensor& TensorImpl::grad() const {
@@ -44,8 +44,11 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set)
-    : TensorImpl(std::move(storage), key_set, storage.dtype(), storage.device()) {}
+TensorImpl::TensorImpl(
+    Storage&& storage,
+    DispatchKeySet key_set,
+    const caffe2::TypeMeta& data_type)
+    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
@@ -57,14 +60,22 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
-      device_opt_(device_opt),
-      key_set_(key_set) {
+      device_opt_(device_opt) {
   if (!key_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
+  // After we removed Autograd keys from globally enabled set, every Tensor must be created with
+  // a backend DispatchKey and an AutogradBackend key.
+  // We automatically add the corresponding autograd key to key_set_ so that backends can stay
+  // in the old way of only registering with backend key like DispatchKey::CPU.
+  // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
+  // add AutogradBackend key when the tensor requires grad.
+  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  key_set_ = key_set.add(getAutogradKeyFromBackend(k));
+
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
   strides_.push_back(1);
@@ -96,25 +107,62 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
-bool TensorImpl::compute_channels_last_contiguous() const {
-  if (sizes_.size() == 4) {
-    int64_t expected = 1;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] == expected) {
-          expected *= sizes_[d];
-        } else {
-          return false;
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_.size()) {
+    case 4:
+      {
+        int64_t expected = 1;
+        for (auto& d : {1, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
+            }
+            expected *= sizes_[d];
+          }
         }
+        return true;
       }
-    }
-    return true;
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
   }
-  return false;
 }
 
-bool TensorImpl::compute_strides_like_channels_last() const {
-  return is_channels_last_strides(sizes_, strides_);
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_.size()) {
+    case 5:
+      {
+        int64_t expected = 1;
+        for (auto& d : {1, 4, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
+            }
+            expected *= sizes_[d];
+          }
+        }
+        return true;
+      }
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
+}
+
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
+  return is_channels_last_strides_2d(sizes_, strides_);
+}
+
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
+  return is_channels_last_strides_3d(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
@@ -179,6 +227,9 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
+  }
+  else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
   }
   return is_contiguous_;
 }
@@ -250,7 +301,9 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+  dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_channels_last_3d_ = src_impl->is_channels_last_3d_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;

@@ -24,13 +24,7 @@ The following functions will fail if used in TorchScript, either because they
 are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
-  * :func:`torch.cdist`
-  * :func:`torch.lu`
-  * :func:`torch.lu_unpack`
-  * :func:`torch.norm`
   * :func:`torch.tensordot`
-  * :func:`torch.unique`
-  * :func:`torch.unique_consecutive`
   * :func:`torch.nn.init.calculate_gain`
   * :func:`torch.nn.init.eye_`
   * :func:`torch.nn.init.dirac_`
@@ -70,19 +64,14 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.randperm`
   * :func:`torch.tril_indices`
   * :func:`torch.triu_indices`
+  * :func:`torch.vander`
   * :func:`torch.zeros`
   * :func:`torch.zeros_like`
 
 The following functions require `dtype`, `layout`, `device` as parameters in TorchScript,
 but these parameters are optional in Python.
 
-  * :func:`torch.empty_like`
-  * :func:`torch.full_like`
-  * :func:`torch.ones_like`
-  * :func:`torch.rand_like`
   * :func:`torch.randint`
-  * :func:`torch.randn_like`
-  * :func:`torch.zeros_like`
   * :func:`torch.sparse_coo_tensor`
   * :meth:`~torch.Tensor.to`
 
@@ -98,6 +87,5 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.nn.RNN`
   * :class:`torch.nn.AdaptiveLogSoftmaxWithLoss`
   * :class:`torch.autograd.Function`
-  * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
-  * :class:`torch._C.Generator`
+  * :class:`torch.Generator`

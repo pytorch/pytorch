@@ -1,9 +1,11 @@
 #ifndef CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 #define CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 
-#include "caffe2/core/asan.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(IndexHash);
 
 namespace caffe2 {
 
@@ -49,7 +51,8 @@ class IndexHashOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  CAFFE2_NO_SANITIZE("signed-integer-overflow") T hash(T id) {
+  __ubsan_ignore_signed_int_overflow__
+  T hash(T id) {
     int8_t* bytes = (int8_t*)&id;
     T hashed = seed_ * 0xDEADBEEF;
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {

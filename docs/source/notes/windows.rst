@@ -15,11 +15,13 @@ MKL and MAGMA. Here are the steps to build with them.
     REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
-    curl https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z -k -O
-    7z x -aoa mkl_2018.2.185.7z -omkl
+    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
+    7z x -aoa mkl_2020.0.166.7z -omkl
 
     REM Download MAGMA files
     REM version available:
+    REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)
+    REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)
     REM 2.4.0 (CUDA 8.0 9.2) x (Release)
@@ -29,9 +31,9 @@ MKL and MAGMA. Here are the steps to build with them.
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
-    set "CMAKE_INCLUDE_PATH=%cd%\\mkl\\include"
-    set "LIB=%cd%\\mkl\\lib;%LIB%"
-    set "MAGMA_HOME=%cd%\\magma"
+    set "CMAKE_INCLUDE_PATH=%cd%\mkl\include"
+    set "LIB=%cd%\mkl\lib;%LIB%"
+    set "MAGMA_HOME=%cd%\magma"
 
 Speeding CUDA build for Windows
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -150,11 +152,6 @@ Package not found in win-32 channel.
 PyTorch doesn't work on 32-bit system. Please use Windows and
 Python 64-bit version.
 
-Why are there no Python 2 packages for Windows?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Because it's not stable enough. There're some issues that need to
-be solved before we officially release it. You can build it by yourself.
 
 Import error
 ^^^^^^^^^^^^
@@ -289,4 +286,3 @@ tensors cannot succeed, there are two alternatives for this.
 
 2. Share CPU tensors instead. Make sure your custom
 :class:`~torch.utils.data.DataSet` returns CPU tensors.
-

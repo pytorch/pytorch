@@ -25,16 +25,22 @@
     PyObject_IsInstance(obj, THCPBoolStorageClass)
 #define THCPBFloat16Storage_Check(obj) \
     PyObject_IsInstance(obj, THCPBFloat16StorageClass)
+#define THCPComplexDoubleStorage_Check(obj) \
+    PyObject_IsInstance(obj, THCPDoubleStorageClass)
+#define THCPComplexFloatStorage_Check(obj) \
+    PyObject_IsInstance(obj, THCPFloatStorageClass)
 
-#define THCPDoubleStorage_CData(obj)      (obj)->cdata
-#define THCPFloatStorage_CData(obj)       (obj)->cdata
-#define THCPLongStorage_CData(obj)        (obj)->cdata
-#define THCPIntStorage_CData(obj)         (obj)->cdata
-#define THCPShortStorage_CData(obj)       (obj)->cdata
-#define THCPCharStorage_CData(obj)        (obj)->cdata
-#define THCPByteStorage_CData(obj)        (obj)->cdata
-#define THCPBoolStorage_CData(obj)        (obj)->cdata
-#define THCPBFloat16Storage_CData(obj)    (obj)->cdata
+#define THCPDoubleStorage_CData(obj)             (obj)->cdata
+#define THCPFloatStorage_CData(obj)              (obj)->cdata
+#define THCPLongStorage_CData(obj)               (obj)->cdata
+#define THCPIntStorage_CData(obj)                (obj)->cdata
+#define THCPShortStorage_CData(obj)              (obj)->cdata
+#define THCPCharStorage_CData(obj)               (obj)->cdata
+#define THCPByteStorage_CData(obj)               (obj)->cdata
+#define THCPBoolStorage_CData(obj)               (obj)->cdata
+#define THCPBFloat16Storage_CData(obj)           (obj)->cdata
+#define THCPComplexDoubleStorage_CData(obj)      (obj)->cdata
+#define THCPComplexFloatStorage_CData(obj)       (obj)->cdata
 
 #define THCPStorageType TH_CONCAT_3(THCP,Real,StorageType)
 #define THCPStorageBaseStr TH_CONCAT_STRING_3(Cuda,Real,StorageBase)
@@ -43,6 +49,9 @@
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateAllTypes.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
+#include <THC/THCGenerateComplexTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateBoolType.h>

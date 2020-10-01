@@ -8,6 +8,7 @@
 #include <exception>
 #include <functional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -28,8 +29,10 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <ATen/core/Tensor.h>
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <ATen/core/TensorBody.h>
+#include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #endif
 
@@ -59,7 +62,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * Alternatively, inputs can be one tensor list ivalue followed by non-tensors
    * to represent operators with a variable number of inputs.
    */
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
@@ -72,7 +76,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * New operators should be instantiated with FunctionSchema
    */
   bool isLegacyOperator() const {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return !fn_schema_;
 #else
     return true;
@@ -81,7 +86,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   const c10::FunctionSchema& getFunctionSchema() const {
     CAFFE_ENFORCE(!isLegacyOperator());
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return *fn_schema_.get();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -107,7 +113,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
           *operator_def_, name, default_value);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     auto index = argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
     const auto& value = newstyle_inputs_[index.value()];
@@ -123,7 +130,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return ArgumentHelper::HasSingleArgumentOfType<OperatorDef, T>(
         *operator_def_, name);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   template <typename T>
   inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
     return value.template to<List<T>>().vec();
@@ -147,9 +155,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
-        enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
-        enf.AppendMessage(".\n");
+        TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
       }
       throw enf;
     }
@@ -173,32 +179,37 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         return tensor;
       } catch (::caffe2::EnforceNotMet& enf) {
         if (has_debug_def()) {
-          enf.AppendMessage(".\nOffending Blob name: ");
-          enf.AppendMessage(debug_def().input(idx));
-          enf.AppendMessage(".\n");
+          TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
         }
         throw enf;
       }
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    DCHECK_LT(0, newstyle_inputs_.size());
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+    DCHECK_LT(0U, newstyle_inputs_.size());
     IValue ival;
     if (newstyle_inputs_[0].isTensorList()) {
-      // if the first input is a tensor list, we get input tensors by indexing into that list.
-      // currently, this means that only tensors from that list are accessible as inputs.
-      // any hypothetical input tensors that come after the list are not accessible.
+      // if the first input is a tensor list, we get input tensors by indexing
+      // into that list. currently, this means that only tensors from that list
+      // are accessible as inputs. any hypothetical input tensors that come
+      // after the list are not accessible.
       auto tensorList = newstyle_inputs_[0].toTensorVector();
       DCHECK_LT((size_t)idx, tensorList.size());
       ival = tensorList[idx];
     } else {
-      // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
+      // if the first input is not a tensor list, we get input tensors by
+      // indexing into the inputs.
       DCHECK_LT((size_t)idx, newstyle_inputs_.size());
       ival = newstyle_inputs_[idx];
     }
     CAFFE_ENFORCE(
         ival.isTensor(),
         "Input(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival.toTensor());
+    auto t = ival.toTensor();
+    if (!t.is_contiguous()) {
+      t = t.contiguous();
+    }
+    Tensor tensor = caffe2::Tensor(std::move(t));
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);
     return input_tensors_[idx];
@@ -230,12 +241,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // When you get a Tensor here it is not fully initialized
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor = caffe2::Tensor(output);
-    if (!tensor.defined() || tensor.GetDeviceType() != type) {
+    if (!output.defined() || caffe2::Tensor(output).GetDeviceType() != type) {
       // Fix tensor type
-      tensor = Tensor(type);
+      Tensor tensor = Tensor(type);
       output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
     output_tensors_[idx] = caffe2::Tensor(output);
@@ -260,13 +271,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   void SetOutputTensor(int idx, Tensor tensor) {
     if (!isLegacyOperator()) {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
       newstyle_outputs_[idx] = at::Tensor(tensor);
 
       // also update the tensor in the hack
       output_tensors_[idx] = std::move(tensor);
 #else
-    CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+      CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
     } else {
       // update the tensor in the workspace
@@ -289,10 +301,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
           "device must be provided in options.");
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor =
-        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
+    Tensor tensor = output.defined()
+        ? GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options)
+        : caffe2::empty(dims, options);
     // assign it back in case it changed
     output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
@@ -329,10 +343,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         isLegacyOperator(),
         "OutputTensorAlias(idx, src) not (yet) supported for operators exported to c10.");
-    return BlobSetTensor(OutputBlob(idx),
-                  src.Alias());
+    return BlobSetTensor(OutputBlob(idx), src.Alias());
   }
-
 
   template <typename T>
   inline T* Output(int idx, T* allocated) {
@@ -413,7 +425,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     if (isLegacyOperator()) {
       return outputs_.size();
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return newstyle_outputs_.size();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -471,66 +484,15 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   virtual void CancelAsyncCallback() {}
 
-  // RunAsync, if implemenented by the specific operators, will schedule the
+  virtual void Cancel() {}
+
+  // RunAsync, if implemented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
   // it will simply be synchronous as a fallback.
-  virtual bool RunAsync(int stream_id = 0) {
-    try {
-      auto result = Run(stream_id);
-      if (result) {
-        if (HasAsyncPart()) {
-          RecordEvent();
-        } else {
-          SetEventFinished();
-        }
-      } else {
-        SetEventFinished(getErrorMsg().c_str());
-      }
-      return result;
-    } catch (EnforceNotMet& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (const std::exception& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (...) {
-      SetEventFinishedWithException(getErrorMsg().c_str());
-      throw;
-    }
-  }
+  virtual bool RunAsync(int stream_id = 0);
 
-  virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
-    CAFFE_ENFORCE(
-        isLegacyOperator(),
-        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
-
-    if (!has_debug_def()) {
-      return;
-    }
-
-    bool found_input;
-    if (err->caller() != nullptr) {
-      for (size_t i = 0; i < inputs_.size(); i++) {
-        if (inputs_[i]->GetRaw() == err->caller()) {
-          found_input = true;
-          err->AppendMessage(
-              "\n** while accessing input: " + debug_def().input(i));
-          break;
-        }
-      }
-      for (size_t i = 0; i < outputs_.size(); i++) {
-        if (outputs_[i]->GetRaw() == err->caller()) {
-          if (found_input) {
-            err->AppendMessage("\n OR ");
-          }
-          err->AppendMessage(
-              "\n** while accessing output: " + debug_def().output(i));
-          break;
-        }
-      }
-    }
-  }
+  virtual void AddRelatedBlobInfo(EnforceNotMet* err);
 
   virtual std::string debug_info_string() const {
     return "";
@@ -628,7 +590,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return helper_;
   }
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   c10::List<at::Tensor> move_newstyle_outputs() && {
     return std::move(newstyle_outputs_);
   }
@@ -646,7 +609,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
   // Preferably use c10::optional, but nvcc doesn't work
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
   c10::List<at::Tensor> newstyle_outputs_;
@@ -710,7 +674,8 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 template <>
 inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
     const c10::IValue& value) const {
@@ -738,8 +703,12 @@ inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
 template <>
 inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
     const c10::IValue& value) const {
-  CAFFE_THROW("Cannot extract vector<string> from ivalue.");
+  auto vs = value.template to<c10::List<string>>();
   vector<string> out;
+  out.reserve(vs.size());
+  for (string v : vs) {
+    out.emplace_back(v);
+  }
   return out;
 }
 
@@ -762,10 +731,10 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 // member variables for the class constructors.
 // This is a workaround for CUDA9.2 and GCC7
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
-#define OP_SINGLE_ARG(type, name, variable, default)                           \
+#define OP_SINGLE_ARG(type, name, variable, default) \
   variable(this->template GetSingleArgument<type>(name, (default)))
 #else
-#define OP_SINGLE_ARG(type, name, variable, default)                           \
+#define OP_SINGLE_ARG(type, name, variable, default) \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
 #endif
 
@@ -779,11 +748,10 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 // you can now do
 //     auto& weight = Input(WEIGHT);
 // to make it more clear.
-#define INPUT_TAGS(first_input, ...)                                           \
+#define INPUT_TAGS(first_input, ...) \
   enum _InputTags { first_input = 0, __VA_ARGS__ }
-#define OUTPUT_TAGS(first_input, ...)                                          \
+#define OUTPUT_TAGS(first_input, ...) \
   enum _OutputTags { first_input = 0, __VA_ARGS__ }
-
 
 template <typename T>
 inline vector<T> OperatorBase::GetRepeatedArgument(
@@ -794,7 +762,8 @@ inline vector<T> OperatorBase::GetRepeatedArgument(
     return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
         *operator_def_, name, default_value);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
   const auto& value = newstyle_inputs_[index.value()];
@@ -815,7 +784,8 @@ inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
     return ArgumentHelper::GetRepeatedArgument<OperatorDef, int16_t>(
         *operator_def_, name, default_value);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
   const auto& value = newstyle_inputs_[index.value()];
@@ -843,7 +813,8 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice();
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
@@ -1050,7 +1021,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
@@ -1088,7 +1059,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
@@ -1191,9 +1162,10 @@ class Operator : public OperatorBase {
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
-#define USE_SIMPLE_CTOR_DTOR(name)                                             \
-  template<class... Args> explicit name(Args&&... args)                        \
-      : Operator<Context>(std::forward<Args>(args)...) {}                      \
+#define USE_SIMPLE_CTOR_DTOR(name)                        \
+  template <class... Args>                                \
+  explicit name(Args&&... args)                           \
+      : Operator<Context>(std::forward<Args>(args)...) {} \
   virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
@@ -1459,9 +1431,10 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
   C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
-#define REGISTER_MIOPEN_OPERATOR(name, ...) \
+#define REGISTER_MIOPEN_OPERATOR(name, ...)                    \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
-  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(                           \
+      name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
@@ -1480,11 +1453,11 @@ struct StaticLinkingProtector {
     // If Caffe2 is properly linked with whole archive, there should be more
     // than zero registered ops.
     if (registered_ops == 0) {
-      LOG(FATAL) <<
-        "You might have made a build error: the Caffe2 library does not seem "
-        "to be linked with whole-static library option. To do so, use "
-        "-Wl,-force_load (clang) or -Wl,--whole-archive (gcc) to link the "
-        "Caffe2 library.";
+      LOG(FATAL)
+          << "You might have made a build error: the Caffe2 library does not seem "
+             "to be linked with whole-static library option. To do so, use "
+             "-Wl,-force_load (clang) or -Wl,--whole-archive (gcc) to link the "
+             "Caffe2 library.";
     }
   }
 };
@@ -1532,8 +1505,10 @@ using PerOpEnginePrefType =
     CaffeMap<DeviceType, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
 using GlobalEnginePrefType = CaffeMap<DeviceType, EnginePrefType>;
-CAFFE2_API void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
-CAFFE2_API void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
+CAFFE2_API void SetPerOpEnginePref(
+    const PerOpEnginePrefType& per_op_engine_pref);
+CAFFE2_API void SetGlobalEnginePref(
+    const GlobalEnginePrefType& global_engine_pref);
 CAFFE2_API void SetEnginePref(
     const PerOpEnginePrefType& per_op_engine_pref,
     const GlobalEnginePrefType& global_engine_pref);
@@ -1566,15 +1541,15 @@ CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
-CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
-    OperatorBase& op,
-    const OperatorDef& op_def);
+CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>>
+ValidateTensorDevices(OperatorBase& op, const OperatorDef& op_def);
 
 // Get a set of registered operator names
 CAFFE2_API std::set<std::string> GetRegisteredOperators();
 
 // Operator logging capabilities
-CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+CAFFE2_API void SetOperatorLogger(
+    std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 #ifndef C10_MOBILE
@@ -1630,7 +1605,6 @@ inline unique_ptr<ExternalTensorFunctionsBase> CreateExternalTensorFunctions(
 }
 #endif // C10_MOBILE
 
-}  // namespace caffe2
+} // namespace caffe2
 
-
-#endif  // CAFFE2_CORE_OPERATOR_H_
+#endif // CAFFE2_CORE_OPERATOR_H_

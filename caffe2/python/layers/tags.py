@@ -1,9 +1,9 @@
 ## @package tags
 # Module caffe2.python.layers.tags
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import six
 
@@ -39,6 +39,7 @@ class Tags(object):
     HANDLE_AS_SPARSE_LAYER = 'handle_as_sparse_layer'
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
+    LOCAL = 'local'
 
     # The following three tags are hints to **distributed training framework**.
     """
@@ -58,6 +59,12 @@ class Tags(object):
     parameter server.
     """
     COMPONENT = 'component:'
+    PIPELINE = 'pipeline:'
+    """
+    Indicate it's a dense layer or dense param init, 
+    but we use hogwild across multiple trainers
+    """
+    HOGWILD_DENSE = "hogwild_dense"
     """
     Valid tag prefixes for distributed training framework.
     """
@@ -71,7 +78,7 @@ class Tags(object):
     """
     EMPTY_TAG = 'empty_tag'
 
-    DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
+    DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT, HOGWILD_DENSE)
 
     # In certain cases we want to have different schema for training and
     # prediction, as an example in prediction we might need to have only

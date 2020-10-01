@@ -59,7 +59,7 @@ SimpleRefCountNet::SimpleRefCountNet(
 bool SimpleRefCountNet::Run() {
   StartAllObservers();
   VLOG(1) << "Running net " << name_;
-  for (int op_id = 0; op_id < operators_.size(); ++op_id) {
+  for (auto op_id = 0U; op_id < operators_.size(); ++op_id) {
     auto& op = operators_[op_id];
     VLOG(1) << "Running operator " << op->debug_def().name() << "("
             << op->debug_def().type() << ").";

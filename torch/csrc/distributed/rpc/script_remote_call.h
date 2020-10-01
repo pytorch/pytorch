@@ -2,8 +2,8 @@
 
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
 namespace torch {
@@ -30,7 +30,8 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
       const c10::QualifiedName& qualifiedName,
       std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
-      const ForkId& retForkId);
+      const ForkId& retForkId,
+      const bool isAsyncExecution);
 
   inline const RRefId& retRRefId() const {
     return retRRefId_;
@@ -43,7 +44,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
   static std::unique_ptr<ScriptRemoteCall> fromIValues(
       std::vector<at::IValue>& ivalues);
 
-  Message toMessage() && override;
+  Message toMessageImpl() && override;
   static std::unique_ptr<ScriptRemoteCall> fromMessage(const Message& message);
 
  private:

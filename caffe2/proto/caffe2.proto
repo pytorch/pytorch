@@ -194,6 +194,12 @@ message TensorBoundShapes {
   optional int64 max_feature_len = 3;
 }
 
+message AOTConfig{
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {
@@ -316,6 +322,38 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// MapFieldEntry follows the pattern for cross-proto-version maps.
+// See https://developers.google.com/protocol-buffers/docs/proto3#maps
+message MapFieldEntry {
+  required string key = 1;
+  required string val = 2;
+};
+
+// Used to hold backend-specific options.
+message BackendOptions {
+  // Name of the backend that the specified options apply to.
+  required string backend_name = 1;
+  // Flexible map for passing in the options.
+  repeated MapFieldEntry option = 2;
+};
+
+// Partition definition.
+message PartitionInfo {
+  // Name of the partition.
+  required string name = 1;
+
+  // A list of logic device ID, indicating which devices this partition
+  // can be executed on. If empty, it means the partition won't run on
+  // device but on host CPU instead.
+  repeated int32 device_id = 2;
+
+  // Extra debug info.
+  optional string extra_info = 3;
+
+  // Flexible map for passing options specific to a backend.
+  repeated BackendOptions backend_options = 4;
+}
+
 // Network definition.
 message NetDef {
   optional string name = 1; // the network's name
@@ -333,7 +371,8 @@ message NetDef {
   // in parallel.
   // Note: This is to be deprecated. Using the arg field with "num_workers" as
   // key.
-  optional int32 num_workers = 4 [deprecated=true];
+  // Note 2: The old uses of this were never actually cleaned up
+  optional int32 num_workers = 4;
 
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the
@@ -356,7 +395,11 @@ message NetDef {
   // blobs' contents may be overwritten.
   repeated string external_input = 7;
   repeated string external_output = 8;
+
+  // Partitioning info, indexed by partition names.
+  repeated PartitionInfo partition_info = 9;
 }
+
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
 // now.

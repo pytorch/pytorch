@@ -6,8 +6,8 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/print_handler.h>
+#include <ATen/record_function.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -19,6 +19,8 @@
 #include <android/log.h>
 #endif
 
+using namespace torch::autograd::profiler;
+
 namespace pytorch_jni {
 
 namespace {
@@ -26,6 +28,12 @@ namespace {
 struct JITCallGuard {
   // AutoGrad is disabled for mobile by default.
   torch::autograd::AutoGradMode no_autograd_guard{false};
+  // VariableType dispatch is not included in default mobile build. We need set
+  // this guard globally to avoid dispatch error (only for dynamic dispatch).
+  // Thanks to the unification of Variable class and Tensor class it's no longer
+  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
+  // always set NonVariableTypeMode for inference only use case.
+  torch::AutoNonVariableTypeMode non_var_guard{true};
   // Disable graph optimizer to ensure list of unused ops are not changed for
   // custom mobile build.
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
@@ -58,42 +66,59 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
-  torch::jit::script::Module module_;
+  torch::jit::Module module_;
+  c10::DeviceType deviceType_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
-      facebook::jni::alias_ref<jstring> modelPath) {
-    return makeCxxInstance(modelPath);
+      facebook::jni::alias_ref<jstring> modelPath,
+      jint device) {
+    return makeCxxInstance(modelPath, device);
   }
 
 #ifdef __ANDROID__
   static facebook::jni::local_ref<jhybriddata> initHybridAndroidAsset(
       facebook::jni::alias_ref<jclass>,
       facebook::jni::alias_ref<jstring> assetName,
-      facebook::jni::alias_ref<jobject> assetManager) {
-    return makeCxxInstance(assetName, assetManager);
+      facebook::jni::alias_ref<jobject> assetManager,
+      jint device) {
+    return makeCxxInstance(assetName, assetManager, device);
   }
 #endif
 
 #ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
+  static bool onFunctionEnter(
+      const at::RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
+    return true;
   }
 
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+  static void onFunctionExit(const at::RecordFunction&) {
     Trace::endSection();
   }
 #endif
 
   static void preModuleLoadSetupOnce() {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
+
 #ifdef __ANDROID__
     torch::jit::setPrintHandler([](const std::string& s) {
       __android_log_print(ANDROID_LOG_DEBUG, "pytorch-print", "%s", s.c_str());
     });
+#endif
+
+#ifdef TRACE_ENABLED
+    at::addGlobalCallback(at::RecordFunctionCallback(
+        &onFunctionEnter,
+        &onFunctionExit)
+      .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
 #endif
   }
 
@@ -103,32 +128,21 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       return 0;
     }();
     ((void)once);
-
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
-#ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
-        &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
-#endif
-    JITCallGuard guard;
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
     preModuleLoadSetup();
+    JITCallGuard guard;
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
+    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 
 #ifdef __ANDROID__
   PytorchJni(
       facebook::jni::alias_ref<jstring> assetName,
-      facebook::jni::alias_ref<jobject> assetManager) {
+      facebook::jni::alias_ref<jobject> assetManager,
+      jint device) {
     preModuleLoadSetup();
     JNIEnv* env = facebook::jni::Environment::current();
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager.get());
@@ -152,10 +166,12 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
           "Could not get buffer for asset '%s'",
           assetName->toStdString().c_str());
     }
+    JITCallGuard guard;
     module_ = torch::jit::load(torch::make_unique<MemoryReadAdapter>(
         assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();
+    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 #endif
 
@@ -181,7 +197,14 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
     auto output = [&]() {
       JITCallGuard guard;
@@ -202,7 +225,14 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {

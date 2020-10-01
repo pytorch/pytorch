@@ -1,8 +1,7 @@
 package org.pytorch;
 
-import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
-
+import com.facebook.jni.annotations.DoNotStrip;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -41,6 +40,7 @@ public abstract class Tensor {
       "Data buffer must be direct (java.nio.ByteBuffer#allocateDirect)";
 
   @DoNotStrip final long[] shape;
+  final MemoryFormat memoryFormat;
 
   private static final int INT_SIZE_BYTES = 4;
   private static final int FLOAT_SIZE_BYTES = 4;
@@ -113,14 +113,18 @@ public abstract class Tensor {
    * @param data Tensor elements
    * @param shape Tensor shape
    */
-  public static Tensor fromBlobUnsigned(byte[] data, long[] shape) {
+  public static Tensor fromBlobUnsigned(byte[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_uint8(byteBuffer, shape);
+    return new Tensor_uint8(byteBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlobUnsigned(byte[] data, long[] shape) {
+    return fromBlobUnsigned(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -130,14 +134,18 @@ public abstract class Tensor {
    * @param data Tensor elements
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(byte[] data, long[] shape) {
+  public static Tensor fromBlob(byte[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_int8(byteBuffer, shape);
+    return new Tensor_int8(byteBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(byte[] data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -147,14 +155,18 @@ public abstract class Tensor {
    * @param data Tensor elements
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(int[] data, long[] shape) {
+  public static Tensor fromBlob(int[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final IntBuffer intBuffer = allocateIntBuffer((int) numel(shape));
     intBuffer.put(data);
-    return new Tensor_int32(intBuffer, shape);
+    return new Tensor_int32(intBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(int[] data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -164,14 +176,18 @@ public abstract class Tensor {
    * @param data Tensor elements
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(float[] data, long[] shape) {
+  public static Tensor fromBlob(float[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final FloatBuffer floatBuffer = allocateFloatBuffer((int) numel(shape));
     floatBuffer.put(data);
-    return new Tensor_float32(floatBuffer, shape);
+    return new Tensor_float32(floatBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(float[] data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -181,14 +197,18 @@ public abstract class Tensor {
    * @param data Tensor elements
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(long[] data, long[] shape) {
+  public static Tensor fromBlob(long[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final LongBuffer longBuffer = allocateLongBuffer((int) numel(shape));
     longBuffer.put(data);
-    return new Tensor_int64(longBuffer, shape);
+    return new Tensor_int64(longBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(long[] data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -198,14 +218,18 @@ public abstract class Tensor {
    * @param shape Tensor shape
    * @param data Tensor elements
    */
-  public static Tensor fromBlob(long[] shape, double[] data) {
+  public static Tensor fromBlob(double[] data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final DoubleBuffer doubleBuffer = allocateDoubleBuffer((int) numel(shape));
     doubleBuffer.put(data);
-    return new Tensor_float64(doubleBuffer, shape);
+    return new Tensor_float64(doubleBuffer, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(double[] data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -216,7 +240,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlobUnsigned(ByteBuffer data, long[] shape) {
+  public static Tensor fromBlobUnsigned(ByteBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -225,7 +249,11 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_uint8(data, shape);
+    return new Tensor_uint8(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlobUnsigned(ByteBuffer data, long[] shape) {
+    return fromBlobUnsigned(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -236,7 +264,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(ByteBuffer data, long[] shape) {
+  public static Tensor fromBlob(ByteBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -245,7 +273,11 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int8(data, shape);
+    return new Tensor_int8(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(ByteBuffer data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -256,7 +288,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(IntBuffer data, long[] shape) {
+  public static Tensor fromBlob(IntBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -265,7 +297,11 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int32(data, shape);
+    return new Tensor_int32(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(IntBuffer data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -276,7 +312,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(FloatBuffer data, long[] shape) {
+  public static Tensor fromBlob(FloatBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -285,7 +321,11 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float32(data, shape);
+    return new Tensor_float32(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(FloatBuffer data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -296,7 +336,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(LongBuffer data, long[] shape) {
+  public static Tensor fromBlob(LongBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -305,7 +345,11 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int64(data, shape);
+    return new Tensor_int64(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(LongBuffer data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -316,7 +360,7 @@ public abstract class Tensor {
    *     change the tensor.
    * @param shape Tensor shape
    */
-  public static Tensor fromBlob(DoubleBuffer data, long[] shape) {
+  public static Tensor fromBlob(DoubleBuffer data, long[] shape, MemoryFormat memoryFormat) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -325,14 +369,19 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float64(data, shape);
+    return new Tensor_float64(data, shape, memoryFormat);
+  }
+
+  public static Tensor fromBlob(DoubleBuffer data, long[] shape) {
+    return fromBlob(data, shape, MemoryFormat.CONTIGUOUS);
   }
 
   @DoNotStrip private HybridData mHybridData;
 
-  private Tensor(long[] shape) {
+  private Tensor(long[] shape, MemoryFormat memoryFormat) {
     checkShape(shape);
     this.shape = Arrays.copyOf(shape, shape.length);
+    this.memoryFormat = memoryFormat;
   }
 
   /** Returns the number of elements in this tensor. */
@@ -355,6 +404,11 @@ public abstract class Tensor {
     return Arrays.copyOf(shape, shape.length);
   }
 
+  /** Returns the memory format of this tensor. */
+  public MemoryFormat memoryFormat() {
+    return memoryFormat;
+  }
+
   /** @return data type of this tensor. */
   public abstract DType dtype();
 
@@ -362,6 +416,12 @@ public abstract class Tensor {
   @DoNotStrip
   int dtypeJniCode() {
     return dtype().jniCode;
+  }
+
+  // Called from native
+  @DoNotStrip
+  int memoryFormatJniCode() {
+    return memoryFormat.jniCode;
   }
 
   /**
@@ -427,8 +487,8 @@ public abstract class Tensor {
   static class Tensor_uint8 extends Tensor {
     private final ByteBuffer data;
 
-    private Tensor_uint8(ByteBuffer data, long[] shape) {
-      super(shape);
+    private Tensor_uint8(ByteBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -459,8 +519,8 @@ public abstract class Tensor {
   static class Tensor_int8 extends Tensor {
     private final ByteBuffer data;
 
-    private Tensor_int8(ByteBuffer data, long[] shape) {
-      super(shape);
+    private Tensor_int8(ByteBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -491,8 +551,8 @@ public abstract class Tensor {
   static class Tensor_int32 extends Tensor {
     private final IntBuffer data;
 
-    private Tensor_int32(IntBuffer data, long[] shape) {
-      super(shape);
+    private Tensor_int32(IntBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -523,8 +583,8 @@ public abstract class Tensor {
   static class Tensor_float32 extends Tensor {
     private final FloatBuffer data;
 
-    Tensor_float32(FloatBuffer data, long[] shape) {
-      super(shape);
+    Tensor_float32(FloatBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -555,8 +615,8 @@ public abstract class Tensor {
   static class Tensor_int64 extends Tensor {
     private final LongBuffer data;
 
-    private Tensor_int64(LongBuffer data, long[] shape) {
-      super(shape);
+    private Tensor_int64(LongBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -587,8 +647,8 @@ public abstract class Tensor {
   static class Tensor_float64 extends Tensor {
     private final DoubleBuffer data;
 
-    private Tensor_float64(DoubleBuffer data, long[] shape) {
-      super(shape);
+    private Tensor_float64(DoubleBuffer data, long[] shape, MemoryFormat memoryFormat) {
+      super(shape, memoryFormat);
       this.data = data;
     }
 
@@ -643,20 +703,29 @@ public abstract class Tensor {
 
   // Called from native
   @DoNotStrip
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+  private static Tensor nativeNewTensor(
+      ByteBuffer data, long[] shape, int dtype, int memoryFormatCode, HybridData hybridData) {
     Tensor tensor = null;
+
+    MemoryFormat memoryFormat = MemoryFormat.CONTIGUOUS;
+    if (MemoryFormat.CHANNELS_LAST.jniCode == memoryFormatCode) {
+      memoryFormat = MemoryFormat.CHANNELS_LAST;
+    } else if (MemoryFormat.CHANNELS_LAST_3D.jniCode == memoryFormatCode) {
+      memoryFormat = MemoryFormat.CHANNELS_LAST_3D;
+    }
+
     if (DType.FLOAT32.jniCode == dtype) {
-      tensor = new Tensor_float32(data.asFloatBuffer(), shape);
+      tensor = new Tensor_float32(data.asFloatBuffer(), shape, memoryFormat);
     } else if (DType.INT32.jniCode == dtype) {
-      tensor = new Tensor_int32(data.asIntBuffer(), shape);
+      tensor = new Tensor_int32(data.asIntBuffer(), shape, memoryFormat);
     } else if (DType.INT64.jniCode == dtype) {
-      tensor = new Tensor_int64(data.asLongBuffer(), shape);
+      tensor = new Tensor_int64(data.asLongBuffer(), shape, memoryFormat);
     } else if (DType.FLOAT64.jniCode == dtype) {
-      tensor = new Tensor_float64(data.asDoubleBuffer(), shape);
+      tensor = new Tensor_float64(data.asDoubleBuffer(), shape, memoryFormat);
     } else if (DType.UINT8.jniCode == dtype) {
-      tensor = new Tensor_uint8(data, shape);
+      tensor = new Tensor_uint8(data, shape, memoryFormat);
     } else if (DType.INT8.jniCode == dtype) {
-      tensor = new Tensor_int8(data, shape);
+      tensor = new Tensor_int8(data, shape, memoryFormat);
     } else {
       new IllegalArgumentException("Unknown Tensor dtype");
     }

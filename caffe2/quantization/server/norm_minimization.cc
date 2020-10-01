@@ -6,7 +6,7 @@
 #include <cmath>
 #include <limits>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 using namespace std;
 
@@ -160,8 +160,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     start_bin = next_start_bin;
     end_bin = next_end_bin;
   }
-  VLOG(2) << "best quantization range " << start_bin << "," << end_bin + 1 << ","
-          << norm_min;
+  VLOG(2) << "best quantization range " << start_bin << "," << end_bin + 1
+          << "," << norm_min;
 
   double selected_sum = 0;
   for (int i = start_bin; i < end_bin + 1; ++i) {

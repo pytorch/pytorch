@@ -475,3 +475,88 @@ class TestTypeSharing(JitTestCase):
         a()
         b = package(A())
         b()
+
+    def test_module_dict_same_type_different_name(self):
+        """
+        We should be able to differentiate between two ModuleDict instances
+        that have different keys but the same value types.
+        """
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x
+
+        class Foo(torch.nn.Module):
+            def __init__(self, s):
+                super(Foo, self).__init__()
+                self.dict = torch.nn.ModuleDict(s)
+
+            def forward(self, x):
+                return x
+
+        a = Foo({'foo': A()})
+        b = Foo({'bar': A()})
+        c = Foo({'bar': A()})
+        self.assertDifferentType(a, b)
+        self.assertSameType(b, c)
+
+    def test_type_sharing_define_in_init(self):
+        """
+        Tests that types between instances of a ScriptModule
+        subclass that defines methods in its __init__ are not
+        shared.
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self, val):
+                super().__init__()
+                self.define(f"""
+                def forward(self) -> int:
+                    return {val}
+                """)
+
+        one = A(1)
+        two = A(2)
+
+        self.assertEqual(one(), 1)
+        self.assertEqual(two(), 2)
+
+    def test_type_sharing_disabled(self):
+        """
+        Test that type sharing can be disabled.
+        """
+        class A(torch.nn.Module):
+            def __init__(self, sub):
+                super().__init__()
+                self.sub = sub
+
+            def forward(self, x):
+                return x
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        top1 = A(A(B()))
+        top2 = A(A(B()))
+
+        top1_s = torch.jit._recursive.create_script_module(
+            top1,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+        top2_s = torch.jit._recursive.create_script_module(
+            top2,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+
+        self.assertDifferentType(top1_s, top2_s)
+        self.assertDifferentType(top1_s, top1_s.sub)
+        self.assertDifferentType(top1_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top1_s.sub)

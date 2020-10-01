@@ -3,7 +3,7 @@
 #include <iostream>
 
 #include <c10/core/TensorOptions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 #include "utils.h"
 
@@ -60,43 +60,57 @@ Tensor FF_op(const Tensor& self) {
   return self;
 }
 
+// GG -> FF
+Tensor GG_op(const Tensor& self) {
+  return call_FF_op(self);
+}
+
 namespace {
 
-auto registerer = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::AA(Tensor self) -> Tensor")
-    .kernel<decltype(AA_op), &AA_op>(DispatchKey::CPUTensorId)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::BB(Tensor self) -> Tensor")
-    .catchAllKernel<decltype(BB_op), &BB_op>()
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::CC(Tensor self) -> Tensor")
-    .kernel(DispatchKey::CPUTensorId, &CC_op)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::DD(Tensor self) -> Tensor")
-    .catchAllKernel(&DD_op)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::EE(Tensor self) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(EE_op), &EE_op>(DispatchKey::CPUTensorId)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::FF(Tensor self) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<decltype(FF_op), &FF_op>()
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::GG(Tensor self) -> Tensor")
-    .kernel(DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {
-      return call_FF_op(a);
-    }))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::HH(Tensor self) -> Tensor")
-    .catchAllKernel([] (Tensor a) -> Tensor {
+// NB: Some of these registrations (AA, EE) are not what you
+// actually expect to see in practice, but we cover them here
+// as they are technically "valid" API calls and we want to
+// make sure the analyzer catches them.  (The analyzer is very
+// generic, so actually there isn't any reason it shouldn't work,
+// but it's good to test them!)
+//
+// Additionally, the code in this file is not really runnable; for
+// example we are missing schemas for all of the impl registrations
+// here.  The analyzer doesn't really care, as it only really
+// cares about the name
+TORCH_LIBRARY(_test, m) {
+  m.def("AA(Tensor self) -> Tensor");
+  m.impl("AA", torch::CppFunction::makeUnboxedOnly(AA_op));
+
+  m.def("BB(Tensor self) -> Tensor");
+  m.impl("BB", TORCH_FN(BB_op));
+
+  m.def("CC(Tensor self) -> Tensor", TORCH_FN(CC_op));
+  m.def("DD", TORCH_FN(DD_op));
+}
+
+TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
+  m.def("EE(Tensor self) -> Tensor");
+  m.def("FF(Tensor self) -> Tensor");
+  m.def("GG(Tensor self) -> Tensor");
+  m.def("HH(Tensor self) -> Tensor");
+}
+
+TORCH_LIBRARY_IMPL(_test, CPU, m) {
+  m.impl_UNBOXED("EE", EE_op);
+  m.impl("FF",
+         torch::dispatch(DispatchKey::CPU,
+                         torch::CppFunction::makeUnboxedOnly(FF_op))
+  );
+  m.impl("GG",
+         torch::dispatch(DispatchKey::CPU,
+                         TORCH_FN((GG_op)))
+  );
+  m.impl("HH",
+    [] (Tensor a) -> Tensor {
       return a;
-    }));
+    });
+}
 
 } // namespace
 

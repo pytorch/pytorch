@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given
@@ -27,9 +27,10 @@ class TestHyperbolicOps(serial.SerializedTestCase):
             op=op,
             inputs=[X],
             reference=ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(dtype=np.float32), **hu.gcs)
     def test_sinh(self, X, gc, dc):

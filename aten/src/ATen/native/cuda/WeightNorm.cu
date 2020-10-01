@@ -401,7 +401,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
   // synchronizing here, this is the best we can do.
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::tuple<Tensor, Tensor>{w, norms};
 }
@@ -493,7 +493,7 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
   // synchronizing here, this is the best we can do.
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::tuple<Tensor, Tensor>{grad_v, grad_g};
 }

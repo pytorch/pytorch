@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import functools
 import numpy as np
 import timeit
@@ -12,9 +7,8 @@ import copy
 import ast
 
 # needs to be imported after torch
-import cpp_extension # noqa
+import torch.utils.cpp_extension as cpp_extension # noqa
 
-import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 

@@ -58,6 +58,11 @@ static void avg_pool2d_out_frame(
             hend = std::min(hend, inputHeight);
             wend = std::min(wend, inputWidth);
 
+            if (hstart >= hend || wstart >= wend) {
+              ++ptr_output;
+              continue;
+            }
+
             scalar_t sum = 0;
 
             int divide_factor;

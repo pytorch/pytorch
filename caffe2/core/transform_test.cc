@@ -418,7 +418,7 @@ REGISTER_TRANSFORM(SlowToFast, SlowToFastTransform);
 
 TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
   NetDef init_netdef;
-  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+  AddOp(&init_netdef, "ConstantFill", {}, {"in"});
 
   NetDef netdef;
   AddOp(&netdef, "TransformDummyOp1", {"in"}, {"mid"});
@@ -437,7 +437,7 @@ TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
 
 TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
   NetDef init_netdef;
-  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+  AddOp(&init_netdef, "ConstantFill", {}, {"in"});
 
   NetDef netdef;
   AddOp(&netdef, "TransformDummyOp1", {"in"}, {"mid"});
@@ -456,4 +456,4 @@ TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
 
 } // namespace
 
-} // namespace Caffe2
+} // namespace caffe2

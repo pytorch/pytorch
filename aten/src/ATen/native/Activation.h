@@ -16,6 +16,10 @@ using softplus_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using softplus_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using threshold_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using hardtanh_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
+using hardsigmoid_fn = void(*)(TensorIterator&);
+using hardsigmoid_backward_fn = void(*)(TensorIterator&);
+using hardswish_fn = void(*)(TensorIterator&);
+using hardswish_backward_fn = void(*)(TensorIterator&);
 using shrink_fn = void (*)(TensorIterator&, Scalar);
 using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
 using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
@@ -33,11 +37,19 @@ DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(activation_fn, GeluKernel);
 DECLARE_DISPATCH(activation_backward_fn, GeluBackwardKernel);
 DECLARE_DISPATCH(hardtanh_backward_fn, hardtanh_backward_stub);
+DECLARE_DISPATCH(hardsigmoid_fn, hardsigmoid_stub);
+DECLARE_DISPATCH(hardsigmoid_backward_fn, hardsigmoid_backward_stub);
+DECLARE_DISPATCH(hardswish_fn, hardswish_stub);
+DECLARE_DISPATCH(hardswish_backward_fn, hardswish_backward_stub);
 DECLARE_DISPATCH(shrink_fn, hardshrink_stub);
 DECLARE_DISPATCH(shrink_fn, softshrink_stub);
 DECLARE_DISPATCH(shrink_backward_fn, shrink_backward_stub);
 DECLARE_DISPATCH(leaky_relu_fn, leaky_relu_stub);
 DECLARE_DISPATCH(leaky_relu_backward_fn, leaky_relu_backward_stub);
+DECLARE_DISPATCH(activation_fn, glu_stub);
+DECLARE_DISPATCH(activation_backward_fn, glu_backward_stub);
+DECLARE_DISPATCH(activation_fn, silu_stub);
+DECLARE_DISPATCH(activation_backward_fn, silu_backward_stub);
 
 } // namespace native
 

@@ -29,7 +29,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors);
 
-  rpc::Message toMessage() && override;
+  rpc::Message toMessageImpl() && override;
 
   static std::unique_ptr<RpcWithAutograd> fromMessage(
       const rpc::Message& message);
@@ -41,6 +41,8 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   const AutogradMetadata& autogradMetadata() const;
 
   RpcCommandBase& wrappedRpc();
+
+  void setWrappedRpc(std::unique_ptr<RpcCommandBase> wrappedRpc);
 
   std::unique_ptr<RpcCommandBase> moveWrappedRpc() &&;
 

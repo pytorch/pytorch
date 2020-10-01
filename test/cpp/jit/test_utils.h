@@ -1,10 +1,9 @@
 #pragma once
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/ir/irparser.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
 
 namespace torch {
 namespace jit {

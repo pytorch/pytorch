@@ -1,10 +1,10 @@
 # @package onnx
 # Module caffe2.python.onnx.tests.onnx_backend_test
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import os
 
@@ -23,7 +23,7 @@ backend_test = onnx.backend.test.BackendTest(c2, __name__)
 
 backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_hardmax'  # Does not support Hardmax.
-                     '|test_cast.*FLOAT16.*'  # Does not support Cast on Float16.
+                     '|test_.*FLOAT16.*'  # Does not support Cast on Float16.
                      '|test_depthtospace.*'  # Does not support DepthToSpace.
                      '|test_reduce_l1.*'  # Does not support ReduceL1.
                      '|test_reduce_l2.*'  # Does not support ReduceL2.
@@ -81,8 +81,10 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_unique.*'  # opset 11 is not supported yet
                      '|test_gathernd.*'  # opset 11 is not supported yet
                      '|test_dropout_random.*'  # opset 12 is not supported
+                     '|test_dropout_default.*'  # opset 12 is not supported
                      '|test_einsum.*'  # opset 12 is not supported
                      '|test_.*training.*'  # training is not supported
+                     '|test_.*_loss.*'  # training is not supported
                      '|test_split_zero_size.*'  # unsupported case
                      '|test_constantofshape_int_shape_zero.*'  # unsupported case
                      '|test_constant_pad.*'  # 1d pad is not supported
@@ -95,6 +97,20 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
+                     '|test_celu.*'  # unsupported case
+                     '|test_gathernd.*'  # unsupported case
+                     '|test_greater_equal.*'  # unsupported case
+                     '|test_less_equal.*'  # unsupported case
+                     '|test_max_.*'  # unsupported case
+                     '|test_min_.*'  # unsupported case
+                     '|test_.*momentum_.*'  # unsupported case
+                     '|test_sce.*'  # unsupported case
+                     '|test_nllloss.*'  # unsupported case
+                     '|test_unfoldtodepth.*'  # unsupported case
+                     '|test_.*gradient.*'  # no support for gradient op in c2-onnx
+                     '|test_.*adagrad.*'  # no support for gradient op in c2-onnx
+                     '|test_.*loss.*'  # no support for loss op in c2-onnx
+                     '|test_.*adam.*'  # no support for adam op
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -110,6 +126,7 @@ backend_test.exclude('(test_cast_.*'
 
 # Temporarily skip some ONNX backend tests with broadcasting.
 backend_test.exclude('(test_pow_bcast'
+                     '|test_pow_types.*'
                      ')')
 
 # Skip vgg to speed up CI

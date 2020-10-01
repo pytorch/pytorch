@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_jni CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
+message(STATUS "ANDROID_STL:${ANDROID_STL}")
 
 set(TRACE_ENABLED OFF)
 if(DEFINED ENV{TRACE_ENABLED})
@@ -13,17 +14,24 @@ endif()
 if(NOT TRACE_ENABLED)
   message(STATUS "TRACE_ENABLED OFF")
 endif()
+set(USE_VULKAN OFF)
+if(DEFINED ENV{USE_VULKAN})
+  if($ENV{USE_VULKAN} STREQUAL "1")
+    message(STATUS "USE_VULKAN ON")
+    set(USE_VULKAN ON)
+  endif()
+endif()
 
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
-if (ANDROID_ABI)
+if(ANDROID_ABI)
   set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
   set(BUILD_SUBDIR ${ANDROID_ABI})
 elseif(BUILD_LIBTORCH_WITH_JNI)
   # Don't need LIBTORCH_HOME if we're building from within PyTorch.
 else()
   # Building against a pre-built libtorch.
-  if (NOT LIBTORCH_HOME)
+  if(NOT LIBTORCH_HOME)
     message(FATAL_ERROR
       "pytorch_android requires LIBTORCH_HOME to be defined for non-Android builds.")
   endif()
@@ -48,7 +56,7 @@ add_library(pytorch_jni SHARED
     ${pytorch_android_SOURCES}
 )
 
-if (APPLE)
+if(APPLE)
   # Need to add rpath so dlopen can find dependencies.
   add_custom_command(TARGET pytorch_jni
       POST_BUILD COMMAND
@@ -69,8 +77,14 @@ set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
 
 add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
-if (ANDROID_ABI)
+# ---[ Vulkan deps
+if(USE_VULKAN)
+  set(Vulkan_LIBS)
+  set(Vulkan_INCLUDES)
+  include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/VulkanDependencies.cmake)
+endif()
 
+if(ANDROID_ABI)
   function(import_static_lib name)
     add_library(${name} STATIC IMPORTED)
     set_property(
@@ -83,13 +97,15 @@ if (ANDROID_ABI)
   import_static_lib(libtorch_cpu)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
+  import_static_lib(libXNNPACK)
   import_static_lib(libpytorch_qnnpack)
+  import_static_lib(libpthreadpool)
   import_static_lib(libeigen_blas)
   import_static_lib(libcpuinfo)
   import_static_lib(libclog)
 
-    # Link most things statically on Android.
-  target_link_libraries(pytorch_jni
+  # Link most things statically on Android.
+  set(pytorch_jni_LIBS
       fbjni
       -Wl,--gc-sections
       -Wl,--whole-archive
@@ -98,24 +114,31 @@ if (ANDROID_ABI)
       -Wl,--no-whole-archive
       libc10
       libnnpack
+      libXNNPACK
       libpytorch_qnnpack
+      libpthreadpool
       libeigen_blas
       libcpuinfo
       libclog
   )
-
 else()
-
   # Prefer dynamic linking on the host
-  target_link_libraries(pytorch_jni
+  set(pytorch_jni_LIBS
       fbjni
       torch
       torch_cpu
       c10
       nnpack
+      XNNPACK
       pytorch_qnnpack
+      pthreadpool
       cpuinfo
       clog
   )
-
 endif()
+
+if(USE_VULKAN)
+  list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
+endif()
+
+target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})

@@ -31,3 +31,8 @@ SHOULD_NOT_DO_GRADIENT(IndexHash);
 
 } // namespace
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    IndexHash,
+    "_caffe2::IndexHash(Tensor indices, int seed, int modulo) -> Tensor hashed_indices",
+    caffe2::IndexHashOp<caffe2::CPUContext>);

@@ -1,9 +1,9 @@
 # @package layer_model_helper
 # Module caffe2.python.layer_model_helper
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, model_helper, schema, scope, utils, muji
 from caffe2.python.modeling.parameter_info import (
@@ -93,6 +93,8 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
         self._initialize_params = True
+
+        self._transfer_learning_blob_name_mappings = None
 
         # additional (hard-coded) diagnose_options to report based on the model
         # TODO(xlwang): it's hack!
@@ -217,6 +219,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.global_constants = {}
         self.global_constant_initializers = {}
         self.add_global_constant('ONE', 1.0)
+        self.add_global_constant('NAN', float("NaN"))
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 
@@ -489,6 +492,15 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_prediction(self, prediction, weight=1.0):
         assert prediction is not None, "Added prediction should not be None"
         self._prediction.append((prediction, weight))
+
+    @property
+    def transfer_learning_blob_name_mappings(self):
+        return self._transfer_learning_blob_name_mappings
+
+    @transfer_learning_blob_name_mappings.setter
+    def transfer_learning_blob_name_mappings(self, blob_name_mappings):
+        assert blob_name_mappings is not None, "Transfer learning blob name mappings should not be None"
+        self._transfer_learning_blob_name_mappings = blob_name_mappings
 
     @property
     def loss(self):

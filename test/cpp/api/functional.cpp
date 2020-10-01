@@ -111,6 +111,14 @@ TEST_F(FunctionalTest, MaxPool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
+TEST_F(FunctionalTest, MaxPool2dBackward) {
+  auto input = torch::rand({1, 2, 4, 4}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto output = F::max_pool2d(input, F::MaxPool2dFuncOptions(2));
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, MaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
   auto y = F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));
@@ -238,6 +246,18 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+TEST_F(FunctionalTest, SmoothL1LossBeta) {
+  auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
+  auto expected = torch::tensor(1.67, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -293,7 +313,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
+  auto options = F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -660,6 +680,56 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   auto expected = torch::tensor({0.}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
+TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
+  // Check that if we use torch::pairwise_distance with the default
+  // TripletMarginLoss options as our distance function, the outputs
+  // are equal (i.e., equal under defaults).
+
+  std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kNone};
+  std::vector<float> margins = {0.5, 1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& reduction : reductions) {
+    for (auto& margin : margins) {
+      for (const auto& swap : swaps) {
+        auto anchor = 
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto positive =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto negative =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+        auto basicOptions = F::TripletMarginLossFuncOptions()
+                                .reduction(reduction)
+                                .margin(margin)
+                                .swap(swap);
+        auto distanceOptions =
+            F::TripletMarginWithDistanceLossFuncOptions()
+                .reduction(reduction)
+                .margin(margin)
+                .swap(swap);
+        TripletMarginLoss basicLoss(basicOptions);
+        TripletMarginWithDistanceLoss distanceLoss(distanceOptions);
+
+        auto basicOutput =
+            F::triplet_margin_loss(anchor, positive, negative, basicOptions);
+        auto distanceOutput = F::triplet_margin_with_distance_loss(
+            anchor, positive, negative, distanceOptions);
+
+        ASSERT_TRUE(distanceOutput.allclose(basicOutput, 1e-6, 1e-6));
+
+        // handle for torch::kNone reduction
+        auto sum = distanceOutput.sum();
+        sum.backward();
+        ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+        ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+        ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+      }
+    }
+  }
 }
 
 TEST_F(FunctionalTest, NLLLoss) {
@@ -1875,7 +1945,7 @@ TEST_F(FunctionalTest, Interpolate) {
     // 1D interpolation
     auto input = torch::ones({1, 1, 2});
     auto options = F::InterpolateFuncOptions()
-                       .size({4})
+                       .size(std::vector<int64_t>({4}))
                        .mode(torch::kNearest);
     auto output = F::interpolate(input, options);
     auto expected = torch::ones({1, 1, 4});
@@ -1889,7 +1959,7 @@ TEST_F(FunctionalTest, Interpolate) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         auto input = torch::ones({1, 1, 2, 2});
         auto options = F::InterpolateFuncOptions()
-                           .scale_factor({scale_factor, scale_factor})
+                           .scale_factor(std::vector<double>({scale_factor, scale_factor}))
                            .mode(torch::kBilinear)
                            .align_corners(align_corners);
         auto output = F::interpolate(input, options);
@@ -1908,7 +1978,7 @@ TEST_F(FunctionalTest, Interpolate) {
         auto input = torch::ones({1, 1, 2, 2, 2});
         auto options =
             F::InterpolateFuncOptions()
-                .scale_factor({scale_factor, scale_factor, scale_factor})
+                .scale_factor(std::vector<double>({scale_factor, scale_factor, scale_factor}))
                 .mode(torch::kTrilinear)
                 .align_corners(align_corners);
         auto output = F::interpolate(input, options);
@@ -1924,13 +1994,13 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto input = torch::randn({3, 2, 2});
     ASSERT_THROWS_WITH(
-        F::interpolate(input[0], F::InterpolateFuncOptions().size({4, 4})),
+        F::interpolate(input[0], F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 4}))),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
     ASSERT_THROWS_WITH(
         F::interpolate(
             torch::reshape(input, {1, 1, 1, 3, 2, 2}),
-            F::InterpolateFuncOptions().size({1, 1, 1, 3, 4, 4})),
+            F::InterpolateFuncOptions().size(std::vector<int64_t>({1, 1, 1, 3, 4, 4}))),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
     ASSERT_THROWS_WITH(
@@ -1939,12 +2009,12 @@ TEST_F(FunctionalTest, Interpolate) {
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
-            F::InterpolateFuncOptions().size({3, 4, 4}).scale_factor({0.5})),
+            F::InterpolateFuncOptions().size(std::vector<int64_t>({3, 4, 4})).scale_factor(std::vector<double>({0.5}))),
         "only one of size or scale_factor should be defined");
     ASSERT_THROWS_WITH(
-        F::interpolate(input, F::InterpolateFuncOptions().scale_factor({3, 2})),
+        F::interpolate(input, F::InterpolateFuncOptions().scale_factor(std::vector<double>({3, 2}))),
         "scale_factor shape must match input shape. "
-        "Input is 1D, scale_factor size is 2");
+        "Input is 1D, scale_factor size is [3, 2]");
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
@@ -2328,9 +2398,15 @@ TEST_F(FunctionalTest, AlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(rate).training(false));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    for (const auto inplace : {false, true}) {
+      auto input_ = input.clone();
+      auto output = F::alpha_dropout(input_, F::AlphaDropoutFuncOptions().p(rate).training(false).inplace(inplace));
+      ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+      ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(input_, output));
+      }
+    }
   }
   auto output = F::detail::alpha_dropout(input, 0.5, false, false);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
@@ -2343,9 +2419,15 @@ TEST_F(FunctionalTest, FeatureAlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    for (const auto inplace : {false, true}) {
+      auto input_ = input.clone();
+      auto output = F::feature_alpha_dropout(input_, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false).inplace(inplace));
+      ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+      ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(input_, output));
+      }
+    }
   }
   auto output = F::feature_alpha_dropout(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));

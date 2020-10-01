@@ -41,7 +41,8 @@ class FindDuplicateElementsOp final : public Operator<Context> {
 
     const auto dupSize = dupIndices.size();
 
-    auto* output = Output(0, {static_cast<int64_t>(dupSize)}, at::dtype<int64_t>());
+    auto* output =
+        Output(0, {static_cast<int64_t>(dupSize)}, at::dtype<int64_t>());
     auto* out_ptr = output->template mutable_data<int64_t>();
     for (size_t i = 0; i < dupSize; ++i) {
       out_ptr[i] = dupIndices[i];

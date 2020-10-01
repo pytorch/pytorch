@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -35,15 +34,41 @@ struct TORCH_API BatchNormOptions {
   TORCH_ARG(bool, track_running_stats) = true;
 };
 
+/// Options for the `BatchNorm1d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm1dOptions = BatchNormOptions;
+
+/// Options for the `BatchNorm2d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm2dOptions = BatchNormOptions;
+
+/// Options for the `BatchNorm3d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm3dOptions = BatchNormOptions;
 
 // ============================================================================
 
 namespace functional {
 
-/// Options for the `BatchNorm` functional.
+/// Options for `torch::nn::functional::batch_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::batch_norm(input, mean, variance, F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(0.1).eps(1e-05).training(false));
+/// ```
 struct TORCH_API BatchNormFuncOptions {
   TORCH_ARG(Tensor, weight) = Tensor();
 

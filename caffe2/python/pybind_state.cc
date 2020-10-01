@@ -6,7 +6,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/core/asan.h"
+#include <c10/macros/Macros.h>
+
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -19,6 +20,7 @@
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/offline_tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
@@ -27,6 +29,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/shape_info.h"
+#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -34,7 +37,7 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/script/module_python.h"
+#include "torch/csrc/jit/python/module_python.h"
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -82,6 +85,14 @@ Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
 
+Workspace* GetWorkspaceByName(const std::string &name) {
+  if (gWorkspaces.count(name)) {
+    return gWorkspaces[name].get();
+  }
+  return nullptr;
+}
+
+
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {
@@ -94,12 +105,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(*blob.Get<std::unique_ptr<torch::jit::script::Module>>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<std::unique_ptr<torch::jit::script::Module>>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -113,6 +124,8 @@ int CaffeToNumpyType(const TypeMeta& meta) {
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
+      {TypeMeta::Id<std::complex<double>>(), NPY_COMPLEX128},
+      {TypeMeta::Id<std::complex<float>>(), NPY_COMPLEX64},
       {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
@@ -247,9 +260,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (auto module = torch::jit::script::as_module(arg)) {
-    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(
-        new torch::jit::script::Module(*module));
+  if (auto module = torch::jit::as_module(arg)) {
+    blob->GetMutable<std::unique_ptr<torch::jit::Module>>()->reset(
+        new torch::jit::Module(*module));
     return true;
   }
 #endif
@@ -356,10 +369,18 @@ class BackgroundPlan {
 };
 
 void addObjectMethods(py::module& m) {
-  py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
-    py::gil_scoped_release g;
-    CAFFE_ENFORCE(net->Run());
-  });
+  py::class_<NetBase>(m, "Net")
+      .def(
+          "run",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            CAFFE_ENFORCE(net->Run());
+          })
+      .def("cancel",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            net->Cancel();
+      });
 
   py::class_<ObserverBase<NetBase>>(m, "Observer")
       .def(
@@ -1011,7 +1032,7 @@ void addObjectMethods(py::module& m) {
 }
 
 void addGlobalMethods(py::module& m) {
-  m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+  m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
@@ -1105,6 +1126,18 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "switch_workspace",
       [](Workspace* ws, py::object /*create_if_missing*/) { gWorkspace = ws; });
+  m.def(
+      "create_child_workspace",
+      [](const std::string& parent_ws_name, const std::string& child_ws_name) {
+        CAFFE_ENFORCE(
+            gWorkspaces.count(parent_ws_name), "Parent ws does not exist.");
+        auto parent_gws = gWorkspaces[parent_ws_name].get();
+        std::unique_ptr<Workspace> child_ws(new Workspace(parent_gws));
+        gWorkspaces.insert(std::make_pair(child_ws_name, std::move(child_ws)));
+      },
+      "Create and register child ws, sharing existing blobs in parent ws.",
+      py::arg("parent_ws_name"),
+      py::arg("child_ws_name"));
   m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
@@ -1524,6 +1557,14 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def("ssa_rewrite", [](const py::bytes& net_proto) {
+    auto net_def = std::make_unique<NetDef>();
+    CAFFE_ENFORCE(net_def->ParseFromString(net_proto));
+    onnx::SsaRewrite(nullptr, net_def.get());
+    std::string output_net_proto;
+    CAFFE_ENFORCE(net_def->SerializeToString(&output_net_proto));
+    return py::bytes(output_net_proto);
+  });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
@@ -1707,40 +1748,60 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
   m.def(
+      "create_offline_tensor",
+      [](const std::string& name,
+         const std::vector<int>& dims,
+         int datatype) -> bool {
+        Workspace* curr_ws = GetCurrentWorkspace();
+        auto* b = curr_ws->CreateBlob(name);
+        auto* offline = b->GetMutable<OfflineTensor>();
+        CAFFE_ENFORCE(offline);
+        offline->setShapeAndType(
+            dims,
+            CPU,
+            DataTypeToTypeMeta(static_cast<TensorProto::DataType>(datatype)));
+        return true;
+      });
+  m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
-         const std::unordered_map<std::string, std::vector<int>>& shapes,
-         const std::vector<int>& black_list,
+         const py::bytes& shapes_str,
+         const std::vector<int>& block_list,
          const std::vector<std::string>& weight_names,
          int max_batch_size,
          int max_seq_size,
+         int timeout,
          bool adjust_batch,
          bool debug_builder,
          bool merge_fp32_inputs_into_fp16,
+         bool net_ssa_rewritten,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
-        ShapeInfoMap shape_map;
-        for (const auto& it : shapes) {
-          shape_map.emplace(
-              it.first,
-              constructShapeInfoWithDefaultDimType(
-                  CreateTensorShape(it.second, TensorProto::FLOAT)));
-        }
+        Workspace* curr_ws = GetCurrentWorkspace();
+        CAFFE_ENFORCE(curr_ws);
+        splitSparseLengthsSumSparse(&pred_net, *curr_ws);
+        caffe2::TensorBoundShapes tbs;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(shapes_str.cast<std::string>(), &tbs),
+            "broken TensorBoundShapes protobuf");
+        ShapeInfoMap shape_map = caffe2::extractShapeInfoFromTensorBoundShapes(
+            tbs, max_batch_size, max_seq_size);
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.timeout = timeout;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
+        opts.predictor_net_ssa_rewritten = net_ssa_rewritten;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        Workspace* curr_ws = GetCurrentWorkspace();
-        std::unordered_set<int> blacklist_set(
-            black_list.begin(), black_list.end());
+        std::unordered_set<int> blocklist_set(
+            block_list.begin(), block_list.end());
         std::vector<std::string> weight_names_overwrite{};
         if (weight_names.size() == 0) {
           weight_names_overwrite = curr_ws->Blobs();
@@ -1752,7 +1813,7 @@ void addGlobalMethods(py::module& m) {
             &pred_net,
             weight_names_overwrite,
             shape_map,
-            blacklist_set);
+            blocklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
@@ -1776,6 +1837,17 @@ void addGlobalMethods(py::module& m) {
         new_proto.SerializeToString(&out);
         return py::bytes(out);
       });
+  m.def("fakeFp16FuseOps", [](const py::bytes& net_str) {
+    caffe2::NetDef netDef;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(
+            net_str.cast<std::string>(), &netDef),
+        "broken pred_net protobuf");
+    opt::fakeFp16FuseOps(&netDef);
+    std::string out_net;
+    netDef.SerializeToString(&out_net);
+    return py::bytes(out_net);
+  });
 
   // Transformations are exposed as functions here and wrapped
   // into a python interface in transformations.py

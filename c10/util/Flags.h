@@ -32,8 +32,8 @@
 
 #include <string>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Registry.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Registry.h>
 
 namespace c10 {
 /**

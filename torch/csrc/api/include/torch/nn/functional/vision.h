@@ -49,6 +49,7 @@ inline Tensor affine_grid(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor grid_sample(
     const Tensor& input,
@@ -83,7 +84,19 @@ inline Tensor grid_sample(
   return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners.value());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::GridSampleFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::grid_sample(input, grid, F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
+/// ```
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,

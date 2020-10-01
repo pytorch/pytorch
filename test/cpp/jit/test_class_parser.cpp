@@ -1,10 +1,10 @@
-#include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/script/parser.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <gtest/gtest.h>
+
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
-using namespace torch::jit::script;
 const auto testSource = R"JIT(
   class FooTest:
     def __init__(self, x):
@@ -16,7 +16,7 @@ const auto testSource = R"JIT(
     an_attribute : Tensor
 )JIT";
 
-void testClassParser() {
+TEST(ClassParserTest, Basic) {
   Parser p(std::make_shared<Source>(testSource));
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;

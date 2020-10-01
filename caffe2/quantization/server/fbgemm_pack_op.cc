@@ -4,6 +4,7 @@
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
+#include <fbgemm/FbgemmConvert.h>
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
@@ -182,12 +183,13 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
 }
 
 // FIXME: code duplication with ConvDNNLowPOp::QuantizeBias_
-static void QuantizeConvBias(
+void QuantizeConvBias(
     const Blob& blob,
     int M,
     const TensorQuantizationParams& in_qparams,
     const vector<TensorQuantizationParams>& filter_qparams,
-    vector<int32_t>& b_quantized) {
+    vector<int32_t>& b_quantized, bool use_fp16,
+    bool round_to_nearest_even) {
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
@@ -205,17 +207,29 @@ static void QuantizeConvBias(
         bias.data<int32_t>(), bias.data<int32_t>() + bias.numel());
   } else {
     const float* bdata = bias.data<float>();
+    vector<float> bdata_local;
+    if (use_fp16) {
+      bdata_local.resize(bias.numel());
+      fbgemm::RoundToFloat16(
+              bdata, bdata_local.data(), bias.numel(), 1 /* FLAGS_caffe2_fbgemm_fake_fp16_clamp */);
+      bdata = bdata_local.data();
+    }
     b_quantized.resize(bias.numel());
     for (int g = 0; g < filter_qparams.size(); ++g) {
       int i_begin = g * (M / filter_qparams.size());
       int i_end = i_begin + (M / filter_qparams.size());
       for (int i = i_begin; i < i_end; ++i) {
-        b_quantized[i] = fbgemm::Quantize<int32_t>(
-            bdata[i],
-            0,
-            in_qparams.scale * filter_qparams[g].scale,
-            32,
-            true /* signed */);
+        if (round_to_nearest_even) {
+          b_quantized[i] = fbgemm::Quantize<int32_t>(
+              bdata[i],
+              0,
+              in_qparams.scale * filter_qparams[g].scale,
+              32,
+              true /* signed */);
+        } else {
+          b_quantized[i] = round((1.0f / in_qparams.scale) * (1.0f / filter_qparams[g].scale) * bdata[i]);
+          b_quantized[i] = std::max(std::min(b_quantized[i], INT32_MAX), INT32_MIN);
+        }
       }
     }
   }
@@ -325,6 +339,33 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
     QuantizeConvBias(InputBlob(1), N, in_qparams, Y->qparams, *Y->bias);
   } else {
     Y->bias = nullptr;
+  }
+
+  // Output quantized bias if we specify a second output. This output is meant
+  // to be consumed by accelerator instead of CPU ops.
+  if (OutputSize() >= 2) {
+    CAFFE_ENFORCE(Y->bias, "Bias is not quantized");
+    // The reason we don't support this is basically due to limitation of
+    // Int8TensorCPU only support single scale and zero_point. If we choose to
+    // output bias as Int8FCDNNLowPPackedWeightBlob with original layout,
+    // everything should still work for accelerator.
+    CAFFE_ENFORCE_EQ(
+        1,
+        Y->qparams.size(),
+        "We don't support outputing channelwise quantized bias yet");
+    auto quantized_bias = Y->bias;
+    float in_scale = GetSingleArgument<float>("in_scale", 0);
+    float bias_scale = in_scale * Y->qparams.front().scale;
+    LOG(INFO) << "Bias scale " << bias_scale << ": input scale " << in_scale
+              << " weight scale " << Y->qparams.front().scale;
+    auto* Bq = this->Output<int8::Int8TensorCPU>(1);
+    std::vector<int64_t> shape = {static_cast<int64_t>(quantized_bias->size())};
+    Bq->t.Resize(shape);
+    Bq->scale = bias_scale;
+    Bq->zero_point = 0;
+    auto* data = Bq->t.template mutable_data<int32_t>();
+    context_.template CopySameDevice<int32_t>(
+        quantized_bias->size(), quantized_bias->data(), data);
   }
 
   return true;
@@ -736,7 +777,8 @@ void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
@@ -784,7 +826,8 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
@@ -830,11 +873,42 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8FCDNNLowPPackedWeightBlob")
+    .Output(1, "B_q", "Bias int32 quantized tensor")
+    .Arg("axis_w", "See FC operator")
+    .Arg(
+        "quantize_channelwise",
+        "Default false. Per output channel quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
@@ -849,9 +923,36 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(
+        0,
+        "W_q",
+        "Weight/bias tensor in a packed format "
+        "with type Int8ConvDNNLowPPackedWeightBlob")
+    .Arg("quantize_groupwise", "Default false. Per group quantization")
+    .Arg(
+        "save_unpacked_weights",
+        "Default false. "
+        "Store unpacked quantized weights to W_q.original_tensor")
+    .Arg(
+        "in_scale",
+        "The scale of input activation tensor. "
+        "Only meaningful when bias is provided "
+        "(NOTE: this is not the scale of weight");
 
 } // namespace caffe2

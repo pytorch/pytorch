@@ -6,9 +6,10 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/vulkan/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 namespace {
 
@@ -33,7 +34,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -78,7 +79,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan;
 }
 
 } // namespace
@@ -102,17 +103,19 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
-  // Re-dispatch copies when src device not implemented here (e.g. XLA).
-  // This includes: cpu_tensor.copy_(xla_tensor) which
-  // calls xla_tensor._copy_from(cpu_tensor)
-  if (!is_supported_device(src.device())) {
-    TORCH_INTERNAL_ASSERT(is_supported_device(self.device()));
+  // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
+  // _copy_from has a proper device dispatch setup.
+  // This includes:
+  //   cpu_tensor.copy_(xla_tensor) => xla_tensor._copy_from(cpu_tensor)
+  //   xla_tensor.copy_(cpu_tensor) => cpu_tensor._copy_from(xla_tensor)
+  // Both the _copy_from calls above will be dispatched to XLA's _copy_from kernels.
+  if (!is_supported_device(src.device()) || !is_supported_device(self.device())) {
     at::_copy_from(src, self, non_blocking);
     return self;
   }
 
   if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_(self, src);
+    return quantized_copy_from_float_cpu_(self, src);
   }
 
   if (self.is_quantized() && src.is_quantized()) {
@@ -126,13 +129,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
-  auto iter = TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(self);
-  iter.add_input(src);
-  iter.dont_resize_outputs();
-  iter.dont_compute_common_dtype();
-  iter.build();
+  if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+    return at::vulkan::vulkan_copy_(self, src);
+  }
+
+  auto iter = TensorIteratorConfig()
+    .add_output(self)
+    .add_input(src)
+    .resize_outputs(false)
+    .check_all_same_dtype(false)
+    .check_all_same_device(false)
+    .build();
 
   if (iter.numel() == 0) {
     return self;
@@ -141,12 +148,18 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   DeviceType device_type = iter.device_type(0);
   if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
+  } else if (iter.device_type(1) == kHIP) {
+    device_type = kHIP;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor
   if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
+  }
+
+  if(!self.is_complex() && src.is_complex()) {
+    TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
 
   copy_stub(device_type, iter, non_blocking);
@@ -162,13 +175,6 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
-
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
-    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  ;
 
 DEFINE_DISPATCH(copy_stub);
 

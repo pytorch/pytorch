@@ -18,7 +18,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
   scalar_t *data = THCTensor_(data)(state, input);
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
   }
 
@@ -34,7 +34,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Fill sortBuffer with [0, 1, 2, ... nElement - 1]
   thrust::sequence(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -43,7 +43,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Sort the input data. The original indices of the data are stored in seq
   thrust::sort_by_key(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -57,7 +57,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Add 1 if two neighboring element are not equal.
   int unique = 1 + thrust::inner_product(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -74,7 +74,7 @@ void THCTensor_(calculateMode)(THCState *state,
   thrust::device_vector<int> counts(unique);
   thrust::reduce_by_key(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -88,7 +88,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Find index of maximum count
   thrust::device_vector<int>::iterator it = thrust::max_element(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -99,7 +99,7 @@ void THCTensor_(calculateMode)(THCState *state,
 #if defined(THC_REAL_IS_HALF)
   thrust::device_vector<scalar_t>::iterator positionIter = thrust::find_if(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -107,7 +107,7 @@ void THCTensor_(calculateMode)(THCState *state,
 #else
   thrust::device_vector<scalar_t>::iterator positionIter = thrust::find(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #else
     thrust::device,
 #endif
@@ -121,7 +121,7 @@ void THCTensor_(calculateMode)(THCState *state,
   ptrdiff_t valuesOffset = THCTensor_(storageOffset)(state, values);
   int64_t indicesOffset = THCudaLongTensor_storageOffset(state, indices);
 
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
     valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
     indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
@@ -241,7 +241,7 @@ void THCTensor_(mode)(THCState *state,
 \
     int memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
     computeMode<scalar_t, SIZE> \
-      <<<grid, blockSize, memsize, THCState_getCurrentStream(state)>>>( \
+      <<<grid, blockSize, memsize, c10::cuda::getCurrentCUDAStream()>>>( \
         THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize); \
   }
 
@@ -269,7 +269,7 @@ void THCTensor_(mode)(THCState *state,
         break;
       case 1:
       default:
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
     }
     THCudaCheck(cudaGetLastError());
 

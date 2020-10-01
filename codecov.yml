@@ -1,0 +1,7 @@
+coverage:
+  status:
+    project:
+      default:
+        threshold: 1%
+fixes:
+  - "/opt/conda/lib/python3.8/site-packages/::project/"

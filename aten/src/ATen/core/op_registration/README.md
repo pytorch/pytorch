@@ -40,11 +40,11 @@ namespace { Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...} }
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 It is recommended to put your kernel into an anonymous namespace because that allows for better linker optimizations and smaller binary size.
-The dispatch key argument (i.e. `CPUTensorId()`) takes care that this kernel is only called for tensors from the CPU backend, more on that below.
+The dispatch key argument (i.e. `CPU()`) takes care that this kernel is only called for tensors from the CPU backend, more on that below.
 
 ### As lambdas
 
@@ -53,7 +53,7 @@ Very short and simple kernels can be written as lambdas directly in the registra
 ```
 static auto registry = torch::RegisterOperators()
     .op("my_namespace::my_op", torch::RegisterOperators::options()
-        .kernel(CPUTensorId(), [] (const Tensor& a) -> Tensor{...}));
+        .kernel(CPU(), [] (const Tensor& a) -> Tensor{...}));
 ```
 
 These lambdas must be stateless, i.e. not have a closure. The registration will fail if the lambda has a closure.
@@ -97,9 +97,9 @@ Multiple operator registrations can be chained into the same registry by calling
 ```
 static auto registry = torch::RegisterOperators()
     .op("my_namespace::my_op_1", torch::RegisterOperators::options()
-        .kernel<MyKernel1>(CPUTensorId()))
+        .kernel<MyKernel1>(CPU()))
     .op("my_namespace::my_op_2", torch::RegisterOperators::options()
-        .kernel<MyKernel2>(CPUTensorId()));
+        .kernel<MyKernel2>(CPU()));
 ```
 
 ## Multiple Backends
@@ -114,9 +114,9 @@ Tensor my_kernel_cuda(const Tensor& a, const Tensor& b) {...}
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()))
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()))
    .op("my_namespace::my_op",  torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cuda), &my_kernel_cuda>(CUDATensorId()));
+       .kernel<decltype(my_kernel_cuda), &my_kernel_cuda>(CUDA()));
 ```
 
 Note that here, the CPU and CUDA kernel were registered directly next to each other, but that's not necessary. You could even put them into different shared libraries if you want and as long as both are loaded into your process, things will work as you expect.
@@ -133,7 +133,7 @@ namespace { Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...} }
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op(Tensor a, Tensor b) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 Or with annotations:
@@ -146,7 +146,7 @@ namespace {
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op(Tensor(a) x, int y = 3, int? z = None) -> Tensor(a|b)",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 If the schema is explicitly specified but doesn't match the kernel signature, you will get an error when registering it.
@@ -163,7 +163,7 @@ namespace {
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op", torch::RegisterOperators::options()
-       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPU()));
 ```
 
 ### Supported Input and output types
@@ -202,10 +202,10 @@ namespace {
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op.overload1(Tensor a) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu_1), &my_kernel_cpu>(CPUTensorId()))
+         .kernel<decltype(my_kernel_cpu_1), &my_kernel_cpu>(CPU()))
    .op("my_namespace::my_op.overload2(Tensor a, Tensor b) -> Tensor",
        torch::RegisterOperators::options()
-         .kernel<decltype(my_kernel_cpu_2), &my_kernel_cpu>(CPUTensorId()));
+         .kernel<decltype(my_kernel_cpu_2), &my_kernel_cpu>(CPU()));
 ```
 
 Kernels registered for the same overload must have exactly matching schemas, but kernels registered for different overloads are allowed to have different schemas. This also works when different overloads come from different shared libraries.

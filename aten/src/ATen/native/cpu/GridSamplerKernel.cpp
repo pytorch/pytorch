@@ -203,7 +203,8 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
-    return minimum(Vec(max_val), maximum(in, Vec(0)));
+    // Invert order of clamp_min operands in order to clamp Nans to zero
+    return clamp_max(Vec(max_val), clamp_min(Vec(0), in));
   }
 
   // same as clip_coordinates but also returns the gradient multiplier
@@ -213,9 +214,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
-    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(in));
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
+    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
-    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(in));
+    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
     return std::make_pair(res, in_bound_lo & in_bound_hi);
   }
 
@@ -282,7 +285,8 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
-    return minimum(Vec(max_val), maximum(in, Vec(0)));
+    // Invert order of clamp_min operands in order to clamp Nans to zero
+    return clamp_max(Vec(max_val), clamp_min(Vec(0), in));
   }
 
   // same as clip_coordinates but also returns the gradient multiplier
@@ -292,9 +296,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
-    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(in));
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
+    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
-    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(in));
+    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
     return std::make_pair(res, in_bound_lo & in_bound_hi);
   }
 
@@ -390,10 +396,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 
   inline Vec apply(const Vec &in) const {
     auto res = reflect_coordinates(unnormalize(in));
-    // when align_corners=False, reflection does not auto clip coords
-    if (!align_corners) {
-      res = clip_coordinates(res);
-    }
+    res = clip_coordinates(res);
     return res;
   }
 
@@ -401,10 +404,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
     Vec res, grad_refl, grad_clip, grad(scaling_factor);
     std::tie(res, grad_refl) = reflect_coordinates_get_grad(unnormalize(in));
     grad = grad_refl * grad;
-    if (!align_corners) {
-      std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
-      grad = grad_clip & grad;
-    }
+    std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
+    grad = grad_clip & grad;
     return std::make_pair(res, grad);
   }
 };
@@ -419,7 +420,7 @@ static inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
-  #ifndef _MSC_VER
+  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
   # pragma unroll
   #endif
   for (int64_t i = 0; i < len; i++) {
@@ -544,7 +545,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto i_sw_offset = i_nw_offset + iVec(inp_sH);
     auto i_se_offset = i_sw_offset + iVec(inp_sW);
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -618,7 +619,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     scalar_t gInp_corner_arr[Vec::size()];
 
     auto gx = Vec(0), gy = Vec(0);
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -712,10 +713,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     auto out_ptr = out_slice.data() + offset;
     auto out_sC = out_slice.stride(0);
     auto inp_slice_ptr = inp_slice.data();
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
+    for (int64_t c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
       // mask_gather zeros out the mask, so we need to make a copy
       auto mask_copy = mask;
       auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask_copy);
@@ -735,8 +736,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     auto x_nearest = x.round();
     auto y_nearest = y.round();
 
-    auto i_x_nearest = convert_to_int_of_same_size<scalar_t>(x_nearest);
-    auto i_y_nearest = convert_to_int_of_same_size<scalar_t>(y_nearest);
+    auto i_x_nearest = convert_to_int_of_same_size(x_nearest);
+    auto i_y_nearest = convert_to_int_of_same_size(y_nearest);
 
     auto i_mask = must_in_bound ? iVec(-1)
                                 : (i_x_nearest > iVec(-1)) & (i_x_nearest < iVec(inp_W)) &
@@ -749,7 +750,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     integer_t gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(gInp_offset_arr);
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -854,17 +855,17 @@ static inline void grid_sample_2d_grid_slice_iterator(
     // General case.
     // Strategy: Do a for-loop over H, for each W slice, use
     //           at::vec256::gather to load the x and y vectors.
-    auto spatial_offset = 0;
-    auto i_offsets_delta = iVec(grid_sW * step);
+    int64_t spatial_offset = 0;
+    const int64_t i_offset_delta = grid_sW * step;
 
-    #ifndef _MSC_VER
+    #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
     for (int64_t h = 0; h < out_H; h++) {
       auto grid_ptr_x = grid_ptr + h * grid_sH;
       auto grid_ptr_y = grid_ptr_x + grid_sCoor;
       auto i_offsets = iVec::arange(0, grid_sW);
-      #ifndef _MSC_VER
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
       # pragma unroll
       #endif
       for (int64_t w = 0; w < out_W; w += step) {
@@ -877,7 +878,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
                  vec256::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
                  spatial_offset, len);
 
-        i_offsets = i_offsets + i_offsets_delta;
+        grid_ptr_x += i_offset_delta;
+        grid_ptr_y += i_offset_delta;
         spatial_offset += len;
       }
     }

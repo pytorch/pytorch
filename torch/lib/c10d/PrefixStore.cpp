@@ -16,7 +16,7 @@ std::vector<std::string> PrefixStore::joinKeys(
   std::vector<std::string> joinedKeys;
   joinedKeys.reserve(keys.size());
   for (const auto& key : keys) {
-    joinedKeys.push_back(joinKey(key));
+    joinedKeys.emplace_back(joinKey(key));
   }
   return joinedKeys;
 }
@@ -33,6 +33,14 @@ std::vector<uint8_t> PrefixStore::get(const std::string& key) {
 
 int64_t PrefixStore::add(const std::string& key, int64_t value) {
   return store_->add(joinKey(key), value);
+}
+
+bool PrefixStore::deleteKey(const std::string& key) {
+  return store_->deleteKey(joinKey(key));
+}
+
+int64_t PrefixStore::getNumKeys() {
+  return store_->getNumKeys();
 }
 
 bool PrefixStore::check(const std::vector<std::string>& keys) {

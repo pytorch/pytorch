@@ -1,6 +1,9 @@
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace torch {
 namespace jit {
@@ -27,7 +30,7 @@ std::vector<at::Tensor> run(
   return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
-static void unpackReturnTuple(Stack &stack) {
+static void unpackReturnTuple(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
@@ -40,7 +43,7 @@ std::pair<tensor_list, tensor_list> runGradient(
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
   ClearUndefinedness(grad_spec.df);
-  Code f_code{grad_spec.f}, df_code{grad_spec.df};
+  Code f_code{grad_spec.f, ""}, df_code{grad_spec.df, ""};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
   auto f_stack = fmap<IValue>(tensors_in);
@@ -84,7 +87,7 @@ std::shared_ptr<Graph> build_lstm() {
       %22 : Tensor = aten::mul(%14, %21)
       return (%22, %20))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
   return g;
@@ -135,6 +138,23 @@ std::pair<at::Tensor, at::Tensor> lstm(
   auto hy = outgate * cy.tanh();
 
   return {hy, cy};
+}
+
+inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
+
+namespace {
+RegisterOperators reg({
+    // This operator is intended to be used in JIT analysis and transformation
+    // pass unit tests in which Values with type Tensor are often required. It
+    // should not be used in situations in which the graph is actually executed
+    // because it always produces empty Tensors.
+    Operator(
+        "prim::MakeTestTensor() -> Tensor",
+        [](Stack* stack) { push(stack, at::Tensor()); },
+        aliasAnalysisFromSchema()),
+});
 }
 
 } // namespace jit

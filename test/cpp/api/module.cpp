@@ -148,8 +148,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
     ASSERT_EQ(model.parameters().size(), 0);
   }
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     TestModel model;
     model.register_parameter("undefined_tensor", torch::Tensor());
@@ -157,7 +156,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
 
     ASSERT_EQ(
       count_substr_occurrences(
-        buffer.str(),
+        warnings.str(),
         "Ignoring the `requires_grad=true` function parameter"
       ),
     1);

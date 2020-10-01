@@ -149,7 +149,7 @@ class CAFFE2_API WorkspaceStack {
   int top_;
   std::vector<std::shared_ptr<Workspace>> workspaces_;
 };
-}
+} // namespace detail
 
 template <class Context>
 class CreateScopeOp final : public Operator<Context> {

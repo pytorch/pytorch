@@ -671,7 +671,7 @@ bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
       auto* seqOp = getMutableOpDef(*seq);
       auto* arg = seqOp->add_arg();
       arg->set_name("output_order");
-      arg->set_i(iformat::nhwc);
+      arg->set_i(static_cast<int64_t>(iformat::nhwc));
 
       auto input = repr::nn::getInputs(osNode).front();
       nn->dataFlow.replaceNode(output, input);
@@ -696,7 +696,7 @@ bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
       auto* preOp = getMutableOpDef(*pre);
       auto* arg = preOp->add_arg();
       arg->set_name("output_order");
-      arg->set_i(iformat::nchw);
+      arg->set_i(static_cast<int64_t>(iformat::nchw));
 
       auto output = repr::nn::getOutputs(osNode).front();
       nn->dataFlow.replaceNode(input, output);
@@ -864,7 +864,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     itensor::descriptor expectedDesc;
     if (repr::nn::is<repr::ConvTranspose>(node)) {
-      if (filter->get_public_format() == ideep::format::iohw)
+      if (filter->get_desc().is_iohw())
         continue;
       auto convTranspose = repr::nn::get<repr::ConvTranspose>(node);
       auto initValue = [](vector<int>& v, vector<int> i) {
@@ -883,19 +883,17 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
                                              filter->get_dim(2),
                                              filter->get_dim(3)};
       expectedDesc =
-          ideep::convolution_transpose_forward::expected_weights_descriptor(
+          ideep::convolution_transpose_forward::expected_weights_desc(
               filter_dims_mkldnn,
               dataType,
-              strides,
+              {strides.begin(), strides.end()},
               {pads[0], pads[1]},
               {pads[2], pads[3]});
 
       if (filter->get_descriptor() != expectedDesc) {
-        filter->set_public_format(ideep::format::iohw);
         itensor newFilter;
         newFilter.init(expectedDesc);
         newFilter.feed_from(*filter);
-        newFilter.set_public_format(ideep::format::iohw);
         filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
       }
     } else if (repr::nn::is<repr::Conv>(node)) {
@@ -919,16 +917,14 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
           aalgorithm = ialgo::convolution_winograd;
         }
       }
-      auto dataType = filter->get_data_type();
 
-      filter->make_group(conv->getGroup());
-      expectedDesc = ideep::convolution_forward::expected_weights_descriptor(
+      expectedDesc = ideep::convolution_forward::expected_weights_desc(
           filter->get_dims(),
-          dataType,
-          strides,
+          filter->get_data_type(),
+          {strides.begin(), strides.end()},
           {pads[0], pads[1]},
           {pads[2], pads[3]},
-          dilations,
+          {dilations.begin(), dilations.end()},
           conv->getGroup(),
           aalgorithm);
 
@@ -957,13 +953,13 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
         filter->reshape({f_dim0, f_dim1});
       }
 
-      expectedDesc = ideep::inner_product_forward::expected_weights_descriptor(
+      expectedDesc = ideep::inner_product_forward::expected_weights_desc(
           filter->get_dims());
 
       if (filter->get_descriptor() != expectedDesc) {
         itensor newFilter;
         newFilter.init(expectedDesc);
-        newFilter.feed_from(filter->as_weights());
+        newFilter.feed_from(*filter);
         filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
       }
     }

@@ -1,7 +1,8 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 // ${generated_comment}
 
@@ -27,10 +28,20 @@
 
 using namespace at;
 using namespace torch::autograd::generated;
+using namespace torch::autograd::generated::details;
 
 namespace torch { namespace autograd {
 
 namespace VariableType {
+namespace{
+  void reset_grad_accumulator(Variable & self) {
+    AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
+    if (meta != nullptr) {
+      meta->grad_accumulator_.reset();
+    }
+  }
+}
+
 namespace {
 ${type_derived_method_definitions}
 }
@@ -38,8 +49,9 @@ ${type_derived_method_definitions}
 
 namespace {
 
-auto registerer = torch::RegisterOperators()
-  ${wrapper_registrations};
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
+  ${wrapper_registrations}
+}
 
 }
 

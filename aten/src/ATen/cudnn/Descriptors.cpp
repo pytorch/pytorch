@@ -4,7 +4,6 @@
 
 #include <ostream>
 #include <sstream>
-#include <string>
 
 namespace at { namespace native {
 
@@ -30,7 +29,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
-  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides(t_sizes, t_strides));
+  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides_2d(t_sizes, t_strides));
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
@@ -143,5 +142,39 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool force_nhwc) {
   }
   set(getDataType(t), (int) dim, size, filter_format);
 }
+
+std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
+  switch (tformat) {
+    case CUDNN_TENSOR_NCHW:
+      return "CUDNN_TENSOR_NCHW";
+    case CUDNN_TENSOR_NHWC:
+      return "CUDNN_TENSOR_NHWC";
+    default:
+      std::ostringstream oss;
+      oss << "(unknown cudnn tensor format " << static_cast<int>(tformat) << ")";
+      return oss.str();
+  }
+}
+
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
+  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  int nbDims;
+  int dimA[CUDNN_DIM_MAX];
+  cudnnDataType_t dtype;
+  cudnnTensorFormat_t tformat;
+  cudnnGetFilterNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &tformat, &nbDims, dimA);
+  out << "    type = " << cudnnTypeToString(dtype) << "\n";
+  out << "    tensor_format = " << cudnnMemoryFormatToString(tformat) << "\n";
+  out << "    nbDims = " << nbDims << "\n";
+  // Read out only nbDims of the arrays!
+  out << "    dimA = ";
+  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
+    out << i << ", ";
+  }
+  out << "\n";
+  return out;
+}
+
+void FilterDescriptor::print() { std::cout << *this; }
 
 }}

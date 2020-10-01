@@ -8,6 +8,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <ATen/BatchedTensorImpl.h>
+#include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
 
 #ifndef _WIN32
@@ -23,25 +25,49 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-static torch::autograd::python::PythonEngine engine;
-
-static Engine& get_python_engine() {
-  return engine;
-}
+static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
 
-void PythonEngine::thread_init(int device) {
+PythonEngine::PythonEngine() = default;
+
+Engine& PythonEngine::get_python_engine() {
+  static PythonEngine engine;
+  // This is "probably" thread-safe because the flag is set in a fork handler
+  // before any threads are created, and this function is only called with the
+  // GIL held. However, using fork + threads is playing with fire so this is
+  // more of a "best effort" thing. For example, if the fork occurs while the
+  // backwards threads hold a lock, we'll probably deadlock in the engine
+  // destructor.
+  if (_reinitialize_engine) {
+    engine.release_workers();
+    engine.~PythonEngine();
+    new (&engine) torch::autograd::python::PythonEngine();
+    _reinitialize_engine = false;
+  }
+  return engine;
+}
+
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  // Increment thread usage count before acquiring the GIL
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
-  Engine::thread_init(device);
+  Engine::thread_init(device, ready_queue, false);
+
+  if (should_increment) {
+    // Decrement the count during shutdown if we incremented earlier.
+    decrement_non_reentrant_thread_count();
+  }
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
@@ -73,7 +99,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
@@ -91,27 +117,10 @@ std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
 
 PyObject *THPEngineClass = nullptr;
 
-static bool _reinitialize_engine = false;
-
-static void _maybe_reinitialize_engine_after_fork() {
-  // This is "probably" thread-safe because the flag is set in a fork handler
-  // before any threads are created, and this function is only called with the
-  // GIL held. However, using fork + threads is playing with fire so this is
-  // more of a "best effort" thing. For example, if the fork occurs while the
-  // backwards threads hold a lock, we'll probably deadlock in the engine
-  // destructor.
-  if (_reinitialize_engine) {
-    engine.~PythonEngine();
-    new (&engine) torch::autograd::python::PythonEngine();
-    _reinitialize_engine = false;
-  }
-}
-
 // Implementation of torch._C._EngineBase.run_backward
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
   PyObject *tensors = nullptr;
   PyObject *grad_tensors = nullptr;
   unsigned char keep_graph = 0;
@@ -136,6 +145,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_tensors == num_gradients, "got %ld tensors and %ld "
       "gradients", num_tensors, num_gradients);
 
+  // The user either called autograd.backward(...) or autograd.grad(...) to get here
+  bool backward_api_called = inputs == nullptr;
+  TORCH_CHECK(!backward_api_called || at::impl::VmapMode::current_vmap_level() == 0,
+      "backward() called inside torch.vmap. This is not supported, "
+      "please call backward() outside torch.vmap or instead use "
+      "torch.autograd.grad inside torch.vmap");
+
   edge_list roots;
   roots.reserve(num_tensors);
   variable_list grads;
@@ -145,6 +161,12 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
+    TORCH_CHECK(!isBatchedTensor(variable),
+        "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+        "torch.vmap. We do not support the case where any outputs are ",
+        "vmapped tensors (output ", i, " is being vmapped over). Please "
+        "call autograd.grad() outside torch.vmap or file a bug report "
+        "with your use case.")
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
@@ -170,7 +192,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   std::vector<Edge> output_edges;
-  if (inputs != nullptr) {
+  if (!backward_api_called) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (int i = 0; i < num_inputs; ++i) {
@@ -178,6 +200,12 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
+      TORCH_CHECK(!isBatchedTensor(input_var->cdata),
+          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+          "torch.vmap. We do not support the case where any inputs are ",
+          "vmapped tensors (input ", i, " is being vmapped over). Please "
+          "call autograd.grad() outside torch.vmap or file a bug report "
+          "with your use case.")
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
@@ -196,10 +224,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   variable_list outputs;
   {
     pybind11::gil_scoped_release no_gil;
+    auto& engine = python::PythonEngine::get_python_engine();
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
-  if (inputs != nullptr) {
+  if (!backward_api_called) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
@@ -219,7 +248,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   HANDLE_TH_ERRORS
-  _maybe_reinitialize_engine_after_fork();
+  auto& engine = python::PythonEngine::get_python_engine();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { pybind11::gil_scoped_acquire gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
@@ -233,6 +262,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
 
 PyObject* THPEngine_is_checkpoint_valid(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto& engine = python::PythonEngine::get_python_engine();
   if(engine.is_checkpoint_valid()) {
     Py_RETURN_TRUE;
   } else {
@@ -310,6 +340,6 @@ bool THPEngine_initModule(PyObject *module)
     return false;
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
-  set_default_engine_stub(get_python_engine);
+  set_default_engine_stub(python::PythonEngine::get_python_engine);
   return true;
 }

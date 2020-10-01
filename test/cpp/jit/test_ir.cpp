@@ -1,11 +1,12 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/ir/irparser.h"
 
 namespace torch {
 namespace jit {
 
-void testAttributes() {
+TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
   auto two = attr::device;
@@ -33,7 +34,7 @@ void testAttributes() {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
-void testBlocks() {
+TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
     graph(%a : Tensor,
@@ -55,7 +56,7 @@ void testBlocks() {
       %12 : int = prim::Constant[value=1]()
       %13 : Tensor = aten::add(%5, %3, %12)
       return (%13))IR";
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
   testing::FileCheck()
@@ -92,7 +93,7 @@ void testBlocks() {
       ->run(*g2);
 }
 
-void testCommonAncestor() {
+TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
       %a.1 : bool,
@@ -122,7 +123,7 @@ graph(%x : Tensor,
 
   torch::jit::Graph g;
   std::unordered_map<std::string, torch::jit::Value*> name_to_value;
-  torch::jit::script::parseIR(input_str, &g, name_to_value);
+  torch::jit::parseIR(input_str, &g, name_to_value);
 
   std::vector<std::string> value_names{"6", "7", "9", "10"};
   std::unordered_set<std::string> value_names_set(

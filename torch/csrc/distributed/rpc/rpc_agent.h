@@ -10,16 +10,42 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+// Default RPC timeout
+constexpr float kDefaultRpcTimeoutSeconds = 60;
+// Unset RPC timeout. This is the value agent::send() will have if user does not
+// pass in a specific timeout, and indicates that we must use the default
+// timeout for RPCs.
+constexpr float kUnsetRpcTimeout = -1;
+constexpr auto kDefaultInitMethod = "env://";
+constexpr float kSecToMsConversion = 1000;
+constexpr auto kRpcTimeoutErrorStr =
+    "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
+
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+// Input is qualified name string, output is JIT StrongTypePtr
+// Same as jit::TypeResolver, did not import jit::TypeResolver to here
+// because it could instroduce cyclic dependencies.
+using TypeResolver =
+    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 struct RpcBackendOptions {
-  RpcBackendOptions() = default;
-  std::chrono::milliseconds rpcTimeout;
+  RpcBackendOptions()
+      : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
+
+  RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
+      : rpcTimeoutSeconds(rpcTimeoutSeconds),
+        initMethod(std::move(initMethod)) {
+    TORCH_CHECK(rpcTimeoutSeconds >= 0, "RPC Timeout must be non-negative");
+  }
+
+  float rpcTimeoutSeconds;
   std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
-struct TORCH_API WorkerInfo {
-  WorkerInfo(std::string name, int id)
+struct TORCH_API WorkerInfo : torch::CustomClassHolder {
+  WorkerInfo(std::string name, int64_t id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
         id <= std::numeric_limits<worker_id_t>::max(),
@@ -53,6 +79,48 @@ struct TORCH_API WorkerInfo {
 
   const std::string name_;
   const worker_id_t id_;
+};
+
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const WorkerInfo& workerInfo);
+
+// Struct for options to configure the RPC Retry protocol.
+struct TORCH_API RpcRetryOptions {
+  // Using a default constructor like all other Options structs in the RPC
+  // codebase. TORCH_CHECKs for input validation are done in the
+  // sendWithRetries function.
+  RpcRetryOptions() = default;
+  // Maximum number of times we will retry the RPC
+  int maxRetries{5};
+  // Initial duration between consecutive RPC send attempts
+  std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
+  // Constant for exponential backoff used while calculating future wait
+  // durations
+  float retryBackoff{1.5};
+};
+
+// Struct that stores all the metadata needed to retry a given RPC.
+struct TORCH_API RpcRetryInfo {
+  RpcRetryInfo(
+      const WorkerInfo& to,
+      Message&& message,
+      std::shared_ptr<FutureMessage> originalFuture,
+      int retryCount,
+      RpcRetryOptions options)
+      : to_(to),
+        message_(message),
+        originalFuture_(std::move(originalFuture)),
+        retryCount_(retryCount),
+        options_(options) {}
+
+  const WorkerInfo& to_;
+  Message message_;
+  // Future that is returned to the caller of sendWithRetries().
+  std::shared_ptr<FutureMessage> originalFuture_;
+  // Number of send attempts completed so far.
+  int retryCount_;
+  RpcRetryOptions options_;
 };
 
 // ``RpcAgent`` is the base class for sending and receiving RPC messages. It
@@ -91,7 +159,25 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
-      Message&& message) = 0;
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
+
+  // Retries sending the message up to maxRetries times until an ACK is
+  // receieved. The duration between consecutive sends is increased over
+  // time using an exponential backoff algorithm.
+  //
+  // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
+  // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
+  // number of retries for this RPC (default is 5), initial duration between
+  // sends (default is 1000ms), and backoff constant (default is 1.5) by
+  // passing in the RpcRetryOptions struct. This API might end up
+  // executing a method twice on the remote end (it does not guarantee
+  // exactly-once semantics). Therefore, the user must ensure their requests
+  // are idempotent.
+  std::shared_ptr<FutureMessage> sendWithRetries(
+      const WorkerInfo& to,
+      Message&& message,
+      RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
@@ -125,12 +211,24 @@ class TORCH_API RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
-  // start accepting requests
-  virtual void start() = 0;
+  // Sets up backend-agnostic state for accepting requests. Currently, this
+  // entails setting rpcAgentRunning_ to true, creating the retry thread, and
+  // calling the backend's startImpl.
+  void start();
+
+  // Derived classes must override this function to start accepting requests.
+  // This is used to initialize any backend-specific state. Users must call
+  // start, not startImpl, to initialize the RPC Agent.
+  virtual void startImpl() = 0;
 
   // Stop accepting requests and shutdown the RPC framework as soon as possible
   // by terminating all RPC threads.
-  virtual void shutdown() = 0;
+  void shutdown();
+
+  // Derived classes must override this function to start accepting requests.
+  // THis is used to clean up any backend-specific state. Users must call
+  // shutdown, not shutdownImpl, to shutdown the RPC Agent.
+  virtual void shutdownImpl() = 0;
 
   // Check if current RPC agent is set.
   static bool isCurrentRpcAgentSet();
@@ -154,17 +252,76 @@ class TORCH_API RpcAgent {
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
+  // Set type resolver that will be passed to JIT pickler to resolver type Ptr
+  // based on type str.
+  void setTypeResolver(std::shared_ptr<TypeResolver> typeResolver);
+
+  // Get the type resolver
+  std::shared_ptr<TypeResolver> getTypeResolver();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
   std::atomic<bool> profilingEnabled_;
+  std::shared_ptr<TypeResolver> typeResolver_;
+  // Atomic boolean indicating whether this agent is running. It controls
+  // whether several background threads should be running. It is set in
+  // RpcAgent::start() and unset in the derived class shutdown().
+  std::atomic<bool> rpcAgentRunning_;
 
  private:
   static std::shared_ptr<RpcAgent> currentRpcAgent_;
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
+
+  // Map that stores metadata for RPC's that may need to be re-tried as well as
+  // the timepoint at which we should re-try them.
+  std::map<
+      steady_clock_time_point,
+      std::unordered_set<std::shared_ptr<RpcRetryInfo>>>
+      rpcRetryMap_;
+
+  // Thread that checks for retryable RPC's in the rpcRetryMap_ and sleeps until
+  // the next unACKed RPC's timeout has expired.
+  std::thread rpcRetryThread_;
+
+  // Function that rpcRetryThread_ calls in a loop as long as RpcAgent is
+  // running.
+  void retryExpiredRpcs();
+
+  // This is the callback attached to futures corresponding to send retries.
+  // This handles 3 cases: 1). send was completed, 2). send failed with an
+  // error and we've done maxRetries failed send attempts, and 3). send
+  // failed with an error and we have more retries to go. In case 1, we mark
+  // the original future as complete. In case 2, we mark the future with an
+  // error and do not retry again. In case 3, we move the RpcRetryInfo struct
+  // to another time point in the map to schedule the RPC for a future send.
+  void rpcRetryCallback(
+      const std::shared_ptr<FutureMessage>& message,
+      steady_clock_time_point newTime,
+      std::shared_ptr<RpcRetryInfo> earliestRpc);
+
+  // Function that uses the exponential backoff algorithm to compute the next
+  // time point to retry a given RPC.
+  inline steady_clock_time_point computeNewRpcRetryTime(
+      RpcRetryOptions& options,
+      int retryCount) {
+    // The exponential backoff algorithm being used here is:
+    // newTime = timeNow + (retryDuration * (backoffConstant ^ retryCount)).
+    std::chrono::milliseconds timedelta =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            options.rpcRetryDuration * pow(options.retryBackoff, retryCount));
+    return std::chrono::time_point_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() + timedelta);
+  }
+
+  // Condition Variable to signal when the rpcRetryMap_ has been populated.
+  std::condition_variable rpcRetryMapCV_;
+
+  // Mutex to protect RpcRetryMap_.
+  std::mutex rpcRetryMutex_;
 };
 
 } // namespace rpc

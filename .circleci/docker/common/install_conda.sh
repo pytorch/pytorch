@@ -4,7 +4,7 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://repo.continuum.io/miniconda"
+  BASE_URL="https://repo.anaconda.com/miniconda"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
 
@@ -24,13 +24,20 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   mkdir /opt/conda
   chown jenkins:jenkins /opt/conda
 
+  # Work around bug where devtoolset replaces sudo and breaks it.
+  if [ -n "$DEVTOOLSET_VERSION" ]; then
+    SUDO=/bin/sudo
+  else
+    SUDO=sudo
+  fi
+
   as_jenkins() {
     # NB: unsetting the environment variables works around a conda bug
     # https://github.com/conda/conda/issues/6576
     # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
     # NB: This must be run from a directory that jenkins has access to,
     # works around https://github.com/conda/conda-package-handling/pull/34
-    sudo -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
+    $SUDO -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
   }
 
   pushd /tmp
@@ -49,10 +56,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /opt/conda
 
   # Track latest conda update
-  as_jenkins conda update -n base conda
+  as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
@@ -64,17 +71,23 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.5, but
   # we want to pin to version 3.5.
-  conda_install numpy pyyaml mkl mkl-include setuptools cffi typing future six
-  if [[ "$CUDA_VERSION" == 9.0* ]]; then
-    conda_install magma-cuda90 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.1* ]]; then
-    conda_install magma-cuda91 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.2* ]]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+    # DO NOT install typing if installing python-3.8, since its part of python-3.8 core packages
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 dataclasses
+  else
+    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi typing future six dataclasses
+  fi
+  if [[ "$CUDA_VERSION" == 9.2* ]]; then
     conda_install magma-cuda92 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.0* ]]; then
     conda_install magma-cuda100 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.1* ]]; then
     conda_install magma-cuda101 -c pytorch
+  elif [[ "$CUDA_VERSION" == 10.2* ]]; then
+    conda_install magma-cuda102 -c pytorch
+  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
+    conda_install magma-cuda110 -c pytorch
   fi
 
   # TODO: This isn't working atm

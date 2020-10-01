@@ -25,7 +25,7 @@ class ByteWeightDequantOp : public Operator<Context> {
     auto* Y = Output(0, shape_, at::dtype<float>());
     float bin_interval = (max_ - min_) / 255.0;
     int total = 1;
-    for (int i = 0; i < shape_.size(); i++) {
+    for (auto i = 0U; i < shape_.size(); i++) {
       total *= Y->size(i);
     }
     const uint8_t* Xdata;
