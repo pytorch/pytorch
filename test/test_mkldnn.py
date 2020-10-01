@@ -202,6 +202,81 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
 
+    def _assert_compare_grad_gradgrad(self, inputs1, expect, inputs2, actual):
+        # Forward
+        self.assertEqual(expect, actual)
+
+        # Backward
+        grad_out = torch.rand_like(expect)
+        g1 = torch.autograd.grad(expect, inputs1, grad_out, create_graph=True)
+        g2 = torch.autograd.grad(actual, inputs2, grad_out, create_graph=True)
+        for gx, gx2 in zip(g1, g2):
+            self.assertEqual(gx, gx2)
+
+        # Double backward
+        for gx in itertools.chain(g1, g2):
+            gx.requires_grad_().retain_grad()
+
+        sum(gx.sum() for gx in g1).backward()
+        sum(gx.sum() for gx in g2).backward()
+
+        for x, x2 in zip(inputs1, inputs2):
+            self.assertEqual(x.grad, x2.grad)
+
+        for gx, gx2 in zip(g1, g2):
+            self.assertEqual(gx.grad, gx2.grad)
+
+    def test_conv1d_same_padding(self):
+        x = torch.rand(1, 1, 12)
+        y = torch.rand(1, 1, 4)
+        x, y = x.requires_grad_(), y.requires_grad_()
+        x2, y2 = x.clone().detach_().requires_grad_(), y.clone().detach_().requires_grad_()
+
+        # Asymmetric padding
+        expect = F.conv1d(x, y, padding=2)[..., 1:]
+        actual = F.conv1d(x2.to_mkldnn(), y2.to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+        x.grad, y.grad, x2.grad, y2.grad = None, None, None, None
+
+        # Symmetric padding
+        expect = F.conv1d(x, y[..., :3], padding=1)
+        actual = F.conv1d(x2.to_mkldnn(), y2[..., :3].to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+
+    def test_conv2d_same_padding(self):
+        x = torch.rand(1, 1, 4, 12)
+        y = torch.rand(1, 1, 4, 6)
+        x, y = x.requires_grad_(), y.requires_grad_()
+        x2, y2 = x.clone().detach_().requires_grad_(), y.clone().detach_().requires_grad_()
+
+        # Asymmetric padding
+        expect = F.conv2d(x, y, padding=[2, 3])[..., 1:, 1:]
+        actual = F.conv2d(x2.to_mkldnn(), y2.to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+        x.grad, y.grad, x2.grad, y2.grad = None, None, None, None
+
+        # Symmetric padding
+        expect = F.conv2d(x, y[..., :3, :5], padding=[1, 2])
+        actual = F.conv2d(x2.to_mkldnn(), y2[..., :3, :5].to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+
+    def test_conv3d_same_padding(self):
+        x = torch.rand(1, 1, 4, 4, 12)
+        y = torch.rand(1, 1, 2, 4, 6)
+        x, y = x.requires_grad_(), y.requires_grad_()
+        x2, y2 = x.clone().detach_().requires_grad_(), y.clone().detach_().requires_grad_()
+
+        # Asymmetric padding
+        expect = F.conv3d(x, y, padding=[1, 2, 3])[..., 1:, 1:, 1:]
+        actual = F.conv3d(x2.to_mkldnn(), y2.to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+        x.grad, y.grad, x2.grad, y2.grad = None, None, None, None
+
+        # Symmetric padding
+        expect = F.conv3d(x, y[..., :1, :3, :5], padding=[0, 1, 2])
+        actual = F.conv3d(x2.to_mkldnn(), y2[..., :1, :3, :5].to_mkldnn(), padding='same').to_dense()
+        self._assert_compare_grad_gradgrad((x, y), expect, (x2, y2), actual)
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())
