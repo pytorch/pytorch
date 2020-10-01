@@ -29,8 +29,9 @@ from torch.fx import symbolic_trace
 from torch.quantization import (
     QuantType,
     prepare_fx,
-    prepare_qat_fx,
+    prepare_dynamic_fx,
     convert_fx,
+    convert_dynamic_fx,
 )
 
 import copy
@@ -629,46 +630,41 @@ class QuantizationTestCase(TestCase):
         if type(inputs) == list:
             inputs = inputs[0]
         if quant_type == QuantType.QAT:
-            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+            qconfig_dict = {'': get_default_qat_qconfig(torch.backends.quantized.engine)}
             model.train()
-        elif quant_type == QuantType.STATIC:
-            qconfig = get_default_qconfig(torch.backends.quantized.engine)
-            model.eval()
         else:
-            qconfig = default_dynamic_qconfig
+            qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
             model.eval()
-
         original = symbolic_trace(model)
-        if quant_type == QuantType.QAT:
-            prepare = prepare_qat_fx
+
+        if quant_type == QuantType.DYNAMIC:
+            prepare = prepare_dynamic_fx
+            convert = convert_dynamic_fx
         else:
             prepare = prepare_fx
+            convert = convert_fx
 
-        qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
-        qgraph = convert_fx(prepared)
-        qgraph_debug = convert_fx(prepared, debug=True)
+        qgraph = convert(prepared)
+        qgraph_debug = convert(prepared, debug=True)
 
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
-        # numeric match for debug option for dynamic
-        # quantized op is not needed right now
-        if quant_type != QuantType.DYNAMIC:
-            self.assertEqual((result - result_debug).abs().max(), 0), \
-                'Expecting debug and non-debug option to produce identical result'
+        self.assertEqual((result - result_debug).abs().max(), 0), \
+            'Expecting debug and non-debug option to produce identical result'
 
-        qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
             self.printGraphModule(original)
             print()
-            print('quantized graph module:', type(qgraph_to_check))
-            self.printGraphModule(qgraph_to_check)
+            print('quantized graph module:', type(qgraph))
+            self.printGraphModule(qgraph)
             print()
+        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
             qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
