@@ -71,9 +71,6 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
     if r is not None:
         return r
 
-    if str(t) == 'Tensor' and mutable and local.hack_const_mutable_self():
-        return 'const Tensor &'
-
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
@@ -167,8 +164,12 @@ def default_expr(d: str, t: Type) -> str:
 
         return default_expr(d, t.elem)
 
-    if isinstance(t, ListType) and d.startswith('[') and d.endswith(']'):
-        return '{' + d[1:-1] + '}'
+    if isinstance(t, ListType):
+        if (d.startswith('[') and d.endswith(']')):
+            return '{' + d[1:-1] + '}'
+        elif t.size is None:
+            # NOTE: Sized lists can have scalar defaults
+            raise ValueError(f"Expected a list default '[...]' but found: '{d}'")
 
     return JIT_TO_CPP_DEFAULT.get(d, d)
 

@@ -342,13 +342,13 @@ class Flattener : public IRMutator {
   Expr* mutate(const FunctionCall* v) override {
     const Tensor* t = v->tensor();
     const Buf* b = t->buf();
-    Buffer buffer = Buffer(BufHandle(b));
+    Placeholder buffer = Placeholder(BufHandle(b));
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
       params_expr[i] = ExprHandle(params[i]);
     }
-    return buffer(params_expr).node();
+    return buffer.load(params_expr).node();
   }
 };
 
@@ -459,7 +459,7 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
   const Expr* initializer = t->initializer();
   if (initializer) {
-    buf_initializers_[t->func_var()] = initializer;
+    buf_initializers_[t->buf()] = initializer;
   }
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
@@ -506,7 +506,7 @@ class FunctionInliner : public IRMutator {
 
     if (v->nparams() != buf->ndim()) {
       throw malformed_input(
-          "Buffer indexed access is inconsistent with its rank", v);
+          "Placeholder indexed access is inconsistent with its rank", v);
     }
 
     std::vector<const Var*> index_vars;
@@ -835,6 +835,71 @@ void LoopNest::prepareForCodegen() {
 
   // Add allocs and frees for intermediate buffers at the global level.
   root_stmt_ = insertAllocFree(root_stmt_);
+}
+
+void LoopNest::vectorizeInnerLoops() {
+  std::vector<For*> innerLoops;
+  std::vector<For*> worklist;
+
+  // Find outer-most For loops
+  if (For* rootF = dynamic_cast<For*>(root_stmt_)) {
+    worklist.push_back(rootF);
+  } else if (Block* body = dynamic_cast<Block*>(root_stmt_)) {
+    std::vector<Block*> blocks = {body};
+    while (blocks.size()) {
+      Block* b = blocks.back();
+      blocks.pop_back();
+
+      for (Stmt* s : *b) {
+        if (For* f = dynamic_cast<For*>(s)) {
+          worklist.push_back(f);
+        } else if (Block* b2 = dynamic_cast<Block*>(s)) {
+          blocks.push_back(b2);
+        }
+      }
+    }
+  }
+
+  // Traverse the For loop nest find inner-most loops, which are
+  // vectorization candidates.
+  while (worklist.size()) {
+    For* f = worklist.back();
+    worklist.pop_back();
+
+    bool containsSubLoops = false;
+    if (Block* body = dynamic_cast<Block*>(f->body())) {
+      for (Stmt* s2 : *body) {
+        if (For* f2 = dynamic_cast<For*>(s2)) {
+          containsSubLoops = true;
+          worklist.push_back(f2);
+        }
+      }
+    }
+
+    if (!containsSubLoops) {
+      innerLoops.push_back(f);
+    }
+  }
+
+  // vectorize inner loops.
+  for (For* loop : innerLoops) {
+    For* outer1;
+    For* split1;
+    For* tail1;
+
+    static const int kBodyVectorWidth = 8;
+    splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
+    vectorize(split1);
+
+    if (tail1) {
+      For* outer2;
+      For* split2;
+      For* tail2;
+      static const int kTailVectorWidth = 4;
+      splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
+      vectorize(split2);
+    }
+  }
 }
 
 void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
@@ -1341,7 +1406,7 @@ class LoopComputeAtRewriter : public IRMutator {
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
   const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->func_var() != buf_) {
+    if (v->tensor()->buf() != buf_) {
       return v;
     }
     std::vector<const Expr*> new_indices;
