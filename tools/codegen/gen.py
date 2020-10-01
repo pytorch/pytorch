@@ -9,7 +9,6 @@ from collections import OrderedDict
 import argparse
 import pathlib
 import functools
-import typing
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
@@ -311,8 +310,9 @@ ArgT = TypeVar('ArgT', CppArgument, LegacyDispatcherArgument)
 # Resolve any overload ambiguities introduced by default values
 # Always prefers the overload declared first, since this will be picked by
 # the PythonArgParser as well
-def unambiguous_defaults(name: str, args: Sequence[ArgT],
-                         seen_functions: Dict[str, List[Sequence[ArgT]]]) -> List[bool]:
+def unambiguous_defaults(
+        name: str, args: Sequence[ArgT],
+        seen_functions: Dict[str, List[Sequence[ArgT]]]) -> List[bool]:
     overloads: List[Sequence[ArgT]] = seen_functions.get(name, [])
     n = 0
     for o_args in overloads:
