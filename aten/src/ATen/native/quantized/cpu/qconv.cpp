@@ -21,7 +21,7 @@ constexpr int64_t kReasonableMaxDim = 1000000;
 template <int kSpatialDim, bool kReluFused>
 at::Tensor convolution_fallback_slow(
     const at::Tensor& input,
-    PackedConvWeight<kSpatialDim>* packed_params,
+    ConvPackedParamsBase<kSpatialDim>* packed_params,
     double output_scale,
     int64_t output_zero_point) {
   at::Tensor x = input.dequantize();
