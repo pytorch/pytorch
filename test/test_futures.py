@@ -94,6 +94,7 @@ class TestFuture(TestCase):
 
     def test_add_done_callback_simple(self):
         callback_result = False
+
         def callback():
             nonlocal callback_result
             callback_result = True
@@ -108,6 +109,7 @@ class TestFuture(TestCase):
 
     def test_add_done_callback_maintains_callback_order(self):
         callback_result = 0
+
         def callback_mul0():
             nonlocal callback_result
             callback_result *= 0

@@ -1041,6 +1041,7 @@ class JitRpcTest(
     @dist_init
     def test_add_done_callback(self):
         callback_called = False
+
         def callback():
             callback_called = True
 
