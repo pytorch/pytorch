@@ -1716,7 +1716,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(PowModule(), (x, y))
 
-         def test_std(self):
+    def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
                 return torch.std(input, unbiased=False)

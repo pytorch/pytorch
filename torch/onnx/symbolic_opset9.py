@@ -2226,7 +2226,7 @@ def _var(g, input, dim, unbiased, keepdim):
     var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
     # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
     if unbiased:
-        num_elements = g.op("Cast", num_elements,  to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
         one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.float))
         mul = g.op("Mul", var, num_elements)
         var = g.op("Div", mul, g.op("Sub", num_elements, one))
