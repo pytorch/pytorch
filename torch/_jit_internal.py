@@ -390,6 +390,15 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
+    if isinstance(fn, property):
+        prop = fn
+        setattr(prop.fget, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        if prop.fset:
+            setattr(prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        return prop
+
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -14,34 +15,29 @@ namespace api {
 
 //
 // Vulkan Context holds onto all relevant Vulkan state as it pertains to our
-// use of Vulkan in PyTorch.  The context is currently a global object, but
-// technically it does not need to be if we were to make it explicit to the
-// user.
+// use of Vulkan in PyTorch.  A Context is associated with one, and only one,
+// Adapter as a precursor to multi-GPU support.  All Vulkan tensors in PyTorch
+// are associated with a Context to make tensor <-> device affinity explicit.
+// The context is currently a global object, but technically it does not need
+// to be if we were to make it explicit to the user.
 //
 
-class C10_EXPORT Context final {
+class Context final {
  public:
-  explicit Context(bool enable_validation_layers);
+  explicit Context(const Adapter& adapter);
+  Context(const Context&) = delete;
+  Context(Context&&) = default;
+  Context& operator=(const Context&) = delete;
+  Context& operator=(Context&&) = default;
   ~Context() = default;
 
-  inline VkInstance instance() const {
-    return instance_.get();
-  }
-
-  inline VkPhysicalDevice physical_device() const {
-    return physical_device_;
-  }
-
-  inline const VkPhysicalDeviceLimits& physical_device_limits() const {
-    return physical_device_limits_;
-  }
-
-  inline VkDevice device() const {
-    return device_.get();
-  }
-
-  inline VkQueue queue() const {
-    return queue_;
+  inline GPU gpu() {
+    // A GPU is simply a (physical device, logical device, device queue) trio.
+    return {
+      &adapter_,
+      device(),
+      queue(),
+    };
   }
 
   inline Command& command() {
@@ -65,23 +61,26 @@ class C10_EXPORT Context final {
   }
 
  private:
-  class Debug final {
-   public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+  inline VkDevice device() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
+    return device_.get();
+  }
 
-   private:
-    VkInstance instance_;
+  inline VkQueue queue() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
+    return queue_;
+  }
+
+ private:
+  class Deleter final {
+   public:
+    void operator()(VkDevice device) const;
   };
 
  private:
   // Construction and destruction order matters.  Do not move members around.
-  Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
-  Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
-  VkPhysicalDevice physical_device_;
-  VkPhysicalDeviceLimits physical_device_limits_;
-  uint32_t compute_queue_family_index_;
-  Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
+  Adapter adapter_;
+  Handle<VkDevice, Deleter> device_;
   VkQueue queue_;
   Command command_;
   Shader shader_;
@@ -90,8 +89,7 @@ class C10_EXPORT Context final {
   Resource resource_;
 };
 
-C10_EXPORT bool available();
-C10_EXPORT Context& context();
+Context* context();
 
 } // namespace api
 } // namespace vulkan

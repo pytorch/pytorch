@@ -1425,7 +1425,7 @@ graph(%Ra, %Rb):
             self.assertEqual(outputs, m(*inputs))
 
     @slowTest
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
         with enable_profiling_mode_for_profiling_tests():
             class MyModule(torch.nn.Module):
@@ -7204,6 +7204,20 @@ a")
         scripted_f = torch.jit.script(f)
         x = torch.rand(3, 4)
         self.assertEqual(scripted_f(x), f(x))
+
+    def test_multiline_string_dedents(self):
+        def foo() -> None:
+            multiline_string_dedent_1 = """
+This is a string dedent """
+            multiline_string_dedent_2 = """ This is a
+  string dedent """
+            multiline_string_dedent_3 = """
+            This is a string
+dedent """
+            multiline_string_dedent_4 = """ This is a string dedent """
+
+        scripted_foo = torch.jit.script(foo)
+        self.assertEqual(scripted_foo(), foo())
 
     # adapted from test in test_torch
     def test_tensor_to(self):
