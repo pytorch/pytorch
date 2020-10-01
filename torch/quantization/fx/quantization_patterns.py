@@ -531,6 +531,24 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
+class StandaloneModuleQuantizeHandler(QuantizeHandler):
+    """ Converts an observed standalone module to quantized standalone module
+    by calling convert_fx on the observed standalone module.
+    """
+    def convert(self, quantizer, node, load_arg, debug=False):
+        assert node.op == 'call_module'
+        if quantizer.is_dynamic_quant:
+            convert = torch.quantizations.quantize_fx._convert_dynamic_standalone_module_fx
+        else:
+            convert = torch.quantization.quantize_fx._convert_standalone_module_fx
+        observed_standalone_module = quantizer.modules[node.target]
+        quantized_standalone_module = convert(observed_standalone_module, debug=debug)
+        parent_name, name = _parent_name(node.target)
+        # update the modules dict
+        setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
+        quantizer.modules[node.target] = quantized_standalone_module
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 
 # 2. Post Training Dynamic Quantizatoin Patterns
 @register_dynamic_quant_pattern(torch.nn.Linear)
