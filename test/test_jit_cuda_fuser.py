@@ -3,7 +3,7 @@ import os
 
 import torch
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm, TEST_WITH_ROCM
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
@@ -804,4 +804,5 @@ class TestPassManagerCudaFuser(JitTestCase):
 
 
 if __name__ == '__main__':
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

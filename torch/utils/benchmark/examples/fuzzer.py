@@ -5,7 +5,7 @@ $ python -m examples.fuzzer
 
 import sys
 
-import torch.utils._benchmark as benchmark_utils
+import torch.utils.benchmark as benchmark_utils
 
 
 def main():
