@@ -12,6 +12,7 @@ Governance <governance>`.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
+It leads to a great bond between developers worldwide.
 
 PyTorch operates similar to most open source projects on GitHub.
 However, if you've never contributed to an open source project before,
