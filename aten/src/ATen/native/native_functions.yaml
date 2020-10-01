@@ -6291,11 +6291,12 @@
   dispatch:
     CPU: legacy::cpu::_th_std
 
-- func: _amp_non_finite_check_and_unscale_(Tensor(a!) self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
+- func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   use_c10_dispatcher: full
+  device_guard: False
   variants: function
   dispatch:
-    CUDA: _amp_non_finite_check_and_unscale_cuda_
+    CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
 
 - func: _amp_update_scale(Tensor(a!) growth_tracker, Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor
   use_c10_dispatcher: full

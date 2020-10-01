@@ -149,13 +149,13 @@ class Tracer(TracerBase):
                 return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
         try:
             torch.nn.Module.__call__ = module_call_wrapper
-            self.graph.set_output(self.create_arg(fn(*args)))
+            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {})
         finally:
             torch.nn.Module.__call__ = orig_call
         return GraphModule(root, self.graph)
 
     def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.placeholder(name), self)
+        return Proxy(self.create_node('placeholder', name, (), {}), self)
 
 # Symbolic tracing API
 #
