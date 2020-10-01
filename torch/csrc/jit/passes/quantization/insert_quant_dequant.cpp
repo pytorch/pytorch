@@ -988,8 +988,14 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
-  if (isPlaceholderObserver(n->input(0)) ||
-      scalar_type == at::ScalarType::Half) {
+  if (isPlaceholderObserver(n->input(0))) {
+    // get compute_dtype for dynamic quantization
+    if (observer_module.hasattr("compute_dtype")) {
+      qparams.push_back(std::make_pair(
+          "_scalar_type", observer_module.attr("compute_dtype")));
+    }
+    return std::make_tuple(qscheme, qparams);
+  } else if (scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");

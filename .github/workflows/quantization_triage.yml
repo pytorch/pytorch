@@ -1,4 +1,4 @@
-name: jit-triage
+name: quantization-triage
 
 on:
   issues:
@@ -18,8 +18,8 @@ jobs:
             // - core: A reference to the @actions/core package
             // - io: A reference to the @actions/io package
 
-            // Check if issue has a JIT label.
-            const kJitLabel = "oncall: jit";
+            // Check if issue has a Quantization label.
+            const kQuantizationLabel = "oncall: quantization";
 
             issue = await github.issues.get({
               owner: context.issue.owner,
@@ -27,16 +27,16 @@ jobs:
               issue_number: context.issue.number,
             })
 
-            const hasJitLabel = issue.data.labels.filter(label => label.name == kJitLabel).length > 0;
+            const hasQuantizationLabel = issue.data.labels.filter(label => label.name == kQuantizationLabel).length > 0;
 
-            if (!hasJitLabel) {
-              core.debug("Issue " + issue.data.title + " does not have JIT label");
+            if (!hasQuantizationLabel) {
+              core.debug("Issue " + issue.data.title + " does not have Quantization label");
               return;
             }
 
             // Get project column ID.
-            const kProjectName = "JIT Triage";
-            const kColumnName = "Need triage";
+            const kProjectName = "Quantization Triage";
+            const kColumnName = "Need Triage";
 
             // Query all projects in the repository.
             // TODO: Support pagination once there are > 30 projects.
@@ -45,7 +45,7 @@ jobs:
               repo: context.issue.repo,
             });
 
-            // Filter out unwanted projects and get the ID for the JIT Triage project.
+            // Filter out unwanted projects and get the ID for the Quantization Triage project.
             const filteredProjects = projects.data.filter(project => project.name == kProjectName);
 
             if (filteredProjects.length != 1) {

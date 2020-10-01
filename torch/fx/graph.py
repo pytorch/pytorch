@@ -74,7 +74,7 @@ class Graph:
     def nodes(self):
         return tuple(self._nodes)
 
-    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Node:
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Node]:
         """
         Append all nodes from graph `g` to this graph. `val_map` should be a dictionary
         that maps nodes in `g` to nodes in `self. `val_map` will be populated with more
@@ -83,7 +83,9 @@ class Graph:
         """
         for node in g._nodes:
             if node.op == 'output':
-                return map_arg(node.args[0], lambda n: val_map[n])
+                rv = map_arg(node.args[0], lambda n: val_map[n])
+                assert isinstance(rv, Node)
+                return rv
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
@@ -246,11 +248,11 @@ class Graph:
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        body = ''.join(body)
-        body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
+        code = ''.join(body)
+        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
         fn_code = f"""\
 def forward(self, {', '.join(free_vars)}):
-{body}
+{code}
 """
         return fn_code
 
