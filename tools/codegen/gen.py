@@ -305,10 +305,35 @@ def compute_type_method(
 
     return func
 
+# Resolve any overload ambiguities introduced by default values
+# Always prefers the overload declared first, since this will be picked by
+# the PythonArgParser as well
+def unambiguous_defaults(
+        name: str, args: Sequence[T],
+        seen_functions: Dict[str, List[Sequence[T]]]) -> List[bool]:
+    overloads = seen_functions.get(name, [])
+    n = 0
+    for o_args in overloads:
+        for i, (a, b) in enumerate(zip(args, o_args)):
+            if b.default is not None:
+                n = max(n, i + 1)
+            if a.type != b.type:
+                break
+        else:
+            if len(o_args) < len(args):
+                n = max(n, len(o_args) + 1)
+
+    overloads.append(args)
+    seen_functions[name] = overloads
+    return [False] * n + [True] * (len(args) - n)
+
 # Generates Function.cpp and Function.h.  These files provide the
 # functional public C++ API, and the scaffolding to call into
-# the dispatcher from these functions.  See also compute_tensor_method.
-def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+# the dispatcher from these functions.  See also compute_tensor_methods.
+def compute_functions(native_functions: List[NativeFunction], *, target: Target) -> List[str]:
+    # Map function name to a list of its overloads C++ arguments
+    seen_functions: Dict[str, List[Sequence[CppArgument]]] = {}
+
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
         if f.manual_kernel_registration:
@@ -320,9 +345,12 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 
         cpp_returns_type = cpp.returns_type(f.func.returns)
         cpp_args = cpp.arguments(f.func)
-        cpp_args_str = ', '.join(map(str, cpp_args))
 
         if target is Target.DECLARATION:
+            use_defaults = unambiguous_defaults(name, cpp_args, seen_functions)
+            cpp_args_str = ', '.join(str(arg) if use_def else arg.str_no_default()
+                                    for use_def, arg in zip(use_defaults, cpp_args))
+
             return f"CAFFE2_API {cpp_returns_type} {name}({cpp_args_str});"
 
         assert target is Target.DEFINITION
@@ -342,12 +370,15 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
     return op.call({dispatcher_exprs_str});
 }}
 """
-    return go
+    return list(mapMaybe(go, native_functions))
 
 # Generates TensorBody.h (sic) and TensorMethods.cpp.  These files provide the
 # object-oriented (method-based) public C++ API, and the scaffolding to call into
-# the dispatcher from these functions.  See also compute_function.
-def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+# the dispatcher from these functions.  See also compute_functions.
+def compute_tensor_methods(native_functions: List[NativeFunction], *, target: Target) -> List[str]:
+    # Map function name to list of functions and their C++ arguments
+    seen_functions: Dict[str, List[Tuple[NativeFunction, Sequence[CppArgument]]]] = {}
+
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
         if Variant.method not in f.variants:
@@ -361,9 +392,13 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         cpp_returns_type = cpp.returns_type(f.func.returns)
         cpp_args = cpp.arguments(f.func, method=True)
         cpp_args_exclude_this = [a for a in cpp_args if not isinstance(a.argument, ThisArgument)]
-        cpp_args_exclude_this_str = ', '.join(str(a) for a in cpp_args_exclude_this)
 
         if target is Target.DECLARATION:
+            use_defaults = unambiguous_defaults(name, cpp_args_exclude_this, seen_functions)
+            cpp_args_exclude_this_str = ', '.join(
+                str(arg) if use_def else arg.str_no_default()
+                for use_def, arg in zip(use_defaults, cpp_args_exclude_this))
+
             return f"{cpp_returns_type} {name}({cpp_args_exclude_this_str}) const;"
 
         assert target is Target.DEFINITION
@@ -384,7 +419,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 }}
 """
 
-    return go
+    return list(mapMaybe(go, native_functions))
 
 # Generates ATenOpList.cpp, a runtime accessible list of all aten
 # operators.
@@ -397,28 +432,39 @@ def compute_aten_op(f: NativeFunction) -> str:
 
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
-@with_native_function
-def compute_native_function_declaration(f: NativeFunction) -> List[str]:
-    if f.dispatch is None:
-        ns = [cpp.name(f.func)]
-    else:
-        ns = list(f.dispatch.values())
+def compute_native_function_declarations(native_functions: List[NativeFunction]) -> List[str]:
+    # Map function name to a list of its overloads C++ arguments
+    seen_functions: Dict[str, List[Sequence[LegacyDispatcherArgument]]] = {}
 
-    rs = []
-    # Sometimes a function name shows up multiple times; only generate
-    # it once!
-    seen = set()
-    for n in ns:
-        if n in seen:
-            continue
-        if "legacy::" in n:
-            continue
-        seen.add(n)
-        returns_type = legacy_dispatcher.returns_type(f.func.returns)
-        args = legacy_dispatcher.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(map(lambda a: a.str_with_default(), args))});")
+    @with_native_function
+    def go(f: NativeFunction) -> List[str]:
+        if f.dispatch is None:
+            ns = [cpp.name(f.func)]
+        else:
+            ns = list(f.dispatch.values())
 
-    return rs
+        rs = []
+        # Sometimes a function name shows up multiple times; only generate
+        # it once!
+        seen = set()
+        for n in ns:
+            if n in seen:
+                continue
+            if "legacy::" in n:
+                continue
+            seen.add(n)
+            returns_type = legacy_dispatcher.returns_type(f.func.returns)
+            args = legacy_dispatcher.arguments(f.func)
+
+            use_defaults = unambiguous_defaults(n, args, seen_functions)
+            args_str = ', '.join(
+                arg.str_with_default() if use_def else str(arg)
+                for use_def, arg in zip(use_defaults, args))
+            rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
+
+        return rs
+
+    return list(concatMap(go, native_functions))
 
 # Generates BackendSelectRegister.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
@@ -1002,22 +1048,22 @@ def main() -> None:
             native_functions)),
     })
     cpu_fm.write('Functions.h', lambda: {
-        'function_declarations': list(mapMaybe(compute_function(target=Target.DECLARATION), native_functions)),
+        'function_declarations': compute_functions(native_functions, target=Target.DECLARATION),
     })
     cpu_fm.write('Functions.cpp', lambda: {
-        'function_definitions': list(mapMaybe(compute_function(target=Target.DEFINITION), native_functions)),
+        'function_definitions': compute_functions(native_functions, target=Target.DEFINITION),
     })
     core_fm.write('TensorBody.h', lambda: {
-        'tensor_method_declarations': list(mapMaybe(compute_tensor_method(target=Target.DECLARATION), native_functions)),
+        'tensor_method_declarations': compute_tensor_methods(native_functions, target=Target.DECLARATION),
     })
     core_fm.write('TensorMethods.cpp', lambda: {
-        'tensor_method_definitions': list(mapMaybe(compute_tensor_method(target=Target.DEFINITION), native_functions)),
+        'tensor_method_definitions': compute_tensor_methods(native_functions, target=Target.DEFINITION),
     })
     core_fm.write('ATenOpList.cpp', lambda: {
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, native_functions)),
+        'native_function_declarations': compute_native_function_declarations(native_functions),
     })
     cpu_fm.write('BackendSelectRegister.cpp', lambda: {
         'backend_select_method_definitions':
