@@ -374,13 +374,12 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
-
-            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
-              .circleci/scripts/driver_update.bat
-            fi
             
             # Test
             cd /c/pytorch
+            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+              .circleci/scripts/driver_update.bat
+            fi
             .jenkins/pytorch/win-test.sh
             # =================== The above code will be executed inside Docker container ===================
             EOL
