@@ -925,7 +925,7 @@ jobs:
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run:
@@ -950,7 +950,7 @@ jobs:
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -991,7 +991,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1018,7 +1018,7 @@ jobs:
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1260,7 +1260,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run_brew_for_macos_build
@@ -1294,7 +1294,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - attach_workspace:
@@ -1522,7 +1522,7 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run_brew_for_ios_build
