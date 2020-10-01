@@ -1,7 +1,7 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
 
 
-IOS_VERSION = MultiPartVersion([11, 2, 1])
+IOS_VERSION = MultiPartVersion([12, 0, 0])
 
 
 class ArchVariant:
