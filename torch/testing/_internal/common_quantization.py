@@ -11,7 +11,12 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
+    get_default_qat_qconfig
+from torch.quantization import (
+    is_custom_module_class,
+    is_observed_custom_module,
+)
 from torch.quantization.quantization_mappings import (
     get_dynamic_quant_module_mappings,
     get_qconfig_propagation_list,
@@ -24,9 +29,8 @@ from torch.fx import symbolic_trace
 from torch.quantization import (
     QuantType,
     prepare_fx,
-    prepare_dynamic_fx,
+    prepare_qat_fx,
     convert_fx,
-    convert_dynamic_fx,
 )
 
 import copy
@@ -343,14 +347,25 @@ class QuantizationTestCase(TestCase):
         """
         if propagate_qconfig_list is None:
             propagate_qconfig_list = get_qconfig_propagation_list()
-        if hasattr(module, 'qconfig') and module.qconfig is not None and \
-           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
-           and type(module) in propagate_qconfig_list:
+
+        # check if a module is a leaf module, ignoring activation_post_process attribute
+        def is_leaf_module(module):
+            submodule_name_count = 0
+            for name, _ in module.named_children():
+                if name != 'activation_post_process':
+                    submodule_name_count += 1
+            return submodule_name_count == 0
+
+        if (hasattr(module, 'qconfig') and module.qconfig is not None and
+           is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
+           and type(module) in propagate_qconfig_list) or \
+           is_custom_module_class(type(module)):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in get_qat_module_mappings().values():
+        if type(module) not in get_qat_module_mappings().values() and \
+           not is_observed_custom_module(module):
             for child in module.children():
                 self.checkObservers(child)
 
@@ -614,40 +629,46 @@ class QuantizationTestCase(TestCase):
         if type(inputs) == list:
             inputs = inputs[0]
         if quant_type == QuantType.QAT:
+            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
             model.train()
-        else:
+        elif quant_type == QuantType.STATIC:
+            qconfig = get_default_qconfig(torch.backends.quantized.engine)
             model.eval()
-        original = symbolic_trace(model)
+        else:
+            qconfig = default_dynamic_qconfig
+            model.eval()
 
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        if quant_type == QuantType.DYNAMIC:
-            prepare = prepare_dynamic_fx
-            convert = convert_dynamic_fx
+        original = symbolic_trace(model)
+        if quant_type == QuantType.QAT:
+            prepare = prepare_qat_fx
         else:
             prepare = prepare_fx
-            convert = convert_fx
 
+        qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
-        qgraph = convert(prepared)
-        qgraph_debug = convert(prepared, debug=True)
+        qgraph = convert_fx(prepared)
+        qgraph_debug = convert_fx(prepared, debug=True)
 
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
-        self.assertEqual((result - result_debug).abs().max(), 0), \
-            'Expecting debug and non-debug option to produce identical result'
+        # numeric match for debug option for dynamic
+        # quantized op is not needed right now
+        if quant_type != QuantType.DYNAMIC:
+            self.assertEqual((result - result_debug).abs().max(), 0), \
+                'Expecting debug and non-debug option to produce identical result'
 
+        qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
             self.printGraphModule(original)
             print()
-            print('quantized graph module:', type(qgraph))
-            self.printGraphModule(qgraph)
+            print('quantized graph module:', type(qgraph_to_check))
+            self.printGraphModule(qgraph_to_check)
             print()
-        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
             qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
@@ -793,11 +814,34 @@ class ConvModel(torch.nn.Module):
         x = self.conv(x)
         return x
 
+class ConvTransposeModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.ConvTranspose2d(3, 5, 3, bias=False).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
 class AnnotatedConvModel(torch.nn.Module):
     def __init__(self, qengine):
         super().__init__()
         self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.dequant(x)
+        return x
+
+class AnnotatedConvTransposeModel(torch.nn.Module):
+    def __init__(self, qengine):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.conv = torch.nn.ConvTranspose2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
 
@@ -864,6 +908,17 @@ class TwoLayerLinearModel(torch.nn.Module):
     def forward(self, x):
         x = self.fc1(x)
         x = self.fc2(x)
+        return x
+
+class LinearModelWithSubmodule(nn.Module):
+    def __init__(self):
+        super(LinearModelWithSubmodule, self).__init__()
+        self.subm = TwoLayerLinearModel()
+        self.fc = nn.Linear(5, 5)
+
+    def forward(self, x):
+        x = self.subm(x)
+        x = self.fc(x)
         return x
 
 class AnnotatedTwoLayerLinearModel(torch.nn.Module):

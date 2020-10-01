@@ -23,6 +23,7 @@ namespace jit {
   _(ExprLongTest)                           \
   _(ExprHalfTest)                           \
   _(ExprDoubleTest)                         \
+  _(ExprDisallowBoolArithmetic)             \
   _(ExprVectorAdd01)                        \
   _(ExprCompareSelectEQ)                    \
   _(ExprCompareSelectDtypes)                \
@@ -55,6 +56,7 @@ namespace jit {
   _(ExprSplitWithTail)                      \
   _(ExprSplitWithTailNone)                  \
   _(ExprSplitWithMask01)                    \
+  _(ExprSplitWithMaskRepeatedNoMask)        \
   _(SplitWithTailWithLoopOptions)           \
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
@@ -213,6 +215,11 @@ namespace jit {
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
   _(DontSimplifyRand)                       \
+  _(SimplifyReorderForCond)                 \
+  _(SimplifyFuseConditions)                 \
+  _(SimplifySyncThreads)                    \
+  _(SimplifyRampSubBroadcast)               \
+  _(SimplifyBroadcastTermExpander)          \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -288,6 +295,7 @@ namespace jit {
   _(FuserPass_0DimInput)                    \
   _(FuserPass_UnfusibleDevice)              \
   _(FuserPass_UnknownShapes)                \
+  _(FuserPass_UnknownShapesIgnored)         \
   _(FuserPass_Multidevice)                  \
   _(FuserPass_MergeGroups)                  \
   _(TrainBasic)
@@ -391,14 +399,20 @@ namespace jit {
   _(LLVMElemwiseAdd)                       \
   _(LLVMElemwiseAddFloat)                  \
   _(LLVMElemwiseLog10Float)                \
+  _(LLVMElemwiseLog1pFloat)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
   _(LLVMElemwiseMaxFloat)                  \
   _(LLVMElemwiseMaxNaNFloat)               \
   _(LLVMElemwiseMinFloat)                  \
   _(LLVMElemwiseMinNaNFloat)               \
+  _(LLVMElemwiseMod)                       \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
+  _(LLVMCompareSelectByteGT)               \
+  _(LLVMCompareSelectByteGE)               \
+  _(LLVMCompareSelectByteLT)               \
+  _(LLVMCompareSelectByteLE)               \
   _(LLVMStoreFloat)                        \
   _(LLVMSimpleMath01)                      \
   _(LLVMComputeMul)                        \
@@ -425,12 +439,13 @@ namespace jit {
   _(CudaOneBlockOneThreadGlobalReduce1)    \
   _(CudaOneBlockMultiThreadGlobalReduce1)  \
   _(CudaNoThreadIdxWrite_1)                \
-  _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
+  _(CudaSharedMemReduce_1)                 \
   _(CudaTestRand01)                        \
   _(CudaSigmoid)                           \
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
+  _(CudaHalfPropagation)                   \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
   _(CudaMaskThreadDim)                     \

@@ -13,12 +13,14 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#include <llvm/Transforms/Scalar.h>
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #define DEBUG_PRINT 0
@@ -31,6 +33,48 @@ DEFINE_TRIGGER(llvm_codegen_executed);
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+namespace {
+
+bool is_unsigned_integral(const ScalarType& type) {
+  switch (type) {
+    case ScalarType::Bool:
+    case ScalarType::Byte:
+      return true;
+    default:
+      return false;
+  }
+
+  return false;
+}
+
+llvm::CmpInst::Predicate llvm_comparison_predicate(
+    CompareSelectOperation compare_op,
+    const ScalarType& type) {
+  switch (compare_op) {
+    case CompareSelectOperation::kEQ:
+      return llvm::ICmpInst::ICMP_EQ;
+    case CompareSelectOperation::kNE:
+      return llvm::ICmpInst::ICMP_NE;
+    case CompareSelectOperation::kGT:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGT
+                                        : llvm::ICmpInst::ICMP_SGT;
+    case CompareSelectOperation::kGE:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGE
+                                        : llvm::ICmpInst::ICMP_SGE;
+    case CompareSelectOperation::kLT:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULT
+                                        : llvm::ICmpInst::ICMP_SLT;
+    case CompareSelectOperation::kLE:
+      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULE
+                                        : llvm::ICmpInst::ICMP_SLE;
+    default:
+      // TODO: change to a proper error report
+      throw std::runtime_error("invalid operator type");
+  }
+}
+
+} // namespace
+
 class LLVMCodeGenImpl : public IRVisitor {
  private:
   llvm::orc::ThreadSafeContext context_;
@@ -257,6 +301,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
+  fn_->addAttribute(
+      llvm::AttributeList::AttrIndex::FunctionIndex,
+      llvm::Attribute::AlwaysInline);
   for (size_t i = 0; i < args.size(); i++) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
@@ -608,7 +655,18 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Mod* v) {
-  throw std::runtime_error("Mod unsupported in LLVM codegen yet");
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateSRem(lhs, rhs);
+  } else {
+    throw malformed_input("llvm_codgen: bad type in Mod", v);
+  }
 }
 
 void LLVMCodeGenImpl::visit(const Max* v) {
@@ -671,29 +729,8 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
   CompareSelectOperation cmp_op_ = v->compare_select_op();
 
   if (is_integral(type_used)) {
-    switch (cmp_op_) {
-      case CompareSelectOperation::kEQ:
-        cmp_ = irb_.CreateICmpEQ(lhs, rhs);
-        break;
-      case CompareSelectOperation::kNE:
-        cmp_ = irb_.CreateICmpNE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGT:
-        cmp_ = irb_.CreateICmpSGT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGE:
-        cmp_ = irb_.CreateICmpSGE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLT:
-        cmp_ = irb_.CreateICmpSLT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLE:
-        cmp_ = irb_.CreateICmpSLE(lhs, rhs);
-        break;
-      default:
-        // TODO: change to a proper error report
-        throw std::runtime_error("invalid operator type");
-    }
+    cmp_ = irb_.CreateICmp(
+        llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
   } else if (is_floating_point(type_used)) { // FP32
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
@@ -1257,6 +1294,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #endif
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
         SIMD_UNARY_MATH_CASE(kLog, "logf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kLog1p, "log1pf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kLog2, "log2f", FloatTy_)
         SIMD_UNARY_MATH_CASE(kExp, "expf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
@@ -1401,6 +1439,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #endif
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kLog, "log", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kLog1p, "log1p", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kLog2, "log2", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kExp, "exp", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
@@ -1608,6 +1647,8 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);
   FPM.doInitialization();
+  PM.add(llvm::createDeadCodeEliminationPass());
+  PM.add(llvm::createAlwaysInlinerLegacyPass());
   PM.run(M);
   for (auto& FF : M) {
     FPM.run(FF);

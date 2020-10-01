@@ -2,10 +2,11 @@
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-from typing import List, Tuple, Optional
-
+from typing import List, Tuple, Optional, Dict, Union
+from collections import OrderedDict
 import torch
 import torch.nn as nn
+import re
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
@@ -96,12 +97,18 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_symmetric``
     """
 
+    # Note: the version is shared by all observer types
+    #
     # Version 1/None
     #   self
     #
-    # Version 2
+    # Version 2 (base class only, does not include child class buffers)
     #   self
     #   |--- eps : Tensor
+    #
+    # Version 3
+    #   for HistogramObserver only, changed the shape of uninitialized
+    #   min_val and max_val buffers from torch.Size([0]) to torch.Size([])
     _version = 2
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -469,82 +476,6 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         self.max_val.copy_(max_val)
         return x_orig
 
-
-class MinMaxDynamicQuantObserver(MinMaxObserver):
-    r"""Observer module for computing the quantization parameters based on the
-    tensor min and max values in dynamic quantization.
-
-    This observer will mimic the quantization steps followed in the operator
-    to compute the activation tensor quantization parameters at run-time.
-
-    Args:
-        dtype: Quantized data type
-        qscheme: Quantization scheme to be used
-        reduce_range: Reduces the range of the quantized data type by 1 bit
-
-    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
-
-    .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
-
-    .. note:: If the running minimum equals to the running maximum, the scale
-              and zero_point are set to 0.1 and 0.
-    """
-
-    @torch.jit.export
-    def calculate_qparams(self):
-        r"""Calculates the quantization parameters."""
-
-        if self.max_val == float('-inf') and self.min_val == float('inf'):
-            return torch.tensor([1.0]), torch.tensor([0])
-
-        assert self.min_val <= self.max_val, "min {} should be less than max {}".format(
-            self.min_val, self.max_val
-        )
-
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
-            else:
-                qmin, qmax = -128, 127
-        else:  # dtype == torch.quint8
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
-
-        max_val, min_val = self.max_val.to(dtype=torch.float), self.min_val.to(dtype=torch.float)
-
-        # Extend the min_val and max_val to ensure that it contains 0.
-        min_val = torch.min(min_val, torch.tensor(0.).to(dtype=torch.float))
-        max_val = torch.max(max_val, torch.tensor(0.).to(dtype=torch.float))
-
-        scale = (max_val.to(dtype=torch.double) - min_val) / float(qmax - qmin)
-
-        if scale == 0.0 or torch.isinf(1.0 / scale):
-            scale = torch.tensor(0.1).to(dtype=torch.float)
-            zero_point = 0
-
-        zero_point_from_min = qmin - min_val / scale.to(dtype=torch.double)
-        zero_point_from_max = qmax - max_val / scale.to(dtype=torch.double)
-        zero_point_from_min_error = abs(qmin) - abs(min_val / scale.to(dtype=torch.double))
-        zero_point_from_max_error = abs(qmax) - abs(max_val / scale.to(dtype=torch.double))
-
-        if zero_point_from_min_error < zero_point_from_max_error:
-            initial_zero_point = zero_point_from_min
-        else:
-            initial_zero_point = zero_point_from_max
-
-        nudged_zero_point = 0
-
-        if initial_zero_point < qmin:
-            nudged_zero_point = qmin
-        elif initial_zero_point > qmax:
-            nudged_zero_point = qmax
-        else:
-            nudged_zero_point = int(initial_zero_point.round())
-
-        return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
-
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
@@ -627,8 +558,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
+    @torch.jit.export
+    def _load_from_state_dict(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], prefix: str,
+                              local_metadata: Dict[str, torch.Tensor], strict: bool,
+                              missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str]):
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
@@ -642,10 +575,26 @@ class PerChannelMinMaxObserver(_ObserverBase):
                     self.min_vals.resize_(val.shape)
                 else:
                     self.max_vals.resize_(val.shape)
+                # For torchscript module we need to update the attributes here since we do not
+                # call the `_load_from_state_dict` function defined module.py
+                if torch.jit.is_scripting():
+                    if name == 'min_vals':
+                        self.min_vals.copy_(val)
+                    else:
+                        self.max_vals.copy_(val)
             elif strict:
                 missing_keys.append(key)
-        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                                    missing_keys, unexpected_keys, error_msgs)
+
+        if not torch.jit.is_scripting():
+            super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                                                        missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def _load_from_state_dict_script(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
+                                     prefix: str, local_metadata: Dict[str, torch.Tensor], strict: bool,
+                                     missing_keys: List[str], unexpected_keys: List[str], error_msgs: List[str]):
+
+        self._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -739,8 +688,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+        self.register_buffer('min_val', torch.tensor(float('inf')))
+        self.register_buffer('max_val', torch.tensor(float('-inf')))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -917,10 +866,9 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        same_values = False
-        if min_val.numel() > 0 and max_val.numel() > 0:
-            same_values = min_val.item() == max_val.item()
-        if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
+        same_values = min_val.item() == max_val.item()
+        is_uninitialized = min_val == float('inf') and max_val == float('-inf')
+        if is_uninitialized or same_values:
             min_val, max_val = torch._aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
@@ -958,7 +906,9 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        if self.min_val.numel() == 0 or self.max_val.numel() == 0:
+        is_uninitialized = (self.min_val == float('inf') and
+                            self.max_val == float('-inf'))
+        if is_uninitialized:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
@@ -980,6 +930,18 @@ class HistogramObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+
+        if version is None or version < 3:
+            # if min_val and max_val are not initialized, update their shape
+            # to account for the differences between v2 and v3
+            min_val_name, max_val_name = prefix + 'min_val', prefix + 'max_val'
+            if min_val_name in state_dict:
+                if state_dict[min_val_name].shape == torch.Size([0]):
+                    state_dict[min_val_name] = torch.tensor(float('inf'))
+            if max_val_name in state_dict:
+                if state_dict[max_val_name].shape == torch.Size([0]):
+                    state_dict[max_val_name] = torch.tensor(float('-inf'))
 
         local_state = ['min_val', 'max_val']
         for name in local_state:
@@ -1005,10 +967,15 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name=""):
+    def __init__(self, dtype=torch.float16, custom_op_name="", compute_dtype=None):
         super(PlaceholderObserver, self).__init__(dtype=dtype)
+        # dtype of input of the target operator, e.g. for dynamic quantization
+        # ops, the dtype will be float32
         self.dtype = dtype
         self.custom_op = custom_op_name
+        # used for configuration of computation type for dynamic quantization
+        if compute_dtype:
+            self.compute_dtype = compute_dtype
 
     def forward(self, x):
         return x
@@ -1072,6 +1039,68 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+def _is_observer_script_module(mod, obs_type_name):
+    ''' Returns true if given mod is an instance of Observer script module.
+    '''
+    if isinstance(mod, torch.jit.RecursiveScriptModule):
+        # qualified name looks like '__torch__.torch.quantization.observer.___torch_mangle_2.MinMaxObserver'
+        suffix = mod._c.qualified_name.split('.', 1)[1]
+        name = re.sub(r'\.___torch_mangle_\d+', '', suffix)
+        return obs_type_name in name
+    return False
+
+def _is_activation_post_process(module):
+    return (isinstance(module, torch.quantization.ObserverBase) or
+            isinstance(module, torch.quantization.FakeQuantize) or
+            _is_observer_script_module(module, 'torch.quantization.observer'))
+
+def _is_per_channel_script_obs_instance(module):
+    if isinstance(module, torch.jit.RecursiveScriptModule):
+        return _is_observer_script_module(module, "torch.quantization.observer.PerChannelMinMaxObserver") or\
+            _is_observer_script_module(module, "torch.quantization.observer.MovingAveragePerChannelMinMaxObserver")
+    return False
+
+def get_observer_state_dict(mod):
+    r"""
+    Returns the state dict corresponding to the observer stats.
+    Traverse the model state_dict and extract out the stats.
+    """
+    od = OrderedDict()
+    if isinstance(mod, torch.jit.RecursiveScriptModule):
+        for k, v in mod.state_dict().items():
+            if 'observer' in k:
+                od[k] = v
+    else:
+        # path for GraphModule and nn.Module (eager mode)
+        for k, v in mod.state_dict().items():
+            if 'activation_post_process' in k:
+                od[k] = v
+    od._metadata = mod.state_dict()._metadata
+    return od
+
+def load_observer_state_dict(mod, obs_dict):
+    r"""
+    Given input model and a state_dict containing model observer stats,
+    load the stats back into the model. The observer state_dict can be saved
+    using torch.quantization.get_observer_state_dict
+    """
+    missing_keys = []
+    unexpected_keys = []
+    for name, module in mod.named_modules():
+        prefix = name + '.'
+        if _is_activation_post_process(module):
+            if _is_per_channel_script_obs_instance(module):
+                # For per-channel observers we need to call a custom load_from_state_dict to resize the tensor.
+                # However this is not called when the module is scripted and we end up calling the default one in module.py
+                module._load_from_state_dict_script(obs_dict, prefix, {}, True, missing_keys, unexpected_keys, [])
+            else:
+                module._load_from_state_dict(obs_dict, prefix, {}, False, missing_keys, unexpected_keys, [])
+    for k in missing_keys:
+        if 'observer' in k or 'activation_post_process' in k:
+            raise Exception("Missing keys for observer {} in state_dict".format(k))
+    for k in unexpected_keys:
+        if 'observer' in k or 'activation_post_process' in k:
+            raise Exception("Unexpected keys for observer {} in state_dict".format(k))
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
@@ -1079,7 +1108,7 @@ default_debug_observer = RecordingObserver
 default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
 default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
-default_dynamic_quant_observer = MinMaxDynamicQuantObserver
+default_dynamic_quant_observer = PlaceholderObserver.with_args(dtype=torch.float, compute_dtype=torch.quint8)
 default_float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=torch.quint8,
                                                                     qscheme=torch.per_channel_affine_float_qparams,
                                                                     ch_axis=0)

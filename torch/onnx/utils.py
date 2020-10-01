@@ -17,7 +17,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -121,7 +121,7 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=False):
+                    params_dict=None, use_new_jit_passes=False, dynamic_axes=None, input_names=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
@@ -195,6 +195,11 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
 
+        from torch.onnx.symbolic_helper import _onnx_shape_inference
+        if _onnx_shape_inference:
+            input_names = [] if input_names is None else input_names
+            dynamic_axes = {} if dynamic_axes is None else dynamic_axes
+            torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 
@@ -214,6 +219,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
+    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
+    if _onnx_shape_inference:
+        torch._C._jit_pass_onnx_graph_shape_type_inference(graph, _export_onnx_opset_version)
     return graph
 
 
@@ -388,7 +396,8 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, use_new_jit_passes=False):
+                    training=None, use_new_jit_passes=False,
+                    dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -408,19 +417,20 @@ def _model_to_graph(model, args, verbose=False,
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            use_new_jit_passes=use_new_jit_passes)
+                            use_new_jit_passes=use_new_jit_passes,
+                            dynamic_axes=dynamic_axes, input_names=input_names)
+    from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
-        graph = _assign_output_shapes(graph, out_vars)
+        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, _onnx_shape_inference)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         output_tensors, _ = torch._C._jit_flatten(torch_out)
-        for output, tensor in zip(graph.outputs(), output_tensors):
-            output.inferTypeFrom(tensor)
+        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
 
@@ -509,8 +519,38 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                         operator_export_type, google_printer,
                                         val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
-def _diagnose_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
-                     input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
+                                  input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+    r"""
+    This diagnostic tool runs your model with operator_export_type set to
+    OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
+    all the ops that are not supported/implemented by the current exporter
+
+    operator_export_type is set to OperatorExportTypes.ONNX_FALLTHROUGH by default
+        OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+        in ONNX, fall through and export the operator as is, as a custom
+        ONNX op. Using this mode, the op can be exported and implemented by
+        the user for their runtime backend.
+        Example graph::
+
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                %4 : None = prim::Constant()
+                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                return (%5)
+
+        is exported as::
+
+            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                %4 : None = prim::Constant()
+                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                return (%5)
+
+        In the above example, aten::cumsum in not implemented in opset 9, hence exporter falls
+        through and provides a list of unsupported ops, the result being:
+            Unsupported ops : [aten:cumsum]
+    """
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -584,6 +624,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
+            if dynamic_axes is None:
+                dynamic_axes = {}
+            _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
+
             graph, params_dict, torch_out = \
                 _model_to_graph(model, args, verbose, input_names,
                                 output_names, operator_export_type,
@@ -591,16 +635,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                use_new_jit_passes=use_new_jit_passes)
+                                use_new_jit_passes=use_new_jit_passes,
+                                dynamic_axes=dynamic_axes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
-            if dynamic_axes is None:
-                dynamic_axes = {}
             if custom_opsets is None:
                 custom_opsets = {}
-
-            _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
             if export_params:
                 proto, export_map = graph._export_onnx(
@@ -795,6 +836,38 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     if outputs == 1:
         return n.output()
     return tuple(o for o in n.outputs())
+
+
+def _block_op(b, opname, *args, **kwargs):
+    if "::" in opname:
+        aten = False
+        ns_opname = opname
+    else:
+        aten = kwargs.pop("aten", False)
+        ns = "aten" if aten else "onnx"
+        ns_opname = ns + "::" + opname
+    n = b.addNode(ns_opname, list(args))
+    for k, v in sorted(kwargs.items()):
+        # TODO: enable inplace in aten exporting mode.
+        if k == "inplace":
+            continue
+        _add_attribute(n, k, v, aten=aten)
+    if len(list(n.outputs())) == 1:
+        return n.output()
+    return tuple(o for o in n.outputs())
+
+
+def _add_block(node):
+    return node.addBlock()
+
+
+def _add_input_to_block(block):
+    return block.addInputToBlock()
+
+
+def _add_output_to_block(block, value):
+    new_output = block.registerOutput(value)
+    return new_output
 
 
 # Note [Export inplace]
@@ -1050,13 +1123,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
 
-def _add_block(node, input_node, op_name, **kwargs):
-    new_block = node.addBlock()
-    new_node = new_block.addNode(input_node, op_name)
-    for k, v in kwargs.items():
-        _add_attribute(new_node, k, v, False)
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at
+torch._C.Block.op = _block_op
 torch._C.Graph.constant = _graph_constant
 torch._C.Node.__getitem__ = _node_getitem
