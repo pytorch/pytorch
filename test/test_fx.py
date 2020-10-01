@@ -756,16 +756,20 @@ class TestFX(JitTestCase):
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
+        output_shape : Optional[torch.Shape] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
-        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+            if node.op == 'output':
+                output_shape = node.args[0].shape
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
+                                       'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
-        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+        self.assertEqual(output_shape, ref_out.shape)
 
 
 

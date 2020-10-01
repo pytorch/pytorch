@@ -791,9 +791,6 @@ class Quantizer:
         quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
-            if node.op == 'output':
-                folded_graph.output(load_arg(node.args[0]))
-                continue
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
                 packed_weight = packed_weights[node.name]

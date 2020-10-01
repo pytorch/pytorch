@@ -74,7 +74,7 @@ class Graph:
     def nodes(self):
         return tuple(self._nodes)
 
-    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Node]:
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Argument]:
         """
         Append all nodes from graph `g` to this graph. `val_map` should be a dictionary
         that maps nodes in `g` to nodes in `self. `val_map` will be populated with more
@@ -84,7 +84,6 @@ class Graph:
         for node in g._nodes:
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
-                assert isinstance(rv, Node)
                 return rv
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
