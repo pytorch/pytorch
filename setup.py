@@ -340,7 +340,11 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future', 'typing_extensions', 'dataclasses']
+install_requires = [
+    'future',
+    'typing_extensions',
+    'dataclasses; python_version < "3.8"'
+]
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
