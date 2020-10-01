@@ -7,7 +7,7 @@ import torch.nn.intrinsic.quantized as nniq
 import torch.multiprocessing as mp
 
 # symbolic trace
-from torch.fx import symbolic_trace
+from torch._fx import symbolic_trace
 
 # graph mode quantization based on fx
 from torch.quantization import (
@@ -654,7 +654,7 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
 
-        from torch.fx.symbolic_trace import Tracer
+        from torch._fx.symbolic_trace import Tracer
 
         # define a custom tracer to not trace through the custom module
 

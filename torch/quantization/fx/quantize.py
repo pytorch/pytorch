@@ -1,10 +1,10 @@
 import torch
-from torch.fx import (
+from torch._fx import (
     GraphModule,
     Proxy,
 )
 
-from torch.fx.graph import (
+from torch._fx.graph import (
     Graph,
     Node,
     map_arg,

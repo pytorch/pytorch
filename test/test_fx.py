@@ -5,10 +5,10 @@ import numbers
 import pickle
 import copy
 from pathlib import Path
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
-from torch.fx.experimental import GraphManipulation
+from torch._fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch._fx.experimental import GraphManipulation
 
-from torch.fx.proxy import TraceError
+from torch._fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
@@ -177,7 +177,7 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        new_g = torch.fx.Graph()
+        new_g = torch._fx.Graph()
         new_g.graph_copy(g)
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
@@ -192,7 +192,7 @@ class TestFX(JitTestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        new_g = torch.fx.Graph()
+        new_g = torch._fx.Graph()
         new_g.graph_copy(g)
         t = Proxy(new_g.nodes[-1])
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
@@ -204,13 +204,13 @@ class TestFX(JitTestCase):
             seen_names.add(node.name)
 
     def test_graph_unique_names_manual(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        a : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,), name='foo_1_1')
-        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr', name='foo_1')
-        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph : torch._fx.Graph = torch._fx.Graph()
+        a : torch._fx.Node = graph.create_node('placeholder', 'x')
+        b : torch._fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,), name='foo_1_1')
+        c : torch._fx.Node = graph.create_node('get_attr', 'y_attr', name='foo_1')
+        d : torch._fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
-        graph2 = torch.fx.Graph()
+        graph2 = torch._fx.Graph()
         graph2.graph_copy(graph)
         seen_names : Set[str] = set()
         for node in graph2.nodes:
@@ -367,7 +367,7 @@ class TestFX(JitTestCase):
             # without it messing up Python `hasattr` for some reason. More digging
             # into CPython's implementation of hasattr is probably in order...
 
-            graph = torch.fx.Graph()
+            graph = torch._fx.Graph()
             # Add placeholders for fn inputs
             placeholder_nodes = []
             for name in fn_input_names:
@@ -514,7 +514,7 @@ class TestFX(JitTestCase):
         traced.graph.lint(traced)
 
         def transform(traced):
-            new_graph = torch.fx.Graph()
+            new_graph = torch._fx.Graph()
             new_graph.graph_copy(traced.graph)
             relu_out = new_graph.create_node(
                 op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
@@ -655,16 +655,16 @@ class TestFX(JitTestCase):
         self.assertEqual(r, ref)
 
     def test_construct_root_dict(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        a : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
-        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph : torch._fx.Graph = torch._fx.Graph()
+        a : torch._fx.Node = graph.create_node('placeholder', 'x')
+        b : torch._fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch._fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
+        d : torch._fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
 
         linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
         add_param : torch.Tensor = torch.rand(3, 4)
-        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+        gm : torch._fx.GraphModule = torch._fx.GraphModule(
             {'foo.bar.baz': linear_mod, 'zip.zap.zam' : add_param}, graph)
         gm.graph.lint(gm)
 
@@ -692,15 +692,15 @@ class TestFX(JitTestCase):
             traced(torch.rand(4, 3))
 
     def test_get_all_users_of(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        a : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr')
-        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph : torch._fx.Graph = torch._fx.Graph()
+        a : torch._fx.Node = graph.create_node('placeholder', 'x')
+        b : torch._fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
+        c : torch._fx.Node = graph.create_node('get_attr', 'y_attr')
+        d : torch._fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
         add_param : torch.Tensor = torch.rand(3, 4)
-        gm : torch.fx.GraphModule = torch.fx.GraphModule(
+        gm : torch._fx.GraphModule = torch._fx.GraphModule(
             {'linear_mod': linear_mod, 'y_attr' : add_param}, graph)
         expected_uses: Dict[int, List[int]] = {
             0: [1],
@@ -715,18 +715,18 @@ class TestFX(JitTestCase):
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
         g = traced.graph
-        copied = torch.fx.Graph()
+        copied = torch._fx.Graph()
         for node in g.nodes:
             copied.node_copy(node)
         with self.assertRaisesRegex(RuntimeError, 'does not belong to this Graph'):
             copied.lint()
 
     def test_wrong_topo(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        a : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
-        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
+        graph : torch._fx.Graph = torch._fx.Graph()
+        a : torch._fx.Node = graph.create_node('placeholder', 'x')
+        b : torch._fx.Node = graph.create_node('call_module', 'foo.bar.baz', args=(a,))
+        c : torch._fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
+        d : torch._fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         nodes = graph._nodes
         nodes[2], nodes[3] = nodes[3], nodes[2]

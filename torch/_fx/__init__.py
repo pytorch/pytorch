@@ -9,7 +9,7 @@ with an `nn.Module` instance as its argument, GraphModule will trace through the
 
 ```
 import torch
-from torch.fx import GraphModule
+from torch._fx import GraphModule
 
 class MyModule(torch.nn.Module):
     def __init__(self):

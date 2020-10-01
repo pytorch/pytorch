@@ -1,8 +1,8 @@
-from torch.fx import (
+from torch._fx import (
     GraphModule
 )
 
-from torch.fx.graph import (
+from torch._fx.graph import (
     Graph,
     map_arg,
 )

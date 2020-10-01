@@ -26,7 +26,7 @@ _all__ = [
     'prepare', 'convert', 'prepare_qat',
     # Top level API for graph mode quantization on TorchScript
     'quantize_jit', 'quantize_dynamic_jit',
-    # Top level API for graph mode quantization on GraphModule(torch.fx)
+    # Top level API for graph mode quantization on GraphModule(torch._fx)
     'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
     'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
     'QuantType',  # quantization type

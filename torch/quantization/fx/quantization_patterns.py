@@ -1,5 +1,5 @@
 import torch
-from torch.fx.graph import (
+from torch._fx.graph import (
     Node,
 )
 from ..quantization_mappings import (

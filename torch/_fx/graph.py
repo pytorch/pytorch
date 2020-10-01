@@ -131,8 +131,8 @@ class Graph:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
             to the graph of self. Example:
 
-            g : torch.fx.Graph = ...
-            new_graph = torch.fx.graph()
+            g : torch._fx.Graph = ...
+            new_graph = torch._fx.graph()
             value_remap = {}
             for node in g.nodes:
                 value_remap[node] = new_graph.node_copy(node, lambda n : value_remap[n])
