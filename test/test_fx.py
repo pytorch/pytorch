@@ -7,6 +7,8 @@ import copy
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
+from torch.fx.experimental import shape_prop
+from torch.fx.experimental.Partitioner import DAG, Partitioner
 
 from torch.fx.proxy import TraceError
 
@@ -732,6 +734,51 @@ class TestFX(JitTestCase):
         nodes[2], nodes[3] = nodes[3], nodes[2]
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
+
+    def test_example_shape_prop(self):
+        class TestCase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.randn(3, 4)
+                self.submod = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.neg(self.submod(x.relu() + self.attr))
+        tc = TestCase()
+        tc_traced = symbolic_trace(tc)
+        ref_out = tc_traced(torch.rand(3, 4))
+
+        # Make sure we're testing all opcodes
+        opcodes = set()
+        for node in tc_traced.graph.nodes:
+            opcodes.add(node.op)
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+
+        # Test shape propogation and make sure results match actual
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+
+    def test_find_single_partition(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        partitioner = Partitioner()
+        devices = [{"name": "dev_0", "available_mem": float('inf')}]
+        dag = partitioner.partition_graph(traced, devices)
+        for node in traced.graph.nodes:
+            assert node.partition_ids == [1]
+        nodes = traced.graph.nodes
+        res_dag = DAG()
+        res_dag.create_node(0, [], [1], [], [])
+        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
+        for r, d in zip(res_dag.nodes, dag.nodes):
+            assert(r.partition_id == d.partition_id)
+            assert(r.parents == d.parents)
+            assert(r.children == d.children)
+            assert(r.input_nodes == d.input_nodes)
+            assert(r.output_nodes == d.output_nodes)
 
 if __name__ == '__main__':
     run_tests()
