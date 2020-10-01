@@ -786,6 +786,9 @@ jobs:
           command: |
             set -e
 
+            mkdir -p /c/Users/circleci/project/build/win_tmp/
+            mkdir -p /c/w/
+
             cat > /c/Users/circleci/project/build/win_tmp/ci_test_script.sh \<<EOL
             # =================== The following code will be executed inside Docker container ===================
             set -ex

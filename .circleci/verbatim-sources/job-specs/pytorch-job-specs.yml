@@ -271,10 +271,14 @@ jobs:
             # Cleanup disk space
             rm -rf "C:/ProgramData/Microsoft/VisualStudio/Packages"
             rm -rf "C:/Program Files (x86)/Microsoft Visual Studio"
+            
+            mkdir -p /c/Users/circleci/project/build/win_tmp/
+            mkdir -p /c/w/
 
-            cat > /c/Users/circleci/project/ci_build_script.sh \<<EOL
+            cat > /c/Users/circleci/project/build/win_tmp/ci_build_script.sh \<<EOL
             # =================== The following code will be executed inside Docker container ===================
             set -ex
+            export JOB_EXECUTOR="$JOB_EXECUTOR"
             export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
             export SCCACHE_BUCKET="$SCCACHE_BUCKET"
             export CUDA_VERSION="$CUDA_VERSION"
@@ -299,9 +303,8 @@ jobs:
             export DOCKER_IMAGE=peterjc123/windows-cuda-container:v3.0.0
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
-            export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE})
-            docker cp C:/Users/circleci/project/. $id:C:/pytorch/
-            docker exec -i "$id" sh /c/pytorch/ci_build_script.sh
+            export id=$(docker run --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/w:C:/w -d ${DOCKER_IMAGE})
+            docker exec -i "$id" sh /c/pytorch/build/win_tmp/ci_build_script.sh
       - persist_to_workspace:
           root: "C:/w"
           paths: build-results
@@ -344,33 +347,47 @@ jobs:
       - attach_workspace:
           at: c:/users/circleci/workspace
       - run:
-          name: Install Cuda
-          no_output_timeout: 30m
-          command: |
-            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-                .circleci/scripts/windows_cuda_install.sh
-              fi
-              if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
-                .circleci/scripts/driver_update.bat
-              fi
-            fi
-      - run:
-          name: Install Cudnn
-          command : |
-            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              .circleci/scripts/windows_cudnn_install.sh
-            fi
-      - run:
           name: Test
           no_output_timeout: "30m"
           command: |
             set -e
+
+            mkdir -p /c/Users/circleci/project/build/win_tmp/
+            mkdir -p /c/w/
+
+            cat > /c/Users/circleci/project/build/win_tmp/ci_test_script.sh \<<EOL
+            # =================== The following code will be executed inside Docker container ===================
+            set -ex
+            export JOB_EXECUTOR="$JOB_EXECUTOR"
+            export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+            export SCCACHE_BUCKET="$SCCACHE_BUCKET"
+            export CUDA_VERSION="$CUDA_VERSION"
+            export PYTHON_VERSION="$PYTHON_VERSION"
+            export VC_VERSION="$VC_VERSION"
+            export VC_YEAR="$VC_YEAR"
+            export VC_PRODUCT="$VC_PRODUCT"
+            export USE_CUDA="$USE_CUDA"
+            export TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST"
             export IN_CIRCLECI=1
+
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
+
+            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+              .circleci/scripts/driver_update.bat
+            fi
+            
+            # Test
+            cd /c/pytorch
             .jenkins/pytorch/win-test.sh
+            # =================== The above code will be executed inside Docker container ===================
+            EOL
+            export DOCKER_IMAGE=peterjc123/windows-cuda-container:v3.0.0
+            echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+            time docker pull ${DOCKER_IMAGE} >/dev/null
+            export id=$(docker run --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/w:C:/w -d ${DOCKER_IMAGE})
+            docker exec -i "$id" sh /c/pytorch/build/win_tmp/ci_test_script.sh
       - store_test_results:
           path: test/test-reports
