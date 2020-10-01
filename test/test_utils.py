@@ -12,6 +12,7 @@ import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.benchmark as benchmark_utils
+from torch.utils.distributed_utils import remove_prefix_from_state_dict_if_exists
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -35,6 +36,26 @@ class RandomDatasetMock(object):
 
     def __len__(self):
         return 1000
+
+
+class TestStateDict(TestCase):
+    def test_state_dict(self):
+        """"""
+        model = nn.Sequential(nn.Conv2d(1, 1, 1, bias=False),
+                              nn.BatchNorm2d(1))
+        model.train()
+        # quantize
+        torch.quantization.fuse_modules(model, ["0", "1"], inplace=True)
+        model = torch.quantization.QuantWrapper(model)
+        torch.backends.quantized.engine = "qnnpack"
+        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        torch.quantization.prepare_qat(model, inplace=True)
+        # Make dataparallel
+        dist_model = nn.DataParallel(model)
+        state_dict = remove_prefix_from_state_dict_if_exists(dist_model.state_dict(),
+                                                             prefix='module.')
+        self.assertEqual(model.state_dict().keys(), state_dict.keys())
+        self.assertEqual(model.state_dict()._metadata.keys(), state_dict._metadata.keys())
 
 
 class TestCheckpoint(TestCase):
