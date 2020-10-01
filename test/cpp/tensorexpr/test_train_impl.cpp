@@ -482,7 +482,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       Placeholder inpB(BufHandle(get_name(id), exprs, kFloat));
       auto inpT =
           Compute("input" + get_name(id), vars, [&](const VarHandle& i) {
-            return Load::make(inpB, {i}, 1);
+            return Load::make(BufHandle(inpB.data()), {i}, 1);
           });
       inputs.emplace(&t, inpB);
       bindings.emplace(&t, inpT);

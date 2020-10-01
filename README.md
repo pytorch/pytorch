@@ -188,7 +188,7 @@ On Windows
 ```bash
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -y -q -c rdonnelly libuv
+conda install -c conda-forge libuv=1.39
 ```
 
 #### Get the PyTorch Source

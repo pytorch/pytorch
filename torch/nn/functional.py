@@ -1315,8 +1315,7 @@ In-place version of :func:`~celu`.
 """)
 
 
-def leaky_relu(input, negative_slope=0.01, inplace=False):
-    # type: (Tensor, float, bool) -> Tensor
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
