@@ -361,6 +361,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
+    nn_module = nn_module.__prepare_scriptable__() if hasattr(nn_module, '__prepare_scriptable__') else nn_module
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
 
