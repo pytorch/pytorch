@@ -15,7 +15,7 @@ namespace jit {
  *
  * The function is sensitive to value naming and whitespace, so it should be
  * used with care. Nevertheless, it helps to keep tests more compact.
- */
+ */git
 static void checkRoundtrip(const std::string& s) {
   auto graph = std::make_shared<Graph>();
   parseIR(s, &*graph);
@@ -291,7 +291,6 @@ graph(%a : Float(4, 5),
   AT_ASSERT(b_sizes[0] == 4 && b_sizes[1] == 5);
   AT_ASSERT(*b_strides[0] == 5 && *b_strides[1] == 1);
 
-<<<<<<< HEAD
   auto c_type = c->type()->cast<TensorType>();
   AT_ASSERT(*c_type->sizes().size() == 2);
   AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
@@ -305,21 +304,6 @@ TEST(IRParserTest, MalformedStrides) {
   EXPECT_ANY_THROW(parseIR(
       R"IR(
 graph(%a : Float(4, strides=[5], 5)):
-=======
-    auto c_type = c->type()->cast<TensorType>();
-    AT_ASSERT(*c_type->sizes().size() == 2);
-    AT_ASSERT(c_type->sizes().concrete_sizes() == c10::nullopt);
-    AT_ASSERT(c_type->strides().concrete_sizes() == c10::nullopt);
-  }
-  {
-    auto graph = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> vmap;
-    bool error_thrown = false;
-    try {
-      parseIR(
-          R"IR(
-graph(%a : Float(4, strides=[5], 5)):
->>>>>>> Fix stride printing/parsing formatting
   return (%a)
 )IR",
       &*graph,
