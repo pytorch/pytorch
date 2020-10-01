@@ -301,6 +301,30 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                          msg="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
+    def test_leaky_relu(self, X, alpha):
+        """ Test quantized::leaky_relu op that takes scale/zero_point as input
+        """
+        X, (scale, zero_point, torch_type) = X
+        Y_scale = scale / 2
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+        # torch.nn.functional
+        op = torch.nn.functional.leaky_relu
+        dqY = op(dqX, negative_slope=alpha)
+        qY = torch.quantize_per_tensor(dqY, scale=Y_scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        quantized_op = torch.ops.quantized.leaky_relu
+        qY_hat = quantized_op(qX, negative_slope=alpha, output_scale=Y_scale, output_zero_point=zero_point)
+        self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                         msg="quantized::leaky_relu failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::elu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
