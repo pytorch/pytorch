@@ -81,7 +81,7 @@ SHOULD_NOT_DO_GRADIENT(BBoxTransform);
 } // namespace
 
 template <>
-bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
+CAFFE2_API bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   const auto& roi_in = Input(0);
   const auto& delta_in = Input(1);
   const auto& iminfo_in = Input(2);

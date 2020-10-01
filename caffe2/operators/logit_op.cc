@@ -15,8 +15,7 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-bool LogitFunctor<CPUContext>::
-operator()(const int size, const T* X, T* Y, CPUContext* /* context */) const {
+CAFFE2_API bool LogitFunctor<CPUContext>::operator()(const int size, const T* X, T* Y, CPUContext* /* context */) const {
   ConstEigenVectorMap<T> X_vec(X, size);
   EigenVectorMap<T> Y_vec(Y, size);
   Y_vec = X_vec.array().min(static_cast<T>(1.0f - eps_));
@@ -26,7 +25,7 @@ operator()(const int size, const T* X, T* Y, CPUContext* /* context */) const {
 }
 
 template <>
-bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
+CAFFE2_API bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dY = Input(1);
 

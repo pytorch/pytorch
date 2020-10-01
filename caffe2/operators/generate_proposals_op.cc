@@ -146,7 +146,7 @@ ERArrXXf ComputeSortedAnchors(
 } // namespace utils
 
 template <>
-void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
+CAFFE2_API void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     const Eigen::Array3f& im_info,
     const Eigen::Map<const ERArrXXf>& anchors,
     const utils::ConstTensorView<float>& bbox_deltas_tensor,
@@ -265,7 +265,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 }
 
 template <>
-bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   const auto& scores = Input(0);
   const auto& bbox_deltas = Input(1);
   const auto& im_info_tensor = Input(2);

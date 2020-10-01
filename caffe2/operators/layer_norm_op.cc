@@ -10,7 +10,7 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-void LayerNormOp<CPUContext>::ComputeSigmaAndFusedParams(
+CAFFE2_API void LayerNormOp<CPUContext>::ComputeSigmaAndFusedParams(
     const int N,
     const float eps,
     const T* mean,
@@ -29,7 +29,7 @@ void LayerNormOp<CPUContext>::ComputeSigmaAndFusedParams(
 
 template <>
 template <typename T>
-void LayerNormOp<CPUContext>::LayerNormForward(
+CAFFE2_API void LayerNormOp<CPUContext>::LayerNormForward(
     const int M,
     const int N,
     const T* X,
@@ -63,7 +63,7 @@ REGISTER_CPU_OPERATOR(LayerNorm, LayerNormOp<CPUContext>);
 
 template <>
 template <typename T>
-void LayerNormGradientOp<CPUContext>::ComputeInternalGradients(
+CAFFE2_API void LayerNormGradientOp<CPUContext>::ComputeInternalGradients(
     const int M,
     const int N,
     const T* dY,

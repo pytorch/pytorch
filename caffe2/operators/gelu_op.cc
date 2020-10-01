@@ -21,8 +21,7 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-bool GeluFunctor<CPUContext>::
-operator()(const int N, const T* X, T* Y, CPUContext* context) const {
+CAFFE2_API bool GeluFunctor<CPUContext>::operator()(const int N, const T* X, T* Y, CPUContext* context) const {
   if (fast_gelu) {
     // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
     constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2;
@@ -42,7 +41,7 @@ operator()(const int N, const T* X, T* Y, CPUContext* context) const {
 
 template <>
 template <typename T>
-bool GeluGradientFunctor<CPUContext>::Forward(
+CAFFE2_API bool GeluGradientFunctor<CPUContext>::Forward(
     const std::vector<int>& dY_dims,
     const std::vector<int>& /* X_dims */,
     const T* dY,

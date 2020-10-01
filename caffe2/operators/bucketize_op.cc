@@ -6,7 +6,7 @@
 namespace caffe2 {
 
 template <>
-bool BucketizeOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool BucketizeOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   CAFFE_ENFORCE_GE(input.dim(), 1);
 
