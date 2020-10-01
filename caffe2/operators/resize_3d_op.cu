@@ -85,7 +85,7 @@ __global__ void NearestNeighbor3DGradientKernel(
 
 
 template <>
-bool ResizeNearest3DOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
+CAFFE2_API bool ResizeNearest3DOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
 
   const auto inputDims = X.sizes();
@@ -128,7 +128,7 @@ bool ResizeNearest3DOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool ResizeNearest3DOp<float, CUDAContext>::RunOnDevice() {
+CAFFE2_API bool ResizeNearest3DOp<float, CUDAContext>::RunOnDevice() {
   switch (order_) {
     case StorageOrder::NHWC:
       CAFFE_THROW("Not implemented for storage order: ", order_);
@@ -141,7 +141,7 @@ bool ResizeNearest3DOp<float, CUDAContext>::RunOnDevice() {
 
 
 template <>
-bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
+CAFFE2_API bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
 
@@ -195,7 +195,7 @@ bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDevice() {
+CAFFE2_API bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDevice() {
   switch (order_) {
     case StorageOrder::NHWC:
       CAFFE_THROW("Not implemented for storage order: ", order_);

@@ -59,7 +59,7 @@ void resizeNearestNCHW2x(
 }
 
 template <>
-bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
+CAFFE2_API bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
 
   const int batch_size = X.dim32(0), num_channels = X.dim32(1),

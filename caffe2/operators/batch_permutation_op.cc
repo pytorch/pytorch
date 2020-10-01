@@ -45,7 +45,7 @@ void batch_permutation_loop(
 }
 
 template <>
-bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
+CAFFE2_API bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& indices = Input(1);
 
@@ -73,7 +73,7 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
 }
 
 template <>
-bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
+CAFFE2_API bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
   auto& indices = Input(0);
   auto& dY = Input(1);
 

@@ -70,7 +70,7 @@ __global__ void NearestNeighborGradientKernel(
 } // namespace
 
 template <>
-bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
+CAFFE2_API bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
 
   const auto inputDims = X.sizes();

@@ -47,7 +47,7 @@ __global__ void BatchPermutationKernel(
 } // namespace
 
 template <>
-bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
+CAFFE2_API bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& indices = Input(1);
 
@@ -79,7 +79,7 @@ bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
 }
 
 template <>
-bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
+CAFFE2_API bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& indices = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());

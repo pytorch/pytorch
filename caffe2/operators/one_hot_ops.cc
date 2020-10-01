@@ -7,7 +7,7 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-bool BatchOneHotOp<CPUContext>::DoRunWithType() {
+CAFFE2_API bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& vals = Input(VALS);
@@ -89,7 +89,7 @@ OpSchema::Cost CostInferenceForBatchOneHot(
 }
 
 template <>
-void OneHotOp<CPUContext>::DoOneHotOp(
+CAFFE2_API void OneHotOp<CPUContext>::DoOneHotOp(
     int64_t batch_size,
     int64_t index_size,
     const Tensor& indices,
@@ -106,7 +106,7 @@ void OneHotOp<CPUContext>::DoOneHotOp(
 }
 
 template <>
-bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& boundaries = Input(BOUNDARIES);

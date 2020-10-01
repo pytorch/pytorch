@@ -123,7 +123,7 @@ void RowsWhereRoILevelEquals(
 } // namespace utils
 
 template <>
-bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   int num_rpn_lvls = rpn_max_level_ - rpn_min_level_ + 1;
   CAFFE_ENFORCE_EQ(InputSize(), 2 * num_rpn_lvls);
 
@@ -244,7 +244,7 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
 }
 
 template <>
-bool CollectRpnProposalsOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool CollectRpnProposalsOp<CPUContext>::RunOnDevice() {
   int num_rpn_lvls = rpn_max_level_ - rpn_min_level_ + 1;
   CAFFE_ENFORCE_EQ(InputSize(), 2 * num_rpn_lvls);
 
@@ -302,7 +302,7 @@ bool CollectRpnProposalsOp<CPUContext>::RunOnDevice() {
 }
 
 template <>
-bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
+CAFFE2_API bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
   int num_roi_lvls = roi_max_level_ - roi_min_level_ + 1;
   CAFFE_ENFORCE_EQ(OutputSize(), num_roi_lvls + 1);
 
