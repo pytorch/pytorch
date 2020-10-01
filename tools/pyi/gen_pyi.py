@@ -146,6 +146,7 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
+        'ArrayRef<double>' : 'Sequence[float]'
     }[typename]
 
     return typename
@@ -399,6 +400,14 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    # functional.pyi already contains the definitions for those functions
+    # so, we don't export then to it
+    from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
+    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    env = {
+        'imported_hints': import_code,
+        'dispatched_hints': dispatch_code
+    }
     stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
     write(out, 'torch/_C/_nn.pyi', stubs, env)
 
@@ -465,10 +474,12 @@ def gen_pyi(declarations_path, out):
                     ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
-                 ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                 ' out: Optional[Tensor]=None,'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS),
                  'def full(size: _size, fill_value: Number, *,'
-                 ' names: List[Union[str, None]], {}) -> Tensor: ...'
+                 ' names: List[Union[str, None]],'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',

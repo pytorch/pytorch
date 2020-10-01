@@ -63,6 +63,9 @@ def argument(a: Argument) -> DispatcherArgument:
             argument=la.argument,
         )
 
+def name(func: FunctionSchema) -> str:
+    return cpp.name(func)
+
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
     if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
@@ -106,4 +109,7 @@ def cpparguments_exprs(args: Sequence[CppArgument]) -> Sequence[DispatcherExpr]:
 # I don't think this is entirely sound, but it should be reasonably
 # close
 def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])
+
+def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
     return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])
