@@ -108,7 +108,7 @@ ncclRedOp_t to_nccl_red_op(int var) {
     NCCL_CHECK(from_nccl_result(ncclGroupStart()));      \
       fprintf(                                           \
           stdout,                                        \
-          "[%d:%d] NCCL group start in: %s:%d\n",        \
+          "[%d:%ld] NCCL group start in: %s:%d\n",        \
           getpid(),                                      \
           gettid(),                                      \
           __FILE__,                                      \
@@ -121,7 +121,7 @@ ncclRedOp_t to_nccl_red_op(int var) {
     NCCL_CHECK(from_nccl_result(ncclGroupEnd()));        \
       fprintf(                                           \
           stdout,                                        \
-          "[%d:%d] NCCL group end in: %s:%d\n",          \
+          "[%d:%ld] NCCL group end in: %s:%d\n",          \
           getpid(),                                      \
           gettid(),                                      \
           __FILE__,                                      \
