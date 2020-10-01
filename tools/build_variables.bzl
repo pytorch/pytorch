@@ -294,6 +294,7 @@ libtorch_distributed_sources = [
 
 jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
+    "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",

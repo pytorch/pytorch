@@ -16,6 +16,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
+
 // dummy struct to allow API registration
 struct CudaFuserInterface {
   void (*fn_compile_n_)(Node*) = nullptr;
@@ -29,6 +31,10 @@ C10_EXPORT CudaFuserInterface* getFuserInterface();
 C10_EXPORT void compileFusionGroup(Node* fusion_node);
 C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
 C10_EXPORT void fuseGraph(std::shared_ptr<Graph>&);
+
+C10_EXPORT bool complyWith(
+    const at::Tensor& tensor,
+    const c10::TensorTypePtr& guard_tensor_type);
 
 } // namespace cuda
 } // namespace fuser

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -7085,6 +7086,94 @@ TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   auto id_1_relook = inputs_id_lookup.lookupId({t0, t1});
   TORCH_CHECK(id_1_relook.id == id_1.id);
   TORCH_CHECK(id_1_relook.eviction == false);
+}
+
+TEST(NVFuserTest, FusionGroupGuardSimpleTensor) {
+  std::vector<int64_t> sizes_vec({16, 8, 8});
+  std::vector<int64_t> strides_vec({64, 8, 1});
+  auto tensor_type = TensorType::create(
+      at::kFloat, c10::nullopt, sizes_vec, strides_vec, c10::nullopt);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // pass with identical shape
+  auto t0 = at::randn({16, 8, 8}, options);
+  TORCH_CHECK(fuser::cuda::complyWith(t0, tensor_type));
+
+  // pass with dynamic shape
+  auto t1 = at::randn({16, 16, 8}, options);
+  TORCH_CHECK(fuser::cuda::complyWith(t1, tensor_type));
+
+  // rank failure
+  auto t5 = at::randn({16, 8, 8, 8}, options);
+  TORCH_CHECK(!fuser::cuda::complyWith(t5, tensor_type));
+
+  // broadcasting semantic change failure
+  auto t2 = at::randn({16, 1, 8}, options);
+  TORCH_CHECK(!fuser::cuda::complyWith(t2, tensor_type));
+
+  // contiguity failure via slicing
+  auto t3 = t0.slice(1, 0, 8, 2);
+  TORCH_CHECK(!fuser::cuda::complyWith(t3, tensor_type));
+
+  // contiguity failure via slicing
+  auto t4 = t0.slice(2, 0, 8, 2);
+  TORCH_CHECK(!fuser::cuda::complyWith(t4, tensor_type));
+}
+
+TEST(NVFuserTest, FusionGroupGuardBroadcastTensor) {
+  std::vector<int64_t> sizes_vec({16, 1, 8});
+  std::vector<int64_t> strides_vec({8, 8, 1});
+  auto tensor_type = TensorType::create(
+      at::kFloat, c10::nullopt, sizes_vec, strides_vec, c10::nullopt);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // broadcasting semantic change
+  auto t0 = at::randn({16, 8, 8}, options);
+  TORCH_CHECK(!fuser::cuda::complyWith(t0, tensor_type));
+
+  // dtype failure
+  auto t1 = at::randn({16, 1, 8}, options.dtype(at::kHalf));
+  TORCH_CHECK(!fuser::cuda::complyWith(t1, tensor_type));
+
+  // dtype failure
+  auto t2 = at::randn({16, 1, 8}, options);
+  TORCH_CHECK(fuser::cuda::complyWith(t2, tensor_type));
+
+  // device inconsistency shouldn't fail
+  auto t3 = at::randn({16, 1, 8}, options.device(at::kCPU, 0));
+  TORCH_CHECK(fuser::cuda::complyWith(t3, tensor_type));
+}
+
+TEST(NVFuserTest, FusionGroupGuardPermutedTensor) {
+  std::vector<int64_t> sizes_vec({16, 8, 8});
+  std::vector<int64_t> strides_vec({64, 1, 8});
+  auto tensor_type = TensorType::create(
+      at::kFloat, c10::nullopt, sizes_vec, strides_vec, c10::nullopt);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // failing permutation
+  auto t0 = at::randn({16, 8, 8}, options);
+  TORCH_CHECK(!fuser::cuda::complyWith(t0, tensor_type));
+
+  // passing with dynamic shape
+  auto t1 = t0.permute({0, 2, 1});
+  TORCH_CHECK(fuser::cuda::complyWith(t1, tensor_type));
+}
+
+TEST(NVFuserTest, FusionGroupGuardRelaxedCheck) {
+  std::vector<int64_t> sizes_vec({16, 8, 8});
+  std::vector<int64_t> strides_vec({128, 16, 1});
+  auto tensor_type = TensorType::create(
+      at::kFloat, c10::nullopt, sizes_vec, strides_vec, c10::nullopt);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // contiguity check passes although it differs
+  auto t0 = at::randn({16, 16, 8}, options);
+  TORCH_CHECK(fuser::cuda::complyWith(t0, tensor_type));
+
+  // passing with dynamic shape
+  auto t1 = t0.slice(1, 0, 16, 2);
+  TORCH_CHECK(fuser::cuda::complyWith(t1, tensor_type));
 }
 
 } // namespace jit
