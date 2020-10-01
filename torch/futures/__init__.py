@@ -81,7 +81,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return cast(Future[S], super().then(callback))
 
-    def add_done_callback(self, callback):  # type: (Callable[[None], None]) -> None
+    def add_done_callback(self, callback):  # type: (Callable[[Future[S]], None]) -> None
         r"""
         Add a callback to this ``Future``.
         Multiple callbacks can be added to the same ``Future``, and all
