@@ -825,7 +825,6 @@ TEST(RecordFunctionTest, Basic) {
     traced_inputs.clear();
   }
 
-  TORCH_CHECK(ts_names.size() == 2);
   TORCH_CHECK(ts_names.find("forward") != ts_names.end());
   TORCH_CHECK(ts_names.find("foo") != ts_names.end());
 

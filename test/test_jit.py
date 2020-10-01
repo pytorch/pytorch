@@ -7205,6 +7205,20 @@ a")
         x = torch.rand(3, 4)
         self.assertEqual(scripted_f(x), f(x))
 
+    def test_multiline_string_dedents(self):
+        def foo() -> None:
+            multiline_string_dedent_1 = """
+This is a string dedent """
+            multiline_string_dedent_2 = """ This is a
+  string dedent """
+            multiline_string_dedent_3 = """
+            This is a string
+dedent """
+            multiline_string_dedent_4 = """ This is a string dedent """
+
+        scripted_foo = torch.jit.script(foo)
+        self.assertEqual(scripted_foo(), foo())
+
     # adapted from test in test_torch
     def test_tensor_to(self):
         template = dedent('''

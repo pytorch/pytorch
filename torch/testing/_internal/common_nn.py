@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import expectedAlertNondetermini
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
     gradcheck, gradgradcheck
 from torch.autograd import Variable
+from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -3533,6 +3534,62 @@ new_module_tests = [
         skip_double=TEST_WITH_ROCM,
         pickle=False,
     ),
+    dict(
+        module_name='TransformerEncoderLayer',
+        constructor_args=(4, 2, 16, 0.0),
+        cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
+                                .dim_feedforward(16)
+                                .dropout(0.0)''',
+        input_size=(2, 3, 4),
+        desc='relu_activation',
+    ),
+    dict(
+        module_name='TransformerEncoderLayer',
+        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
+                                .dim_feedforward(8)
+                                .dropout(0.0)
+                                .activation(torch::kGELU)''',
+        input_size=(2, 3, 4),
+        check_gradgrad=False,
+        desc='gelu_activation',
+    ),
+    dict(
+        module_name='TransformerDecoderLayer',
+        constructor_args=(4, 2, 8, 0.0),
+        cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
+                                .dim_feedforward(8)
+                                .dropout(0.0)''',
+        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        check_gradgrad=False,
+        desc='relu_activation',
+    ),
+    dict(
+        module_name='TransformerDecoderLayer',
+        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
+                                .dim_feedforward(8)
+                                .dropout(0.0)
+                                .activation(torch::kGELU)''',
+        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        check_gradgrad=False,
+        desc='gelu_activation',
+    ),
+    dict(
+        module_name='Transformer',
+        constructor_args=(4, 2, 2, 2, 8, 0.0, "relu"),
+        cpp_constructor_args='''torch::nn::TransformerOptions()
+                                .d_model(4)
+                                .nhead(2)
+                                .num_encoder_layers(2)
+                                .num_decoder_layers(2)
+                                .dim_feedforward(8)
+                                .dropout(0.0)
+                                .activation(torch::kReLU)''',
+        input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+        check_gradgrad=False,
+        desc='multilayer_coder'
+    )
 ]
 
 # add conv padding mode tests:
@@ -4547,7 +4604,7 @@ class NNTestCase(TestCase):
             for i in input:
                 self._zero_grad_input(i)
 
-    def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
+    def _analytical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
         output_size = output.nelement()
 
@@ -4589,7 +4646,7 @@ class NNTestCase(TestCase):
 
         return res
 
-    def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
+    def _numerical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
         def fw(input):
             return self._forward(module, input).detach()
 
@@ -4601,19 +4658,20 @@ class NNTestCase(TestCase):
             res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
         return res
 
-    def check_jacobian(self, module, input, jacobian_input=True):
+    def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
         analytical_t = list(iter_tensors(analytical))
         numerical_t = list(iter_tensors(numerical))
 
-        # TODO: compare structure
-        if input.numel() != 0:
-            self.assertLessEqual(
-                max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
-                PRECISION
-            )
+        differences = []
+        for a, n in zip(analytical_t, numerical_t):
+            if a.numel() != 0:
+                differences.append(a.add(n, alpha=-1).abs().max())
+            # TODO: compare structure (ensure analytic jacobian has correct shape)
+        if len(differences) > 0:
+            self.assertLessEqual(max(differences), PRECISION)
 
 
 class TestBase(object):
@@ -4736,6 +4794,8 @@ class ModuleTest(TestBase):
     def noncontiguize(self, obj):
         if isinstance(obj, list):
             return [self.noncontiguize(o) for o in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self.noncontiguize(o) for o in obj)
         tensor = obj
         ndim = tensor.dim()
         # Always making only the last dimension noncontiguous is easy to hide
@@ -4791,7 +4851,8 @@ class ModuleTest(TestBase):
 
         cpu_input = self._get_input()
         type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
-        gpu_input = to_gpu(cpu_input, type_map=type_map)
+        cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
+        gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
         cpu_module = self.constructor(*self.constructor_args)
         gpu_module = self.constructor(*self.constructor_args).float().cuda()
@@ -4800,12 +4861,12 @@ class ModuleTest(TestBase):
         for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
             gpu_p.data.copy_(cpu_p)
 
-        test_case._zero_grad_input(cpu_input)
-        test_case._zero_grad_input(gpu_input)
+        test_case._zero_grad_input(cpu_input_tuple)
+        test_case._zero_grad_input(gpu_input_tuple)
         test_case._zero_grad_parameters(cpu_module)
         test_case._zero_grad_parameters(gpu_module)
-        cpu_output = test_case._forward(cpu_module, cpu_input)
-        gpu_output = test_case._forward(gpu_module, gpu_input)
+        cpu_output = test_case._forward(cpu_module, cpu_input_tuple)
+        gpu_output = test_case._forward(gpu_module, gpu_input_tuple)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_output, gpu_output, atol=self.precision, rtol=0)
 
@@ -4813,8 +4874,8 @@ class ModuleTest(TestBase):
         for _ in range(5):
             cpu_gradOutput = cpu_output.clone().normal_()
             gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
-            cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
-            gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
+            cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
+            gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
             for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
@@ -4822,8 +4883,8 @@ class ModuleTest(TestBase):
 
         # Run double-backwards on CPU and GPU and compare results
         if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
-            cpu_output = cpu_module(cpu_input)
-            gpu_output = gpu_module(gpu_input)
+            cpu_output = cpu_module(*cpu_input_tuple)
+            gpu_output = gpu_module(*gpu_input_tuple)
 
             cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
             gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
@@ -4831,12 +4892,12 @@ class ModuleTest(TestBase):
 
             cpu_gradInputs = torch.autograd.grad(
                 cpu_output,
-                (cpu_input,) + tuple(cpu_module.parameters()),
+                cpu_input_tuple + tuple(cpu_module.parameters()),
                 cpu_gradOutput,
                 create_graph=True)
             gpu_gradInputs = torch.autograd.grad(
                 gpu_output,
-                (gpu_input,) + tuple(gpu_module.parameters()),
+                gpu_input_tuple + tuple(gpu_module.parameters()),
                 gpu_gradOutput,
                 create_graph=True)
 
@@ -4850,11 +4911,11 @@ class ModuleTest(TestBase):
             # only on the gradient.
             cpu_gg = torch.autograd.grad(
                 cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
-                (cpu_input, cpu_gradOutput) + tuple(cpu_module.parameters()),
+                cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
                 retain_graph=True)
             gpu_gg = torch.autograd.grad(
                 gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
-                (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
+                gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0)
@@ -4862,8 +4923,7 @@ class ModuleTest(TestBase):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 test_case.assertEqualIgnoreType(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
-        self.test_noncontig(test_case, gpu_module, gpu_input)
-
+        self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 class InputVariableMixin(object):
     def _get_input(self):
@@ -4894,12 +4954,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
-        test_case.check_jacobian(module, input, self.jacobian_input)
+        input_tuple = input if isinstance(input, tuple) else (input,)
+        test_case.check_jacobian(module, input_tuple, self.jacobian_input)
         if self.check_gradgrad:
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case,
-                                         lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
+            num_inputs = len(input_tuple)
+            _assertGradAndGradgradChecks(
+                test_case, lambda *args, **kw: test_case._forward(module, args[:num_inputs]), input_tuple + params)
 
         # check if module can be printed
         module.__repr__()
@@ -4907,6 +4969,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         if self.check_inplace:
             # check if the inplace variant of the module gives the same result
             # as the out-of-place
+
+            # check_inplace doesn't support multiple input tensors, since we don't have any modules
+            # that modify the inputs in-place and that accept more than one input
+            assert len(input_tuple) == 1
+            input = input_tuple[0]
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
@@ -4927,106 +4994,93 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
 
-        if isinstance(input, torch.LongTensor) and TEST_CUDA:
+        def assert_module_parameters_are(tensor_type, device_id=None):
+            for p in module.parameters():
+                test_case.assertIsInstance(p, tensor_type)
+                if device_id is not None:
+                    test_case.assertEqual(p.get_device(), device_id)
+
+        if all(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_CUDA:
             # check that cuda() moves module parameters to correct GPU device,
             # and that float() casts parameters correctly
-
-            input = input.cuda()
+            input_tuple = tuple(t.cuda() for t in input_tuple)
             module.float().cuda()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                test_case.assertEqual(p.get_device(), 0)
+            module(*input_tuple)
+            assert_module_parameters_are(torch.cuda.FloatTensor, 0)
 
             if torch.cuda.device_count() > 1:
-                input = input.cuda(1)
+                input_tuple = tuple(t.cuda(1) for t in input_tuple)
                 module.cuda(1)
                 with torch.cuda.device(1):
-                    module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 1)
+                    module(*input_tuple)
+                assert_module_parameters_are(torch.cuda.FloatTensor, 1)
         else:
             # check that float()/double() casters work correctly
 
             # to float
-            if not isinstance(input, torch.LongTensor):
-                input = input.float()
+            input_tuple = tuple(t.float() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
             module.float()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.FloatTensor)
+            module(*input_tuple)
+            assert_module_parameters_are(torch.FloatTensor)
 
             # and back to double
-            if not isinstance(input, torch.LongTensor):
-                input = input.double()
+            input_tuple = tuple(t.double() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
             module.double()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.DoubleTensor)
+            module(*input_tuple)
+            assert_module_parameters_are(torch.DoubleTensor)
 
             if TEST_CUDA and self.should_test_cuda:
                 # check that cuda() moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
                 # to GPU0
-                input = input.float().cuda()
+                input_tuple = tuple(
+                    t.float().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
                 module.float().cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                module(*input_tuple)
+                assert_module_parameters_are(torch.cuda.FloatTensor, 0)
 
                 # to CPU
-                input = input.cpu()
+                input_tuple = tuple(t.cpu() for t in input_tuple)
                 module.cpu()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.FloatTensor)
+                module(*input_tuple)
+                assert_module_parameters_are(torch.FloatTensor)
 
                 # back to GPU0
-                input = input.cuda()
+                input_tuple = tuple(t.cuda() for t in input_tuple)
                 module.cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                module(*input_tuple)
+                assert_module_parameters_are(torch.cuda.FloatTensor, 0)
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
                     with torch.backends.cudnn.flags(enabled=False):
-                        module(input)
-                        for p in module.parameters():
-                            test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                            test_case.assertEqual(p.get_device(), 0)
+                        module(*input_tuple)
+                        assert_module_parameters_are(torch.cuda.FloatTensor, 0)
 
                 if torch.cuda.device_count() >= 2:
                     # test cross-GPU transfer works
                     # to GPU1
-                    input = input.cuda(1)
+                    input_tuple = tuple(t.cuda(1) for t in input_tuple)
                     module.cuda(1)
                     with torch.cuda.device(1):
-                        module(input)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                        test_case.assertEqual(p.get_device(), 1)
+                        module(*input_tuple)
+                    assert_module_parameters_are(torch.cuda.FloatTensor, 1)
 
                 if not self.skip_double:
                     # test double()
-                    input = input.double().cuda()
+                    input_tuple = tuple(
+                        t.double().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
                     module.double().cuda()
-                    module(input)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
-                        test_case.assertEqual(p.get_device(), 0)
+                    module(*input_tuple)
+                    assert_module_parameters_are(torch.cuda.DoubleTensor, 0)
 
                 # test half()
-                input = input.half().cuda()
+                input_tuple = tuple(
+                    t.half().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
                 module.half().cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.HalfTensor)
-                    test_case.assertEqual(p.get_device(), 0)
+                module(*input_tuple)
+                assert_module_parameters_are(torch.cuda.HalfTensor, 0)
         torch.set_num_threads(num_threads)
 
     def _get_target(self):

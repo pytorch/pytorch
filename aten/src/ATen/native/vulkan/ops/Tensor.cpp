@@ -28,9 +28,12 @@ vTensor::Buffer allocate_buffer(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
+  // Forward function declaration
+  bool requires_staging(api::Context*);
+
   VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-  if (!context->gpu().adapter->has_unified_memory()) {
+  if (requires_staging(context)) {
     usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
              VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
@@ -175,8 +178,7 @@ vTensor* vTensor::host(const Access::Flags access) {
 }
 
 vTensor::Memory& vTensor::wait() {
-  //
-
+  view_.wait();
   return view_.staging().memory;
 }
 
@@ -297,9 +299,9 @@ vTensor::Fence& vTensor::View::fence() const {
   return fence_;
 }
 
-// Any state in column T can transition to any state in column T + 1.  That
-// leaves us with 7 x 6 = 42 possible transitions.  In each scenario,
-// synchronization must be handled appropriately.
+// Any state in column T can transition to any state in column T + 1 for a
+// total of 7 x 6 = 42 possible transitions.  In each scenario, synchronization
+// must be handled appropriately.
 //
 //      T              T + 1
 //       Unknown |
@@ -341,8 +343,11 @@ void vTensor::View::transition(Active view) const {
       Active& view;
       Image::Object& image;
 
-      VkAccessFlags access() const {
-        return State::access(view);
+      inline VkAccessFlags access() const {
+        return State::access(view, required_) &
+               // Filter out host dependencies out of source, per Vulkan spec guarantee:
+               // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+              ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT);
       }
 
       inline VkImageLayout layout() const {
@@ -354,24 +359,31 @@ void vTensor::View::transition(Active view) const {
       }
 
       inline VkPipelineStageFlags stage() const {
-        return State::stage(view);
+        return State::stage(view, required_) &
+               // Filter out host dependencies out of source, per Vulkan spec guarantee:
+               // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+               ~VK_PIPELINE_STAGE_HOST_BIT;
       }
+
+      Component::Flags required_;
     } current;
 
     const struct {
       Active view;
 
-      VkAccessFlags access() const {
-        return State::access(view);
+      inline VkAccessFlags access() const {
+        return State::access(view, required_);
       }
 
       inline VkImageLayout layout() const {
-        return State::layout(view);
+        return State::layout(view, required_);
       }
 
       inline VkPipelineStageFlags stage() const {
-        return State::stage(view);
+        return State::stage(view, required_);
       }
+
+      Component::Flags required_;
     } next;
 
     inline ~State() {
@@ -387,45 +399,56 @@ void vTensor::View::transition(Active view) const {
              (next.layout() != current.layout());
     }
 
-    static VkAccessFlags access(const Active view) {
+    static VkAccessFlags access(
+        const Active view,
+        const Component::Flags required) {
       VkAccessFlags access = 0u;
 
-      switch (stage(view)) {
-        case VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT:
-          if (view.access & Access::Read) {
-            access |= VK_ACCESS_SHADER_READ_BIT;
-          }
+      const VkPipelineStageFlags stages = stage(view, required);
 
-          if (view.access & Access::Write) {
-            access |= VK_ACCESS_SHADER_WRITE_BIT;
-          }
+      if (stages & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) {
+        if (view.access & Access::Read) {
+          access |= VK_ACCESS_SHADER_READ_BIT;
+        }
 
-          break;
+        if (view.access & Access::Write) {
+          access |= VK_ACCESS_SHADER_WRITE_BIT;
+        }
+      }
 
-        case VK_PIPELINE_STAGE_TRANSFER_BIT:
-          if (view.access & Access::Read) {
-            access |= VK_ACCESS_HOST_READ_BIT;
-          }
+      if (stages & VK_PIPELINE_STAGE_HOST_BIT) {
+        if (view.access & Access::Read) {
+          access |= VK_ACCESS_HOST_READ_BIT;
+        }
 
-          if (view.access & Access::Write) {
-            access |= VK_ACCESS_HOST_WRITE_BIT;
-          }
+        if (view.access & Access::Write) {
+          access |= VK_ACCESS_HOST_WRITE_BIT;
+        }
+      }
 
-          break;
+      if (stages & VK_PIPELINE_STAGE_TRANSFER_BIT) {
+        if (view.access & Access::Read) {
+          access |= VK_ACCESS_TRANSFER_READ_BIT;
+        }
 
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "Invalid Vulkan tensor view state!");
+        if (view.access & Access::Write) {
+          access |= VK_ACCESS_TRANSFER_WRITE_BIT;
+        }
       }
 
       return access;
     }
 
-    static VkImageLayout layout(const Active view) {
+    static VkImageLayout layout(
+        const Active view,
+        const Component::Flags required) {
       TORCH_INTERNAL_ASSERT(
           Component::Image == view.component,
           "The active view on the requested Vulkan tensor is not an image!");
+
+      TORCH_INTERNAL_ASSERT(
+          (required & Component::Image),
+          "This Vulkan tensor cannot have an image representation!");
 
       if (view.access & Access::Write) {
         return VK_IMAGE_LAYOUT_GENERAL;
@@ -438,20 +461,41 @@ void vTensor::View::transition(Active view) const {
       return VK_IMAGE_LAYOUT_UNDEFINED;
     }
 
-    static VkPipelineStageFlags stage(const Active view) {
+    static VkPipelineStageFlags stage(
+        const Active view,
+        const Component::Flags required) {
+      // Legend
+      //         =UMA=
+      // Image   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+      // Buffer  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+      // Staging VK_PIPELINE_STAGE_HOST_BIT
+      //         =Discrete=
+      // image   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+      // Buffer  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT
+      // Staging VK_PIPELINE_STAGE_HOST_BIT           | VK_PIPELINE_STAGE_TRANSFER_BIT
+
+      VkPipelineStageFlags stages = 0u;
+
       switch (view.component) {
         case Component::Buffer:
         case Component::Image:
-          return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+          stages |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+          break;
 
         case Component::Staging:
-          return VK_PIPELINE_STAGE_TRANSFER_BIT;
+          stages |= VK_PIPELINE_STAGE_HOST_BIT;
+          break;
 
         default:
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "Invalid Vulkan tensor view state!");
+          break;
       }
+
+      if ((Component::Image != view.component) &&
+          (required & Component::Staging)) {
+        stages |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+      }
+
+      return stages;
     }
   } state {
       // Current
@@ -462,10 +506,12 @@ void vTensor::View::transition(Active view) const {
         //   1) The tensor cannot be represented as an image, or
         //   2) The requested target view is not an image.
         image_.object,
+        required_,
       },
       // Next
       {
         view,
+        required_,
       },
   };
 
@@ -502,7 +548,7 @@ void vTensor::View::transition(Active view) const {
 
   // RAR (Read after Read) is not a hazard so no synchronization is required
   // unless we are dealing with an image layout transition in which case we
-  // need an image memory barrier to signal the layout transition. This
+  // need an image memory barrier to signal the layout transition.  This
   // section handles the follwing 8 transitions leaving us with 32 - 8 = 24
   // possibilities remaining.
 
@@ -521,13 +567,28 @@ void vTensor::View::transition(Active view) const {
     return;
   }
 
+  // If on UMA, Buffer and Staging are both aliases for the same memory region
+  // that is both accessible to host and device.  As long as a queue submission
+  // command comes in between the host accessing the memory, and the device
+  // accessing the same location, the Vulkan spec guarantees all host writes to
+  // be visible to device.  https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+  // CPU readbacks require a barrier and are intentionally not handled here.
+  // Furthermore, on discrete systems, this transition requires a transfer from
+  // host to device memory which is also handled later on.
+
+  if (!(required_ & Component::Staging) &&
+       (Component::Staging == state.current.view.component) &&
+       (Component::Buffer == state.next.view.component)) {
+    return;
+  }
+
   // All transitions after this point require an explicit synchronization of
   // one type or another.
 
   api::Command::Buffer command_buffer = context_->command().pool.allocate();
   command_buffer.begin();
 
-  // WAR (Write after Read) hazards do not need a memory barrier. Execution
+  // WAR (Write after Read) hazards do not need a memory barrier.  Execution
   // barriers are sufficient, unless we are dealing with image layout
   // transitions which do require an image memory barrier to signal the layout
   // transition.  This section handles the following 8 WAR transitions, leaving
@@ -573,16 +634,16 @@ void vTensor::View::transition(Active view) const {
 
     command_buffer.barrier({
       {
-        state.current.stage(),
+        state.current.stage() &
+        // Filter out host dependencies out of source, per Vulkan spec guarantee:
+          // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+          ~VK_PIPELINE_STAGE_HOST_BIT,
         state.next.stage(),
       },
       api::Resource::Image::Barrier{
         image().object.handle,
         {
-          // Filter out host read and writes.  The spec guarantees a memory dependency
-          // and writes
-          // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
-          state.current.access() & ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT),
+          state.current.access(),
           state.next.access(),
         },
         {
@@ -624,6 +685,12 @@ void vTensor::View::transition(Active view) const {
 
   command_buffer.end();
   command_buffer.submit(context_->gpu().queue);
+}
+
+void vTensor::View::wait() {
+  if (fence_) {
+    fence_.wait();
+  }
 }
 
 void vTensor::View::verify() const {

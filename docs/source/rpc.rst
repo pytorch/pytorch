@@ -113,8 +113,6 @@ and move it to the desired devices on the callee if necessary.
 The RPC package also provides decorators which allow applications to specify
 how a given function should be treated on the callee side.
 
-.. warning::
-  The ``rpc.functions`` package is a prototype feature and subject to change.
 
 .. autofunction:: torch.distributed.rpc.functions.async_execution
 
@@ -302,3 +300,5 @@ to use `the profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
 -  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__
 -  `Profiling RPC-based Workloads <https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html>`__
+-  `Implementing batch RPC processing <https://pytorch.org/tutorials/intermediate/rpc_async_execution.html>`__
+-  `Distributed Pipeline Parallel <https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html>`__
