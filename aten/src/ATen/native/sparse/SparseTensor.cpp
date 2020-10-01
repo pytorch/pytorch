@@ -35,6 +35,13 @@ int64_t _nnz_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->nnz();
 }
 
+int64_t nse_sparse(const SparseTensor& self, bool coalesce) {
+  if (!coalesce || self.is_coalesced()) {
+    return get_sparse_impl(self)->nnz();
+  }
+  return get_sparse_impl(self.coalesce())->nnz();
+}
+
 // Why are there so many methods to get indices and value?
 // See Note [ Sparse: different methods to get indices and values ] in native_functions.yaml
 
@@ -51,16 +58,24 @@ Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
   return self;
 }
 
-Tensor indices_sparse(const Tensor& self) {
-  TORCH_CHECK(self.is_coalesced(),
-           "Cannot get indices on an uncoalesced tensor, please call .coalesce() first");
-  return get_sparse_impl(self)->indices().alias();
+Tensor indices_sparse(const Tensor& self, bool coalesce) {
+  if (self.is_coalesced()) {
+    return get_sparse_impl(self)->indices().alias();
+  }
+  if (coalesce) {
+    return get_sparse_impl(self.coalesce())->indices();
+  }
+  return get_sparse_impl(self)->indices();
 }
 
-Tensor values_sparse(const Tensor& self) {
-  TORCH_CHECK(self.is_coalesced(),
-           "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
-  return get_sparse_impl(self)->values().alias();
+    Tensor values_sparse(const Tensor& self, bool coalesce) {
+  if (self.is_coalesced()) {
+    return get_sparse_impl(self)->values().alias();
+  }
+  if (coalesce) {
+    return get_sparse_impl(self.coalesce())->values();
+  }
+  return get_sparse_impl(self)->values();
 }
 
 /******************************************************************************

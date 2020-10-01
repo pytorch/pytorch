@@ -501,7 +501,7 @@
   self: grad.mv(vec2.conj())
   vec2: grad.t().mv(self.conj())
 
-- name: indices(Tensor(a) self) -> Tensor(a)
+- name: indices(Tensor(a) self, bool coalesce=True) -> Tensor(a)
   output_differentiability: [False]
 
 - name: _indices(Tensor(a) self) -> Tensor(a)
@@ -1155,7 +1155,7 @@
 - name: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   self: not_implemented("_standard_gamma_grad")
 
-- name: values(Tensor(a) self) -> Tensor(a)
+- name: values(Tensor(a) self, bool coalesce=True) -> Tensor(a)
   self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
 
 # Why is _values() not differentiable?

@@ -4625,6 +4625,13 @@
     SparseCPU, SparseCUDA: _nnz_sparse
   device_guard: False
 
+- func: nse(Tensor self, bool coalesce=True) -> int
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    SparseCPU, SparseCUDA: nse_sparse
+  device_guard: False
+
 - func: coalesce(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method
@@ -4663,14 +4670,14 @@
     SparseCPU, SparseCUDA: _coalesced_sparse_
   device_guard: False
 
-- func: indices(Tensor(a) self) -> Tensor(a)
+- func: indices(Tensor(a) self, bool coalesce=True) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: indices_sparse
   device_guard: False
 
-- func: values(Tensor(a) self) -> Tensor(a)
+- func: values(Tensor(a) self, bool coalesce=True) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:

@@ -166,10 +166,8 @@ class TestSparse(TestCase):
 
             # Test .indices() and .values()
             if self.is_uncoalesced:
-                with self.assertRaisesRegex(RuntimeError, "Cannot get indices on an uncoalesced tensor"):
-                    x.indices()
-                with self.assertRaisesRegex(RuntimeError, "Cannot get values on an uncoalesced tensor"):
-                    x.values()
+                self.assertEqual(x.indices(False), x._indices())
+                self.assertEqual(x.values(False), x._values())
             else:
                 self.assertEqual(x.indices(), x._indices())
                 self.assertEqual(x.values(), x._values())
