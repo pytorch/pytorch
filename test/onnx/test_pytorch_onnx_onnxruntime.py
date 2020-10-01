@@ -1869,7 +1869,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_std_mean(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, unbiased=False)
+                return torch.std_mean(input, unbiased=False)
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
@@ -1877,7 +1877,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class StandardDeviationUnbiased(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, unbiased=True)
+                return torch.std_mean(input, unbiased=True)
 
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
@@ -1885,7 +1885,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_std_mean_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, dim=(0, 1), unbiased=False)
+                return torch.std_mean(input, dim=(0, 1), unbiased=False)
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
@@ -1893,7 +1893,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class VarianceUnbiased(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, dim=(0, 1), unbiased=True)
+                return torch.std_mean(input, dim=(0, 1), unbiased=True)
 
         x = torch.randn(2, 3, 4)
         model = VarianceUnbiased()
@@ -1902,7 +1902,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_std_mean_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
+                return torch.std_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
@@ -1910,7 +1910,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class StandardDeviationUnbiased(torch.nn.Module):
             def forward(self, input):
-                return torch.var_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
+                return torch.std_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviationUnbiased()
