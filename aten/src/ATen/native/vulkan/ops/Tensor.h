@@ -279,11 +279,12 @@ class C10_EXPORT vTensor final {
     Buffer& buffer() const;
     Image& image() const;
     Buffer& staging() const;
-    Fence& fence() const;
 
     void transition(Active view) const;
+    void wait();
 
    private:
+    Fence& fence() const;
     void verify() const;
 
    private:

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
