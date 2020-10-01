@@ -169,9 +169,9 @@ class TestFX(JitTestCase):
 
         mrm = MyReluMod()
         sym = NoLeafModulesTracer().trace(mrm)
-        for node in sym.graph.nodes:
+        for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
-        sym.graph.lint(sym)
+        sym.lint(sym)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -435,7 +435,7 @@ class TestFX(JitTestCase):
                 return a + b
 
         m = M()
-        g = TaggingTracer().trace(m).graph
+        g = TaggingTracer().trace(m)
         g.lint(m)
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))

@@ -152,7 +152,7 @@ class Tracer(TracerBase):
             self.graph.output(self.create_arg(fn(*args)))
         finally:
             torch.nn.Module.__call__ = orig_call
-        return GraphModule(root, self.graph)
+        return self.graph
 
     def _proxy_placeholder(self, name: str) -> Proxy:
         return Proxy(self.create_node('placeholder', name, (), {}), self)
@@ -165,4 +165,4 @@ class Tracer(TracerBase):
 # Args:
 #   - root - the `nn.Module` instance to trace
 def symbolic_trace(root : torch.nn.Module) -> GraphModule:
-    return Tracer().trace(root)
+    return GraphModule(root, Tracer().trace(root))
