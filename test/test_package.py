@@ -187,7 +187,6 @@ b = resources.load_binary('main', 'main_binary')
             # check th debug graph has something reasonable:
             buf = StringIO()
             debug_graph = e._write_dep_graph(failing_module='torch')
-            print(debug_graph)
             self.assertIn('torchvision.models.resnet', debug_graph)
 
         # we can now load the saved model

@@ -8,6 +8,7 @@ from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
+from torch.fx.experimental.Partitioner import DAG, Partitioner
 
 from torch.fx.proxy import TraceError
 
@@ -27,9 +28,6 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
-
-def a_non_torch_leaf(a, b):
-    return a + b
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -760,16 +758,27 @@ class TestFX(JitTestCase):
         shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
         self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
 
-    def test_custom_import(self):
-        graph = torch.fx.Graph()
-        a = graph.placeholder('x')
-        b = graph.placeholder('y')
-        c = graph.call_function(a_non_torch_leaf, (a, b))
-        d = graph.call_function(torch.sin, (c,))
-        graph.output(d)
-        gm = GraphModule(torch.nn.Module(), graph)
-        x, y = torch.rand(1), torch.rand(1)
-        self.assertEqual(torch.sin(x + y), gm(x, y))
+    def test_find_single_partition(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        partitioner = Partitioner()
+        devices = [{"name": "dev_0", "available_mem": float('inf')}]
+        dag = partitioner.partition_graph(traced, devices)
+        for node in traced.graph.nodes:
+            assert node.partition_ids == [1]
+        nodes = traced.graph.nodes
+        res_dag = DAG()
+        res_dag.create_node(0, [], [1], [], [])
+        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
+        for r, d in zip(res_dag.nodes, dag.nodes):
+            assert(r.partition_id == d.partition_id)
+            assert(r.parents == d.parents)
+            assert(r.children == d.children)
+            assert(r.input_nodes == d.input_nodes)
+            assert(r.output_nodes == d.output_nodes)
 
 if __name__ == '__main__':
     run_tests()
