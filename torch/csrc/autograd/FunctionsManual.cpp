@@ -244,11 +244,11 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
 }
 
 Tensor angle_backward(Tensor grad, const Tensor& self) {
-  auto out = grad * self / self.abs().pow(2);
   if (self.is_complex()) {
-    return out * Scalar(c10::complex<double>{0.0, 1.0});
+    return grad * self / self.abs().pow(2) * Scalar(c10::complex<double>{0.0, 1.0});
+  } else {
+    return at::zeros_like(self, at::MemoryFormat::Preserve);
   }
-  return out;
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
@@ -264,7 +264,7 @@ Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
     // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
     return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
   } else {
-    return at::zeros_like(grad, at::MemoryFormat::Preserve);
+    return at::zeros_like(self, at::MemoryFormat::Preserve);
   }
 }
 
