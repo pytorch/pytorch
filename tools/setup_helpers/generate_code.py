@@ -145,7 +145,7 @@ def get_selector(selected_op_list_path, operators_yaml_path):
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
     assert not (selected_op_list_path is not None and
-            operators_yaml_path is not None), \
+                operators_yaml_path is not None), \
         ("Expected at most one of selected_op_list_path and " +
          "operators_yaml_path to be set.")
 
