@@ -167,6 +167,7 @@ struct Pipeline final {
 
 inline Pipeline::Barrier::Barrier(const Stage stage)
   : type(Type::Execution),
+    stage(stage),
     as{} {
 }
 
@@ -174,6 +175,7 @@ inline Pipeline::Barrier::Barrier(
     const Stage stage,
     const Resource::Buffer::Barrier barrier)
   : type(Type::Buffer),
+    stage(stage),
     as{
       .buffer = barrier,
     } {
@@ -183,6 +185,7 @@ inline Pipeline::Barrier::Barrier(
     const Stage stage,
     const Resource::Image::Barrier barrier)
   : type(Type::Image),
+    stage(stage),
     as{
       .image = barrier,
     } {

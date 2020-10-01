@@ -10,6 +10,38 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
 
+/*
+ * CPUCachingAllocator:
+ * DISCLAIMER:
+ *    This is subject to change (beta) and only supported on mobile builds.
+ *    If code snippet such as in 'Usage pattern' is used outside of mobile
+ *    build you will not observe the intended behavior.
+ *    See below for more information.
+ * Why?
+ *    It has been observed that some mobile platforms, such as pixel 3, return
+ *    memory aggressively to the system. This results in page faults in some cases
+ *    and ends up hurting performance. This caching allocator aims to address that.
+ *    Furthermore it also allows users to specify their own allocator by implementing
+ *    allocate/free virtual interfaces.
+ * What are the cons?
+ *    There are some cons that were observed where use of caching allocator led to
+ *    worse performance on some platforms. Reason being that the caching mechanism
+ *    used by this allocator left us worse off compared to the corresonding platform's
+ *    tuned memory allocator. In that case it seemed better to not use this allocator.
+ *    Note there are some ideas to fix this in the works.
+ *
+ * Usage:
+ * Usage pattern:
+ * Instantiate and own the caching allocator.
+ * std::unique_ptr<c10::CPUCachingAllocator> caching_allocator =
+ *   std::make_unique<c10::CPUCachingAllocator>();
+ * Use caching allocator with a scoped guard at inference time.
+ * {
+ * WithCPUCachingAllocatorGuard(caching_allocator.get());
+ * ... model.forward(...);
+ * }
+ */
+
 namespace c10 {
 
 class C10_API CPUCachingAllocator {
@@ -63,16 +95,6 @@ CPUCachingAllocator* GetDefaultCPUCachingAllocator();
 
 bool ThreadLocalCachingAllocatorEnabled();
 CPUCachingAllocator* GetThreadLocalCachingAllocator();
-
-/*
- * Usage pattern:
- * std::unique_ptr<c10::CPUCachingAllocator> caching_allocator =
- *   std::make_unique<c10::CPUCachingAllocator>();
- * {
- * WithCPUCachingAllocatorGuard(caching_allocator.get());
- * ...
- * }
- */
 
 class C10_API WithCPUCachingAllocatorGuard {
   public:

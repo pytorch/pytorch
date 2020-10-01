@@ -1,6 +1,6 @@
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/CPUCachingAllocator.h>
 #include <c10/core/DeviceType.h>
+#include <c10/mobile/CPUCachingAllocator.h>
 
 // TODO: rename flags to C10
 C10_DEFINE_bool(

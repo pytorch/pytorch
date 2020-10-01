@@ -162,7 +162,10 @@ Tensor& abs_out(Tensor& result, const Tensor& self) {
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
-Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+Tensor& abs_(Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
+  return unary_op_impl_(self, at::abs_out);
+}
 
 // Absolute, alias for abs
 Tensor& absolute_out(Tensor& result, const Tensor& self) {
