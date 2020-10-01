@@ -9141,6 +9141,18 @@ class TestFusionEval(TestCase):
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
 
+        na_bn_ref = torch.nn.BatchNorm2d(oC, affine=False)
+        na_bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        na_bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+        na_bn_ref.eval()
+
+        Y_ref = na_bn_ref(conv_ref(inputs))
+        conv_na_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                   na_bn_ref)
+        Y_hat = conv_na_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
+
 
 class TestAddRelu(TestCase):
     def test_add_relu(self):
