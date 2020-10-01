@@ -9,6 +9,7 @@ from collections import OrderedDict
 import argparse
 import pathlib
 import functools
+import typing
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
@@ -305,12 +306,22 @@ def compute_type_method(
 
     return func
 
+@typing.overload
+def unambiguous_defaults(
+        name: str, args: Sequence[CppArgument],
+        seen_functions: Dict[str, List[Sequence[CppArgument]]]) -> List[bool]:
+    pass
+
+@typing.overload
+def unambiguous_defaults(
+        name: str, args: Sequence[LegacyDispatcherArgument],
+        seen_functions: Dict[str, List[Sequence[LegacyDispatcherArgument]]]) -> List[bool]:
+    pass
+
 # Resolve any overload ambiguities introduced by default values
 # Always prefers the overload declared first, since this will be picked by
 # the PythonArgParser as well
-def unambiguous_defaults(
-        name: str, args: Sequence[T],
-        seen_functions: Dict[str, List[Sequence[T]]]) -> List[bool]:
+def unambiguous_defaults(name, args, seen_functions):
     overloads = seen_functions.get(name, [])
     n = 0
     for o_args in overloads:
@@ -377,7 +388,7 @@ def compute_functions(native_functions: List[NativeFunction], *, target: Target)
 # the dispatcher from these functions.  See also compute_functions.
 def compute_tensor_methods(native_functions: List[NativeFunction], *, target: Target) -> List[str]:
     # Map function name to list of functions and their C++ arguments
-    seen_functions: Dict[str, List[Tuple[NativeFunction, Sequence[CppArgument]]]] = {}
+    seen_functions: Dict[str, List[Sequence[CppArgument]]] = {}
 
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
