@@ -435,7 +435,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
 
   if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
       (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
-      finput = input.view({batch_size, n_input_plane, output_height * output_width}).requires_grad_(false);
+    finput =
+        input.view({batch_size, n_input_plane, output_height * output_width})
+            .detach();
   } else {
      finput.resize_({batch_size,
                   n_input_plane * kernel_height * kernel_width,

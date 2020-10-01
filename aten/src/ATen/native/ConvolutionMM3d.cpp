@@ -584,11 +584,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
   if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
       (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
       (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
-    finput = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).requires_grad_(false);
+    finput = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+  } else {
+    finput.resize_({batch_size,
+                    n_input_plane * kernel_depth * kernel_height * kernel_width,
+                    output_depth * output_height * output_width});
   }
-  finput.resize_({batch_size,
-                  n_input_plane * kernel_depth * kernel_height * kernel_width,
-                  output_depth * output_height * output_width});
   output.resize_(
       {batch_size, n_output_plane, output_depth, output_height, output_width});
 
