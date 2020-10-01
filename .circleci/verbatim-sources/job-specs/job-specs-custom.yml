@@ -396,7 +396,7 @@
             rm cert.txt
             bundle exec fastlane install_cert
             # install the provisioning profile
-            PROFILE=TestApp_CI.mobileprovision
+            PROFILE=PyTorch_CI_2021.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
             mkdir -pv "${PROVISIONING_PROFILES}"
             cd "${PROVISIONING_PROFILES}"
@@ -454,7 +454,7 @@
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=TestApp_CI
+            PROFILE=PyTorch_CI_2021
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
